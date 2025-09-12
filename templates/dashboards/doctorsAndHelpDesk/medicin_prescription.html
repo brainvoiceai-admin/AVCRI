@@ -1,0 +1,324 @@
+{%load static%}
+{% include 'dashboards/nav.html' %}
+
+<div class="main-content">
+    <!-- Medical Prescription Header -->
+    <div class="header fade-in">
+        <h1>Medical Prescription</h1>
+        <p>Manage patient prescriptions and treatment plans</p>
+    </div>
+
+    <!-- Prescription Form -->
+    <div class="form-container fade-in">
+        <h2 class="form-title">New Prescription</h2>
+        <div class="form-grid">
+            <div class="form-row">
+                <div class="form-group">
+                   <label for="patientReg">Patient Registration Number</label>
+<input type="text" id="patientReg" name="patientReg" 
+       placeholder="Enter Registration Number" value="PAT001" required>
+
+                </div>
+            </div>
+            <div class="prescription-section">
+                <h3 class="prescription-title">Prescription Details</h3>
+                <div class="prescription-table-container">
+                    <table class="prescription-table" id="prescriptionTable">
+                        <thead>
+                            <tr>
+                                <th>Item</th>
+                                <th>Dosage</th>
+                                <th>Usage</th>
+                                <th>Internal/External</th>
+                                <th>Procured From</th>
+                                <th>Time</th>
+                                <th>Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="prescriptionTableBody">
+                            <tr>
+                                <td><input type="text" placeholder="Medicine name" class="prescription-input"></td>
+                                <td><input type="text" placeholder="e.g. 500mg" class="prescription-input"></td>
+                                <td><input type="text" placeholder="e.g. Twice daily" class="prescription-input"></td>
+                                <td>
+                                    <select class="prescription-input">
+                                        <option value="">Select</option>
+                                        <option value="Internal">Internal</option>
+                                        <option value="External">External</option>
+                                    </select>
+                                </td>
+                                <td><input type="text" placeholder="e.g. Hospital Pharmacy" class="prescription-input"></td>
+                                <td><input type="text" placeholder="e.g. After meals" class="prescription-input"></td>
+                                <td><button type="button" class="remove-prescription-btn" onclick="removePrescriptionRow(this)">Remove</button></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <button type="button" class="add-prescription-btn" onclick="addPrescriptionRow()">
+                    <span>➕</span> Add Prescription Item
+                </button>
+            </div>
+            <div class="remarks-section">
+                <h3 class="remarks-title">Remarks</h3>
+                <div class="form-group">
+                    <textarea id="remarks" placeholder="Enter any special instructions..."></textarea>
+                </div>
+            </div>
+            <div class="action-buttons">
+                <button class="btn btn-primary" onclick="savePrescription()">Save Prescription</button>
+                <button class="btn btn-secondary" onclick="resetForm()">Reset Form</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% include 'dashboards/footer.html' %}
+
+<style>
+    /* Add this to your page for styling */
+    body {
+        margin: 0;
+        padding: 0;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+        background: #f8f9fa;
+    }
+    .main-content {
+        margin-left: 280px;
+        padding: 20px;
+    }
+    .header {
+        background: rgba(255, 255, 255, 0.95);
+        backdrop-filter: blur(20px);
+        border-radius: 20px;
+        padding: 30px;
+        margin-bottom: 30px;
+        box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+        text-align: center;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+    }
+    .header h1 {
+        color: #2d3748;
+        font-size: 2.5rem;
+        font-weight: 700;
+        margin-bottom: 10px;
+    }
+    .form-container {
+        background: rgba(255, 255, 255, 0.95);
+        backdrop-filter: blur(20px);
+        border-radius: 20px;
+        padding: 40px;
+        box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+    }
+    .form-title {
+        color: #2d3748;
+        font-size: 1.8rem;
+        font-weight: 700;
+        margin-bottom: 30px;
+        text-align: center;
+    }
+    .form-grid {
+        display: grid;
+        gap: 25px;
+    }
+    .form-row {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+        gap: 20px;
+    }
+    .form-group {
+        display: flex;
+        flex-direction: column;
+    }
+    label {
+        font-weight: 600;
+        color: #4a5568;
+        margin-bottom: 8px;
+        font-size: 0.95rem;
+    }
+    input, select, textarea {
+        padding: 12px 16px;
+        border: 2px solid #e2e8f0;
+        border-radius: 12px;
+        font-size: 1rem;
+        transition: all 0.3s ease;
+        background: white;
+        font-family: inherit;
+    }
+    textarea {
+        resize: vertical;
+        min-height: 100px;
+    }
+    input:focus, select:focus, textarea:focus {
+        outline: none;
+        border-color: #667eea;
+        box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+    }
+    .therapy-details {
+        background: linear-gradient(135deg, #667eea, #764ba2);
+        border-radius: 15px;
+        padding: 25px;
+        margin: 25px 0;
+        color: white;
+    }
+    .detail-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 15px;
+    }
+    .detail-item {
+        background: rgba(255, 255, 255, 0.1);
+        padding: 15px;
+        border-radius: 10px;
+        backdrop-filter: blur(10px);
+    }
+    .detail-label {
+        font-size: 0.8rem;
+        opacity: 0.9;
+        margin-bottom: 5px;
+    }
+    .detail-value {
+        font-size: 1.1rem;
+        font-weight: 600;
+    }
+    .prescription-section {
+        background: #f8fafc;
+        border-radius: 15px;
+        padding: 25px;
+        margin-top: 25px;
+        border: 2px solid #e2e8f0;
+    }
+    .prescription-title {
+        color: #2d3748;
+        font-size: 1.3rem;
+        font-weight: 700;
+        margin-bottom: 20px;
+        display: flex;
+        align-items: center;
+    }
+    .prescription-table-container {
+        overflow-x: auto;
+        margin-bottom: 20px;
+    }
+    .prescription-table {
+        width: 100%;
+        border-collapse: collapse;
+        background: white;
+        border-radius: 10px;
+        overflow: hidden;
+        box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+    }
+    .prescription-table th {
+        background: linear-gradient(135deg, #667eea, #764ba2);
+        color: white;
+        padding: 15px 12px;
+        text-align: left;
+        font-weight: 600;
+        font-size: 0.9rem;
+        border: none;
+    }
+    .prescription-table td {
+        padding: 12px;
+        border-bottom: 1px solid #e2e8f0;
+        vertical-align: middle;
+    }
+    .prescription-table input, .prescription-table select {
+        width: 100%;
+        padding: 8px 12px;
+        border: 1px solid #e2e8f0;
+        border-radius: 6px;
+        font-size: 0.9rem;
+        min-width: 120px;
+    }
+    .add-prescription-btn {
+        background: linear-gradient(135deg, #48bb78, #38a169);
+        color: white;
+        border: none;
+        padding: 10px 20px;
+        border-radius: 8px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+    .remove-prescription-btn {
+        background: #e53e3e;
+        color: white;
+        border: none;
+        padding: 6px 12px;
+        border-radius: 6px;
+        font-size: 0.8rem;
+        cursor: pointer;
+        transition: all 0.3s ease;
+    }
+    .action-buttons {
+        display: flex;
+        gap: 15px;
+        justify-content: center;
+        margin-top: 30px;
+    }
+    .btn {
+        padding: 12px 30px;
+        border: none;
+        border-radius: 12px;
+        font-size: 1rem;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.3s ease;
+    }
+    .btn-primary {
+        background: linear-gradient(135deg, #667eea, #764ba2);
+        color: white;
+    }
+    .btn-secondary {
+        background: #e2e8f0;
+        color: #4a5568;
+    }
+    @media (max-width: 768px) {
+        .main-content {
+            margin-left: 0;
+        }
+        .form-row {
+            grid-template-columns: 1fr;
+        }
+        .detail-grid {
+            grid-template-columns: 1fr;
+        }
+    }
+</style>
+
+<script>
+    // Your JavaScript functions here
+    function addPrescriptionRow() {
+        const tableBody = document.getElementById('prescriptionTableBody');
+        const newRow = document.createElement('tr');
+        newRow.innerHTML = `
+            <td><input type="text" placeholder="Medicine name" class="prescription-input"></td>
+            <td><input type="text" placeholder="e.g. 500mg" class="prescription-input"></td>
+            <td><input type="text" placeholder="e.g. Twice daily" class="prescription-input"></td>
+            <td>
+                <select class="prescription-input">
+                    <option value="">Select</option>
+                    <option value="Internal">Internal</option>
+                    <option value="External">External</option>
+                </select>
+            </td>
+            <td><input type="text" placeholder="e.g. Hospital Pharmacy" class="prescription-input"></td>
+            <td><input type="text" placeholder="e.g. After meals" class="prescription-input"></td>
+            <td><button type="button" class="remove-prescription-btn" onclick="removePrescriptionRow(this)">Remove</button></td>
+        `;
+        tableBody.appendChild(newRow);
+    }
+    function removePrescriptionRow(button) {
+        const row = button.closest('tr');
+        row.remove();
+    }
+    function savePrescription() {
+        alert("Prescription saved successfully!");
+    }
+    function resetForm() {
+        document.querySelectorAll('input, select, textarea').forEach(el => el.value = '');
+    }
+</script>

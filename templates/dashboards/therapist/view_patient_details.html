@@ -1,0 +1,582 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Patient Therapy Dashboard</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #667eea;
+            --secondary: #764ba2;
+            --light: #f8f9fa;
+            --dark: #343a40;
+            --success: #28a745;
+            --danger: #dc3545;
+            --warning: #ffc107;
+            --info: #17a2b8;
+        }
+        
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f5f7fb;
+            color: #333;
+            line-height: 1.6;
+        }
+        
+        .dashboard-container {
+            display: flex;
+            min-height: 100vh;
+        }
+        
+        /* Sidebar Styles */
+        .sidebar {
+            width: 280px;
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            color: white;
+            padding: 20px 0;
+            box-shadow: 0 0 15px rgba(0, 0, 0, 0.1);
+            position: fixed;
+            height: 100%;
+            overflow-y: auto;
+            z-index: 1000;
+        }
+        
+        .sidebar-header {
+            padding: 0 20px 20px;
+            text-align: center;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        .sidebar-header h2 {
+            font-size: 1.5rem;
+            font-weight: 700;
+            margin-bottom: 5px;
+        }
+        
+        .sidebar-header p {
+            font-size: 0.9rem;
+            opacity: 0.8;
+        }
+        
+        .nav-links {
+            padding: 20px 0;
+        }
+        
+        .nav-item {
+            padding: 12px 25px;
+            display: flex;
+            align-items: center;
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }
+        
+        .nav-item:hover, .nav-item.active {
+            background: rgba(255, 255, 255, 0.1);
+            border-left: 4px solid white;
+        }
+        
+        .nav-item i {
+            margin-right: 15px;
+            font-size: 1.2rem;
+        }
+        
+        /* Main Content */
+        .main-content {
+            flex: 1;
+            margin-left: 280px;
+            padding: 30px;
+        }
+        
+        .header {
+            background: white;
+            border-radius: 15px;
+            padding: 25px;
+            margin-bottom: 30px;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.05);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .header h1 {
+            color: var(--dark);
+            font-size: 2.2rem;
+            font-weight: 700;
+            margin-bottom: 5px;
+        }
+        
+        .header p {
+            color: #6c757d;
+            font-size: 1.1rem;
+        }
+        
+        .user-info {
+            display: flex;
+            align-items: center;
+        }
+        
+        .user-info img {
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            margin-right: 15px;
+            object-fit: cover;
+        }
+        
+        /* Card Styles */
+        .card {
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.05);
+            margin-bottom: 25px;
+            border: none;
+        }
+        
+        .card-header {
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            color: white;
+            border-radius: 15px 15px 0 0 !important;
+            padding: 15px 20px;
+            font-weight: 600;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .card-body {
+            padding: 20px;
+        }
+        
+        /* Patient Info */
+        .patient-info {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+            gap: 20px;
+        }
+        
+        .info-item {
+            margin-bottom: 15px;
+        }
+        
+        .info-item label {
+            font-weight: 600;
+            color: #6c757d;
+            display: block;
+            margin-bottom: 5px;
+        }
+        
+        .info-item p {
+            font-size: 1.1rem;
+            color: var(--dark);
+        }
+        
+        /* Table Styles */
+        .table-container {
+            overflow-x: auto;
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background: white;
+            border-radius: 10px;
+            overflow: hidden;
+        }
+        
+        th, td {
+            padding: 15px;
+            text-align: left;
+            border-bottom: 1px solid #e2e8f0;
+        }
+        
+        th {
+            background: #f8f9fa;
+            font-weight: 600;
+            color: #4a5568;
+        }
+        
+        tr:hover {
+            background: #f8f9fa;
+        }
+        
+        .status {
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            font-weight: 600;
+        }
+        
+        .status-active {
+            background: #c6f6d5;
+            color: #2f855a;
+        }
+        
+        .status-completed {
+            background: #fed7d7;
+            color: #c53030;
+        }
+        
+        .btn {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 8px;
+            font-size: 0.9rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        
+        .btn-primary {
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+        
+        .btn-sm {
+            padding: 6px 12px;
+            font-size: 0.8rem;
+        }
+        
+        /* Form Styles */
+        .form-container {
+            background: white;
+            border-radius: 15px;
+            padding: 25px;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.05);
+            margin-bottom: 25px;
+        }
+        
+        .form-title {
+            color: var(--dark);
+            font-size: 1.5rem;
+            font-weight: 700;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #f1f1f1;
+        }
+        
+        .form-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 20px;
+        }
+        
+        .form-group {
+            margin-bottom: 20px;
+        }
+        
+        .form-group label {
+            display: block;
+            font-weight: 600;
+            color: #4a5568;
+            margin-bottom: 8px;
+        }
+        
+        .form-group input, .form-group select, .form-group textarea {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e2e8f0;
+            border-radius: 8px;
+            font-size: 1rem;
+            transition: all 0.3s ease;
+        }
+        
+        .form-group input:focus, .form-group select:focus, .form-group textarea:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+        
+        .form-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+        }
+        
+        /* Responsive */
+        @media (max-width: 992px) {
+            .sidebar {
+                width: 220px;
+            }
+            
+            .main-content {
+                margin-left: 220px;
+            }
+        }
+        
+        @media (max-width: 768px) {
+            .dashboard-container {
+                flex-direction: column;
+            }
+            
+            .sidebar {
+                width: 100%;
+                height: auto;
+                position: relative;
+            }
+            
+            .main-content {
+                margin-left: 0;
+            }
+            
+            .form-row {
+                grid-template-columns: 1fr;
+            }
+            
+            .patient-info {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="dashboard-container">
+        <!-- Sidebar -->
+       
+           
+            
+            {% include 'dashboards/nav.html' %}
+           
+       
+
+        <!-- Main Content -->
+        <div class="main-content">
+            <!-- Header -->
+            <div class="header">
+                <div>
+                    <h1>Patient Therapy Dashboard</h1>
+                    <p>Detailed view of patient information, therapies, and prescriptions</p>
+                </div>
+                <div class="user-info">
+                    <img src="https://ui-avatars.com/api/?name=Dr+Sarah&background=667eea&color=fff" alt="Therapist">
+                    <div>
+                        <strong>Dr. Sarah Johnson</strong>
+                        <div>Therapist</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Patient Details -->
+            <div class="card">
+                <div class="card-header">
+                    <span>Patient Information</span>
+                    <span class="status status-active">Active</span>
+                </div>
+                <div class="card-body">
+                    <div class="patient-info">
+                        <div class="info-item">
+                            <label>Patient ID</label>
+                            <p>PAT001</p>
+                        </div>
+                        <div class="info-item">
+                            <label>Full Name</label>
+                            <p>John Doe</p>
+                        </div>
+                        <div class="info-item">
+                            <label>Age</label>
+                            <p>52 years</p>
+                        </div>
+                        <div class="info-item">
+                            <label>Gender</label>
+                            <p>Male</p>
+                        </div>
+                        <div class="info-item">
+                            <label>IP Number</label>
+                            <p>IP202310001</p>
+                        </div>
+                        <div class="info-item">
+                            <label>Admission Date</label>
+                            <p>October 1, 2023</p>
+                        </div>
+                        <div class="info-item">
+                            <label>VIP Status</label>
+                            <p>Standard</p>
+                        </div>
+                        <div class="info-item">
+                            <label>Unique ID</label>
+                            <p>UID787634</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Therapy Schedule -->
+            <div class="card">
+                <div class="card-header">
+                    <span>Therapy Schedule</span>
+                </div>
+                <div class="card-body">
+                    <div class="table-container">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Therapy Type</th>
+                                    <th>Schedule</th>
+                                    <th>Room No.</th>
+                                    <th>From Date</th>
+                                    <th>To Date</th>
+                                    <th>Days</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td>Physical Therapy</td>
+                                    <td>Mon, Wed, Fri (10:00 AM)</td>
+                                    <td>TR-102</td>
+                                    <td>2023-10-01</td>
+                                    <td>2023-10-15</td>
+                                    <td>15</td>
+                                    <td><span class="status status-active">Active</span></td>
+                                </tr>
+                                <tr>
+                                    <td>Hydrotherapy</td>
+                                    <td>Tue, Thu (2:00 PM)</td>
+                                    <td>TR-205</td>
+                                    <td>2023-10-05</td>
+                                    <td>2023-10-19</td>
+                                    <td>15</td>
+                                    <td><span class="status status-active">Active</span></td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Medicine Prescription -->
+            <div class="card">
+                <div class="card-header">
+                    <span>Medicine Prescription</span>
+                </div>
+                <div class="card-body">
+                    <div class="table-container">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Item</th>
+                                    <th>Dosage</th>
+                                    <th>Usage</th>
+                                    <th>Internal/External</th>
+                                    <th>Procured From</th>
+                                    <th>Time</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td>Paracetamol</td>
+                                    <td>500mg</td>
+                                    <td>Twice daily</td>
+                                    <td>Internal</td>
+                                    <td>Hospital Pharmacy</td>
+                                    <td>After meals</td>
+                                </tr>
+                                <tr>
+                                    <td>Voltaren Gel</td>
+                                    <td>1%</td>
+                                    <td>Apply gently</td>
+                                    <td>External</td>
+                                    <td>Hospital Pharmacy</td>
+                                    <td>Morning & Night</td>
+                                </tr>
+                                <tr>
+                                    <td>Multivitamin</td>
+                                    <td>One tablet</td>
+                                    <td>Once daily</td>
+                                    <td>Internal</td>
+                                    <td>Hospital Pharmacy</td>
+                                    <td>With breakfast</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Assigned Therapies -->
+            <div class="form-container">
+                <h2 class="form-title">Assigned Therapies</h2>
+                <div class="table-container">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>SI No.</th>
+                                <th>Procured</th>
+                                <th>Therapy</th>
+                                <th>Item</th>
+                                <th>Oil Class</th>
+                                <th>Usage</th>
+                                <th>From Date</th>
+                                <th>To Date</th>
+                                <th>Days</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>1</td>
+                                <td>Hospital Store</td>
+                                <td>Abhyangam</td>
+                                <td>Massage Table</td>
+                                <td>Bala Tailam</td>
+                                <td>Full body massage</td>
+                                <td>2023-10-01</td>
+                                <td>2023-10-07</td>
+                                <td>7</td>
+                            </tr>
+                            <tr>
+                                <td>2</td>
+                                <td>Therapy Department</td>
+                                <td>Pizhichil</td>
+                                <td>Dhara Equipment</td>
+                                <td>Dhanwantharam Tailam</td>
+                                <td>Pouring warm oil</td>
+                                <td>2023-10-03</td>
+                                <td>2023-10-10</td>
+                                <td>7</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Remarks Section -->
+            <div class="form-container">
+                <h2 class="form-title">Treatment Remarks</h2>
+                <div class="form-group">
+                    <textarea id="remarks" class="form-control" rows="4" placeholder="Enter treatment remarks and observations..." readonly>Patient is responding well to physical therapy. Range of motion has improved by 30% since admission. Hydrotherapy sessions have helped reduce stiffness. Patient reports decreased pain levels.</textarea>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Function to calculate days between dates
+        function calculateDays() {
+            const fromDate = new Date('2023-10-01');
+            const toDate = new Date('2023-10-15');
+            const diffTime = Math.abs(toDate - fromDate);
+            const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)); 
+            return diffDays;
+        }
+
+        // Update days in the table
+        document.addEventListener('DOMContentLoaded', function() {
+            const daysCells = document.querySelectorAll('tbody tr td:nth-child(6)');
+            daysCells.forEach(cell => {
+                cell.textContent = calculateDays();
+            });
+        });
+    </script>
+</body>
+</html>

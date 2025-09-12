@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Prescription Dashboard</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+</head>
+<body class="bg-gray-100 p-6">
+
+  <div class="max-w-7xl mx-auto bg-white shadow-md rounded-xl p-6">
+    <h1 class="text-2xl font-bold mb-4">Prescription Dashboard</h1>
+
+    <!-- Patient Info -->
+    <div class="grid grid-cols-2 gap-4 mb-6">
+      <div><strong>IP No:</strong> 20042023</div>
+      <div><strong>Date:</strong> 06/08/2025</div>
+      <div><strong>Patient Name:</strong> Aashish Veera</div>
+      <div><strong>Age/Sex:</strong> 49 / Male</div>
+      <div><strong>Room:</strong> DS-5</div>
+      <div><strong>Day:</strong> 6</div>
+      <div><strong>DOA:</strong> 01/08/2025</div>
+      <div><strong>Unique ID:</strong> 2023084404975</div>
+    </div>
+
+    <!-- Prescription Table -->
+    <table class="w-full border border-gray-300 mb-6">
+      <thead class="bg-gray-200">
+        <tr>
+          <th class="border p-2">Sr. No</th>
+          <th class="border p-2">Prescription</th>
+          <th class="border p-2">Dosage</th>
+          <th class="border p-2">Form</th>
+          <th class="border p-2">Usage</th>
+          <th class="border p-2">Internal/External</th>
+          <th class="border p-2">Procured From</th>
+          <th class="border p-2">Time</th>
+          <th class="border p-2">From Date</th>
+          <th class="border p-2">To Date</th>
+          <th class="border p-2">Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="border p-2">1</td>
+          <td class="border p-2">Pattoladi Kashayam</td>
+          <td class="border p-2">10 ml</td>
+          <td class="border p-2">M,E</td>
+          <td class="border p-2">Internal</td>
+          <td class="border p-2">IP Pharmacy</td>
+          <td class="border p-2">12:07 PM</td>
+          <td class="border p-2">02/08/2025</td>
+          <td class="border p-2">06/08/2025</td>
+          <td class="border p-2">ON</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <!-- Charts -->
+    <div class="grid grid-cols-2 gap-6">
+      <canvas id="chartInternalExternal"></canvas>
+      <canvas id="chartStatus"></canvas>
+    </div>
+  </div>
+
+<script>
+  new Chart(document.getElementById('chartInternalExternal'), {
+    type: 'pie',
+    data: {
+      labels: ['Internal', 'External'],
+      datasets: [{ data: [3, 2], backgroundColor: ['#4CAF50', '#FF9800'] }]
+    }
+  });
+
+  new Chart(document.getElementById('chartStatus'), {
+    type: 'bar',
+    data: {
+      labels: ['ON', 'OFF'],
+      datasets: [{ data: [4, 1], backgroundColor: ['#2196F3', '#F44336'] }]
+    }
+  });
+</script>
+
+</body>
+</html>

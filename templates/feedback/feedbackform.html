@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Treatment Feedback</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: #f5f5f5;
+            padding: 30px;
+        }
+        .feedback-container {
+            max-width: 650px;
+            margin: auto;
+            background: white;
+            padding: 25px;
+            border-radius: 12px;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+        }
+        h2 {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        .patient-info {
+            background: #f0f8ff;
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        .patient-info table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        .patient-info th, .patient-info td {
+            text-align: left;
+            padding: 8px;
+        }
+        .patient-info th {
+            width: 150px;
+            color: #333;
+        }
+        label {
+            display: block;
+            margin: 12px 0 6px;
+            font-weight: bold;
+        }
+        textarea, select {
+            width: 100%;
+            padding: 10px;
+            margin-bottom: 12px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+        }
+        button {
+            background: #007bff;
+            color: white;
+            padding: 12px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            width: 100%;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+    </style>
+</head>
+<body>
+    <div class="feedback-container">
+        <h2>Treatment Feedback</h2>
+
+        <!-- Patient & Treatment Details -->
+        <div class="patient-info">
+            <table>
+                <tr><th>Patient ID</th><td>PAT001</td></tr>
+                <tr><th>Name</th><td>John Doe</td></tr>
+                <tr><th>Age</th><td>45</td></tr>
+                <tr><th>Gender</th><td>Male</td></tr>
+                <tr><th>Contact</th><td>9876543210</td></tr>
+                <tr><th>Address</th><td>123, City Road</td></tr>
+                <tr><th>Treatment</th><td>Pizhichil Therapy</td></tr>
+                <tr><th>Date</th><td>25-Aug-2025</td></tr>
+            </table>
+        </div>
+
+        <!-- Feedback Form -->
+        <form>
+            <label for="comments">Your Feedback</label>
+            <textarea id="comments" name="comments" rows="4" placeholder="Write your feedback about the treatment..."></textarea>
+
+            <button type="submit">Submit Feedback</button>
+        </form>
+    </div>
+</body>
+</html>

@@ -1,0 +1,240 @@
+<div class="sidebar" id="sidebar">
+    <div class="sidebar-header">
+        <div class="profile-section">
+            <img src="https://via.placeholder.com/60" alt="Profile Picture" class="profile-pic">
+            <div class="profile-info">
+                <div class="profile-name">Dr. John Smith</div>
+            </div>
+        </div>
+    </div>
+    <div class="sidebar-menu">
+        <div class="menu-section">
+            <div class="menu-section-title">Menu</div>
+              {% if request.user.role == "doctor_admin" %}
+            <a href="{% url 'doctordash' %}" class="menu-item" id="therapy-prescription">
+                <span>🏥</span> Add Therapy Prescription
+            </a>
+            <a href="{% url 'medicin_prescription_table' %}" class="menu-item" id="medicine-prescription">
+                <span>💊</span> Add Medicine Prescription
+            </a>
+              <a href="{% url 'medicin_prescription_table' %}" class="menu-item" id="treatment-schedule">
+                <span>📅</span> Treatment Schedule
+            </a>
+            {% endif %}
+
+
+           {% comment %} THERAPIST NAVBAR  {% endcomment %}
+            {% if request.user.role == "therapist" %}
+               <a href="{% url 'therapistdash' %}" class="menu-item" id="therapy-prescription">
+                <span>🏥</span>View Schedule
+            </a>
+              {% endif %}
+
+       
+     
+            {% comment %} <div class="menu-section-title">Reports & Analytics</div> {% endcomment %}
+            {% if request.user.role == "doctor_admin" %}
+            <a href="{% url 'Therapy_Report' %}" class="menu-item" id="treatment-schedule">
+                <span>📅</span> Reports
+            </a>
+             {% endif %}
+             <a href="{% url 'patient_profile' %}" class="menu-item" id="edit-profile">
+                <span>👤</span>patient_profile
+            </a>
+              <a href="{% url 'prescription_dash' %}" class="menu-item" id="edit-profile">
+                <span>👤</span>prescription_dash
+            </a>
+             <a href="{% url 'patientdash' %}" class="menu-item" id="edit-profile">
+                <span>👤</span>patientdash
+            </a>
+               <a href="{% url 'ip_pharmacy' %}" class="menu-item" id="edit-profile">
+                <span>👤</span>ip_pharmacy
+            </a>
+              <a href="{% url 'nurse_dash' %}" class="menu-item" id="edit-profile">
+                <span>👤</span>nurse_dash
+            </a>
+             <a href="{% url 'Patient_feedback_review' %}" class="menu-item" id="edit-profile">
+                <span>👤</span>Patient_feedback_review
+            </a>
+ <a href="{% url 'gmdash' %}" class="menu-item" id="edit-profile">
+                <span>👤</span>HR dash
+            </a>
+     <a href="{% url 'housekeepingdash' %}" class="menu-item" id="edit-profile">
+                <span>👤</span>House Keeping
+            </a>
+            {% comment %} <div class="menu-section-title">Administration</div> {% endcomment %}
+            {% if request.user.role == "super_admin" %}
+            <a href="{% url 'Manage_user' %}" class="menu-item" id="edit-profile">
+                <span>👤</span> User Management
+            </a>
+            <a href="{% url 'Audit_Log' %}" class="menu-item" id="edit-profile">
+                <span>📅</span> Audit Log
+            </a>
+{% endif %}
+            <a href="#" class="menu-item" id="edit-profile">
+                <span>👤</span> Edit Profile
+            </a>
+            <a href="{% url 'logout' %}" class="menu-item" id="logout">
+                <span>🔐</span> Log Out
+            </a>
+        </div>
+    </div>
+</div>
+
+<!-- Hamburger Button for Mobile -->
+<button class="hamburger" onclick="toggleSidebar()">
+    <span></span>
+    <span></span>
+    <span></span>
+</button>
+
+<style>
+       body {
+      font-family: Arial, sans-serif;
+      background-color: #f8f9fa;
+      margin: 0;
+      padding: 0;
+    }
+    /* Sidebar Styles (unchanged) */
+    .sidebar {
+        width: 280px;
+        background: white;
+        border-right: 1px solid #e0f2f1;
+        box-shadow: 4px 0 20px rgba(0, 0, 0, 0.05);
+        position: fixed;
+        height: 100vh;
+        overflow-y: auto;
+        z-index: 1000;
+        transition: transform 0.3s ease;
+    }
+    .sidebar-header {
+        padding: 20px;
+        border-bottom: 1px solid #e0f2f1;
+        background: linear-gradient(135deg, #2ed573, #1e8449);
+        color: white;
+        text-align: center;
+    }
+    .profile-section {
+        display: flex;
+        align-items: center;
+        padding: 10px;
+    }
+    .profile-pic {
+        width: 50px;
+        height: 50px;
+        border-radius: 50%;
+        object-fit: cover;
+        border: 2px solid white;
+    }
+    .profile-info {
+        margin-left: 12px;
+        text-align: left;
+    }
+    .profile-name {
+        font-size: 1.1rem;
+        font-weight: 600;
+        margin-bottom: 2px;
+    }
+    .sidebar-menu {
+        padding: 20px 0;
+    }
+    .menu-section {
+        margin-bottom: 25px;
+    }
+    .menu-section-title {
+        padding: 0 20px 10px;
+        font-size: 0.8rem;
+        font-weight: 600;
+        color: #2ed573;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+    .menu-item {
+        display: block;
+        padding: 12px 20px;
+        color: #2c3e50;
+        text-decoration: none;
+        transition: all 0.3s ease;
+        border-left: 3px solid transparent;
+    }
+    .menu-item:hover,
+    .menu-item.active {
+        background: rgba(46, 213, 115, 0.1);
+        border-left-color: #2ed573;
+        color: #2ed573;
+    }
+    .menu-item i {
+        width: 20px;
+        margin-right: 10px;
+        font-style: normal;
+    }
+    /* Hamburger Button */
+    .hamburger {
+        display: none;
+        position: fixed;
+        top: 20px;
+        left: 20px;
+        z-index: 1001;
+        background: white;
+        border: 1px solid #e0f2f1;
+        border-radius: 8px;
+        padding: 10px;
+        cursor: pointer;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+    }
+    .hamburger span {
+        display: block;
+        width: 20px;
+        height: 2px;
+        background: #2ed573;
+        margin: 4px 0;
+        transition: 0.3s;
+    }
+    /* Mobile Responsive */
+    @media (max-width: 768px) {
+        .sidebar {
+            transform: translateX(-100%);
+        }
+        .sidebar.open {
+            transform: translateX(0);
+        }
+        .hamburger {
+            display: block;
+        }
+    }
+</style>
+
+<script>
+    function toggleSidebar() {
+        const sidebar = document.getElementById('sidebar');
+        sidebar.classList.toggle('open');
+    }
+
+    // Close sidebar when clicking outside on mobile
+    document.addEventListener('click', function(event) {
+        const sidebar = document.getElementById('sidebar');
+        const hamburger = document.querySelector('.hamburger');
+        if (window.innerWidth <= 768 &&
+            !sidebar.contains(event.target) &&
+            !hamburger.contains(event.target) &&
+            sidebar.classList.contains('open')) {
+            sidebar.classList.remove('open');
+        }
+    });
+
+    // Set active menu item based on current URL
+    function setActiveMenuItem() {
+        const currentUrl = window.location.href;
+        const menuItems = document.querySelectorAll('.menu-item');
+
+        menuItems.forEach(item => {
+            item.classList.remove('active');
+            if (currentUrl.includes(item.getAttribute('href'))) {
+                item.classList.add('active');
+            }
+        });
+    }
+
+    // Call the function when the page loads
+    document.addEventListener('DOMContentLoaded', setActiveMenuItem);
+</script>

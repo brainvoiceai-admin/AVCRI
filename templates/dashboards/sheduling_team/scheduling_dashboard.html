@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Patient Dashboard</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background-color: #f4f6f9;
+      margin: 0;
+      padding: 0;
+    }
+    .container {
+      width: 95%;
+      margin: 20px auto;
+    }
+    h2 {
+      background-color: #007bff;
+      color: white;
+      padding: 10px;
+      border-radius: 5px;
+    }
+    .card {
+      background: white;
+      border-radius: 8px;
+      padding: 20px;
+      margin-bottom: 20px;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+    }
+    .card table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    .card table th, .card table td {
+      text-align: left;
+      padding: 10px;
+      border-bottom: 1px solid #ddd;
+    }
+    .form-section {
+      margin-top: 20px;
+    }
+    .form-section h3 {
+      margin-bottom: 10px;
+      color: #007bff;
+    }
+    .form-group {
+      margin-bottom: 15px;
+    }
+    label {
+      font-weight: bold;
+      display: block;
+      margin-bottom: 5px;
+    }
+    input, textarea, select {
+      width: 100%;
+      padding: 8px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+    }
+    button {
+      background-color: #007bff;
+      color: white;
+      padding: 10px 15px;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    button:hover {
+      background-color: #0056b3;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="container">
+    <h2>Patient Details</h2>
+    
+    <div class="card">
+      <table>
+        <tr><th>Patient ID</th><td>PAT001</td></tr>
+        <tr><th>Name</th><td>John Doe</td></tr>
+        <tr><th>Age</th><td>45</td></tr>
+        <tr><th>Gender</th><td>Male</td></tr>
+        <tr><th>Contact</th><td>9876543210</td></tr>
+        <tr><th>Address</th><td>123, City Road</td></tr>
+        <tr><th>DOD</th><td>25-08-2025</td></tr>
+      </table>
+    </div>
+
+    <!-- Medical Prescription Section -->
+    <div class="card form-section">
+      <h3>Medical Prescription</h3>
+      <div class="form-group">
+        <label for="medicine">Medicine Name</label>
+        <input type="text" id="medicine" placeholder="Enter medicine name">
+      </div>
+      <div class="form-group">
+        <label for="dosage">Dosage</label>
+        <input type="text" id="dosage" placeholder="e.g., 1 tablet twice a day">
+      </div>
+      <div class="form-group">
+        <label for="duration">Duration</label>
+        <input type="text" id="duration" placeholder="e.g., 5 days">
+      </div>
+      <div class="form-group">
+        <label for="instructions">Special Instructions</label>
+        <textarea id="instructions" rows="3" placeholder="Enter instructions"></textarea>
+      </div>
+      <button type="button">Save Medical Prescription</button>
+    </div>
+
+    <!-- Therapy Prescription Section -->
+    <div class="card form-section">
+      <h3>Therapy Prescription</h3>
+      <div class="form-group">
+        <label for="therapy">Therapy Type</label>
+        <input type="text" id="therapy" placeholder="e.g., Physiotherapy, Ayurveda, etc.">
+      </div>
+      <div class="form-group">
+        <label for="sessions">No. of Sessions</label>
+        <input type="number" id="sessions" placeholder="Enter number of sessions">
+      </div>
+      <div class="form-group">
+        <label for="durationTherapy">Duration per Session</label>
+        <input type="text" id="durationTherapy" placeholder="e.g., 30 minutes">
+      </div>
+      <div class="form-group">
+        <label for="therapist">Assigned Therapist</label>
+        <input type="text" id="therapist" placeholder="Enter therapist name">
+      </div>
+      <div class="form-group">
+        <label for="therapyNotes">Special Notes</label>
+        <textarea id="therapyNotes" rows="3" placeholder="Enter therapy-related notes"></textarea>
+      </div>
+      <button type="button">Save Therapy Prescription</button>
+    </div>
+
+  </div>
+
+</body>
+</html>

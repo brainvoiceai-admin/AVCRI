@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Housekeeping Dashboard</title>
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Bootstrap Icons -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+    <style>
+        /* Custom styles for a cleaner look */
+        body { 
+            background-color: #f8f9fa; 
+            font-family: 'Inter', sans-serif;
+        }
+
+        /* * This layout assumes your 'nav.html' creates a sidebar with a fixed position
+         * and a width of around 250px, similar to the example you provided.
+        */
+        .main-content {
+            margin-left: 270px; /* Adjust this value to match your nav's width + a small gap */
+            padding: 1.5rem; /* Replaces the Bootstrap 'p-4' class for consistency */
+            width: calc(100% - 270px);
+        }
+
+        .card-status-indicator { 
+            border-left: 5px solid; 
+        }
+        .border-success { border-color: #198754 !important; }
+        .border-warning { border-color: #ffc107 !important; }
+        .border-info   { border-color: #0dcaf0 !important; }
+        .border-danger  { border-color: #dc3545 !important; }
+        .main-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 1rem;
+        }
+
+        /* Responsive adjustment for smaller screens where the nav might be hidden or stacked */
+        @media (max-width: 992px) {
+            .main-content {
+                margin-left: 0;
+                width: 100%;
+                padding: 1rem;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    {% include 'dashboards/nav.html' %}
+
+    <main class="main-content">
+        <div class="main-header mb-4">
+            <h1 class="h2 mb-0">Housekeeping Dashboard</h1>
+            <span class="fs-5 text-muted fw-light"><i class="bi bi-clock me-2"></i>Friday, August 29, 2025 - 11:19 AM</span>
+        </div>
+
+        <!-- =================================== -->
+        <!--      1. ACTION LIST (Priority)      -->
+        <!-- =================================== -->
+        <div class="card shadow-sm mb-4">
+            <div class="card-header bg-warning text-dark">
+                <h5 class="mb-0"><i class="bi bi-exclamation-triangle-fill me-2"></i>Prioritized Action List</h5>
+            </div>
+            <div class="list-group list-group-flush">
+                <!-- Example Room 1 that needs cleaning -->
+                <div class="list-group-item d-flex justify-content-between align-items-center p-3">
+                    <div>
+                        <span class="fw-bold fs-5">Therapy Room 101</span>
+                        <small class="d-block text-muted">Status: Needs Cleaning since 10:45 AM</small>
+                    </div>
+                    <a href="#" class="btn btn-success"><i class="bi bi-check-lg me-2"></i>Mark as Cleaned</a>
+                </div>
+                <!-- Example Room 2 that needs cleaning -->
+                <div class="list-group-item d-flex justify-content-between align-items-center p-3">
+                    <div>
+                        <span class="fw-bold fs-5">Ayurveda Suite</span>
+                        <small class="d-block text-muted">Status: Needs Cleaning since 11:05 AM</small>
+                    </div>
+                    <a href="#" class="btn btn-success"><i class="bi bi-check-lg me-2"></i>Mark as Cleaned</a>
+                </div>
+            </div>
+        </div>
+
+        <!-- =================================== -->
+        <!--      2. ROOM STATUS OVERVIEW        -->
+        <!-- =================================== -->
+        <h3 class="mb-3">All Room Status Overview</h3>
+        <div class="row g-4">
+            <!-- Card: Clean -->
+            <div class="col-xl-3 col-md-4 col-sm-6">
+                <div class="card h-100 shadow-sm card-status-indicator border-success">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-start">
+                            <h5 class="card-title mb-0">Therapy Room 102</h5>
+                            <span class="badge bg-success-subtle text-success-emphasis rounded-pill">Clean</span>
+                        </div>
+                        <p class="card-text text-muted mt-2">Next Schedule: <strong>01:00 PM</strong> (Physiotherapy)</p>
+                    </div>
+                </div>
+            </div>
+            <!-- Card: Needs Cleaning -->
+            <div class="col-xl-3 col-md-4 col-sm-6">
+                <div class="card h-100 shadow-sm card-status-indicator border-warning">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-start">
+                            <h5 class="card-title mb-0">Therapy Room 101</h5>
+                            <span class="badge bg-warning-subtle text-warning-emphasis rounded-pill">Needs Cleaning</span>
+                        </div>
+                        <p class="card-text text-muted mt-2">Vacant since <strong>10:45 AM</strong></p>
+                    </div>
+                </div>
+            </div>
+            <!-- Card: Occupied -->
+            <div class="col-xl-3 col-md-4 col-sm-6">
+                <div class="card h-100 shadow-sm card-status-indicator border-info">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-start">
+                            <h5 class="card-title mb-0">Hydrotherapy Pool</h5>
+                            <span class="badge bg-info-subtle text-info-emphasis rounded-pill">Occupied</span>
+                        </div>
+                        <p class="card-text text-muted mt-2">Session ends at <strong>12:00 PM</strong></p>
+                    </div>
+                </div>
+            </div>
+            <!-- Card: Maintenance -->
+            <div class="col-xl-3 col-md-4 col-sm-6">
+                <div class="card h-100 shadow-sm card-status-indicator border-danger">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-start">
+                            <h5 class="card-title mb-0">Massage Room A</h5>
+                            <span class="badge bg-danger-subtle text-danger-emphasis rounded-pill">Maintenance</span>
+                        </div>
+                        <p class="card-text text-muted mt-2">Reason: Plumbing Issue</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- =================================== -->
+        <!--        3. TODAY'S SCHEDULE          -->
+        <!-- =================================== -->
+        <h3 class="mt-5 mb-3">Today's Full Therapy Schedule</h3>
+        <div class="card shadow-sm">
+            <div class="table-responsive">
+                <table class="table table-striped table-hover mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th scope="col">Time</th>
+                            <th scope="col">Room</th>
+                            <th scope="col">Therapy</th>
+                            <th scope="col">Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>09:00 AM - 10:00 AM</td>
+                            <td>Therapy Room 102</td>
+                            <td>Acupuncture</td>
+                            <td><span class="badge bg-secondary">Completed</span></td>
+                        </tr>
+                        <tr>
+                            <td>10:00 AM - 10:45 AM</td>
+                            <td>Therapy Room 101</td>
+                            <td>Hot Stone Massage</td>
+                            <td><span class="badge bg-secondary">Completed</span></td>
+                        </tr>
+                        <tr class="table-primary">
+                            <td>11:00 AM - 12:00 PM</td>
+                            <td>Hydrotherapy Pool</td>
+                            <td>Aquatic Therapy</td>
+                            <td><span class="badge bg-primary">In Progress</span></td>
+                        </tr>
+                        <tr>
+                            <td>01:00 PM - 01:45 PM</td>
+                            <td>Therapy Room 102</td>
+                            <td>Physiotherapy</td>
+                            <td><span class="badge bg-light text-dark">Scheduled</span></td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </main>
+
+    <!-- Bootstrap JS Bundle -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
