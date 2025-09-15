@@ -1,0 +1,43 @@
+{% load custom_tags %}
+
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Database Viewer</title>
+</head>
+<body>
+    <h2>Select a Table</h2>
+    <form method="get">
+        <select name="table_name" onchange="this.form.submit()">
+            <option value="">-- Select Table --</option>
+            {% for tbl in tables %}
+                <option value="{{ tbl }}" {% if selected_table == tbl %}selected{% endif %}>
+                    {{ tbl }}
+                </option>
+            {% endfor %}
+        </select>
+    </form>
+
+    {% if data %}
+        <h3>Top 10 records from {{ selected_table }}</h3>
+        <table border="1" cellpadding="5" cellspacing="0">
+            <thead>
+                <tr>
+                    {% for col in columns %}
+                        <th>{{ col }}</th>
+                    {% endfor %}
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in data %}
+                    <tr>
+                        {% for col in columns %}
+                            <td>{{ row|get_attr:col }}</td>
+                        {% endfor %}
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    {% endif %}
+</body>
+</html>

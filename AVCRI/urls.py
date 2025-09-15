@@ -21,5 +21,6 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     path('', include('Patient.urls')),
       path('authentication/', include('authentication.urls')),  # Add this line
+      path('therapy/', include('MySql_Data_pull.urls')),
 ]
 

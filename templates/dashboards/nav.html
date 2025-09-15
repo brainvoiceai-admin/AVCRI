@@ -7,72 +7,83 @@
             </div>
         </div>
     </div>
+
     <div class="sidebar-menu">
         <div class="menu-section">
-            <div class="menu-section-title">Menu</div>
-              {% if request.user.role == "doctor_admin" %}
-            <a href="{% url 'doctordash' %}" class="menu-item" id="therapy-prescription">
+            <div class="menu-section-title">Doctor Options</div>
+            {% if request.user.role == "doctor_admin" %}
+            <a href="{% url 'doctordash' %}" class="menu-item">
                 <span>🏥</span> Add Therapy Prescription
             </a>
-            <a href="{% url 'medicin_prescription_table' %}" class="menu-item" id="medicine-prescription">
+            <a href="{% url 'medicin_prescription_table' %}" class="menu-item">
                 <span>💊</span> Add Medicine Prescription
             </a>
-              <a href="{% url 'medicin_prescription_table' %}" class="menu-item" id="treatment-schedule">
+            <a href="{% url 'medicin_prescription_table' %}" class="menu-item">
                 <span>📅</span> Treatment Schedule
             </a>
+            <a href="{% url 'Therapy_Report' %}" class="menu-item">
+                <span>📊</span> Reports & Analytics
+            </a>
             {% endif %}
+        </div>
 
+        {% if request.user.role == "therapist" %}
+        <div class="menu-section">
+            <div class="menu-section-title">Therapist Options</div>
+            <a href="{% url 'therapistdash' %}" class="menu-item">
+                <span>🗓️</span> My Therapy Schedule
+            </a>
+        </div>
+        {% endif %}
 
-           {% comment %} THERAPIST NAVBAR  {% endcomment %}
-            {% if request.user.role == "therapist" %}
-               <a href="{% url 'therapistdash' %}" class="menu-item" id="therapy-prescription">
-                <span>🏥</span>View Schedule
+        <div class="menu-section">
+            <div class="menu-section-title">Patients</div>
+            <a href="{% url 'patient_profile' %}" class="menu-item">
+                <span>👤</span> Patient Profiles
             </a>
-              {% endif %}
+            <a href="{% url 'prescription_dash' %}" class="menu-item">
+                <span>💊</span> Prescriptions Dashboard
+            </a>
+            <a href="{% url 'patientdash' %}" class="menu-item">
+                <span>🧑‍⚕️</span> Patient Dashboard
+            </a>
+            <a href="{% url 'Patient_feedback_review' %}" class="menu-item">
+                <span>📝</span> Patient Feedback
+            </a>
+        </div>
 
-       
-     
-            {% comment %} <div class="menu-section-title">Reports & Analytics</div> {% endcomment %}
-            {% if request.user.role == "doctor_admin" %}
-            <a href="{% url 'Therapy_Report' %}" class="menu-item" id="treatment-schedule">
-                <span>📅</span> Reports
+        <div class="menu-section">
+            <div class="menu-section-title">Staff</div>
+            <a href="{% url 'ip_pharmacy' %}" class="menu-item">
+                <span>🏥</span> In-Patient Pharmacy
             </a>
-             {% endif %}
-             <a href="{% url 'patient_profile' %}" class="menu-item" id="edit-profile">
-                <span>👤</span>patient_profile
+            <a href="{% url 'nurse_dash' %}" class="menu-item">
+                <span>🩺</span> Nurse Dashboard
             </a>
-              <a href="{% url 'prescription_dash' %}" class="menu-item" id="edit-profile">
-                <span>👤</span>prescription_dash
+            <a href="{% url 'gmdash' %}" class="menu-item">
+                <span>👥</span> HR Dashboard
             </a>
-             <a href="{% url 'patientdash' %}" class="menu-item" id="edit-profile">
-                <span>👤</span>patientdash
+            <a href="{% url 'housekeepingdash' %}" class="menu-item">
+                <span>🧹</span> Housekeeping
             </a>
-               <a href="{% url 'ip_pharmacy' %}" class="menu-item" id="edit-profile">
-                <span>👤</span>ip_pharmacy
+        </div>
+
+        {% if request.user.role == "super_admin" %}
+        <div class="menu-section">
+            <div class="menu-section-title">Administration</div>
+            <a href="{% url 'Manage_user' %}" class="menu-item">
+                <span>👥</span> User Management
             </a>
-              <a href="{% url 'nurse_dash' %}" class="menu-item" id="edit-profile">
-                <span>👤</span>nurse_dash
+            <a href="{% url 'Audit_Log' %}" class="menu-item">
+                <span>📑</span> Audit Log
             </a>
-             <a href="{% url 'Patient_feedback_review' %}" class="menu-item" id="edit-profile">
-                <span>👤</span>Patient_feedback_review
-            </a>
- <a href="{% url 'gmdash' %}" class="menu-item" id="edit-profile">
-                <span>👤</span>HR dash
-            </a>
-     <a href="{% url 'housekeepingdash' %}" class="menu-item" id="edit-profile">
-                <span>👤</span>House Keeping
-            </a>
-            {% comment %} <div class="menu-section-title">Administration</div> {% endcomment %}
-            {% if request.user.role == "super_admin" %}
-            <a href="{% url 'Manage_user' %}" class="menu-item" id="edit-profile">
-                <span>👤</span> User Management
-            </a>
-            <a href="{% url 'Audit_Log' %}" class="menu-item" id="edit-profile">
-                <span>📅</span> Audit Log
-            </a>
-{% endif %}
-            <a href="#" class="menu-item" id="edit-profile">
-                <span>👤</span> Edit Profile
+        </div>
+        {% endif %}
+
+        <div class="menu-section">
+            <div class="menu-section-title">Account</div>
+            <a href="#" class="menu-item">
+                <span>✏️</span> Edit My Profile
             </a>
             <a href="{% url 'logout' %}" class="menu-item" id="logout">
                 <span>🔐</span> Log Out
@@ -89,13 +100,12 @@
 </button>
 
 <style>
-       body {
-      font-family: Arial, sans-serif;
-      background-color: #f8f9fa;
-      margin: 0;
-      padding: 0;
+    body {
+        font-family: Arial, sans-serif;
+        background-color: #f8f9fa;
+        margin: 0;
+        padding: 0;
     }
-    /* Sidebar Styles (unchanged) */
     .sidebar {
         width: 280px;
         background: white;
@@ -117,23 +127,20 @@
     .profile-section {
         display: flex;
         align-items: center;
-        padding: 10px;
+        justify-content: center;
+        flex-direction: column;
     }
     .profile-pic {
-        width: 50px;
-        height: 50px;
+        width: 60px;
+        height: 60px;
         border-radius: 50%;
         object-fit: cover;
         border: 2px solid white;
-    }
-    .profile-info {
-        margin-left: 12px;
-        text-align: left;
+        margin-bottom: 10px;
     }
     .profile-name {
         font-size: 1.1rem;
         font-weight: 600;
-        margin-bottom: 2px;
     }
     .sidebar-menu {
         padding: 20px 0;
@@ -163,12 +170,6 @@
         border-left-color: #2ed573;
         color: #2ed573;
     }
-    .menu-item i {
-        width: 20px;
-        margin-right: 10px;
-        font-style: normal;
-    }
-    /* Hamburger Button */
     .hamburger {
         display: none;
         position: fixed;
@@ -190,7 +191,6 @@
         margin: 4px 0;
         transition: 0.3s;
     }
-    /* Mobile Responsive */
     @media (max-width: 768px) {
         .sidebar {
             transform: translateX(-100%);
@@ -210,7 +210,6 @@
         sidebar.classList.toggle('open');
     }
 
-    // Close sidebar when clicking outside on mobile
     document.addEventListener('click', function(event) {
         const sidebar = document.getElementById('sidebar');
         const hamburger = document.querySelector('.hamburger');
@@ -222,7 +221,6 @@
         }
     });
 
-    // Set active menu item based on current URL
     function setActiveMenuItem() {
         const currentUrl = window.location.href;
         const menuItems = document.querySelectorAll('.menu-item');
@@ -235,6 +233,5 @@
         });
     }
 
-    // Call the function when the page loads
     document.addEventListener('DOMContentLoaded', setActiveMenuItem);
 </script>

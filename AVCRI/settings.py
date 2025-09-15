@@ -47,6 +47,7 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'Patient',
     'authentication',
+    'MySql_Data_pull',
 ]
 
 MIDDLEWARE = [
@@ -83,31 +84,45 @@ WSGI_APPLICATION = 'AVCRI.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
-    }
-}
-
-
 # DATABASES = {
-#     "default": {
-#         "ENGINE": "django.db.backends.sqlite3",
-#         "NAME": BASE_DIR / "db.sqlite3",
-#     },
-#     "mssql": {
-#         "ENGINE": "mssql",
-#         "NAME": "Therapy-new",        # 👈 pick one of your DB names here
-#         "HOST": "CJ",                 # your SQL Server instance
-#         "PORT": "",
-#         "OPTIONS": {
-#             "driver": "ODBC Driver 17 for SQL Server",  # or 18 if installed
-#             "trusted_connection": "yes",               # Windows Authentication
-#         },
-#     },
+#     'default': {
+#         'ENGINE': 'django.db.backends.sqlite3',
+#         'NAME': BASE_DIR / 'db.sqlite3',
+#     }
 # }
 
+
+
+DATABASES = {
+    'default': {  # Django app DB (SQLite)
+        'ENGINE': 'django.db.backends.sqlite3',
+        'NAME': BASE_DIR / 'db.sqlite3',
+    },
+    'hospital_db': {  # OPTherapy SQL Server
+        'ENGINE': 'mssql',
+        'NAME': os.getenv('HOSPITAL_DB_NAME'),
+        'USER': os.getenv('HOSPITAL_DB_USER'),
+        'PASSWORD': os.getenv('HOSPITAL_DB_PASSWORD'),
+        'HOST': os.getenv('HOSPITAL_DB_HOST'),
+        'PORT': os.getenv('HOSPITAL_DB_PORT'),
+        'OPTIONS': {
+            'driver': 'ODBC Driver 18 for SQL Server',
+            'extra_params': 'TrustServerCertificate=yes;Encrypt=yes;',
+        },
+    },
+    'therapy_db': {  # Therapy-new SQL Server
+        'ENGINE': 'mssql',
+        'NAME': os.getenv('THERAPY_DB_NAME'),
+        'USER': os.getenv('THERAPY_DB_USER'),
+        'PASSWORD': os.getenv('THERAPY_DB_PASSWORD'),
+        'HOST': os.getenv('THERAPY_DB_HOST'),
+        'PORT': os.getenv('THERAPY_DB_PORT'),
+        'OPTIONS': {
+            'driver': 'ODBC Driver 18 for SQL Server',
+            'extra_params': 'TrustServerCertificate=yes;Encrypt=yes;',
+        },
+    }
+}
 
 
 
