@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Patient Registration</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        .form-container { max-width: 500px; margin: auto; }
+        label { display: block; margin-top: 15px; }
+        input, select { width: 100%; padding: 8px; margin-top: 5px; }
+    </style>
+</head>
+<body>
+    <div class="form-container">
+        <h2>Patient Registration</h2>
+
+        <form method="POST">
+            {% csrf_token %}
+
+            <!-- Registration Number Dropdown -->
+            <label for="regNo">Registration Number:</label>
+            <select name="pat_reg_no" id="regNo" onchange="this.form.submit()">
+                <option value="">Select Registration Number</option>
+                {% for p in all_patients %}
+                    {% if patient and patient.pat_reg_no == p.pat_reg_no %}
+                        <option value="{{ p.pat_reg_no }}" selected>{{ p.pat_reg_no }} - {{ p.pat_name }}</option>
+                    {% else %}
+                        <option value="{{ p.pat_reg_no }}">{{ p.pat_reg_no }} - {{ p.pat_name }}</option>
+                    {% endif %}
+                {% endfor %}
+            </select>
+
+            {% if error %}
+                <p style="color:red;">{{ error }}</p>
+            {% endif %}
+
+            <!-- Full Name (from backend) -->
+            <label for="fullName">Full Name:</label>
+            <input type="text" id="fullName" name="fullName" 
+                   value="{% if patient %}{{ patient.pat_name }}{% endif %}" {% if patient %}readonly{% endif %}>
+
+            <!-- Age -->
+            <label for="age">Age:</label>
+            <input type="number" id="age" name="age" 
+                   value="{% if patient %}{{ patient.pat_age }}{% endif %}" {% if patient %}readonly{% endif %}>
+
+            <!-- Gender -->
+            <label for="gender">Gender:</label>
+            <input type="text" id="gender" name="gender" 
+                   value="{% if patient %}{{ patient.pat_sex }}{% endif %}" {% if patient %}readonly{% endif %}>
+
+            <!-- VIP Status (manual entry) -->
+            <label for="vipStatus">VIP Status:</label>
+            <select id="vipStatus" name="vipStatus">
+                <option value="">Select VIP Status</option>
+                <option value="Yes">Yes</option>
+                <option value="No">No</option>
+            </select>
+
+            <!-- IP Number (manual entry) -->
+            <label for="ipNumber">IP Number:</label>
+            <input type="text" id="ipNumber" name="ipNumber" value="{% if patient %}{{ patient.pat_op_reg_no }}{% endif %}" readonly>
+
+            <!-- Room Number (from backend) -->
+            <label for="roomNo">Room Number:</label>
+            <input type="text" id="roomNo" name="roomNo" 
+                   value="{% if patient %}{{ patient.pat_room_no }}{% endif %}" readonly>
+
+            <!-- Unique ID (manual entry) -->
+            <label for="uniqueId">Unique ID:</label>
+            <input type="text" id="uniqueId" name="uniqueId" value="{% if patient %}{{ patient.pat_ref_id }}{% endif %}" readonly>
+
+            <button type="submit" style="margin-top:20px;">Submit</button>
+        </form>
+    </div>
+</body>
+</html>

@@ -9,68 +9,73 @@
     </div>
 
     <!-- Prescription Form -->
-    <div class="form-container fade-in">
-        <h2 class="form-title">New Prescription</h2>
-        <div class="form-grid">
-            <div class="form-row">
-                <div class="form-group">
-                   <label for="patientReg">Patient Registration Number</label>
-<input type="text" id="patientReg" name="patientReg" 
-       placeholder="Enter Registration Number" value="PAT001" required>
+    <form method="POST">
+    {% csrf_token %}
+    <table class="prescription-table">
+        <thead>
+            <tr>
+                <th>Item</th>
+                <th>Dosage</th>
+                <th>Usage</th>
+                <th>Internal/External</th>
+                <th>Procured From</th>
+                <th>Time</th>
+                <th>Action</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in rows %}
+            <tr>
+                <!-- Medicine Dropdown -->
+                <td>
+                    <select name="item_code_{{ forloop.counter0 }}" onchange="this.form.submit()">
+                        <option value="">-- Select Medicine --</option>
+                        {% for itm in items %}
+                            <option value="{{ itm.item_code }}" {% if itm.item_code == row.item_code %}selected{% endif %}>
+                                {{ itm.item_name }}
+                            </option>
+                        {% endfor %}
+                    </select>
+                </td>
 
-                </div>
-            </div>
-            <div class="prescription-section">
-                <h3 class="prescription-title">Prescription Details</h3>
-                <div class="prescription-table-container">
-                    <table class="prescription-table" id="prescriptionTable">
-                        <thead>
-                            <tr>
-                                <th>Item</th>
-                                <th>Dosage</th>
-                                <th>Usage</th>
-                                <th>Internal/External</th>
-                                <th>Procured From</th>
-                                <th>Time</th>
-                                <th>Action</th>
-                            </tr>
-                        </thead>
-                        <tbody id="prescriptionTableBody">
-                            <tr>
-                                <td><input type="text" placeholder="Medicine name" class="prescription-input"></td>
-                                <td><input type="text" placeholder="e.g. 500mg" class="prescription-input"></td>
-                                <td><input type="text" placeholder="e.g. Twice daily" class="prescription-input"></td>
-                                <td>
-                                    <select class="prescription-input">
-                                        <option value="">Select</option>
-                                        <option value="Internal">Internal</option>
-                                        <option value="External">External</option>
-                                    </select>
-                                </td>
-                                <td><input type="text" placeholder="e.g. Hospital Pharmacy" class="prescription-input"></td>
-                                <td><input type="text" placeholder="e.g. After meals" class="prescription-input"></td>
-                                <td><button type="button" class="remove-prescription-btn" onclick="removePrescriptionRow(this)">Remove</button></td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </div>
-                <button type="button" class="add-prescription-btn" onclick="addPrescriptionRow()">
-                    <span>➕</span> Add Prescription Item
-                </button>
-            </div>
-            <div class="remarks-section">
-                <h3 class="remarks-title">Remarks</h3>
-                <div class="form-group">
-                    <textarea id="remarks" placeholder="Enter any special instructions..."></textarea>
-                </div>
-            </div>
-            <div class="action-buttons">
-                <button class="btn btn-primary" onclick="savePrescription()">Save Prescription</button>
-                <button class="btn btn-secondary" onclick="resetForm()">Reset Form</button>
-            </div>
-        </div>
-    </div>
-</div>
+                <!-- Dosage -->
+                <td><input type="text" name="dosage_{{ forloop.counter0 }}" value="{{ row.dosage }}"></td>
+
+                <!-- Usage -->
+                <td><input type="text" name="usage_{{ forloop.counter0 }}" value="{{ row.usage }}"></td>
+
+                <!-- Internal/External -->
+               <td>
+    <select name="internal_external_{{ forloop.counter0 }}">
+        <option value="">Select</option>
+        <option value="Internal" {% if row.internal_external|default:"" == "Internal" %}selected{% endif %}>Internal</option>
+        <option value="External" {% if row.internal_external|default:"" == "External" %}selected{% endif %}>External</option>
+    </select>
+</td>
+
+                <!-- Procured From (autofill) -->
+                <td><input type="text" name="procured_from_{{ forloop.counter0 }}" value="{{ row.procured_from }}" readonly></td>
+
+                <!-- Time -->
+                <td><input type="text" name="time_{{ forloop.counter0 }}" value="{{ row.time }}"></td>
+
+                <td>
+                    {% if forloop.length > 1 %}
+                    <button type="submit" name="remove_row" value="{{ forloop.counter0 }}">Remove</button>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <!-- Hidden input to track number of rows -->
+    <input type="hidden" name="row_count" value="{{ rows|length }}">
+    <button type="submit" name="add_row" value="1">➕ Add Prescription Row</button>
+    <button type="submit" name="save_prescription" value="1">💾 Save Prescription</button>
+</form>
+
+
 
 {% include 'dashboards/footer.html' %}
 

@@ -198,3 +198,32 @@ class TRMaster(models.Model):
         app_label = 'MySql_Data_pull'
 
 
+#for dbo.item_Master
+class ItemMaster(models.Model):
+    item_code = models.CharField(max_length=50, primary_key=True)   # Item_Code
+    item_name = models.CharField(max_length=255, null=True, blank=True)  # Item_Name
+    item_uom = models.CharField(max_length=50, null=True, blank=True)    # Item_Uom
+    item_group_name = models.CharField(max_length=100, null=True, blank=True)  # Item_Group_Name
+    item_category = models.CharField(max_length=50, null=True, blank=True)     # Item_Category
+    item_cex = models.CharField(max_length=10, null=True, blank=True)   # Item_Cex
+    item_seasonal = models.CharField(max_length=10, null=True, blank=True)  # Item_Seasonal
+    item_max = models.IntegerField(null=True, blank=True)   # Item_Max
+    item_min = models.IntegerField(null=True, blank=True)   # Item_Min
+    item_rol = models.FloatField(null=True, blank=True)     # Item_Rol
+    item_procurred_from = models.CharField(max_length=255, null=True, blank=True)  # Item_Procurred_From
+
+    class Meta:
+        managed = False   
+        db_table = '[dbo].[item_Master]'
+
+
+
+#dbo.Slot_Master
+class TimeSlot(models.Model):
+    slot_no = models.IntegerField(primary_key=True)   # Slot_No
+    starting_time = models.CharField(max_length=50, null=True, blank=True)
+    time_session = models.CharField(max_length=50, null=True, blank=True)
+
+    class Meta:
+        managed = False   
+        db_table = '[dbo].[Slot_Master]'

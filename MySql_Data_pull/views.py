@@ -36,3 +36,41 @@ def table_view(request):
         "columns": columns,
     }
     return render(request, "sql_data_test.html", context)
+
+
+
+
+
+
+from django.shortcuts import render
+from django.utils import timezone
+from datetime import timedelta
+from .models import Registration
+
+def registration_search(request):
+    patient = None
+    error = None
+
+    # Calculate the datetime for last 7 days
+    one_week_ago = timezone.now() - timedelta(days=60)
+
+    # Get only patients who visited in the last week
+    all_patients = Registration.objects.using('therapy_db') \
+        .filter(pat_visit_date__gte=one_week_ago) \
+        .order_by('-pat_visit_date')
+
+    if request.method == 'POST':
+        reg_no = request.POST.get('pat_reg_no')
+        if reg_no:
+            try:
+                patient = Registration.objects.using('therapy_db').get(pat_reg_no=reg_no)
+            except Registration.DoesNotExist:
+                error = "Patient not found in last week's visits."
+
+    return render(request, 'dashboards/pat_reg.html', {
+        'patient': patient,
+        'error': error,
+        'all_patients': all_patients
+    })
+
+

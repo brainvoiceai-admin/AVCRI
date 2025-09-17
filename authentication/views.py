@@ -97,9 +97,49 @@ def scheduling_dashboard(request):
     return render(request, "dashboards/sheduling_team/scheduling_dashboard.html")
 
 
+from django.utils import timezone
+from datetime import timedelta
+from django.contrib.auth.decorators import login_required
+from MySql_Data_pull.models import Registration
+from Patient.models import Repeated_Visitors
+
 @login_required
 def doctor_dashboard(request):
-    return render(request, "dashboards/doctorsAndHelpDesk/doctor_dashboard.html")
+    patient = None
+    error = None
+    vip_status ="No"  # default
+
+    one_week_ago = timezone.now() - timedelta(days=20)
+
+    # All patients from last 7 days
+    all_patients = Registration.objects.using('therapy_db') \
+        .filter(pat_visit_date__gte=one_week_ago) \
+        .order_by('-pat_visit_date')
+
+    # Handle GET request (from dropdown onchange)
+    reg_no = request.GET.get('pat_reg_no')
+    if reg_no:
+        patient = Registration.objects.using('therapy_db') \
+            .filter(pat_reg_no=reg_no, pat_visit_date__gte=one_week_ago) \
+            .first()
+
+        if not patient:
+            error = "Patient not found in last week's visits."
+        else:
+            # Fetch VIP status from Repeated_Visitors
+            rv = Repeated_Visitors.objects.filter(register_number=reg_no).first()
+            if rv:
+                vip_status = "Yes" if rv.is_vip else "No"
+
+    return render(request, "dashboards/doctorsAndHelpDesk/doctor_dashboard.html", {
+        'patient': patient,
+        'vip_status': vip_status,
+        'error': error,
+        'all_patients': all_patients
+    })
+
+
+
 
 
 @login_required
@@ -147,10 +187,67 @@ def Helpdeskadmindash(request):
 
 
 
-
+from MySql_Data_pull.models import ItemMaster
 @login_required
 def medicin_prescription(request):
-    return render(request, "dashboards/doctorsAndHelpDesk/medicin_prescription.html")
+
+    items = ItemMaster.objects.using('therapy_db').all().order_by('item_name')
+    rows = []
+
+    if request.method == "POST":
+        # Read how many rows were submitted
+        row_count = int(request.POST.get("row_count", 1))
+        for i in range(row_count):
+            item_code = request.POST.get(f"item_code_{i}", "")
+            dosage = request.POST.get(f"dosage_{i}", "")
+            usage = request.POST.get(f"usage_{i}", "")
+            internal_external = request.POST.get(f"internal_external_{i}", "")
+            time = request.POST.get(f"time_{i}", "")
+            procured_from = ""
+
+            # Autofill Procured From from item_master
+            if item_code:
+                try:
+                    item = ItemMaster.objects.using('therapy_db').get(item_code=item_code)
+                    procured_from = item.item_procurred_from
+                    item_name = item.item_name
+                except ItemMaster.DoesNotExist:
+                    item_name = ""
+            else:
+                item_name = ""
+
+            rows.append({
+                "item_code": item_code,
+                "item_name": item_name,
+                "dosage": dosage,
+                "usage": usage,
+                "internal_external": internal_external,
+                "procured_from": procured_from,
+                "time": time,
+            })
+
+    # If no POST, initialize one empty row
+    if not rows:
+        rows.append({
+            "item_code": "",
+            "item_name": "",
+            "dosage": "",
+            "usage": "",
+            "internal_external": "",
+            "procured_from": "",
+            "time": "",
+        })
+
+    return render(request,"dashboards/doctorsAndHelpDesk/medicin_prescription.html", {
+        "items": items,
+        "rows": rows,
+    })
+
+
+   
+
+  
+   
 
 @login_required
 def medicin_prescription_table(request):

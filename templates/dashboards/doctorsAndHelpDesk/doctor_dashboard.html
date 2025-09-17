@@ -204,74 +204,83 @@
             <p>Select patient and assign therapies</p>
         </div>
         <!-- Patient Details Form -->
-        <div class="form-container fade-in">
-            <h2 class="form-title">Patient Details</h2>
-            <div class="form-grid">
-                <div class="form-row">
-                    <div class="form-group">
-                        <label for="patientSelect">Select Patient</label>
-                        <select id="patientSelect" onchange="fillPatientDetails()">
-                            <option value="">-- Select Patient --</option>
-                            <option value="PAT001">PAT001 - John Doe</option>
-                            <option value="PAT002">PAT002 - Mary Smith</option>
-                            <option value="PAT003">PAT003 - Robert Johnson</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label for="patientRegNo">Registration Number</label>
-                        <input type="text" id="patientRegNo" placeholder="Auto-filled" readonly>
-                    </div>
-                </div>
-                <div class="form-row">
-                    <div class="form-group">
-                        <label for="patientName">Full Name</label>
-                        <input type="text" id="patientName" placeholder="Auto-filled" readonly>
-                    </div>
-                    <div class="form-group">
-                        <label for="patientAge">Age</label>
-                        <input type="text" id="patientAge" placeholder="Auto-filled" readonly>
-                    </div>
-                </div>
-                <div class="form-row">
-                    <div class="form-group">
-                        <label for="patientGender">Gender</label>
-                        <input type="text" id="patientGender" placeholder="Auto-filled" readonly>
-                    </div>
-                    <div class="form-group">
-                        <label for="vipStatus">VIP Status</label>
-                        <input type="text" id="vipStatus" placeholder="Auto-filled" readonly>
-                    </div>
-                </div>
-                <div class="form-row">
-                    <div class="form-group">
-                        <label for="ipNumber">IP Number</label>
-                        <input type="text" id="ipNumber" placeholder="Auto-filled" readonly>
-                    </div>
-                    <div class="form-group">
-                        <label for="roomNumber">Room Number</label>
-                        <input type="text" id="roomNumber" placeholder="Auto-filled" readonly>
-                    </div>
-                    <div class="form-group">
-                        <label for="uniqueId">Unique ID</label>
-                        <input type="text" id="uniqueId" placeholder="Auto-filled" readonly>
-                    </div>
-                </div>
-                <div class="form-row">
-                    <div class="form-group">
-                        <label for="fromDate">From Date</label>
-                        <input type="date" id="fromDate" min="" onchange="setMinToDate()">
-                    </div>
-                    <div class="form-group">
-                        <label for="toDate">To Date</label>
-                        <input type="date" id="toDate" min="" onchange="calculateAdmissionDays()">
-                    </div>
-                    <div class="form-group">
-                        <label for="admissionDays">Admission Days</label>
-                        <input type="text" id="admissionDays" placeholder="Auto-filled" readonly>
-                    </div>
-                </div>
+     <div class="form-container fade-in">
+    <h2 class="form-title">Patient Details</h2>
+
+    <form method="GET">
+        {% csrf_token %}
+        <div class="form-row">
+            <div class="form-group">
+                <label for="patientRegNo">Registration Number</label>
+                <select name="pat_reg_no" id="patientRegNo" onchange="this.form.submit()">
+                    <option value="">Select Registration Number</option>
+                    {% for p in all_patients %}
+                        {% if patient and patient.pat_reg_no == p.pat_reg_no %}
+                            <option value="{{ p.pat_reg_no }}" selected>{{ p.pat_reg_no }} - {{ p.pat_name }}</option>
+                        {% else %}
+                            <option value="{{ p.pat_reg_no }}">{{ p.pat_reg_no }} - {{ p.pat_name }}</option>
+                        {% endif %}
+                    {% endfor %}
+                </select>
             </div>
         </div>
+
+        <div class="form-row">
+            <div class="form-group">
+                <label for="patientName">Full Name</label>
+                <input type="text" id="patientName" value="{% if patient %}{{ patient.pat_name }}{% endif %}" readonly>
+            </div>
+            <div class="form-group">
+                <label for="patientAge">Age</label>
+                <input type="text" id="patientAge" value="{% if patient %}{{ patient.pat_age }}{% endif %}" readonly>
+            </div>
+        </div>
+
+        <div class="form-row">
+            <div class="form-group">
+                <label for="patientGender">Gender</label>
+                <input type="text" id="patientGender" value="{% if patient %}{{ patient.pat_sex }}{% endif %}" readonly>
+            </div>
+    <div class="form-group">
+    <label for="vipStatus">VIP Status</label>
+    <p id="vipStatus" class="form-control-plaintext">{{ vip_status }}</p>
+</div>
+
+
+        </div>
+
+        <div class="form-row">
+            <div class="form-group">
+                <label for="ipNumber">IP Number</label>
+                <input type="text" id="ipNumber" value="{% if patient %}{{ patient.pat_op_reg_no }}{% endif %}" readonly>
+            </div>
+            <div class="form-group">
+                <label for="roomNumber">Room Number</label>
+                <input type="text" id="roomNumber" value="{% if patient %}{{ patient.pat_room_no }}{% endif %}" readonly>
+            </div>
+            <div class="form-group">
+                <label for="uniqueId">Unique ID</label>
+                <input type="text" id="uniqueId" value="{% if patient %}{{ patient.pat_ref_id }}{% endif %}" readonly>
+            </div>
+        </div>
+
+        <div class="form-row">
+            <div class="form-group">
+                <label for="fromDate">From Date</label>
+                <input type="date" id="fromDate" onchange="setMinToDate()">
+            </div>
+            <div class="form-group">
+                <label for="toDate">To Date</label>
+                <input type="date" id="toDate" onchange="calculateAdmissionDays()">
+            </div>
+            <div class="form-group">
+                <label for="admissionDays">Admission Days</label>
+                <input type="text" id="admissionDays" placeholder="Auto-filled" readonly>
+            </div>
+        </div>
+    </form>
+</div>
+
         <!-- Assigned Therapies Table -->
         <div class="form-container fade-in">
             <h2 class="form-title">Assigned Therapies</h2>
