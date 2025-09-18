@@ -1,27 +1,5 @@
 from django.db import models
 
-# Create your models here.
-
-#Therapist_Details Db
-class TherapyDetails(models.Model):
-    therapy_code = models.CharField(max_length=50,primary_key=True)
-    senior_spl_thr_need = models.IntegerField()
-    senior_thr_need = models.IntegerField()
-    junior_thr_need = models.IntegerField()
-    trainee_thr_need = models.CharField(max_length=50)
-    therapy_duration = models.CharField(max_length=50, null=True, blank=True)
-    helpers_needed = models.IntegerField()
-    treat_rm_req = models.CharField(max_length=50)
-    treatment_session = models.CharField(max_length=100)
-    treatment_nature = models.CharField(max_length=100, null=True, blank=True)
-    treat_bath = models.CharField(max_length=50, null=True, blank=True)
-    treatment_room = models.CharField(max_length=100, null=True, blank=True)
-
-    class Meta:
-        managed = False  # Django won’t try to create/migrate this table
-        db_table = '[dbo].[Therapy_Details]'  # SQL Server schema + table
-        app_label = 'MySql_Data_pull'
-
 
 
 #Depute_Details Db
@@ -227,3 +205,88 @@ class TimeSlot(models.Model):
     class Meta:
         managed = False   
         db_table = '[dbo].[Slot_Master]'
+
+
+#dbo.Scheduling
+
+class Scheduling(models.Model):
+    pat_reg_no = models.CharField(max_length=50, primary_key=True, db_column="PReg_No")  # Patient Reg No
+
+    tdate = models.DateTimeField(null=True, blank=True, db_column="TDate")  # Treatment Date
+    treat_no = models.FloatField(null=True, blank=True, db_column="Treat_No")  # Treatment Number
+    troom_no = models.CharField(max_length=50, null=True, blank=True, db_column="TRoom_No")  # Therapy Room
+    therapy_name = models.CharField(max_length=255, null=True, blank=True, db_column="Therapy_Name")  # Therapy Name
+    therapist_name = models.CharField(max_length=255, null=True, blank=True, db_column="Therapist_Name")  # Therapist Name
+    start_time = models.CharField(max_length=50, null=True, blank=True, db_column="Start_Time")  # Start Time
+    pat_room_no = models.CharField(max_length=50, null=True, blank=True, db_column="Pat_Room_No")  # Patient Room
+    admit_date = models.DateTimeField(null=True, blank=True, db_column="Admit_Date")  # Admit Date
+    pat_name = models.CharField(max_length=255, null=True, blank=True, db_column="Pat_Name")  # Patient Name
+    therapist_code = models.CharField(max_length=50, null=True, blank=True, db_column="Therapist_Code")  # Therapist Code
+    therapy_code = models.CharField(max_length=50, null=True, blank=True, db_column="Therapy_Code")  # Therapy Code
+    therapist_sex = models.CharField(max_length=10, null=True, blank=True, db_column="Therapist_Sex")  # Therapist Sex
+    therapist_grade = models.CharField(max_length=50, null=True, blank=True, db_column="Therapist_Grade")  # Therapist Grade
+    treat_status = models.IntegerField(null=True, blank=True, db_column="Treat_Status")  # Treatment Status
+    exc_status = models.IntegerField(null=True, blank=True, db_column="Exc_Status")  # Excuse Status
+    reason_code = models.IntegerField(null=True, blank=True, db_column="Reason_Code")  # Reason Code
+    active = models.CharField(max_length=10, null=True, blank=True, db_column="Active")  # Active
+
+    class Meta:
+        managed = False  # Since table exists in SQL Server
+        db_table = '[dbo].[Scheduling]'
+
+
+
+
+#data base after doctor consultation managed by us
+
+
+class Visit(models.Model):
+    patient_id = models.BigIntegerField()
+    from_date = models.DateField(null=True, blank=True)
+    to_date = models.DateField(null=True, blank=True)
+    admission_days = models.IntegerField(null=True, blank=True)
+    is_ip_or_op = models.CharField(max_length=5, null=True, blank=True)
+    # The VIP status could be stored here as well, if needed
+    is_vip = models.BooleanField(default=False)
+    
+    date_of_visit = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"Visit for Patient {self.patient_id} on {self.date_of_visit.date()}"
+
+
+class store_Therapy(models.Model):
+    # Use DO_NOTHING for foreign key to the live server model to prevent errors
+    visit = models.ForeignKey(Visit, on_delete=models.CASCADE, related_name='therapies',
+    null=True,  # allows empty values
+    blank=True)
+    patient_id = models.BigIntegerField()
+    therapy_name = models.CharField(max_length=100)
+    ext_int = models.CharField(max_length=50)
+    procured = models.CharField(max_length=50)
+    from_date = models.DateField()
+    to_date = models.DateField()
+    days = models.IntegerField()
+
+class store_TherapyItem(models.Model):
+    therapy = models.ForeignKey(store_Therapy, on_delete=models.CASCADE, related_name='items')
+    item_code = models.CharField(max_length=50)
+    oil_class = models.CharField(max_length=100, blank=True, null=True)
+    usage = models.CharField(max_length=255, blank=True, null=True)
+
+
+class store_Prescription(models.Model):
+    visit = models.ForeignKey(Visit, on_delete=models.CASCADE, related_name='prescriptions',
+    null=True,  # allows empty values
+    blank=True)
+    patient_id = models.BigIntegerField()
+    date_created = models.DateTimeField(auto_now_add=True)
+
+class store_PrescriptionItem(models.Model):
+    prescription = models.ForeignKey(store_Prescription, on_delete=models.CASCADE)
+    item_code = models.CharField(max_length=50)
+    dosage = models.CharField(max_length=50)
+    usage = models.CharField(max_length=100)
+    internal_external = models.CharField(max_length=20)
+    time = models.CharField(max_length=50)
+    item_uom = models.CharField(max_length=50, blank=True, null=True)
