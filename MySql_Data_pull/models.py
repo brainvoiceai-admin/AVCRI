@@ -248,7 +248,7 @@ class Visit(models.Model):
     is_ip_or_op = models.CharField(max_length=5, null=True, blank=True)
     # The VIP status could be stored here as well, if needed
     is_vip = models.BooleanField(default=False)
-    
+    repeated_status = models.CharField(max_length=3, choices=[('Yes','Yes'),('No','No')], default='No')
     date_of_visit = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):

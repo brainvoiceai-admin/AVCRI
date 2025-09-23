@@ -76,18 +76,20 @@ def get_patient_details_api(request):
         # Your database router will handle this automatically because
         # the `Repeated_Visitors` model is not marked as `managed=False`
         # and doesn't have a `db_table` pointing to the live server.
-        is_vip = Repeated_Visitors.objects.filter(register_number=pat_reg_no).exists()
-        vip_status = "Yes" if is_vip else "No"
+        vip_status = "Yes" if Repeated_Visitors.objects.filter(register_number=pat_reg_no, is_vip=1).exists() else "No"
+        repeated_status = "Yes" if Repeated_Visitors.objects.filter(register_number=pat_reg_no, total_visits__gt=2).exists() else "No"
+
         
         data = {
-            'pat_name': patient.pat_name,
-            'pat_age': patient.pat_age,
-            'pat_sex': patient.pat_sex,
-            'vip_status': vip_status,
-            'pat_op_reg_no': patient.pat_op_reg_no,
-            'pat_room_no': patient.pat_room_no,
-            'pat_ref_id': patient.pat_ref_id,
-        }
+    'pat_name': patient.pat_name,
+    'pat_age': patient.pat_age,
+    'pat_sex': patient.pat_sex,
+    'vip_status': vip_status,
+    'pat_op_reg_no': patient.pat_op_reg_no,
+    'pat_room_no': patient.pat_room_no,
+    'pat_ref_id': patient.pat_ref_id,
+    'repeated_status': repeated_status,
+}
         return JsonResponse(data)
     except Registration.DoesNotExist:
         return JsonResponse({'error': 'Patient with this registration number does not exist.'}, status=404)
@@ -187,8 +189,7 @@ def review_view(request):
     patient = get_object_or_404(Registration.objects.using('therapy_db'), pat_reg_no=patient_reg_no)
     
     try:
-        is_vip = Repeated_Visitors.objects.filter(register_number=patient_reg_no).exists()
-        vip_status = "Yes" if is_vip else "No"
+        vip_status = "Yes" if Repeated_Visitors.objects.filter(register_number=patient_reg_no, is_vip=1).exists() else "No"
     except Exception:
         vip_status = "N/A"
 
@@ -196,7 +197,7 @@ def review_view(request):
     to_date = request.session.get('to_date')
     admission_days = request.session.get('admission_days')
     is_ip_or_op = request.session.get('is_ip_or_op')
-
+    repeated_status = request.session.get('repeated_status')
     therapy_data = request.session.get('therapy_rows_data', [])
     prescription_data = request.session.get('prescription_rows_data', [])
     
@@ -228,6 +229,7 @@ def review_view(request):
         'is_ip_or_op': is_ip_or_op,
         'therapy_data': therapy_data,
         'prescription_data': prescription_data,
+        'repeated_status': repeated_status,
     }
     return render(request, 'dashboards/doctorsAndHelpDesk/review_page.html', context)
 
@@ -243,7 +245,8 @@ def submit_all_data(request):
         
     from_date_str = request.session.get('from_date')
     to_date_str = request.session.get('to_date')
-
+    record = Repeated_Visitors.objects.filter(register_number=patient_reg_no).first()
+    repeated_status = "Yes" if record and record.total_visits > 2 else "No"
     # Create the new Visit record
     visit = Visit.objects.create(
         patient_id=int(patient_reg_no),
@@ -251,6 +254,7 @@ def submit_all_data(request):
         to_date=datetime.strptime(to_date_str, '%Y-%m-%d').date() if to_date_str else None,
         admission_days=request.session.get('admission_days'),
         is_ip_or_op=request.session.get('is_ip_or_op'),
+        repeated_status=repeated_status,
     )
 
     # Save Therapy Data and link to the Visit record
@@ -307,7 +311,7 @@ def submit_all_data(request):
     if 'prescription_rows_data' in request.session:
         del request.session['prescription_rows_data']
 
-    return render(request, 'dashboards/doctorsAndHelpDesk/success.html')
+    return redirect("patient_lookup")
 
 
 # API for autofill data
