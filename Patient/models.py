@@ -45,3 +45,19 @@ class TherapyDetails(models.Model):
 
     def __str__(self):
         return f"{self.therapy_code} - {self.therapy_name}"
+
+
+
+class PatientHistory(models.Model):
+    id = models.AutoField(primary_key=True)
+    preg_no = models.CharField(max_length=50, db_index=True)  # Patient Reg No
+    pat_name = models.CharField(max_length=200)
+    date = models.DateField()
+    therapist_name = models.CharField(max_length=200)
+    therapist_code = models.CharField(max_length=100)
+    room_no = models.CharField(max_length=50, null=True, blank=True)
+    treatment = models.CharField(max_length=200)
+    t_room = models.CharField(max_length=50, null=True, blank=True)
+
+    def __str__(self):
+        return f"{self.preg_no} - {self.pat_name} ({self.date})"
