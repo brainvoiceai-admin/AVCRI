@@ -1,6 +1,5 @@
 # --- Environment Files ---
 # Ignore sensitive data and local environment configurations.
-.env
 .env.*
 
 # --- Databases ---
