@@ -48,6 +48,7 @@ INSTALLED_APPS = [
     'Patient',
     'authentication',
     'MySql_Data_pull',
+    'allocator',
 ]
 
 MIDDLEWARE = [
