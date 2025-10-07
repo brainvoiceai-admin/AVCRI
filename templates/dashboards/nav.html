@@ -27,17 +27,17 @@
             <a href="{% url 'Therapy_Report' %}" class="menu-item">
                 <span>📊</span> Reports & Analytics
             </a>
-            {% endif %}
+         
         </div>
 
-        {% if request.user.role == "therapist" %}
+      
         <div class="menu-section">
             <div class="menu-section-title">Therapist Options</div>
-            <a href="{% url 'patient:therapistdash' %}" class="menu-item">
+            <a href="{% url 'therapistdash' %}" class="menu-item">
                 <span>🗓️</span> My Therapy Schedule
             </a>
         </div>
-        {% endif %}
+      
 
         <div class="menu-section">
             <div class="menu-section-title">Patients</div>
@@ -71,7 +71,7 @@
             </a>
         </div>
 
-        {% if request.user.role == "super_admin" %}
+       
         <div class="menu-section">
             <div class="menu-section-title">Administration</div>
             <a href="{% url 'Manage_user' %}" class="menu-item">
