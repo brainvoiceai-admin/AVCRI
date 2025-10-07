@@ -27,4 +27,5 @@ env/
 # --- Operating System Files ---
 # Ignore system-specific metadata files.
 .DS_Store
+db.sqlite3
 Thumbs.db

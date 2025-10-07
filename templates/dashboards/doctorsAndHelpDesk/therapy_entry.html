@@ -176,6 +176,7 @@
             padding: 12px 15px;
             text-align: left;
             border-bottom: 1px solid #e0e0e0;
+            vertical-align: top;
         }
         
         .therapy-table th {
@@ -232,6 +233,28 @@
             top: 12px;
             color: #7f8c8d;
         }
+
+        .current-items-list {
+            border: 1px dashed #ced4da;
+            border-radius: 6px;
+            padding: 12px;
+            background: #fafafa;
+            max-height: 180px;
+            overflow-y: auto;
+        }
+
+        .current-item-row {
+            display:flex;
+            justify-content:space-between;
+            align-items:center;
+            margin-bottom:8px;
+            gap:10px;
+        }
+
+        .current-item-row .meta {
+            font-size:0.9rem;
+        }
+
     </style>
 </head>
 <body>
@@ -257,7 +280,7 @@
         </div>
 
         <div class="dashboard-card">
-            <h3 class="section-title">Add New Therapy</h3>
+            <h3 class="section-title">Add New Therapy (supports multiple items)</h3>
             <div class="form-row">
                 <div class="form-group">
                     <label for="therapy-select"><i class="fas fa-tasks me-1"></i> Therapy Name</label>
@@ -273,6 +296,12 @@
                         <option value="External">External</option>
                     </select>
                 </div>
+            </div>
+
+            <hr>
+
+            <!-- Item adder block: user can add multiple items for the current therapy -->
+            <div class="form-row align-items-end">
                 <div class="form-group">
                     <label for="item-select"><i class="fas fa-pills me-1"></i> Item</label>
                     <select id="item-select" class="form-control autofill-item">
@@ -282,9 +311,6 @@
                         {% endfor %}
                     </select>
                 </div>
-            </div>
-
-            <div class="form-row">
                 <div class="form-group">
                     <label for="oil-class-input"><i class="fas fa-oil-can me-1"></i> Oil Class</label>
                     <div class="input-icon-group">
@@ -305,6 +331,19 @@
                         <i class="fas fa-warehouse"></i>
                         <input type="text" id="procured-input" class="form-control" readonly>
                     </div>
+                </div>
+
+                <div class="form-group" style="min-width:180px;">
+                    <button id="add-item-to-current-btn" class="btn btn-warning w-100" type="button" style="height:45px;">
+                        <i class="fas fa-plus me-1"></i> Add Item
+                    </button>
+                </div>
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label"><strong>Current Items for this Therapy</strong></label>
+                <div class="current-items-list" id="current-items-list">
+                    <em class="text-muted">No items added yet.</em>
                 </div>
             </div>
 
@@ -348,10 +387,7 @@
                             <th>SI No.</th>
                             <th>Therapy Name</th>
                             <th>Ext/Int</th>
-                            <th>Item</th>
-                            <th>Oil Class</th>
-                            <th>Usage</th>
-                            <th>Procured</th>
+                            <th>Items</th>
                             <th>From Date</th>
                             <th>To Date</th>
                             <th>Days</th>
@@ -399,9 +435,8 @@
                 }
             });
 
-            // Rest of your JavaScript functions
+            // VARIABLES
             const therapySelect = document.getElementById('therapy-select');
-            const therapyNameInput = document.getElementById('therapy-name-input');
             const extIntSelect = document.getElementById('ext-int-select');
             const itemSelect = document.getElementById('item-select');
             const oilClassInput = document.getElementById('oil-class-input');
@@ -411,11 +446,15 @@
             const toDateInput = document.getElementById('to-date-input');
             const daysInput = document.getElementById('days-input');
             const addTherapyBtn = document.getElementById('add-therapy-btn');
+            const addItemToCurrentBtn = document.getElementById('add-item-to-current-btn');
+            const currentItemsListEl = document.getElementById('current-items-list');
             const tableBody = document.getElementById('therapies-table-body');
             const nextPageBtn = document.getElementById('next-page-btn');
 
             let addedTherapies = [];
+            let currentItems = []; // items for the therapy being composed
 
+            // When user selects an item, fetch details to fill oil/usage/procured
             itemSelect.addEventListener('change', () => {
                 const selectedItemCode = itemSelect.value;
                 if (selectedItemCode) {
@@ -434,14 +473,22 @@
                 }
             });
 
+            // Calculate days
             fromDateInput.addEventListener('change', calculateDays);
             toDateInput.addEventListener('change', calculateDays);
 
             function calculateDays() {
-                const fromDate = new Date(fromDateInput.value);
-                const toDate = new Date(toDateInput.value);
+                const fromVal = fromDateInput.value;
+                const toVal = toDateInput.value;
+                if (!fromVal || !toVal) {
+                    daysInput.value = '';
+                    return;
+                }
+                const fromDate = new Date(fromVal);
+                const toDate = new Date(toVal);
                 if (fromDate && toDate && fromDate <= toDate) {
                     const timeDiff = toDate.getTime() - fromDate.getTime();
+                    // include both dates:
                     const daysDiff = Math.ceil(timeDiff / (1000 * 3600 * 24)) + 1;
                     daysInput.value = daysDiff;
                 } else {
@@ -449,29 +496,102 @@
                 }
             }
 
-            addTherapyBtn.addEventListener('click', () => {
-                const selectedTherapyOption = therapySelect.options[therapySelect.selectedIndex];
+            // Add item to currentItems
+            addItemToCurrentBtn.addEventListener('click', () => {
                 const selectedItemOption = itemSelect.options[itemSelect.selectedIndex];
-                
-                if (!selectedTherapyOption.value || !selectedItemOption.value || !fromDateInput.value || !toDateInput.value) {
-                    alert('Please fill all required fields (Therapy, Item, From/To Date).');
+                if (!selectedItemOption || !selectedItemOption.value) {
+                    alert('Please select an item to add.');
                     return;
                 }
-                
+
+                // Construct item object
+                const itemObj = {
+                    item_code: selectedItemOption.value,
+                    item_name: selectedItemOption.text,
+                    oil_class: oilClassInput.value || '',
+                    usage: usageInput.value || '',
+                    procured: procuredInput.value || ''
+                };
+
+                // push and render
+                currentItems.push(itemObj);
+                renderCurrentItems();
+
+                // Clear item-related inputs ready for next item
+                itemSelect.value = '';
+                $(itemSelect).trigger('change'); // if using select2 in future
+                oilClassInput.value = '';
+                usageInput.value = '';
+                procuredInput.value = '';
+            });
+
+            function renderCurrentItems() {
+                currentItemsListEl.innerHTML = '';
+                if (currentItems.length === 0) {
+                    currentItemsListEl.innerHTML = '<em class="text-muted">No items added yet.</em>';
+                    return;
+                }
+                currentItems.forEach((it, idx) => {
+                    const row = document.createElement('div');
+                    row.className = 'current-item-row';
+                    row.innerHTML = `
+                        <div class="meta">
+                            <strong>${it.item_name}</strong>
+                            <div style="font-size:0.85rem;color:#555;">
+                                ${it.oil_class ? 'Oil: ' + it.oil_class + ' • ' : ''}
+                                ${it.usage ? 'Usage: ' + it.usage + ' • ' : ''}
+                                ${it.procured ? 'Procured: ' + it.procured : ''}
+                            </div>
+                        </div>
+                        <div>
+                            <button class="btn btn-sm btn-outline-danger remove-current-item" data-index="${idx}" title="Remove item">
+                                <i class="fas fa-trash"></i>
+                            </button>
+                        </div>
+                    `;
+                    currentItemsListEl.appendChild(row);
+                });
+            }
+
+            // Remove item from currentItems (delegation)
+            currentItemsListEl.addEventListener('click', (e) => {
+                const btn = e.target.closest('.remove-current-item');
+                if (!btn) return;
+                const idx = parseInt(btn.getAttribute('data-index'));
+                if (!isNaN(idx)) {
+                    currentItems.splice(idx, 1);
+                    renderCurrentItems();
+                }
+            });
+
+            // Add therapy (with currentItems) to addedTherapies
+            addTherapyBtn.addEventListener('click', () => {
+                const selectedTherapyOption = therapySelect.options[therapySelect.selectedIndex];
+                if (!selectedTherapyOption || !selectedTherapyOption.value) {
+                    alert('Please select a Therapy.');
+                    return;
+                }
+
+                if (currentItems.length === 0) {
+                    alert('Please add at least one item to this therapy before adding the therapy.');
+                    return;
+                }
+
+                if (!fromDateInput.value || !toDateInput.value) {
+                    alert('Please fill From and To dates.');
+                    return;
+                }
+
                 const newTherapy = {
-                    therapy_name: selectedTherapyOption.text, // Use the text from Select2
+                    therapy_name: selectedTherapyOption.text,
                     therapy_code: selectedTherapyOption.value,
                     ext_int: extIntSelect.value,
-                    item: selectedItemOption.value,
-                    item_name: selectedItemOption.text,
-                    oil_class: oilClassInput.value,
-                    usage: usageInput.value,
-                    procured: procuredInput.value,
+                    items: JSON.parse(JSON.stringify(currentItems)), // deep copy
                     from_date: fromDateInput.value,
                     to_date: toDateInput.value,
-                    days: daysInput.value,
+                    days: daysInput.value || ''
                 };
-                
+
                 addedTherapies.push(newTherapy);
                 renderTable();
                 clearInputs();
@@ -480,33 +600,42 @@
             function renderTable() {
                 tableBody.innerHTML = '';
                 addedTherapies.forEach((therapy, index) => {
+                    // Build items html: one line per item with small meta
+                    const itemsHtml = therapy.items.map(it => {
+                        const metaParts = [];
+                        if (it.oil_class) metaParts.push(it.oil_class);
+                        if (it.usage) metaParts.push(it.usage);
+                        if (it.procured) metaParts.push(it.procured);
+                        const meta = metaParts.length ? `<div style="font-size:0.85rem;color:#555;">${metaParts.join(' • ')}</div>` : '';
+                        return `<div style="margin-bottom:6px;"><strong>${it.item_name}</strong>${meta}</div>`;
+                    }).join('');
+
                     const newRow = document.createElement('tr');
                     newRow.innerHTML = `
                         <td>${index + 1}</td>
                         <td>${therapy.therapy_name}</td>
-                        <td>${therapy.ext_int}</td>
-                        <td>${therapy.item_name}</td>
-                        <td>${therapy.oil_class}</td>
-                        <td>${therapy.usage}</td>
-                        <td>${therapy.procured}</td>
+                        <td>${therapy.ext_int || ''}</td>
+                        <td>${itemsHtml}</td>
                         <td>${therapy.from_date}</td>
                         <td>${therapy.to_date}</td>
                         <td>${therapy.days}</td>
-                        <td><button class="action-btn remove-btn" type="button" data-index="${index}"><i class="fas fa-trash me-1"></i>Remove</button></td>
+                        <td><button class="action-btn remove-btn remove-therapy" type="button" data-index="${index}"><i class="fas fa-trash me-1"></i>Remove</button></td>
                     `;
                     tableBody.appendChild(newRow);
                 });
             }
 
+            // Remove therapy from addedTherapies (delegation)
             tableBody.addEventListener('click', (e) => {
-                if (e.target.matches('.remove-btn') || e.target.closest('.remove-btn')) {
-                    const btn = e.target.matches('.remove-btn') ? e.target : e.target.closest('.remove-btn');
-                    const indexToRemove = btn.getAttribute('data-index');
-                    addedTherapies.splice(indexToRemove, 1);
+                const btn = e.target.matches('.remove-therapy') ? e.target : e.target.closest('.remove-therapy');
+                if (!btn) return;
+                const idx = parseInt(btn.getAttribute('data-index'));
+                if (!isNaN(idx)) {
+                    addedTherapies.splice(idx, 1);
                     renderTable();
                 }
             });
-            
+
             function clearInputs() {
                 $('#therapy-select').val(null).trigger('change'); // Clear Select2
                 extIntSelect.value = '';
@@ -517,8 +646,11 @@
                 fromDateInput.value = '';
                 toDateInput.value = '';
                 daysInput.value = '';
+                currentItems = [];
+                renderCurrentItems();
             }
 
+            // Submit to server
             nextPageBtn.addEventListener('click', () => {
                 if (addedTherapies.length === 0) {
                     alert('Please add at least one therapy.');
@@ -538,11 +670,15 @@
                     if (data.status === 'success') {
                         window.location.href = '{% url "prescription_entry" %}';
                     } else {
-                        alert('Error: ' + data.message);
+                        alert('Error: ' + (data.message || 'Unknown error'));
                     }
                 })
                 .catch(error => console.error('Submission error:', error));
             });
+
+            // initial render
+            renderCurrentItems();
+            renderTable();
         });
     </script>
 </body>
