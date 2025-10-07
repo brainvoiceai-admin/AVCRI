@@ -1,0 +1,550 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Active Therapy Sessions</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        :root {
+            --primary: #3498db;
+            --primary-dark: #2980b9;
+            --secondary: #2c3e50;
+            --success: #2ecc71;
+            --success-dark: #27ae60;
+            --danger: #e74c3c;
+            --danger-dark: #c0392b;
+            --warning: #f39c12;
+            --light: #f8f9fa;
+            --dark: #343a40;
+            --gray: #6c757d;
+            --light-gray: #e9ecef;
+            --border-radius: 8px;
+            --box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            --transition: all 0.3s ease;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f5f7fa;
+            color: var(--dark);
+            line-height: 1.6;
+        }
+
+        .dashboard-container {
+            display: flex;
+            min-height: 100vh;
+        }
+
+        /* Navigation Styles */
+        .sidebar {
+            width: 250px;
+            background: linear-gradient(135deg, var(--secondary), #1a2530);
+            color: white;
+            padding: 20px 0;
+            position: fixed;
+            height: 100vh;
+            overflow-y: auto;
+            z-index: 100;
+            transition: var(--transition);
+        }
+
+        .sidebar-header {
+            padding: 0 20px 20px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            margin-bottom: 20px;
+        }
+
+        .sidebar-header h2 {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 1.5rem;
+        }
+
+        .sidebar-header h2 i {
+            color: var(--primary);
+        }
+
+        .nav-links {
+            list-style: none;
+        }
+
+        .nav-links li {
+            margin-bottom: 5px;
+        }
+
+        .nav-links a {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px 20px;
+            color: rgba(255, 255, 255, 0.8);
+            text-decoration: none;
+            transition: var(--transition);
+            border-left: 3px solid transparent;
+        }
+
+        .nav-links a:hover, .nav-links a.active {
+            background-color: rgba(255, 255, 255, 0.1);
+            color: white;
+            border-left-color: var(--primary);
+        }
+
+        .nav-links a i {
+            width: 20px;
+            text-align: center;
+        }
+
+        /* Main Content */
+        .main-content {
+            flex: 1;
+            margin-left: 265px;
+            padding: 20px;
+        }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 30px;
+            padding-bottom: 15px;
+            border-bottom: 1px solid var(--light-gray);
+        }
+
+        .header h1 {
+            color: var(--secondary);
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .user-avatar {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background-color: var(--primary);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+        }
+
+        /* Filters and Search */
+        .filters-section {
+            background-color: white;
+            border-radius: var(--border-radius);
+            padding: 20px;
+            margin-bottom: 25px;
+            box-shadow: var(--box-shadow);
+        }
+
+        .filters-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .filters-header h3 {
+            color: var(--secondary);
+            font-size: 1.2rem;
+        }
+
+        .filter-controls {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+            gap: 15px;
+        }
+
+        .filter-group {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .filter-group label {
+            margin-bottom: 5px;
+            font-weight: 500;
+            color: var(--gray);
+        }
+
+        .filter-group input, .filter-group select {
+            padding: 10px 12px;
+            border: 1px solid var(--light-gray);
+            border-radius: var(--border-radius);
+            font-size: 0.95rem;
+            transition: var(--transition);
+        }
+
+        .filter-group input:focus, .filter-group select:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.2);
+        }
+
+        .filter-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+        }
+
+        .btn {
+            padding: 10px 16px;
+            border: none;
+            border-radius: var(--border-radius);
+            font-weight: 500;
+            cursor: pointer;
+            transition: var(--transition);
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .btn-primary {
+            background-color: var(--primary);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background-color: var(--primary-dark);
+        }
+
+        .btn-outline {
+            background-color: transparent;
+            border: 1px solid var(--gray);
+            color: var(--gray);
+        }
+
+        .btn-outline:hover {
+            background-color: var(--light-gray);
+        }
+
+        /* Messages */
+        .messages {
+            margin-bottom: 20px;
+        }
+
+        .message {
+            padding: 12px 15px;
+            border-radius: var(--border-radius);
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .success {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .error {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        /* Session Table */
+        .table-container {
+            background-color: white;
+            border-radius: var(--border-radius);
+            overflow: hidden;
+            box-shadow: var(--box-shadow);
+        }
+
+        .session-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .session-table th {
+            background-color: var(--primary);
+            color: white;
+            padding: 15px 12px;
+            text-align: left;
+            font-weight: 600;
+        }
+
+        .session-table td {
+            padding: 12px;
+            border-bottom: 1px solid var(--light-gray);
+        }
+
+        .session-table tr:last-child td {
+            border-bottom: none;
+        }
+
+        .session-table tr:nth-child(even) {
+            background-color: #f9f9f9;
+        }
+
+        .session-table tr:hover {
+            background-color: #f1f7fd;
+        }
+
+        .action-form {
+            display: inline-block;
+            margin-right: 5px;
+        }
+
+        .cancel-btn {
+            background-color: var(--danger);
+            color: white;
+            border: none;
+            padding: 8px 12px;
+            cursor: pointer;
+            border-radius: 4px;
+            transition: var(--transition);
+            font-size: 0.85rem;
+        }
+
+        .cancel-btn:hover {
+            background-color: var(--danger-dark);
+        }
+
+        .complete-btn {
+            background-color: var(--success);
+            color: white;
+            border: none;
+            padding: 8px 12px;
+            cursor: pointer;
+            border-radius: 4px;
+            transition: var(--transition);
+            font-size: 0.85rem;
+        }
+
+        .complete-btn:hover {
+            background-color: var(--success-dark);
+        }
+
+        .no-sessions {
+            text-align: center;
+            padding: 40px;
+            color: var(--gray);
+        }
+
+        .no-sessions i {
+            font-size: 3rem;
+            margin-bottom: 15px;
+            color: var(--light-gray);
+        }
+
+        /* Responsive */
+        @media (max-width: 992px) {
+            .sidebar {
+                width: 70px;
+                overflow: visible;
+            }
+            
+            .sidebar-header h2 span, .nav-links a span {
+                display: none;
+            }
+            
+            .main-content {
+                margin-left: 70px;
+            }
+            
+            .filter-controls {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .session-table {
+                display: block;
+                overflow-x: auto;
+            }
+            
+            .header {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 15px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="dashboard-container">
+        <!-- Navigation Sidebar -->
+        
+ {% include 'dashboards/nav.html' %}
+        <!-- Main Content -->
+        <main class="main-content">
+            <div class="header">
+                <h1><i class="fas fa-list-alt"></i> Active Therapy Sessions</h1>
+                <div class="user-info">
+                    <div class="user-avatar">JD</div>
+                    <div>
+                        <div class="user-name">Dr. John Doe</div>
+                        <div class="user-role">Administrator</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Filters and Search Section -->
+            <section class="filters-section">
+                <div class="filters-header">
+                    <h3>Filter Sessions</h3>
+                    <div class="filter-actions">
+                        <button class="btn btn-outline"><i class="fas fa-redo"></i> Reset</button>
+                        <button class="btn btn-primary"><i class="fas fa-filter"></i> Apply Filters</button>
+                    </div>
+                </div>
+                <div class="filter-controls">
+                    <div class="filter-group">
+                        <label for="patient-id">Patient ID</label>
+                        <input type="text" id="patient-id" placeholder="Enter Patient ID">
+                    </div>
+                    <div class="filter-group">
+                        <label for="date-from">Date From</label>
+                        <input type="date" id="date-from">
+                    </div>
+                    <div class="filter-group">
+                        <label for="date-to">Date To</label>
+                        <input type="date" id="date-to">
+                    </div>
+                    <div class="filter-group">
+                        <label for="therapy-type">Therapy Type</label>
+                        <select id="therapy-type">
+                            <option value="">All Therapies</option>
+                            <option value="physio">Physiotherapy</option>
+                            <option value="occupational">Occupational Therapy</option>
+                            <option value="speech">Speech Therapy</option>
+                            <option value="respiratory">Respiratory Therapy</option>
+                        </select>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Messages -->
+            <div class="messages">
+                <!-- Example success message -->
+                <div class="message success">
+                    <i class="fas fa-check-circle"></i>
+                    Session completed successfully.
+                </div>
+                <!-- Example error message -->
+                <!-- <div class="message error">
+                    <i class="fas fa-exclamation-circle"></i>
+                    There was an error processing your request.
+                </div> -->
+            </div>
+
+            <!-- Sessions Table -->
+            <div class="table-container">
+                {% if sessions %}
+                    <table class="session-table">
+                        <thead>
+                            <tr>
+                                <th>Patient ID</th>
+                                <th>Date</th>
+                                <th>Time</th>
+                                <th>Room No</th>
+                                <th>Therapy Name</th>
+                                <th>Therapists Involved</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for session in sessions %}
+                                <tr>
+                                    <td>{{ session.patient_id }}</td>
+                                    <td>{{ session.date|date:"Y-m-d" }}</td>
+                                    <td>
+                                        {{ session.start_time|time:"H:i" }} - {{ session.end_time|time:"H:i" }}
+                                    </td>
+                                    <td>
+                                        {{ session.room_no|default:"N/A" }}
+                                    </td>
+                                    <td>{{ session.therapy_name }}</td>
+                                    <td>
+                                        {% if session.therapists %}
+                                            {{ session.therapists }}
+                                        {% else %}
+                                            <span style="color: var(--gray); font-style: italic;">None Assigned</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        <form method="POST" action="{% url 'handle_session_action' action='complete' %}" class="action-form">
+                                            {% csrf_token %}
+                                            <input type="hidden" name="patient_id" value="{{ session.patient_id }}">
+                                            <input type="hidden" name="date" value="{{ session.date|date:"Y-m-d" }}">
+                                            <input type="hidden" name="time_slot_id" value="{{ session.time_slot_id }}">
+                                            <input type="hidden" name="therapy_name" value="{{ session.therapy_name }}">
+                                            <button type="submit" class="complete-btn" title="Mark this session and all related bookings as COMPLETED.">
+                                                <i class="fas fa-check"></i> Complete
+                                            </button>
+                                        </form>
+
+                                        <form method="POST" action="{% url 'handle_session_action' action='cancel' %}" class="action-form" onsubmit="return confirm('WARNING: Are you sure you want to cancel this session? This will free up the room and therapist slots.');">
+                                            {% csrf_token %}
+                                            <input type="hidden" name="patient_id" value="{{ session.patient_id }}">
+                                            <input type="hidden" name="date" value="{{ session.date|date:"Y-m-d" }}">
+                                            <input type="hidden" name="time_slot_id" value="{{ session.time_slot_id }}">
+                                            <input type="hidden" name="therapy_name" value="{{ session.therapy_name }}">
+                                            <input type="hidden" name="reason" value="Cancelled by administrative panel."> 
+                                            <button type="submit" class="cancel-btn" title="Cancel this session, mark all bookings as CANCELED, and free up resources.">
+                                                <i class="fas fa-times"></i> Cancel
+                                            </button>
+                                        </form>
+                                    </td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                {% else %}
+                    <div class="no-sessions">
+                        <i class="fas fa-clipboard-list"></i>
+                        <h3>No Active Sessions Found</h3>
+                        <p>There are currently no active therapy sessions matching your criteria.</p>
+                    </div>
+                {% endif %}
+            </div>
+        </main>
+    </div>
+
+    <script>
+        // Simple filter functionality for demonstration
+        document.addEventListener('DOMContentLoaded', function() {
+            const patientIdFilter = document.getElementById('patient-id');
+            const dateFromFilter = document.getElementById('date-from');
+            const dateToFilter = document.getElementById('date-to');
+            const therapyTypeFilter = document.getElementById('therapy-type');
+            
+            // Set today's date as default for date filters
+            const today = new Date().toISOString().split('T')[0];
+            dateFromFilter.value = today;
+            dateToFilter.value = today;
+            
+            // Apply filters button functionality
+            document.querySelector('.btn-primary').addEventListener('click', function() {
+                alert('Filters applied! In a real application, this would filter the session data.');
+            });
+            
+            // Reset filters button functionality
+            document.querySelector('.btn-outline').addEventListener('click', function() {
+                patientIdFilter.value = '';
+                dateFromFilter.value = today;
+                dateToFilter.value = today;
+                therapyTypeFilter.value = '';
+                alert('Filters reset!');
+            });
+        });
+    </script>
+</body>
+</html>

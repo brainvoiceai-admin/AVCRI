@@ -1,11 +1,9 @@
 # --- Environment Files ---
 # Ignore sensitive data and local environment configurations.
-.env
 .env.*
 
 # --- Databases ---
 # Ignore the local development database.
-db.sqlite3
 
 # --- Django ---
 # Ignore user-uploaded files, collected static files, and logs.
