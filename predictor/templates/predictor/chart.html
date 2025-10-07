@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Patient Predictions — Interactive Dashboard</title>
+
+  <style>
+    :root{
+      --g-dark: #0f5f3a;
+      --g-mid:  #1f8a5a;
+      --g-soft: #bfead0;
+      --bg: #f6fff7;
+      --muted: #164d3b;
+    }
+    body{ margin:0; font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, Arial; background:var(--bg); color:var(--muted); }
+    .wrap{ max-width:1000px; margin:18px auto; padding:16px; }
+    header{ display:flex; flex-wrap:wrap; gap:12px; align-items:center; justify-content:space-between; margin-bottom:12px; }
+    h1{ margin:0; font-size:20px; color:var(--g-dark); }
+    .controls{ display:flex; gap:8px; align-items:center; }
+    .btn{ padding:7px 12px; border-radius:8px; border:0; cursor:pointer; font-weight:600; background:var(--g-soft); color:var(--g-dark); }
+    .btn.active{ background:linear-gradient(90deg,var(--g-mid),var(--g-dark)); color:white; box-shadow:0 6px 18px rgba(15,95,58,0.12); }
+    .card{ background:#fff; border-radius:10px; padding:12px; box-shadow:0 8px 20px rgba(0,0,0,0.06); }
+    #meta{ margin-top:8px; color:#2f6b4f; font-size:13px; }
+    #predChart { width:100% !important; height:360px !important; display:block; }
+    .summary { display:flex; gap:12px; flex-wrap:wrap; margin-bottom:12px; }
+    .summary-card {
+      flex:1; min-width:200px; background:#f0fff4;
+      border-radius:10px; padding:10px 12px;
+      box-shadow:0 6px 16px rgba(15,95,58,0.08);
+    }
+    .summary-card h3{ margin:0; font-size:20px; color:var(--g-dark); }
+    .summary-card small{ color:#2d6a4f; }
+    .filters { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:12px; }
+    input[type="date"]{ padding:6px; border-radius:6px; border:1px solid #bfead0; color:#164d3b; }
+    #range-label { margin-top:8px; color:#155e3d; font-size:14px; font-weight:500; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>Patient Forecasts</h1>
+      <div class="controls">
+        <button class="btn active" data-type="daily">Daily</button>
+        <button class="btn" data-type="weekly">Weekly</button>
+        <button class="btn" data-type="monthly">Monthly</button>
+        <button id="refresh" class="btn" style="background:#eef9f1; color:var(--g-dark);">Refresh</button>
+      </div>
+    </header>
+
+    <!-- 📅 Date Filter -->
+    <div class="filters">
+      <label>From: <input type="date" id="start-date"></label>
+      <label>To: <input type="date" id="end-date"></label>
+      <button id="apply" class="btn" style="background:#d9f5e3; color:#0f5f3a;">Apply</button>
+      <button id="clear" class="btn" style="background:#fff;">Clear</button>
+    </div>
+
+    <!-- 🌿 Summary boxes -->
+    <div class="summary">
+      <div class="summary-card">
+        <h3 id="next-day">–</h3>
+        <small id="next-day-label">Tomorrow</small>
+      </div>
+      <div class="summary-card">
+        <h3 id="next-week">–</h3>
+        <small>Next 7 days</small>
+      </div>
+      <div class="summary-card">
+        <h3 id="next-month">–</h3>
+        <small>Next 30 days</small>
+      </div>
+    </div>
+
+    <div class="card">
+      <canvas id="predChart"></canvas>
+      <div id="range-label"></div>
+      <div id="meta"></div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
+
+  <script>
+  (function(){
+    const API_ROOT = "/predictor/api/predictions/?type=";
+    const chartEl = document.getElementById("predChart");
+    const metaEl = document.getElementById("meta");
+    const rangeLabel = document.getElementById("range-label");
+    const buttons = document.querySelectorAll(".btn[data-type]");
+    const refreshBtn = document.getElementById("refresh");
+    const startInput = document.getElementById("start-date");
+    const endInput = document.getElementById("end-date");
+    const applyBtn = document.getElementById("apply");
+    const clearBtn = document.getElementById("clear");
+    const nextDayEl = document.getElementById("next-day");
+    const nextDayLabel = document.getElementById("next-day-label");
+    const nextWeekEl = document.getElementById("next-week");
+    const nextMonthEl = document.getElementById("next-month");
+    let active = "daily";
+    let chart = null;
+
+    const toNum = v => (v === null || v === undefined) ? null : Number(v);
+    const median = arr => { if(!arr.length) return 0; const s = arr.slice().sort((a,b)=>a-b); const m = Math.floor(s.length/2); return s.length%2 ? s[m] : (s[m-1]+s[m])/2; };
+
+    async function fetchPred(type,start,end){
+      let url = API_ROOT + encodeURIComponent(type);
+      const params=[];
+      if(start) params.push("start="+start);
+      if(end) params.push("end="+end);
+      if(params.length) url+="&"+params.join("&");
+      else url+="&upcoming=1";
+      const r = await fetch(url);
+      if(!r.ok) throw new Error("API "+r.status);
+      return await r.json();
+    }
+
+    function prepare(rows){
+      rows.sort((a,b)=> new Date(a.date) - new Date(b.date));
+      const labels=[],forecast=[],lower=[],upper=[],actual=[];
+      for(const r of rows){
+        labels.push(r.date);
+        forecast.push(toNum(r.predicted_value));
+        lower.push(toNum(r.yhat_lower));
+        upper.push(toNum(r.yhat_upper));
+        actual.push(toNum(r.actual_value));
+      }
+      return { labels,forecast,lower,upper,actual };
+    }
+
+    function updateSummary(prep){
+      const { labels,forecast } = prep;
+      const today=new Date();
+      const nextDay=new Date(today); nextDay.setDate(today.getDate()+1);
+      const next7=new Date(today); next7.setDate(today.getDate()+7);
+      const next30=new Date(today); next30.setDate(today.getDate()+30);
+      let tomorrowVal=null,weekSum=0,monthSum=0;
+      for(let i=0;i<labels.length;i++){
+        const d=new Date(labels[i]);
+        const val=forecast[i]||0;
+        if(d.toDateString()===nextDay.toDateString()) tomorrowVal=val;
+        if(d>today&&d<=next7) weekSum+=val;
+        if(d>today&&d<=next30) monthSum+=val;
+      }
+      nextDayEl.textContent=tomorrowVal!==null?Math.round(tomorrowVal):"–";
+      nextWeekEl.textContent=weekSum?Math.round(weekSum):"–";
+      nextMonthEl.textContent=monthSum?Math.round(monthSum):"–";
+      const tStr=nextDay.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'});
+      nextDayLabel.textContent=`Tomorrow (${tStr})`;
+    }
+
+    function sparseLabels(labels,maxTicks=7){
+      const n=labels.length;
+      if(n<=maxTicks) return labels.map((l,i)=>({label:l,show:true}));
+      const step=Math.ceil(n/maxTicks);
+      return labels.map((l,i)=>({label:l,show:(i%step)===0}));
+    }
+
+    function buildDatasets(prep){
+      const { labels,forecast,lower,upper,actual }=prep;
+      const numericForecast=forecast.filter(v=>v!==null&&!isNaN(v));
+      const med=median(numericForecast);
+      const maxVal=numericForecast.length?Math.max(...numericForecast):null;
+      const hasOutlier=med>0&&maxVal&&(maxVal/med>10);
+      const suggestedMax=hasOutlier?Math.max(med*2,numericForecast[Math.floor(numericForecast.length*0.95)]*1.25):undefined;
+
+      const datasets=[];
+      if(actual.some(v=>v!==null)){
+        datasets.push({
+          label:'Actual',
+          data:actual,
+          borderColor:'#0f5f3a',
+          backgroundColor:'rgba(15,95,58,0.06)',
+          tension:0.2, pointRadius:3, fill:false
+        });
+      }
+      datasets.push({
+        label:'Forecast',
+        data:forecast,
+        borderColor:'#1f8a5a',
+        backgroundColor:'rgba(47,133,90,0.15)',
+        tension:0.25, pointRadius:4, fill:true
+      });
+      const hasCI=lower.some(x=>x!==null)&&upper.some(x=>x!==null);
+      if(hasCI){
+        datasets.push({
+          label:'Confidence Range',
+          data:upper,
+          borderColor:'rgba(72,187,120,0)',
+          backgroundColor:'rgba(72,187,120,0.18)',
+          fill:'-1', pointRadius:0, tension:0.25
+        });
+      }
+      return { datasets,suggestedMax,hasOutlier };
+    }
+
+    async function render(type){
+      metaEl.textContent='Loading…';
+      const start=startInput.value||null;
+      const end=endInput.value||null;
+      const rows=await fetchPred(type,start,end);
+      if(!rows||!rows.length){
+        metaEl.textContent='No predictions available for selected range.';
+        if(chart){ chart.destroy(); chart=null; }
+        rangeLabel.textContent='';
+        return;
+      }
+
+      const prep=prepare(rows);
+      updateSummary(prep);
+
+      // 🗓️ auto-fill start/end fields + display visible range
+      const firstDate=prep.labels[0];
+      const lastDate=prep.labels[prep.labels.length-1];
+      if(!startInput.value) startInput.value=firstDate;
+      if(!endInput.value) endInput.value=lastDate;
+      rangeLabel.textContent=`📅 Showing predictions from ${firstDate} to ${lastDate}`;
+
+      const { labels }=prep;
+      const sparse=sparseLabels(labels,7);
+      const displayLabels=sparse.map(s=>s.show?s.label:'');
+      const { datasets,suggestedMax,hasOutlier }=buildDatasets(prep);
+      if(chart) chart.destroy();
+
+      chart=new Chart(chartEl,{
+        type:'line',
+        data:{ labels:displayLabels, datasets },
+        options:{
+          responsive:true,
+          maintainAspectRatio:false,
+          interaction:{ mode:'nearest', intersect:false },
+          plugins:{
+            legend:{ position:'top', labels:{ color:'#164d3b' } },
+            tooltip:{
+              enabled:true,
+              intersect:false,
+              callbacks:{
+                title:ctx=>`Date: ${ctx[0].label}`,
+                label:ctx=>{
+                  const v=ctx.raw;
+                  return `${ctx.dataset.label}: ${Number(v).toLocaleString(undefined,{maximumFractionDigits:0})}`;
+                }
+              }
+            },
+            zoom:{
+              pan:{ enabled:true, mode:'x', modifierKey:'ctrl' },
+              zoom:{ wheel:{enabled:true}, pinch:{enabled:true}, mode:'x' }
+            }
+          },
+          scales:{
+            x:{ ticks:{ color:'#164d3b', maxRotation:0, autoSkip:false }, grid:{ color:'rgba(15,95,58,0.04)' } },
+            y:{ ticks:{ color:'#164d3b' }, beginAtZero:true, suggestedMax }
+          },
+          animation:{ duration:400 }
+        }
+      });
+
+      metaEl.textContent=`${labels.length} points loaded${hasOutlier?' • outliers detected':''}`;
+    }
+
+    buttons.forEach(b=>{
+      b.addEventListener('click',e=>{
+        buttons.forEach(x=>x.classList.remove('active'));
+        e.currentTarget.classList.add('active');
+        active=e.currentTarget.dataset.type;
+        render(active);
+      });
+    });
+    refreshBtn.addEventListener('click',()=>render(active));
+    applyBtn.addEventListener('click',()=>render(active));
+    clearBtn.addEventListener('click',()=>{
+      startInput.value='';
+      endInput.value='';
+      render(active);
+    });
+
+    render(active);
+  })();
+  </script>
+</body>
+</html>

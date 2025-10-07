@@ -22,5 +22,6 @@ urlpatterns = [
      path('', include(('Patient.urls', 'patient'), namespace='patient')),
       path('authentication/', include('authentication.urls')),  # Add this line
       path('therapy/', include('MySql_Data_pull.urls')),
+      path("predictor/", include("predictor.urls")),
 ]
 

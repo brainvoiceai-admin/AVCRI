@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Prediction Dashboard</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #f4fdf6;
+      margin: 20px;
+      color: #1b4332;
+    }
+    h1 {
+      text-align: center;
+      margin-bottom: 20px;
+      color: #2d6a4f;
+    }
+    .tabs {
+      display: flex;
+      justify-content: center;
+      margin-bottom: 20px;
+    }
+    .tab {
+      padding: 10px 20px;
+      margin: 0 5px;
+      background: #95d5b2;
+      border-radius: 5px;
+      cursor: pointer;
+      font-weight: bold;
+      transition: background 0.3s;
+    }
+    .tab.active {
+      background: #2d6a4f;
+      color: white;
+    }
+    .chart-container {
+      width: 90%;
+      max-width: 900px;
+      margin: auto;
+      display: none;
+    }
+    .chart-container.active {
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <h1>📊 Patient Forecast Dashboard</h1>
+
+  <div class="tabs">
+    <div class="tab active" onclick="showChart('daily')">Daily</div>
+    <div class="tab" onclick="showChart('weekly')">Weekly</div>
+    <div class="tab" onclick="showChart('monthly')">Monthly</div>
+  </div>
+
+  <div id="daily" class="chart-container active">
+    <canvas id="dailyChart"></canvas>
+  </div>
+  <div id="weekly" class="chart-container">
+    <canvas id="weeklyChart"></canvas>
+  </div>
+  <div id="monthly" class="chart-container">
+    <canvas id="monthlyChart"></canvas>
+  </div>
+
+  <script>
+    async function loadPredictions(type, chartId, label) {
+      try {
+        const res = await fetch(`/predictor/api/predictions/?type=${type}`);
+        if (!res.ok) {
+          console.error("Failed fetch", res.status);
+          return;
+        }
+        const data = await res.json();
+        const labels = data.map(x => x.date);
+        const values = data.map(x => Number(x.predicted_value));
+
+        const ctx = document.getElementById(chartId).getContext("2d");
+        new Chart(ctx, {
+          type: "line",
+          data: {
+            labels: labels,
+            datasets: [{
+              label: label,
+              data: values,
+              borderColor: "#2d6a4f",
+              backgroundColor: "rgba(173, 232, 208, 0.5)",
+              tension: 0.3,
+              fill: true,
+              pointBackgroundColor: "#1b4332",
+              pointRadius: 5,
+              pointHoverRadius: 7
+            }]
+          },
+          options: {
+            responsive: true,
+            plugins: {
+              legend: {
+                labels: {
+                  color: "#1b4332"
+                }
+              }
+            },
+            scales: {
+              x: {
+                ticks: { color: "#1b4332" }
+              },
+              y: {
+                ticks: { color: "#1b4332" },
+                beginAtZero: true
+              }
+            }
+          }
+        });
+      } catch (err) {
+        console.error("Error loading predictions:", err);
+      }
+    }
+
+    function showChart(type) {
+      document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
+      document.querySelectorAll(".chart-container").forEach(c => c.classList.remove("active"));
+      document.querySelector(`.tab[onclick="showChart('${type}')"]`).classList.add("active");
+      document.getElementById(type).classList.add("active");
+    }
+
+    // Load charts
+    loadPredictions("daily", "dailyChart", "Daily Patient Forecast");
+    loadPredictions("weekly", "weeklyChart", "Weekly Patient Forecast");
+    loadPredictions("monthly", "monthlyChart", "Monthly Patient Forecast");
+  </script>
+</body>
+</html>
