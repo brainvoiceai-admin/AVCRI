@@ -1,0 +1,352 @@
+{% load static %}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Add Therapy Item</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    :root {
+      --primary: #3498db;
+      --primary-dark: #2980b9;
+      --secondary: #2c3e50;
+      --light: #ecf0f1;
+      --dark: #34495e;
+      --success: #27ae60;
+      --warning: #f39c12;
+      --danger: #e74c3c;
+      --gray: #95a5a6;
+      --light-gray: #f8f9fa;
+      --border-radius: 8px;
+      --shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    }
+
+    * {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    }
+
+    body {
+      background: #f5f7fa;
+      display: flex;
+      min-height: 100vh;
+      margin: 0;
+      padding: 0;
+    }
+
+    /* Main Content Styles */
+    .main-content {
+      flex: 1;
+      padding: 30px;
+      margin-left: 250px; /* Align with existing side nav */
+      overflow-y: auto;
+    }
+
+    .card {
+      max-width: 900px;
+      margin: 0 auto;
+      border: none;
+      border-radius: var(--border-radius);
+      box-shadow: var(--shadow);
+      background: #fff;
+    }
+
+    .card-body {
+      padding: 30px;
+    }
+
+    .page-title {
+      font-size: 1.8rem;
+      font-weight: 600;
+      color: var(--secondary);
+      margin-bottom: 8px;
+    }
+
+    .page-subtitle {
+      color: var(--gray);
+      margin-bottom: 25px;
+      font-size: 1rem;
+    }
+
+    .form-label {
+      font-weight: 500;
+      color: var(--dark);
+      margin-bottom: 8px;
+    }
+
+    .form-control, .form-select {
+      border-radius: 6px;
+      border: 1px solid #dee2e6;
+      padding: 10px 12px;
+      transition: all 0.3s ease;
+    }
+
+    .form-control:focus, .form-select:focus {
+      border-color: var(--primary);
+      box-shadow: 0 0 0 0.2rem rgba(52, 152, 219, 0.25);
+    }
+
+    .btn {
+      border-radius: 6px;
+      padding: 10px 20px;
+      font-weight: 500;
+      transition: all 0.3s ease;
+    }
+
+    .btn-primary {
+      background: var(--primary);
+      border-color: var(--primary);
+    }
+
+    .btn-primary:hover {
+      background: var(--primary-dark);
+      border-color: var(--primary-dark);
+      transform: translateY(-1px);
+    }
+
+    .btn-secondary {
+      background: #6c757d;
+      border-color: #6c757d;
+    }
+
+    .btn-secondary:hover {
+      background: #5a6268;
+      border-color: #5a6268;
+      transform: translateY(-1px);
+    }
+
+    .section-divider {
+      border-top: 1px solid #e9ecef;
+      margin: 20px 0;
+      padding-top: 20px;
+    }
+
+    .auto-fill-note {
+      font-size: 0.85rem;
+      color: var(--gray);
+      font-style: italic;
+      margin-top: 4px;
+    }
+
+    .alert {
+      border-radius: 6px;
+      border: none;
+      padding: 12px 16px;
+    }
+
+    .alert-success {
+      background: #e6ffed;
+      color: #064;
+    }
+
+    .alert-error, .alert-danger {
+      background: #ffecec;
+      color: #700;
+    }
+
+    .alert-warning {
+      background: #fff4e6;
+      color: #663c00;
+    }
+
+    .alert-info {
+      background: #e6f7ff;
+      color: #004b70;
+    }
+
+    /* Responsive Styles */
+    @media (max-width: 1024px) {
+      .main-content {
+        margin-left: 0;
+        padding: 20px 15px;
+      }
+    }
+
+    @media (max-width: 768px) {
+      .card-body {
+        padding: 20px;
+      }
+      
+      .page-title {
+        font-size: 1.5rem;
+      }
+      
+      .btn {
+        width: 100%;
+        margin-bottom: 10px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <!-- Include existing navbar -->
+  {% include 'dashboards/nav.html' %}
+
+  <!-- Main Content -->
+  <main class="main-content">
+    <div class="card">
+      <div class="card-body">
+        <h1 class="page-title">Add Therapy Item</h1>
+        <div class="page-subtitle">
+          Visit ID: <strong>{{ visit.id }}</strong> · Patient: <strong>{{ visit.patient_name }}</strong>
+        </div>
+
+        {% if messages %}
+          {% for m in messages %}
+            <div class="alert alert-{{ m.tags }}">{{ m }}</div>
+          {% endfor %}
+        {% endif %}
+
+        <form method="post" action="{% url 'patient:add_therapy_item' visit.id %}" class="row g-3">
+          {% csrf_token %}
+
+          <!-- Select therapy for this visit -->
+          <div class="col-12">
+            <label class="form-label">Select Therapy (instance for this visit)</label>
+            <select name="therapy_id" id="therapy_select" class="form-select" required>
+              <option value="">-- Choose therapy --</option>
+              {% for th in therapies_for_visit %}
+                <option value="{{ th.id }}"
+                        data-from="{{ th.from_date|date:'Y-m-d' }}"
+                        data-to="{{ th.to_date|date:'Y-m-d' }}"
+                        data-days="{{ th.days }}">
+                  {{ th.therapy_name }} — {{ th.from_date|date:"M j, Y" }} → {{ th.to_date|date:"M j, Y" }}
+                </option>
+              {% endfor %}
+            </select>
+          </div>
+
+          <!-- Item and autofill fields -->
+          <div class="col-md-6">
+            <label class="form-label">Item (from Item Master)</label>
+            <select name="item_code" id="item_select" class="form-select" required>
+              <option value="">-- Select item --</option>
+              {% for it in all_items %}
+                <option value="{{ it.item_code }}"
+                        data-procured-from="{{ it.item_procurred_from|default:'' }}"
+                        data-oil="{{ it.oil_class|default:'' }}">
+                  {{ it.item_name }} {% if it.item_code %} ({{ it.item_code }}){% endif %}
+                </option>
+              {% endfor %}
+            </select>
+          </div>
+
+          <div class="col-md-6">
+            <label class="form-label">Oil Class <span class="auto-fill-note">(auto-filled)</span></label>
+            <input type="text" name="oil_class" id="oil_class" class="form-control" placeholder="Will be auto-filled" readonly>
+          </div>
+
+          <div class="col-md-6">
+            <label class="form-label">Usage</label>
+            <input type="text" name="usage" id="usage" class="form-control" placeholder="e.g. apply externally" required>
+          </div>
+
+          <div class="col-md-6">
+            <label class="form-label">Procured From <span class="auto-fill-note">(auto-filled)</span></label>
+            <input type="text" name="procured" id="procured" class="form-control" placeholder="Will be auto-filled" readonly>
+          </div>
+
+          <div class="col-12 section-divider">
+            <h5 class="mb-3" style="color: var(--secondary);">Date Information</h5>
+          </div>
+
+          <!-- Dates (autofilled from therapy) -->
+          <div class="col-md-4">
+            <label class="form-label">From Date</label>
+            <input class="form-control" type="date" name="from_date" id="from_date" required>
+          </div>
+
+          <div class="col-md-4">
+            <label class="form-label">To Date</label>
+            <input class="form-control" type="date" name="to_date" id="to_date" required>
+          </div>
+
+          <div class="col-md-4">
+            <label class="form-label">Days</label>
+            <input class="form-control" type="number" name="days" id="days" readonly style="background-color: #f8f9fa;">
+          </div>
+
+          <div class="col-12 mt-4">
+            <button class="btn btn-primary" type="submit">Save Therapy Item</button>
+            <a class="btn btn-secondary ms-2" href="{% url 'patient:patient_sessions' visit.id %}">Back to Sessions</a>
+          </div>
+        </form>
+      </div>
+    </div>
+  </main>
+
+  <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+  <script>
+    (function($){
+      $(function(){
+        const $therapy = $('#therapy_select');
+        const $item = $('#item_select');
+        const $from = $('#from_date');
+        const $to = $('#to_date');
+        const $days = $('#days');
+        const $proc = $('#procured');
+        const $oil = $('#oil_class');
+
+        // When therapy changes, set from/to/days from data- attributes
+        $therapy.on('change', function(){
+          const opt = $(this).find('option:selected');
+          const from = opt.data('from') || '';
+          const to = opt.data('to') || '';
+          const days = opt.data('days') || '';
+
+          // put into inputs (HTML date expects YYYY-MM-DD)
+          $from.val(from);
+          $to.val(to);
+          $days.val(days !== undefined ? days : '');
+
+          // If no item is selected yet, attempt to prefill item-related fields if item present on option
+        });
+
+        // When item changes, autofill procured_from, oil and (uom if needed)
+        $('#item_select').on('change', function(){
+          const opt = $(this).find('option:selected');
+          const procured_from = opt.attr('data-procured-from') || '';
+          const oil = opt.attr('data-oil') || '';
+
+          $('#procured').val(procured_from);
+          $('#oil_class').val(oil);
+        });
+
+        // recompute days if dates edited manually
+        function recomputeDays(){
+          const f = $from.val();
+          const t = $to.val();
+          if (!f || !t) {
+            $days.val('');
+            return;
+          }
+          const fromDt = new Date(f);
+          const toDt = new Date(t);
+          if (fromDt <= toDt) {
+            const diff = Math.floor((toDt - fromDt) / (1000*60*60*24)) + 1;
+            $days.val(diff);
+          } else {
+            $days.val(0);
+          }
+        }
+        $from.add($to).on('change', recomputeDays);
+
+        // Pre-select first therapy option on load for convenience and trigger change to fill dates
+        // (skip index 0 because that's the placeholder)
+        const firstTherOpt = $therapy.find('option').eq(1);
+        if (firstTherOpt.length && !$therapy.val()) {
+          firstTherOpt.prop('selected', true);
+          $therapy.trigger('change');
+        }
+
+        // Optionally pre-select first item too (not required)
+        const firstItemOpt = $item.find('option').eq(1);
+        if (firstItemOpt.length && !$item.val()) {
+          firstItemOpt.prop('selected', true);
+          $item.trigger('change');
+        }
+      });
+    })(jQuery);
+  </script>
+</body>
+</html>

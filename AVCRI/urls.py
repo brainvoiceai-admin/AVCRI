@@ -19,7 +19,7 @@ from django.urls import path, include
 
 urlpatterns = [
     path('admin/', admin.site.urls),
-    path('', include('Patient.urls')),
+     path('', include(('Patient.urls', 'patient'), namespace='patient')),
       path('authentication/', include('authentication.urls')),  # Add this line
       path('therapy/', include('MySql_Data_pull.urls')),
 ]

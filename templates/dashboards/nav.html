@@ -12,13 +12,16 @@
         <div class="menu-section">
             <div class="menu-section-title">Doctor Options</div>
             {% if request.user.role == "doctor_admin" %}
-            <a href="{% url 'patient_lookup' %}" class="menu-item">
+            <a href="{% url 'patient:patient_lookup' %}" class="menu-item">
                 <span>🏥</span> Add Therapy Prescription
             </a>
             {% comment %} <a href="{% url 'medicin_prescription_table' %}" class="menu-item">
                 <span>💊</span> Add Medicine Prescription
             </a> {% endcomment %}
-            <a href="{% url 'medicin_prescription_table' %}" class="menu-item">
+            {% comment %} <a href="{% url 'medicin_prescription_table' %}" class="menu-item">
+                <span>📅</span> Treatment Schedule
+            </a> {% endcomment %}
+             <a href="{% url 'patient:patient_list' %}" class="menu-item">
                 <span>📅</span> Treatment Schedule
             </a>
             <a href="{% url 'Therapy_Report' %}" class="menu-item">
@@ -30,7 +33,7 @@
         {% if request.user.role == "therapist" %}
         <div class="menu-section">
             <div class="menu-section-title">Therapist Options</div>
-            <a href="{% url 'therapistdash' %}" class="menu-item">
+            <a href="{% url 'patient:therapistdash' %}" class="menu-item">
                 <span>🗓️</span> My Therapy Schedule
             </a>
         </div>

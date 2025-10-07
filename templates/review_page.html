@@ -292,48 +292,73 @@
         </div>
 
         <div class="dashboard-card">
-            <h3 class="section-title"><i class="fas fa-hand-holding-medical"></i> Therapies</h3>
-            
-            {% if therapy_data %}
-            <div class="table-responsive">
-                <table class="review-table">
-                    <thead>
-                        <tr>
-                            <th>Therapy Name</th>
-                            <th>Ext/Int</th>
-                            <th>Procured</th>
-                            <th>Item</th>
-                            <th>Oil Class</th>
-                            <th>Usage</th>
-                            <th>From Date</th>
-                            <th>To Date</th>
-                            <th>Days</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for therapy in therapy_data %}
-                        <tr>
-                            <td>{{ therapy.therapy_name }}</td>
-                            <td>{{ therapy.ext_int }}</td>
-                            <td>{{ therapy.procured }}</td>
-                            <td>{{ therapy.item_name }}</td>
-                            <td>{{ therapy.oil_class }}</td>
-                            <td>{{ therapy.usage }}</td>
-                            <td>{{ therapy.from_date }}</td>
-                            <td>{{ therapy.to_date }}</td>
-                            <td>{{ therapy.days }}</td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-            {% else %}
-            <div class="empty-message">
-                <i class="fas fa-ban"></i>
-                <p>No therapies added</p>
-            </div>
-            {% endif %}
-        </div>
+    <h3 class="section-title"><i class="fas fa-hand-holding-medical"></i> Therapies</h3>
+    
+    {% if therapy_data %}
+    <div class="table-responsive">
+        <table class="review-table">
+            <thead>
+                <tr>
+                    <th>Therapy Name</th>
+                    <th>Ext/Int</th>
+                    <th>Procured</th>
+                    <th>Items (all)</th>
+                    <th>From Date</th>
+                    <th>To Date</th>
+                    <th>Days</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for therapy in therapy_data %}
+                <tr>
+                    <td>{{ therapy.therapy_name }}</td>
+                    <td>{{ therapy.ext_int }}</td>
+                    <td>{{ therapy.procured }}</td>
+
+                    <!-- Items column: show all related items for the therapy -->
+                    <td>
+                        {% comment %}Prefer resolved_items list from the view (each item has item_code, item_name, oil_class, usage, procured){% endcomment %}
+                        {% if therapy.resolved_items %}
+                            <div style="display:flex;flex-direction:column;gap:8px;">
+                                {% for it in therapy.resolved_items %}
+                                    <div style="padding:6px;border-radius:6px;background:#fff;border:1px solid #eef6fb;">
+                                        <div style="font-weight:600">{{ it.item_name }} <small style="color:#6b7280">({{ it.item_code }})</small></div>
+                                        <div style="font-size:0.85rem;color:#566573;margin-top:4px;">
+                                            {% if it.oil_class %}<span>Oil: {{ it.oil_class }}</span>{% endif %}
+                                            {% if it.usage %}{% if it.oil_class %} &nbsp;•&nbsp; {% endif %}<span>Usage: {{ it.usage }}</span>{% endif %}
+                                            {% if it.procured %}{% if it.oil_class or it.usage %} &nbsp;•&nbsp; {% endif %}<span>Procured: {{ it.procured }}</span>{% endif %}
+                                        </div>
+                                    </div>
+                                {% endfor %}
+                            </div>
+                        {% else %}
+                            {# Fallback for old single-item rows #}
+                            <div style="display:flex;flex-direction:column;gap:6px;">
+                                <div style="font-weight:600">{{ therapy.item_name|default:"-" }}</div>
+                                <div style="font-size:0.85rem;color:#566573;">
+                                    {% if therapy.oil_class %}<span>Oil: {{ therapy.oil_class }}</span>{% endif %}
+                                    {% if therapy.usage %}{% if therapy.oil_class %} &nbsp;•&nbsp; {% endif %}<span>Usage: {{ therapy.usage }}</span>{% endif %}
+                                </div>
+                            </div>
+                        {% endif %}
+                    </td>
+
+                    <td>{{ therapy.from_date }}</td>
+                    <td>{{ therapy.to_date }}</td>
+                    <td>{{ therapy.days }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="empty-message">
+        <i class="fas fa-ban"></i>
+        <p>No therapies added</p>
+    </div>
+    {% endif %}
+</div>
+
 
         <div class="dashboard-card">
             <h3 class="section-title"><i class="fas fa-prescription"></i> Prescriptions</h3>

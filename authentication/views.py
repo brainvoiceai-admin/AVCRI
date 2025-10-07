@@ -52,7 +52,7 @@ def redirect_user_dashboard(user):
     elif user.role == "therapist_admin":
         return redirect("therapistadmindash")
     elif user.role == "doctor_admin":
-        return redirect("patient_lookup")
+        return redirect("patient:patient_lookup")
      
     elif user.role == "gm_hr":
         return redirect("gmdash")
