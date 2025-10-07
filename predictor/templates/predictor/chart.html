@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Patient Predictions — Dashboard</title>
+  <style>
+    :root{--g-dark:#0f5f3a;--g-mid:#1f8a5a;--g-soft:#bfead0;--bg:#f6fff7;--muted:#164d3b;}
+    body{margin:0;font-family:Inter,system-ui,-apple-system,"Segoe UI",Roboto,Arial;background:var(--bg);color:var(--muted);}
+    .wrap{max-width:1000px;margin:18px auto;padding:16px;}
+    header{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;margin-bottom:12px;}
+    h1{margin:0;font-size:20px;color:var(--g-dark);}
+    .controls{display:flex;gap:8px;align-items:center;}
+    .btn{padding:7px 12px;border-radius:8px;border:0;cursor:pointer;font-weight:600;background:var(--g-soft);color:var(--g-dark);}
+    .btn.active{background:linear-gradient(90deg,var(--g-mid),var(--g-dark));color:white;box-shadow:0 6px 18px rgba(15,95,58,0.12);}
+    .card{background:#fff;border-radius:10px;padding:12px;box-shadow:0 8px 20px rgba(0,0,0,0.06);}
+    #meta{margin-top:8px;color:#2f6b4f;font-size:13px;}
+    #predChart{width:100%!important;height:360px!important;display:block;}
+    .summary{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px;}
+    .summary-card{flex:1;min-width:200px;background:#f0fff4;border-radius:10px;padding:10px 12px;box-shadow:0 6px 16px rgba(15,95,58,0.08);}
+    .summary-card h3{margin:0;font-size:20px;color:var(--g-dark);}
+    .summary-card small{color:#2d6a4f;}
+    .filters{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px;}
+    input[type="date"]{padding:6px;border-radius:6px;border:1px solid #bfead0;color:#164d3b;}
+    #range-label{margin-top:8px;color:#155e3d;font-size:14px;font-weight:500;}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>Patient Forecasts</h1>
+      <div class="controls">
+        <button class="btn active" data-type="daily">Daily</button>
+        <button class="btn" data-type="weekly">Weekly</button>
+        <button class="btn" data-type="monthly">Monthly</button>
+        <button id="refresh" class="btn" style="background:#eef9f1;color:var(--g-dark);">Refresh</button>
+      </div>
+    </header>
+
+    <div class="filters">
+      <label>From: <input type="date" id="start-date"></label>
+      <label>To: <input type="date" id="end-date"></label>
+      <button id="apply" class="btn" style="background:#d9f5e3;color:#0f5f3a;">Apply</button>
+      <button id="clear" class="btn" style="background:#fff;">Clear</button>
+    </div>
+
+    <div class="summary">
+      <div class="summary-card"><h3 id="next-day">–</h3><small id="next-day-label">Tomorrow</small></div>
+      <div class="summary-card"><h3 id="next-week">–</h3><small>Next 7 days</small></div>
+      <div class="summary-card"><h3 id="next-month">–</h3><small>Next 30 days</small></div>
+    </div>
+
+    <div class="card">
+      <canvas id="predChart"></canvas>
+      <div id="range-label"></div>
+      <div id="meta"></div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
+
+  <script>
+  (function(){
+    const API_ROOT="/predictor/api/predictions/?type=";
+    const chartEl=document.getElementById("predChart"),metaEl=document.getElementById("meta"),
+          rangeLabel=document.getElementById("range-label"),
+          buttons=document.querySelectorAll(".btn[data-type]"),
+          refreshBtn=document.getElementById("refresh"),
+          startInput=document.getElementById("start-date"),
+          endInput=document.getElementById("end-date"),
+          applyBtn=document.getElementById("apply"),
+          clearBtn=document.getElementById("clear"),
+          nextDayEl=document.getElementById("next-day"),
+          nextDayLabel=document.getElementById("next-day-label"),
+          nextWeekEl=document.getElementById("next-week"),
+          nextMonthEl=document.getElementById("next-month");
+    let active="daily",chart=null;
+
+    const toNum=v=>(v==null)?null:Number(v);
+    const median=a=>{if(!a.length)return 0;const s=a.slice().sort((x,y)=>x-y),m=Math.floor(s.length/2);return s.length%2?s[m]:(s[m-1]+s[m])/2;};
+    async function fetchPred(type,start,end){
+      let url=API_ROOT+encodeURIComponent(type);
+      const p=[];if(start)p.push("start="+start);if(end)p.push("end="+end);
+      url+=p.length?"&"+p.join("&"):"&upcoming=1";
+      const r=await fetch(url);if(!r.ok)throw new Error("API "+r.status);
+      return await r.json();
+    }
+    function prepare(rows){
+      rows.sort((a,b)=>new Date(a.date)-new Date(b.date));
+      const l=[],f=[],lo=[],up=[],act=[];
+      for(const r of rows){l.push(r.date);f.push(toNum(r.predicted_value));lo.push(toNum(r.yhat_lower));up.push(toNum(r.yhat_upper));act.push(toNum(r.actual_value));}
+      return {labels:l,forecast:f,lower:lo,upper:up,actual:act};
+    }
+
+    // new advanced summary
+    function daysBetween(a,b){const _a=new Date(a);_a.setHours(0,0,0,0);const _b=new Date(b);_b.setHours(0,0,0,0);return Math.round((_b-_a)/86400000);}
+    function monthDays(y,m){return new Date(y,m+1,0).getDate();}
+    function updateSummary(prep,type){
+      const {labels,forecast}=prep;
+      const today=new Date();today.setHours(0,0,0,0);
+      const nextDayDate=new Date(today);nextDayDate.setDate(today.getDate()+1);
+      const end7=new Date(today);end7.setDate(today.getDate()+7);
+      const end30=new Date(today);end30.setDate(today.getDate()+30);
+      const toDate=s=>{const d=new Date(s);d.setHours(0,0,0,0);return d;};
+      let nextDayVal=null,sum7=0,sum30=0;
+      if(type==="daily"){
+        for(let i=0;i<labels.length;i++){const d=toDate(labels[i]);const v=Number(forecast[i]||0);
+          if(d.getTime()===nextDayDate.getTime())nextDayVal=v;
+          if(d>today&&d<=end7)sum7+=v;
+          if(d>today&&d<=end30)sum30+=v;}
+        nextDayEl.textContent=nextDayVal!==null?Math.round(nextDayVal):"–";
+        nextWeekEl.textContent=sum7?Math.round(sum7):"–";
+        nextMonthEl.textContent=sum30?Math.round(sum30):"–";
+      }else if(type==="weekly"){
+        let weeklySum7=0,weeklySum30=0;
+        for(let i=0;i<labels.length;i++){const d=toDate(labels[i]),v=Number(forecast[i]||0);
+          if(d>today&&d<=end7)weeklySum7+=v;
+          if(d>today&&d<=end30)weeklySum30+=v;}
+        let approxDaily=null;
+        for(let i=0;i<labels.length;i++){const d=toDate(labels[i]);
+          if(d>today){const v=Number(forecast[i]||0);approxDaily=v/7;break;}}
+        nextDayEl.textContent=approxDaily!==null?Math.round(approxDaily):"–";
+        nextWeekEl.textContent=weeklySum7?Math.round(weeklySum7):"–";
+        nextMonthEl.textContent=weeklySum30?Math.round(weeklySum30):"–";
+      }else if(type==="monthly"){
+        let monthlySum7=0,monthlySum30=0;
+        for(let i=0;i<labels.length;i++){const d=toDate(labels[i]);
+          const y=d.getFullYear(),m=d.getMonth(),v=Number(forecast[i]||0);
+          const monthStart=new Date(y,m,1),monthEnd=new Date(y,m,monthDays(y,m));
+          monthStart.setHours(0,0,0,0);monthEnd.setHours(0,0,0,0);
+          const ovS7=monthStart>today?monthStart:today,ovE7=monthEnd<end7?monthEnd:end7;
+          const ovD7=Math.max(0,daysBetween(ovS7,ovE7)+1);
+          const ovS30=monthStart>today?monthStart:today,ovE30=monthEnd<end30?monthEnd:end30;
+          const ovD30=Math.max(0,daysBetween(ovS30,ovE30)+1);
+          const md=monthDays(y,m);
+          if(ovD7>0)monthlySum7+=v*(ovD7/md);
+          if(ovD30>0)monthlySum30+=v*(ovD30/md);}
+        let approxDaily=null;
+        for(let i=0;i<labels.length;i++){const d=toDate(labels[i]),y=d.getFullYear(),m=d.getMonth();
+          const ms=new Date(y,m,1),me=new Date(y,m,monthDays(y,m));
+          if(nextDayDate>=ms&&nextDayDate<=me){const v=Number(forecast[i]||0);approxDaily=v/monthDays(y,m);break;}}
+        nextDayEl.textContent=approxDaily!==null?Math.round(approxDaily):"–";
+        nextWeekEl.textContent=monthlySum7?Math.round(monthlySum7):"–";
+        nextMonthEl.textContent=monthlySum30?Math.round(monthlySum30):"–";
+      }
+      nextDayLabel.textContent=`Tomorrow (${nextDayDate.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'})})`;
+    }
+
+    function sparseLabels(l,maxTicks=7){const n=l.length;if(n<=maxTicks)return l.map((x,i)=>({label:x,show:true}));const step=Math.ceil(n/maxTicks);return l.map((x,i)=>({label:x,show:(i%step)==0}));}
+    function buildDatasets(prep){const {labels,forecast,lower,upper,actual}=prep;
+      const numF=forecast.filter(v=>v!==null&&!isNaN(v));const med=median(numF);
+      const maxVal=numF.length?Math.max(...numF):null;
+      const hasOutlier=med>0&&maxVal&&(maxVal/med>10);
+      const suggestedMax=hasOutlier?Math.max(med*2,numF[Math.floor(numF.length*0.95)]*1.25):undefined;
+      const ds=[];
+      ds.push({label:'Forecast',data:forecast,borderColor:'#1f8a5a',backgroundColor:'rgba(47,133,90,0.15)',tension:0.25,pointRadius:4,fill:true});
+      const hasCI=lower.some(x=>x!==null)&&upper.some(x=>x!==null);
+      if(hasCI)ds.push({label:'Confidence Range',data:upper,borderColor:'rgba(72,187,120,0)',backgroundColor:'rgba(72,187,120,0.18)',fill:'-1',pointRadius:0,tension:0.25});
+      return {datasets:ds,suggestedMax,hasOutlier};
+    }
+
+    async function render(type){
+      metaEl.textContent='Loading…';
+      const s=startInput.value||null,e=endInput.value||null;
+      const rows=await fetchPred(type,s,e);
+      if(!rows||!rows.length){metaEl.textContent='No data';if(chart){chart.destroy();chart=null;}return;}
+      const prep=prepare(rows);updateSummary(prep,type);
+      const first=prep.labels[0],last=prep.labels[prep.labels.length-1];
+      if(!startInput.value)startInput.value=first;if(!endInput.value)endInput.value=last;
+      rangeLabel.textContent=`📅 ${first} → ${last}`;
+      const sparse=sparseLabels(prep.labels,7),displayLabels=sparse.map(s=>s.show?s.label:'');
+      const {datasets,suggestedMax,hasOutlier}=buildDatasets(prep);
+      if(chart)chart.destroy();
+      chart=new Chart(chartEl,{type:'line',data:{labels:displayLabels,datasets},
+        options:{responsive:true,maintainAspectRatio:false,
+          plugins:{legend:{position:'top',labels:{color:'#164d3b'}},
+          tooltip:{callbacks:{title:c=>`Date: ${c[0].label}`,label:c=>`${c.dataset.label}: ${Number(c.raw).toLocaleString()} patients`}},
+          zoom:{pan:{enabled:true,mode:'x'},zoom:{wheel:{enabled:true},pinch:{enabled:true},mode:'x'}}},
+          scales:{x:{ticks:{color:'#164d3b',maxRotation:0,autoSkip:false},grid:{color:'rgba(15,95,58,0.04)'}},
+                  y:{ticks:{color:'#164d3b'},beginAtZero:true,suggestedMax}},animation:{duration:400}}});
+      metaEl.textContent=`${prep.labels.length} points${hasOutlier?' • outliers detected':''}`;
+    }
+
+    buttons.forEach(b=>b.addEventListener('click',e=>{buttons.forEach(x=>x.classList.remove('active'));e.currentTarget.classList.add('active');active=e.currentTarget.dataset.type;render(active);})); 
+    refreshBtn.addEventListener('click',()=>render(active));
+    applyBtn.addEventListener('click',()=>render(active));
+    clearBtn.addEventListener('click',()=>{startInput.value='';endInput.value='';render(active);});
+    render(active);
+  })();
+  </script>
+</body>
+</html>
