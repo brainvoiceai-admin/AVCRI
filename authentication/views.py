@@ -67,7 +67,7 @@ def redirect_user_dashboard(user):
         return redirect("Helpdeskadmindash")
     else:
         # default dashboard if role not set
-         return redirect("admindash")
+         return redirect("patient:patient_lookup")
 
 
 

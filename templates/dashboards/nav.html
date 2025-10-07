@@ -3,42 +3,44 @@
         <div class="profile-section">
             <img src="https://via.placeholder.com/60" alt="Profile Picture" class="profile-pic">
             <div class="profile-info">
-                <div class="profile-name">Dr. John Smith</div>
+                <div class="profile-name">{{ request.user.get_full_name }}</div>
             </div>
         </div>
     </div>
 
     <div class="sidebar-menu">
+
+        {# ---------- Doctor Section ---------- #}
+        {% if request.user.role == "doctor_admin" or request.user.role == "doctor" or request.user.role == "super_admin" %}
         <div class="menu-section">
             <div class="menu-section-title">Doctor Options</div>
-            {% if request.user.role == "doctor_admin" %}
             <a href="{% url 'patient:patient_lookup' %}" class="menu-item">
                 <span>🏥</span> Add Therapy Prescription
             </a>
-            {% comment %} <a href="{% url 'medicin_prescription_table' %}" class="menu-item">
-                <span>💊</span> Add Medicine Prescription
-            </a> {% endcomment %}
-            {% comment %} <a href="{% url 'medicin_prescription_table' %}" class="menu-item">
-                <span>📅</span> Treatment Schedule
-            </a> {% endcomment %}
-             <a href="{% url 'patient:patient_list' %}" class="menu-item">
-                <span>📅</span> Treatment Schedule
-            </a>
+      
             <a href="{% url 'Therapy_Report' %}" class="menu-item">
                 <span>📊</span> Reports & Analytics
             </a>
-         
         </div>
+        {% endif %}
+{% if request.user.role == "doctor_admin" or request.user.role == "doctor" or request.user.role == "super_admin" or request.user.role == "nurse" or request.user.role == "scheduling_staff" %}
 
-      
+              <a href="{% url 'patient:patient_list' %}" class="menu-item">
+                <span>📅</span> Treatment Schedule
+            </a>
+        {% endif %}
+        {# ---------- Therapist Section ---------- #}
+        {% if request.user.role == "therapist" or request.user.role == "super_admin" %}
         <div class="menu-section">
             <div class="menu-section-title">Therapist Options</div>
             <a href="{% url 'therapistdash' %}" class="menu-item">
                 <span>🗓️</span> My Therapy Schedule
             </a>
         </div>
-      
+        {% endif %}
 
+        {# ---------- Patient Section ---------- #}
+        {% if request.user.role == "patient" or request.user.role == "super_admin" %}
         <div class="menu-section">
             <div class="menu-section-title">Patients</div>
             <a href="{% url 'patient_profile' %}" class="menu-item">
@@ -54,28 +56,48 @@
                 <span>📝</span> Patient Feedback
             </a>
         </div>
+        {% endif %}
 
+        {# ---------- Staff Section ---------- #}
+        {% if request.user.role == "nurse" or request.user.role == "ip_pharmacy_staff" or request.user.role == "hr" or request.user.role == "housekeeping_staff" or request.user.role == "super_admin" %}
         <div class="menu-section">
             <div class="menu-section-title">Staff</div>
+
+            {% if request.user.role == "ip_pharmacy_staff" or request.user.role == "super_admin" %}
             <a href="{% url 'ip_pharmacy' %}" class="menu-item">
                 <span>🏥</span> In-Patient Pharmacy
             </a>
+            {% endif %}
+
+            {% if request.user.role == "nurse" or request.user.role == "super_admin" %}
             <a href="{% url 'nurse_dash' %}" class="menu-item">
                 <span>🩺</span> Nurse Dashboard
             </a>
+            {% endif %}
+
+            {% if request.user.role == "hr" or request.user.role == "super_admin" %}
             <a href="{% url 'gmdash' %}" class="menu-item">
                 <span>👥</span> HR Dashboard
             </a>
+            {% endif %}
+
+            {% if request.user.role == "housekeeping_staff" or request.user.role == "super_admin" %}
             <a href="{% url 'housekeepingdash' %}" class="menu-item">
                 <span>🧹</span> Housekeeping
             </a>
+            {% endif %}
         </div>
+        {% endif %}
 
-       
+        {# ---------- Administration Section ---------- #}
+        {% if request.user.role == "admin" or request.user.role == "super_admin" %}
         <div class="menu-section">
             <div class="menu-section-title">Administration</div>
             <a href="{% url 'Manage_user' %}" class="menu-item">
                 <span>👥</span> User Management
+            </a>
+            <a href="{% url 'predictor:prediction_dashboard' %}" class="menu-item">
+                <span>📈</span> Demand Prediction
             </a>
             <a href="{% url 'Audit_Log' %}" class="menu-item">
                 <span>📑</span> Audit Log
@@ -83,6 +105,7 @@
         </div>
         {% endif %}
 
+        {# ---------- Account Section (all roles) ---------- #}
         <div class="menu-section">
             <div class="menu-section-title">Account</div>
             <a href="#" class="menu-item">
@@ -94,6 +117,7 @@
         </div>
     </div>
 </div>
+
 
 <!-- Hamburger Button for Mobile -->
 <button class="hamburger" onclick="toggleSidebar()">
