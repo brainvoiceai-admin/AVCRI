@@ -1,8 +1,0 @@
-id,name,therapy_code,therapy_name,date,visit_type,is_vip
-123042019,Patient 123042019,*PIZH,*pizhichil(4),2025-09-18,IP,0
-123042019,Patient 123042019,ATHAP,Athapaswedanam ( 1 T),2025-09-18,IP,0
-123062019,Patient 123062019,ABHYA,Abhyangam & Nadiswedanam,2025-09-18,IP,0
-123062019,Patient 123062019,SIROP,Siropichu&Pizichil(3),2025-09-18,IP,0
-123062019,Patient 123062019,PIZHI,pizhichil (2),2025-09-19,IP,0
-123062019,Patient 123062019,DHARA,Dhara& Pizhichil (4),2025-09-19,IP,0
-
