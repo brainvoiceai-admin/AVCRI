@@ -1,7 +1,7 @@
 # --- Environment Files ---
 # Ignore sensitive data and local environment configurations.
 .env.*
-db.sqlite3
+
 # --- Databases ---
 # Ignore the local development database.
 
