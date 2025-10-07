@@ -48,6 +48,9 @@ INSTALLED_APPS = [
     'Patient',
     'authentication',
     'MySql_Data_pull',
+    "rest_framework",
+    "predictor",
+    "django_crontab",
 ]
 
 MIDDLEWARE = [
@@ -179,3 +182,14 @@ STATICFILES_DIRS = [
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 AUTH_USER_MODEL = "authentication.CustomUser"
+
+CRONJOBS = [
+    # Run daily at midnight
+    ('0 0 * * *', 'Patient.cron.run_daily_forecast'),
+
+    # Run weekly every Sunday at midnight
+    ('0 0 * * 0', 'Patient.cron.run_weekly_forecast'),
+
+    # Run monthly last day (simulate with 28th → check in code if last day)
+    ('0 0 28 * *', 'Patient.cron.run_monthly_forecast'),
+]
