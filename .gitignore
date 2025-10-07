@@ -1,7 +1,7 @@
 # --- Environment Files ---
 # Ignore sensitive data and local environment configurations.
 .env.*
-
+db.sqlite3
 # --- Databases ---
 # Ignore the local development database.
 
@@ -26,6 +26,5 @@ env/
 
 # --- Operating System Files ---
 # Ignore system-specific metadata files.
-db.sqlite3
 .DS_Store
 Thumbs.db

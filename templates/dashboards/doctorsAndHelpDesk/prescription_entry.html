@@ -373,7 +373,7 @@
                 .then(data => {
                     if (data.status === 'success') {
                         // Redirect to the review page upon successful submission
-                        window.location.href = '{% url "review_page" %}';
+                        window.location.href = '{% url "patient:review_page" %}';
                     } else {
                         alert('Error: ' + (data.message || 'Unknown error'));
                     }

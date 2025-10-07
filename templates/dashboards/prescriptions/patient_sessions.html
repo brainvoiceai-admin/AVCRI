@@ -6,324 +6,50 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Patient Sessions - {{ visit.patient_name }} ({{ visit.patient_id }})</title>
   <style>
-    :root {
-      --primary: #3498db;
-      --primary-dark: #2980b9;
-      --secondary: #2c3e50;
-      --light: #ecf0f1;
-      --dark: #34495e;
-      --success: #27ae60;
-      --warning: #f39c12;
-      --danger: #e74c3c;
-      --info: #3498db;
-      --gray: #95a5a6;
-      --light-gray: #f8f9fa;
-      --border-radius: 6px;
-      --shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-      --transition: all 0.3s ease;
-    }
-
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-    }
-
-    body {
-      background-color: #f5f7fa;
-      color: #333;
-      line-height: 1.6;
-      display: flex;
-      min-height: 100vh;
-    }
-
-    /* Main Content Styles */
-    .main-content {
-      flex: 1;
-      padding: 25px;
-      margin-left: 260px; /* Align with existing side nav */
-      overflow-y: auto;
-    }
-
-    .page-title {
-      font-size: 1.8rem;
-      font-weight: 600;
-      color: var(--secondary);
-      margin-bottom: 10px;
-    }
-
-    .page-subtitle {
-      color: var(--gray);
-      margin-bottom: 25px;
-      font-size: 1rem;
-    }
-
-    /* Card Styles */
-    .card {
-      background: white;
-      border-radius: var(--border-radius);
-      box-shadow: var(--shadow);
-      margin-bottom: 25px;
-      overflow: hidden;
-    }
-
-    .card-header {
-      padding: 16px 20px;
-      background-color: var(--light-gray);
-      border-bottom: 1px solid #e0e0e0;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-
-    .card-title {
-      font-size: 1.3rem;
-      font-weight: 600;
-      color: var(--secondary);
-    }
-
-    .card-body {
-      padding: 20px;
-    }
-
-    /* Table Styles */
-    table {
-      width: 100%;
-      border-collapse: collapse;
-    }
-
-    thead {
-      background-color: var(--light-gray);
-    }
-
-    th {
-      padding: 12px 15px;
-      text-align: left;
-      font-weight: 600;
-      color: var(--dark);
-      border-bottom: 2px solid #e0e0e0;
-    }
-
-    td {
-      padding: 12px 15px;
-      border-bottom: 1px solid #e0e0e0;
-    }
-
-    tbody tr {
-      transition: var(--transition);
-    }
-
-    tbody tr:hover {
-      background-color: rgba(52, 152, 219, 0.05);
-    }
-
-    /* Button Styles */
-    .btn {
-      display: inline-block;
-      padding: 8px 16px;
-      background: var(--primary);
-      color: white;
-      text-decoration: none;
-      border-radius: var(--border-radius);
-      border: none;
-      cursor: pointer;
-      transition: var(--transition);
-      font-weight: 500;
-      text-align: center;
-      font-size: 0.9rem;
-    }
-
-    .btn:hover {
-      background: var(--primary-dark);
-      transform: translateY(-1px);
-      box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
-    }
-
-    .btn-sm {
-      padding: 6px 12px;
-      font-size: 0.85rem;
-    }
-
-    .btn-danger {
-      background: var(--danger);
-    }
-
-    .btn-danger:hover {
-      background: #c0392b;
-    }
-
-    .btn-success {
-      background: var(--success);
-    }
-
-    .btn-success:hover {
-      background: #219653;
-    }
-
-    .btn-warning {
-      background: var(--warning);
-    }
-
-    .btn-warning:hover {
-      background: #e67e22;
-    }
-
-    .btn-info {
-      background: var(--info);
-    }
-
-    .btn-info:hover {
-      background: var(--primary-dark);
-    }
-
-    /* Form Styles */
-    .form-inline {
-      display: inline;
-      margin: 0;
-    }
-
-    /* Message Styles */
-    .messages {
-      margin: 0 0 20px 0;
-    }
-
-    .messages .success {
-      background: #e6ffed;
-      border: 1px solid #b8f1c6;
-      color: #064;
-      padding: 12px 15px;
-      border-radius: var(--border-radius);
-    }
-
-    .messages .error {
-      background: #ffecec;
-      border: 1px solid #f1b8b8;
-      color: #700;
-      padding: 12px 15px;
-      border-radius: var(--border-radius);
-    }
-
-    .messages .warning {
-      background: #fff4e6;
-      border: 1px solid #ffd8b8;
-      color: #663c00;
-      padding: 12px 15px;
-      border-radius: var(--border-radius);
-    }
-
-    .messages .info {
-      background: #e6f7ff;
-      border: 1px solid #b8e1f1;
-      color: #004b70;
-      padding: 12px 15px;
-      border-radius: var(--border-radius);
-    }
-
-    /* Text Styles */
-    .muted {
-      color: var(--gray);
-      font-size: 0.95em;
-    }
-
-    .small-muted {
-      font-size: 0.85em;
-      color: var(--gray);
-    }
-
-    .note {
-      font-size: 0.9em;
-      color: var(--gray);
-      margin-top: 6px;
-    }
-
-    .no-wrap {
-      white-space: nowrap;
-    }
-
-    /* Section Header */
-    .section-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 10px;
-      margin: 30px 0 15px 0;
-    }
-
-    .section-header h2 {
-      margin: 0;
-      font-size: 1.4rem;
-      color: var(--secondary);
-    }
-
-    /* Action Group */
-    .action-group {
-      display: flex;
-      gap: 8px;
-      flex-wrap: wrap;
-    }
-
-    /* Empty State */
-    .empty-state {
-      text-align: center;
-      padding: 40px 20px;
-      color: var(--gray);
-    }
-
-    .empty-state i {
-      font-size: 3rem;
-      margin-bottom: 15px;
-      color: #bdc3c7;
-    }
-
-    /* Responsive Styles */
-    @media (max-width: 1024px) {
-      .main-content {
-        margin-left: 0;
-        padding: 20px 15px;
-      }
-      
-      table {
-        display: block;
-        overflow-x: auto;
-      }
-      
-      .section-header {
-        flex-direction: column;
-        align-items: flex-start;
-        gap: 10px;
-      }
-      
-      .action-group {
-        width: 100%;
-        justify-content: flex-start;
-      }
-    }
-
-    @media (max-width: 768px) {
-      .card-header {
-        flex-direction: column;
-        gap: 10px;
-        align-items: flex-start;
-      }
-      
-      .action-group {
-        flex-direction: column;
-        width: 100%;
-      }
-      
-      .btn {
-        width: 100%;
-        margin-bottom: 5px;
-      }
-    }
+    /* (kept your original CSS) */
+    :root { --primary: #3498db; --primary-dark: #2980b9; --secondary: #2c3e50; --light: #ecf0f1; --dark: #34495e; --success: #27ae60; --warning: #f39c12; --danger: #e74c3c; --info: #3498db; --gray: #95a5a6; --light-gray: #f8f9fa; --border-radius: 6px; --shadow: 0 2px 4px rgba(0,0,0,0.1); --transition: all 0.3s ease; }
+    * { margin:0; padding:0; box-sizing:border-box; font-family:'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+    body { background-color:#f5f7fa; color:#333; line-height:1.6; display:flex; min-height:100vh; }
+    .main-content { flex:1; padding:25px; margin-left:260px; overflow-y:auto; }
+    .page-title { font-size:1.8rem; font-weight:600; color:var(--secondary); margin-bottom:10px; }
+    .page-subtitle { color:var(--gray); margin-bottom:25px; font-size:1rem; }
+    .card { background:white; border-radius:var(--border-radius); box-shadow:var(--shadow); margin-bottom:25px; overflow:hidden; }
+    .card-header { padding:16px 20px; background-color:var(--light-gray); border-bottom:1px solid #e0e0e0; display:flex; justify-content:space-between; align-items:center; }
+    .card-title { font-size:1.3rem; font-weight:600; color:var(--secondary); }
+    .card-body { padding:20px; }
+    table { width:100%; border-collapse:collapse; }
+    thead { background-color:var(--light-gray); }
+    th { padding:12px 15px; text-align:left; font-weight:600; color:var(--dark); border-bottom:2px solid #e0e0e0; }
+    td { padding:12px 15px; border-bottom:1px solid #e0e0e0; }
+    tbody tr { transition:var(--transition); }
+    tbody tr:hover { background-color: rgba(52,152,219,0.05); }
+    .btn { display:inline-block; padding:8px 16px; background:var(--primary); color:white; text-decoration:none; border-radius:var(--border-radius); border:none; cursor:pointer; transition:var(--transition); font-weight:500; text-align:center; font-size:0.9rem; }
+    .btn:hover { background:var(--primary-dark); transform:translateY(-1px); box-shadow:0 2px 5px rgba(0,0,0,0.1); }
+    .btn-sm { padding:6px 12px; font-size:0.85rem; }
+    .btn-danger { background:var(--danger); }
+    .btn-danger:hover { background:#c0392b; }
+    .btn-success { background:var(--success); }
+    .btn-success:hover { background:#219653; }
+    .btn-warning { background:var(--warning); }
+    .btn-warning:hover { background:#e67e22; }
+    .btn-info { background:var(--info); }
+    .btn-info:hover { background:var(--primary-dark); }
+    .form-inline { display:inline; margin:0; }
+    .messages { margin:0 0 20px 0; }
+    .muted { color:var(--gray); font-size:0.95em; }
+    .small-muted { font-size:0.85em; color:var(--gray); }
+    .note { font-size:0.9em; color:var(--gray); margin-top:6px; }
+    .no-wrap { white-space:nowrap; }
+    .section-header { display:flex; align-items:center; justify-content:space-between; gap:10px; margin:30px 0 15px 0; }
+    .action-group { display:flex; gap:8px; flex-wrap:wrap; }
+    .empty-state { text-align:center; padding:40px 20px; color:var(--gray); }
+    @media (max-width:1024px) { .main-content{ margin-left:0; padding:20px 15px } table{ display:block; overflow-x:auto } .section-header{ flex-direction:column; align-items:flex-start; gap:10px } .action-group{ width:100%; justify-content:flex-start } }
+    @media (max-width:768px) { .card-header{ flex-direction:column; gap:10px; align-items:flex-start } .action-group{ flex-direction:column; width:100% } .btn{ width:100%; margin-bottom:5px } }
   </style>
 </head>
 <body>
-  <!-- Include existing navbar -->
   {% include 'dashboards/nav.html' %}
 
-  <!-- Main Content -->
   <main class="main-content">
     <h1 class="page-title">Sessions for {{ visit.patient_name }}</h1>
     <p class="page-subtitle">Registration No: {{ visit.patient_id }}</p>
@@ -338,7 +64,7 @@
       </div>
     {% endif %}
 
-    <!-- Active Sessions Section -->
+    {# --------- Active Sessions Section --------- #}
     <div class="card">
       <div class="card-header">
         <h2 class="card-title">Active Sessions</h2>
@@ -355,7 +81,10 @@
               <th style="width:90px">Room No</th>
               <th style="width:200px">Therapists</th>
               <th>Therapy Items</th>
-              <th style="width:260px">Actions</th>
+              {# Show Actions column only if NOT scheduling staff (they should have no action access) #}
+              {% if request.user.role != "scheduling_staff" %}
+                <th style="width:260px">Actions</th>
+              {% endif %}
             </tr>
           </thead>
           <tbody>
@@ -373,30 +102,37 @@
                   <span class="small-muted">No therapy items for this session.</span>
                 {% endif %}
               </td>
-              <td>
-                {% if s.booking_ids %}
-                  <div class="action-group">
-                    <form class="form-inline" method="post" action="{% url 'patient:cancel_session_bookings' %}" onsubmit="return confirm('Cancel entire session (all bookings)?');">
-                      {% csrf_token %}
-                      {% for bid in s.booking_ids %}
-                        <input type="hidden" name="booking_ids" value="{{ bid }}">
-                      {% endfor %}
-                      <button class="btn btn-danger btn-sm" type="submit">Cancel Session</button>
-                    </form>
 
-                    <form class="form-inline" method="post" action="{% url 'patient:complete_session_bookings' %}">
-                      {% csrf_token %}
-                      {% for bid in s.booking_ids %}
-                        <input type="hidden" name="booking_ids" value="{{ bid }}">
-                      {% endfor %}
-                      <button class="btn btn-success btn-sm" type="submit">Complete Session</button>
-                    </form>
-                  </div>
-                  <span class="small-muted">Actions operate on all underlying bookings.</span>
-                {% else %}
-                  <span class="small-muted">—</span>
-                {% endif %}
+              {# Actions cell: only render if NOT scheduling_staff #}
+              {% if request.user.role != "scheduling_staff" %}
+              <td>
+                <div class="action-group">
+                  {# Cancel Session: only doctors and super_admin can cancel #}
+                  {% if request.user.role == "doctor" or request.user.role == "doctor_admin" or request.user.role == "super_admin" %}
+                  <form class="form-inline" method="post" action="{% url 'patient:cancel_session_bookings' %}" onsubmit="return confirm('Cancel entire session (all bookings)?');">
+                    {% csrf_token %}
+                    {% for bid in s.booking_ids %}
+                      <input type="hidden" name="booking_ids" value="{{ bid }}">
+                    {% endfor %}
+                    <button class="btn btn-danger btn-sm" type="submit">Cancel Session</button>
+                  </form>
+                  {% endif %}
+
+                  {# Complete Session: nurses, doctors, and super_admin can complete #}
+                  {% if request.user.role == "nurse" or request.user.role == "doctor" or request.user.role == "doctor_admin" or request.user.role == "super_admin" %}
+                  <form class="form-inline" method="post" action="{% url 'patient:complete_session_bookings' %}">
+                    {% csrf_token %}
+                    {% for bid in s.booking_ids %}
+                      <input type="hidden" name="booking_ids" value="{{ bid }}">
+                    {% endfor %}
+                    <button class="btn btn-success btn-sm" type="submit">Complete Session</button>
+                  </form>
+                  {% endif %}
+                </div>
+
+                <span class="small-muted">Actions operate on all underlying bookings.</span>
               </td>
+              {% endif %}
             </tr>
           {% endfor %}
           </tbody>
@@ -409,15 +145,18 @@
       </div>
     </div>
 
-    <!-- Prescription Items Section -->
+    {# --------- Prescription Items Section --------- #}
     <div class="card">
       <div class="card-header">
         <h2 class="card-title">Prescription Items</h2>
         <div class="action-group">
+          {# Add prescription item buttons: only doctors and super_admin can add #}
           {% if prescriptions %}
-            {% for pres in prescriptions %}
-              <a href="{% url 'patient:add_prescription_item' pres.id %}" class="btn btn-success btn-sm">+ Add Prescription Item (Prescription {{ pres.id }})</a>
-            {% endfor %}
+            {% if request.user.role == "doctor" or request.user.role == "doctor_admin" or request.user.role == "super_admin" %}
+              {% for pres in prescriptions %}
+                <a href="{% url 'patient:add_prescription_item' pres.id %}" class="btn btn-success btn-sm">+ Add Prescription Item (Prescription {{ pres.id }})</a>
+              {% endfor %}
+            {% endif %}
           {% else %}
             <span class="small-muted">No prescriptions available for this visit.</span>
           {% endif %}
@@ -434,7 +173,10 @@
               <th>From</th>
               <th>To</th>
               <th>Status</th>
-              <th style="width:200px">Actions</th>
+              {# Actions column only for non-scheduling staff #}
+              {% if request.user.role != "scheduling_staff" %}
+                <th style="width:200px">Actions</th>
+              {% endif %}
             </tr>
           </thead>
           <tbody>
@@ -446,18 +188,26 @@
               <td>{{ pi.from_date }}</td>
               <td>{{ pi.to_date }}</td>
               <td>{{ pi.status }}</td>
+
+              {% if request.user.role != "scheduling_staff" %}
               <td>
                 <div class="action-group">
-                  <form class="form-inline" method="get" action="{% url 'patient:update_prescription_item' pi.id %}">
-                    <button class="btn btn-warning btn-sm" type="submit">Edit</button>
-                  </form>
+                  {# Edit / Cancel: only doctors and super_admin can edit/cancel prescription items #}
+                  {% if request.user.role == "doctor" or request.user.role == "doctor_admin" or request.user.role == "super_admin" %}
+                    <form class="form-inline" method="get" action="{% url 'patient:update_prescription_item' pi.id %}">
+                      <button class="btn btn-warning btn-sm" type="submit">Edit</button>
+                    </form>
 
-                  <form class="form-inline" method="post" action="{% url 'patient:cancel_prescription_item' pi.id %}" onsubmit="return confirm('Cancel prescription item?');">
-                    {% csrf_token %}
-                    <button class="btn btn-danger btn-sm" type="submit">Cancel</button>
-                  </form>
+                    <form class="form-inline" method="post" action="{% url 'patient:cancel_prescription_item' pi.id %}" onsubmit="return confirm('Cancel prescription item?');">
+                      {% csrf_token %}
+                      <button class="btn btn-danger btn-sm" type="submit">Cancel</button>
+                    </form>
+                  {% else %}
+                    <span class="small-muted">No permission to modify</span>
+                  {% endif %}
                 </div>
               </td>
+              {% endif %}
             </tr>
           {% endfor %}
           </tbody>
@@ -470,12 +220,15 @@
       </div>
     </div>
 
-    <!-- Therapy Items Section -->
+    {# --------- Therapy Items Section --------- #}
     <div class="card">
       <div class="card-header">
         <h2 class="card-title">Therapy Items <span class="small-muted">(Update items)</span></h2>
         <div class="action-group">
-          <a href="{% url 'patient:add_therapy_item' visit.id %}" class="btn btn-success btn-sm">+ Add Therapy Item</a>
+          {# Add Therapy Item: only doctors and super_admin can add #}
+          {% if request.user.role == "doctor" or request.user.role == "doctor_admin" or request.user.role == "super_admin" %}
+            <a href="{% url 'patient:add_therapy_item' visit.id %}" class="btn btn-success btn-sm">+ Add Therapy Item</a>
+          {% endif %}
         </div>
       </div>
       <div class="card-body">
@@ -489,7 +242,10 @@
               <th>From</th>
               <th>To</th>
               <th>Status</th>
-              <th style="width:200px">Actions</th>
+              {# Actions only if NOT scheduling staff #}
+              {% if request.user.role != "scheduling_staff" %}
+                <th style="width:200px">Actions</th>
+              {% endif %}
             </tr>
           </thead>
           <tbody>
@@ -502,18 +258,26 @@
               <td>{{ it.from_date }}</td>
               <td>{{ it.to_date }}</td>
               <td>{{ it.status }}</td>
+
+              {% if request.user.role != "scheduling_staff" %}
               <td>
                 <div class="action-group">
-                  <form class="form-inline" method="get" action="{% url 'patient:update_therapy_item' it.id %}">
-                    <button class="btn btn-warning btn-sm" type="submit">Edit</button>
-                  </form>
+                  {# Edit / Cancel: only doctors and super_admin can edit/cancel therapy items #}
+                  {% if request.user.role == "doctor" or request.user.role == "doctor_admin" or request.user.role == "super_admin" %}
+                    <form class="form-inline" method="get" action="{% url 'patient:update_therapy_item' it.id %}">
+                      <button class="btn btn-warning btn-sm" type="submit">Edit</button>
+                    </form>
 
-                  <form class="form-inline" method="post" action="{% url 'patient:cancel_therapy_item' it.id %}" onsubmit="return confirm('Cancel this therapy item?');">
-                    {% csrf_token %}
-                    <button class="btn btn-danger btn-sm" type="submit">Cancel</button>
-                  </form>
+                    <form class="form-inline" method="post" action="{% url 'patient:cancel_therapy_item' it.id %}" onsubmit="return confirm('Cancel this therapy item?');">
+                      {% csrf_token %}
+                      <button class="btn btn-danger btn-sm" type="submit">Cancel</button>
+                    </form>
+                  {% else %}
+                    <span class="small-muted">No permission to modify</span>
+                  {% endif %}
                 </div>
               </td>
+              {% endif %}
             </tr>
             {% endfor %}
           {% endfor %}

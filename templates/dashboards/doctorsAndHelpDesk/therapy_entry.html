@@ -415,7 +415,7 @@
                 placeholder: 'Search for a Therapy...',
                 minimumInputLength: 2,
                 ajax: {
-                    url: '{% url "search_therapies" %}',
+                    url: '{% url "patient:search_therapies" %}',
                     dataType: 'json',
                     delay: 250,
                     data: function(params) {
@@ -668,7 +668,7 @@
                 .then(response => response.json())
                 .then(data => {
                     if (data.status === 'success') {
-                        window.location.href = '{% url "prescription_entry" %}';
+                        window.location.href = '{% url "patient:prescription_entry" %}';
                     } else {
                         alert('Error: ' + (data.message || 'Unknown error'));
                     }

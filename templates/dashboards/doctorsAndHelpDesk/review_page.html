@@ -169,7 +169,7 @@
     </div>
 
     <div class="text-center mb-5">
-      <form method="POST" action="{% url 'submit_all_data' %}">
+      <form method="POST" action="{% url 'patient:submit_all_data' %}">
         {% csrf_token %}
         <button type="submit" class="btn btn-success btn-lg"><i class="fas fa-paper-plane me-2"></i> Submit All Data</button>
       </form>

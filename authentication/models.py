@@ -6,15 +6,18 @@ from django.db import models
 
 class CustomUser(AbstractUser):
     ROLE_CHOICES = [
-        ("therapist", "Therapist"),
-        ("therapist_admin", "Therapist Admin"),
-        ("doctor_admin", "Doctor Admin"),
-        ("gm_hr", "GM & HR Team"),
-        ("super_admin", "Super Admin"),
-        ("Patient", "Patient"),
-        ("Tenants", "Tenants"),
-        ("Doctor Helpdesk", "Doctor Helpdesk "),
-       
-    ]
+    ("super_admin", "Super Admin (IT Department)"),
+    ("admin", "Admin (Administrative GM / Management)"),
+    ("doctor", "Doctor"),
+    ("scheduling_staff", "Scheduling Staff"),
+    ("therapist", "Therapist"),
+    ("nurse", "Nurse"),
+    ("patient", "Patient"),
+    ("ip_pharmacy_staff", "IP Pharmacy Staff"),
+    ("imu_staff", "IMU Staff (Instant Medical Unit)"),
+    ("finance_staff", "Finance Staff"),
+    ("hr", "HR"),
+    ("housekeeping_staff", "Housekeeping Staff"),
+]
     role = models.CharField(max_length=20, choices=ROLE_CHOICES, default="therapist")
     mobile = models.CharField(max_length=15, unique=True, null=True, blank=True)

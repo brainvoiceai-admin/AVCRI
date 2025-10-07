@@ -48,7 +48,7 @@ def patient_lookup_view(request):
             # 🎯 Calculate and store IP/OP status
             request.session['is_ip_or_op'] = 'OP' if len(str(reg_number)) == 5 else 'IP'
 
-            return redirect('therapy_entry')
+            return redirect('patient:therapy_entry')
         except Registration.DoesNotExist:
             error_message = "Registration number not found."
             return render(request, 'patient_lookup.html', {'error': error_message})
@@ -106,7 +106,7 @@ def get_patient_details_api(request):
 def therapy_entry_view(request):
     patient_reg_no = request.session.get('patient_reg_no')
     if not patient_reg_no:
-        return redirect('patient_lookup')
+        return redirect('patient:patient_lookup')
 
     patient = get_object_or_404(Registration.objects.using('therapy_db'), pat_reg_no=patient_reg_no)
     all_therapy_items = ItemMaster.objects.using('therapy_db').all()
@@ -189,7 +189,7 @@ def prescription_entry_view(request):
 def review_view(request):
     patient_reg_no = request.session.get('patient_reg_no')
     if not patient_reg_no:
-        return redirect('patient_lookup')
+        return redirect('patient:patient_lookup')
 
     patient = get_object_or_404(Registration.objects.using(DB_ALIAS), pat_reg_no=patient_reg_no)
 
@@ -264,7 +264,7 @@ DEFAULT_DB = 'default'
 def submit_all_data(request):
     patient_reg_no = request.session.get('patient_reg_no')
     if not patient_reg_no:
-        return redirect('patient_lookup')
+        return redirect('patient:patient_lookup')
 
     patient = get_object_or_404(Registration.objects.using(DB_ALIAS), pat_reg_no=patient_reg_no)
 
@@ -369,7 +369,7 @@ def submit_all_data(request):
     for key in ['patient_reg_no', 'from_date', 'to_date', 'admission_days', 'is_ip_or_op', 'therapy_rows_data', 'prescription_rows_data']:
         request.session.pop(key, None)
 
-    return redirect('patient_lookup')
+    return redirect('patient:patient_lookup')
 
 
 
