@@ -1,83 +1,339 @@
+{% load static %}
 <!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Patient Predictions — Interactive Dashboard</title>
-
   <style>
-    :root{
-      --g-dark: #0f5f3a;
-      --g-mid:  #1f8a5a;
-      --g-soft: #bfead0;
-      --bg: #f6fff7;
-      --muted: #164d3b;
+    :root {
+      --primary: #3498db;
+      --primary-dark: #2980b9;
+      --secondary: #2c3e50;
+      --light: #ecf0f1;
+      --dark: #34495e;
+      --success: #27ae60;
+      --warning: #f39c12;
+      --danger: #e74c3c;
+      --gray: #95a5a6;
+      --light-gray: #f8f9fa;
+      --border-radius: 8px;
+      --shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
     }
-    body{ margin:0; font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, Arial; background:var(--bg); color:var(--muted); }
-    .wrap{ max-width:1000px; margin:18px auto; padding:16px; }
-    header{ display:flex; flex-wrap:wrap; gap:12px; align-items:center; justify-content:space-between; margin-bottom:12px; }
-    h1{ margin:0; font-size:20px; color:var(--g-dark); }
-    .controls{ display:flex; gap:8px; align-items:center; }
-    .btn{ padding:7px 12px; border-radius:8px; border:0; cursor:pointer; font-weight:600; background:var(--g-soft); color:var(--g-dark); }
-    .btn.active{ background:linear-gradient(90deg,var(--g-mid),var(--g-dark)); color:white; box-shadow:0 6px 18px rgba(15,95,58,0.12); }
-    .card{ background:#fff; border-radius:10px; padding:12px; box-shadow:0 8px 20px rgba(0,0,0,0.06); }
-    #meta{ margin-top:8px; color:#2f6b4f; font-size:13px; }
-    #predChart { width:100% !important; height:360px !important; display:block; }
-    .summary { display:flex; gap:12px; flex-wrap:wrap; margin-bottom:12px; }
+
+    * {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    }
+
+    body {
+      background: #f5f7fa;
+      display: flex;
+      min-height: 100vh;
+      margin: 0;
+      padding: 0;
+      color: var(--dark);
+    }
+
+    /* Main Content Styles */
+    .main-content {
+      flex: 1;
+      padding: 30px;
+      margin-left: 250px; /* Align with existing side nav */
+      overflow-y: auto;
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+
+    /* Header Styles */
+    .page-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 25px;
+      padding-bottom: 15px;
+      border-bottom: 1px solid #e0e0e0;
+    }
+
+    .page-title {
+      font-size: 1.8rem;
+      font-weight: 600;
+      color: var(--secondary);
+      margin: 0;
+    }
+
+    /* Control Styles */
+    .controls {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+
+    .btn {
+      padding: 10px 16px;
+      border-radius: var(--border-radius);
+      border: none;
+      cursor: pointer;
+      font-weight: 500;
+      transition: all 0.3s ease;
+      text-decoration: none;
+      display: inline-block;
+      text-align: center;
+    }
+
+    .btn-primary {
+      background: var(--primary);
+      color: white;
+    }
+
+    .btn-primary:hover {
+      background: var(--primary-dark);
+      transform: translateY(-1px);
+    }
+
+    .btn-outline {
+      background: transparent;
+      border: 1px solid var(--primary);
+      color: var(--primary);
+    }
+
+    .btn-outline:hover {
+      background: var(--primary);
+      color: white;
+    }
+
+    .btn-group {
+      display: flex;
+      gap: 5px;
+    }
+
+    .btn-group .btn {
+      border-radius: 0;
+    }
+
+    .btn-group .btn:first-child {
+      border-radius: var(--border-radius) 0 0 var(--border-radius);
+    }
+
+    .btn-group .btn:last-child {
+      border-radius: 0 var(--border-radius) var(--border-radius) 0;
+    }
+
+    .btn.active {
+      background: var(--primary);
+      color: white;
+      box-shadow: var(--shadow);
+    }
+
+    /* Card Styles */
+    .card {
+      background: white;
+      border-radius: var(--border-radius);
+      box-shadow: var(--shadow);
+      margin-bottom: 25px;
+      overflow: hidden;
+    }
+
+    .card-body {
+      padding: 25px;
+    }
+
+    /* Filter Styles */
+    .filters {
+      display: flex;
+      gap: 15px;
+      align-items: center;
+      margin-bottom: 20px;
+      flex-wrap: wrap;
+    }
+
+    .filter-group {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .filter-label {
+      font-weight: 500;
+      color: var(--dark);
+      font-size: 0.9rem;
+    }
+
+    .form-control {
+      border-radius: 6px;
+      border: 1px solid #dee2e6;
+      padding: 8px 12px;
+      transition: all 0.3s ease;
+    }
+
+    .form-control:focus {
+      border-color: var(--primary);
+      box-shadow: 0 0 0 0.2rem rgba(52, 152, 219, 0.25);
+      outline: none;
+    }
+
+    /* Summary Styles */
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 15px;
+      margin-bottom: 25px;
+    }
+
     .summary-card {
-      flex:1; min-width:200px; background:#f0fff4;
-      border-radius:10px; padding:10px 12px;
-      box-shadow:0 6px 16px rgba(15,95,58,0.08);
+      background: white;
+      border-radius: var(--border-radius);
+      padding: 20px;
+      box-shadow: var(--shadow);
+      text-align: center;
+      border-left: 4px solid var(--primary);
     }
-    .summary-card h3{ margin:0; font-size:20px; color:var(--g-dark); }
-    .summary-card small{ color:#2d6a4f; }
-    .filters { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:12px; }
-    input[type="date"]{ padding:6px; border-radius:6px; border:1px solid #bfead0; color:#164d3b; }
-    #range-label { margin-top:8px; color:#155e3d; font-size:14px; font-weight:500; }
+
+    .summary-value {
+      font-size: 2rem;
+      font-weight: 600;
+      color: var(--secondary);
+      margin: 10px 0;
+    }
+
+    .summary-label {
+      color: var(--gray);
+      font-size: 0.9rem;
+      font-weight: 500;
+    }
+
+    /* Chart Styles */
+    .chart-container {
+      position: relative;
+      height: 400px;
+      width: 100%;
+    }
+
+    .chart-meta {
+      margin-top: 15px;
+      color: var(--gray);
+      font-size: 0.9rem;
+      text-align: center;
+    }
+
+    .range-label {
+      background: var(--light-gray);
+      padding: 10px 15px;
+      border-radius: var(--border-radius);
+      margin-bottom: 15px;
+      font-size: 0.9rem;
+      color: var(--dark);
+    }
+
+    /* Responsive Styles */
+    @media (max-width: 1024px) {
+      .main-content {
+        margin-left: 0;
+        padding: 20px 15px;
+      }
+    }
+
+    @media (max-width: 768px) {
+      .page-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 15px;
+      }
+      
+      .controls {
+        width: 100%;
+        justify-content: space-between;
+      }
+      
+      .filters {
+        flex-direction: column;
+        align-items: flex-start;
+      }
+      
+      .filter-group {
+        width: 100%;
+      }
+      
+      .form-control {
+        flex: 1;
+      }
+      
+      .summary {
+        grid-template-columns: 1fr;
+      }
+      
+      .chart-container {
+        height: 300px;
+      }
+    }
   </style>
 </head>
 <body>
-  <div class="wrap">
-    <header>
-      <h1>Patient Forecasts</h1>
-      <div class="controls">
-        <button class="btn active" data-type="daily">Daily</button>
-        <button class="btn" data-type="weekly">Weekly</button>
-        <button class="btn" data-type="monthly">Monthly</button>
-        <button id="refresh" class="btn" style="background:#eef9f1; color:var(--g-dark);">Refresh</button>
-      </div>
-    </header>
+  <!-- Include existing navbar -->
+  {% include 'dashboards/nav.html' %}
 
-    <!-- 📅 Date Filter -->
-    <div class="filters">
-      <label>From: <input type="date" id="start-date"></label>
-      <label>To: <input type="date" id="end-date"></label>
-      <button id="apply" class="btn" style="background:#d9f5e3; color:#0f5f3a;">Apply</button>
-      <button id="clear" class="btn" style="background:#fff;">Clear</button>
-    </div>
+  <!-- Main Content -->
+  <main class="main-content">
+    <div class="container">
+      <div class="page-header">
+        <h1 class="page-title">Patient Forecasts</h1>
+        <div class="controls">
+          <div class="btn-group">
+            <button class="btn active" data-type="daily">Daily</button>
+            <!-- Add more time period buttons if needed -->
+          </div>
+          <button id="refresh" class="btn btn-outline">Refresh</button>
+        </div>
+      </div>
 
-    <!-- 🌿 Summary boxes -->
-    <div class="summary">
-      <div class="summary-card">
-        <h3 id="next-day">–</h3>
-        <small id="next-day-label">Tomorrow</small>
+      <!-- Date Filters -->
+      <div class="card">
+        <div class="card-body">
+          <div class="filters">
+            <div class="filter-group">
+              <span class="filter-label">From:</span>
+              <input type="date" id="start-date" class="form-control">
+            </div>
+            <div class="filter-group">
+              <span class="filter-label">To:</span>
+              <input type="date" id="end-date" class="form-control">
+            </div>
+            <button id="apply" class="btn btn-primary">Apply</button>
+            <button id="clear" class="btn btn-outline">Clear</button>
+          </div>
+        </div>
       </div>
-      <div class="summary-card">
-        <h3 id="next-week">–</h3>
-        <small>Next 7 days</small>
-      </div>
-      <div class="summary-card">
-        <h3 id="next-month">–</h3>
-        <small>Next 30 days</small>
-      </div>
-    </div>
 
-    <div class="card">
-      <canvas id="predChart"></canvas>
-      <div id="range-label"></div>
-      <div id="meta"></div>
+      <!-- Summary Cards -->
+      <div class="summary">
+        <div class="summary-card">
+          <div class="summary-value" id="next-day">–</div>
+          <div class="summary-label" id="next-day-label">Tomorrow</div>
+        </div>
+        <div class="summary-card">
+          <div class="summary-value" id="next-week">–</div>
+          <div class="summary-label">Next 7 Days</div>
+        </div>
+        <div class="summary-card">
+          <div class="summary-value" id="next-month">–</div>
+          <div class="summary-label">Next 30 Days</div>
+        </div>
+      </div>
+
+      <!-- Chart Container -->
+      <div class="card">
+        <div class="card-body">
+          <div class="range-label" id="range-label"></div>
+          <div class="chart-container">
+            <canvas id="predChart"></canvas>
+          </div>
+          <div class="chart-meta" id="meta"></div>
+        </div>
+      </div>
     </div>
-  </div>
+  </main>
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
@@ -170,26 +426,34 @@
         datasets.push({
           label:'Actual',
           data:actual,
-          borderColor:'#0f5f3a',
-          backgroundColor:'rgba(15,95,58,0.06)',
-          tension:0.2, pointRadius:3, fill:false
+          borderColor:'#3498db',
+          backgroundColor:'rgba(52, 152, 219, 0.1)',
+          tension:0.2, 
+          pointRadius:3, 
+          fill:false,
+          borderWidth: 2
         });
       }
       datasets.push({
         label:'Forecast',
         data:forecast,
-        borderColor:'#1f8a5a',
-        backgroundColor:'rgba(47,133,90,0.15)',
-        tension:0.25, pointRadius:4, fill:true
+        borderColor:'#27ae60',
+        backgroundColor:'rgba(39, 174, 96, 0.15)',
+        tension:0.25, 
+        pointRadius:4, 
+        fill:true,
+        borderWidth: 2
       });
       const hasCI=lower.some(x=>x!==null)&&upper.some(x=>x!==null);
       if(hasCI){
         datasets.push({
           label:'Confidence Range',
           data:upper,
-          borderColor:'rgba(72,187,120,0)',
-          backgroundColor:'rgba(72,187,120,0.18)',
-          fill:'-1', pointRadius:0, tension:0.25
+          borderColor:'rgba(39, 174, 96, 0)',
+          backgroundColor:'rgba(39, 174, 96, 0.18)',
+          fill:'-1', 
+          pointRadius:0, 
+          tension:0.25
         });
       }
       return { datasets,suggestedMax,hasOutlier };
@@ -210,7 +474,7 @@
       const prep=prepare(rows);
       updateSummary(prep);
 
-      // 🗓️ auto-fill start/end fields + display visible range
+      // Auto-fill start/end fields + display visible range
       const firstDate=prep.labels[0];
       const lastDate=prep.labels[prep.labels.length-1];
       if(!startInput.value) startInput.value=firstDate;
@@ -231,7 +495,13 @@
           maintainAspectRatio:false,
           interaction:{ mode:'nearest', intersect:false },
           plugins:{
-            legend:{ position:'top', labels:{ color:'#164d3b' } },
+            legend:{ 
+              position:'top', 
+              labels:{ 
+                color:'#34495e',
+                font: { size: 12 }
+              } 
+            },
             tooltip:{
               enabled:true,
               intersect:false,
@@ -249,16 +519,35 @@
             }
           },
           scales:{
-            x:{ ticks:{ color:'#164d3b', maxRotation:0, autoSkip:false }, grid:{ color:'rgba(15,95,58,0.04)' } },
-            y:{ ticks:{ color:'#164d3b' }, beginAtZero:true, suggestedMax }
+            x:{ 
+              ticks:{ 
+                color:'#34495e', 
+                maxRotation:0, 
+                autoSkip:false 
+              }, 
+              grid:{ 
+                color:'rgba(52, 73, 94, 0.1)' 
+              } 
+            },
+            y:{ 
+              ticks:{ 
+                color:'#34495e' 
+              }, 
+              beginAtZero:true, 
+              suggestedMax,
+              grid: {
+                color: 'rgba(52, 73, 94, 0.1)'
+              }
+            }
           },
           animation:{ duration:400 }
         }
       });
 
-      metaEl.textContent=`${labels.length} points loaded${hasOutlier?' • outliers detected':''}`;
+      metaEl.textContent=`${labels.length} data points loaded${hasOutlier?' • outliers detected':''}`;
     }
 
+    // Event Listeners
     buttons.forEach(b=>{
       b.addEventListener('click',e=>{
         buttons.forEach(x=>x.classList.remove('active'));
@@ -275,6 +564,7 @@
       render(active);
     });
 
+    // Initialize
     render(active);
   })();
   </script>

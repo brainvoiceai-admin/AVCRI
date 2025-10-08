@@ -106,12 +106,15 @@ class TimeSlot(models.Model):
         return f"Slot {self.slot_number}: {self.start_time.strftime('%H:%M')} - {self.end_time.strftime('%H:%M')}"
 
 
+ # optional if you want Room_Rent
+
 class TreatmentRoom(models.Model):
     room_no = models.CharField(max_length=20, primary_key=True)
     floor = models.CharField(max_length=20, null=True, blank=True)
     description = models.TextField(null=True, blank=True)
-    rent = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)  # optional if you want Room_Rent
-
+    tr_code = models.CharField(max_length=20, null=True, blank=True)
+    def __str__(self):
+        return f"{self.room_no} ({self.tr_code})"
 
 from django.db import models, IntegrityError, transaction
 from django.utils import timezone
