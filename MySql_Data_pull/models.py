@@ -61,7 +61,22 @@ class Prescription(models.Model):
         app_label = 'MySql_Data_pull'
 
 
+class OPMaster(models.Model):
+    # Replace field names / max_length if your actual SQL schema differs
+    Reg_Date = models.DateTimeField(null=True, blank=True)                      # appears like "2018-06-25 00:00:00.000"
+    NPat_Name = models.CharField(max_length=200, null=True, blank=True)
+    NPat_Reg_No = models.BigIntegerField(primary_key=True)                      # patient registration number (treated as PK)
+    NPat_Sex = models.CharField(max_length=10, null=True, blank=True)
+    NPat_Add1 = models.CharField(max_length=200, null=True, blank=True)
+    NPat_Add2 = models.CharField(max_length=200, null=True, blank=True)
+    NPat_Add3 = models.CharField(max_length=200, null=True, blank=True)
+    NPat_City = models.CharField(max_length=100, null=True, blank=True)         # CSV showed NaNs; using CharField to accept codes/names
 
+    class Meta:
+        managed = False   # Django won't manage (external SQL Server table)
+        db_table = '[dbo].[NPat_Reg_Master]'  # <-- change to the exact external table name if different
+        app_label = 'MySql_Data_pull'
+        
 #For dbo.Registration
 class Registration(models.Model):
     pat_reg_no = models.BigIntegerField(primary_key=True)   # Pat_Reg_No
@@ -197,7 +212,7 @@ class ItemMaster(models.Model):
 
 
 #dbo.Slot_Master
-class TimeSlot(models.Model):
+class TimeSlot_sql(models.Model):
     slot_no = models.IntegerField(primary_key=True)   # Slot_No
     starting_time = models.CharField(max_length=50, null=True, blank=True)
     time_session = models.CharField(max_length=50, null=True, blank=True)
@@ -255,6 +270,7 @@ class Visit(models.Model):
         return f"Visit for Patient {self.patient_id} ({self.patient_name}) on {self.date_of_visit.date()}"
 
 
+from Patient.models import TimeSlot
 class store_Therapy(models.Model):
     # Use DO_NOTHING for foreign key to the live server model to prevent errors
     visit = models.ForeignKey(Visit, on_delete=models.CASCADE, related_name='therapies',
@@ -267,6 +283,8 @@ class store_Therapy(models.Model):
     from_date = models.DateField()
     to_date = models.DateField()
     days = models.IntegerField()
+    preferred_time_slot = models.ForeignKey(TimeSlot, null=True, blank=True, on_delete=models.SET_NULL, related_name='preferred_for_therapies')
+    preferred_time_slot_value = models.CharField(max_length=8, null=True, blank=True)
 
 
 

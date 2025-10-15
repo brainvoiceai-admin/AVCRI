@@ -51,6 +51,8 @@ INSTALLED_APPS = [
     "rest_framework",
     "predictor",
     "django_crontab",
+    "Sheduling",
+    "masters",
 ]
 
 MIDDLEWARE = [

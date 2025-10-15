@@ -296,6 +296,42 @@
                         <option value="External">External</option>
                     </select>
                 </div>
+
+                <!-- NEW: Slot dropdown kept here but we will populate from TimeSlot model -->
+                <div class="form-group">
+                    <label for="slot-select"><i class="fas fa-clock me-1"></i> Slot</label>
+                    <select id="slot-select" class="form-control">
+                        <option value="">-- Select Slot --</option>
+                    </select>
+                    <div id="slot-helper" class="small text-muted" style="margin-top:6px;">Select therapy and from/to dates to see available slots.</div>
+                </div>
+            </div>
+
+            <hr>
+
+            <!-- Move From/To (moved here as user requested) -->
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="from-date-input"><i class="fas fa-calendar-start me-1"></i> From Date</label>
+                    <div class="input-icon-group">
+                        <i class="fas fa-calendar-day"></i>
+                        <input type="date" id="from-date-input" class="form-control">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="to-date-input"><i class="fas fa-calendar-check me-1"></i> To Date</label>
+                    <div class="input-icon-group">
+                        <i class="fas fa-calendar-day"></i>
+                        <input type="date" id="to-date-input" class="form-control">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="days-input"><i class="fas fa-calendar-alt me-1"></i> Days</label>
+                    <div class="input-icon-group">
+                        <i class="fas fa-hashtag"></i>
+                        <input type="text" id="days-input" class="form-control" readonly>
+                    </div>
+                </div>
             </div>
 
             <hr>
@@ -347,30 +383,6 @@
                 </div>
             </div>
 
-            <div class="form-row">
-                <div class="form-group">
-                    <label for="from-date-input"><i class="fas fa-calendar-start me-1"></i> From Date</label>
-                    <div class="input-icon-group">
-                        <i class="fas fa-calendar-day"></i>
-                        <input type="date" id="from-date-input" class="form-control">
-                    </div>
-                </div>
-                <div class="form-group">
-                    <label for="to-date-input"><i class="fas fa-calendar-check me-1"></i> To Date</label>
-                    <div class="input-icon-group">
-                        <i class="fas fa-calendar-day"></i>
-                        <input type="date" id="to-date-input" class="form-control">
-                    </div>
-                </div>
-                <div class="form-group">
-                    <label for="days-input"><i class="fas fa-calendar-alt me-1"></i> Days</label>
-                    <div class="input-icon-group">
-                        <i class="fas fa-hashtag"></i>
-                        <input type="text" id="days-input" class="form-control" readonly>
-                    </div>
-                </div>
-            </div>
-
             <div class="text-center mt-3">
                 <button id="add-therapy-btn" class="btn btn-success" type="button">
                     <i class="fas fa-plus-circle me-2"></i>Add Therapy
@@ -387,6 +399,7 @@
                             <th>SI No.</th>
                             <th>Therapy Name</th>
                             <th>Ext/Int</th>
+                            <th>Slot</th> <!-- NEW: slot column -->
                             <th>Items</th>
                             <th>From Date</th>
                             <th>To Date</th>
@@ -435,9 +448,10 @@
                 }
             });
 
-            // VARIABLES
+            // VARIABLES (kept names as before)
             const therapySelect = document.getElementById('therapy-select');
             const extIntSelect = document.getElementById('ext-int-select');
+            const slotSelect = document.getElementById('slot-select'); // NEW
             const itemSelect = document.getElementById('item-select');
             const oilClassInput = document.getElementById('oil-class-input');
             const usageInput = document.getElementById('usage-input');
@@ -453,6 +467,192 @@
 
             let addedTherapies = [];
             let currentItems = []; // items for the therapy being composed
+
+            // PATIENT REG NO-derived patient type (prefer this over Ext/Int)
+            const PATIENT_REG_NO = "{{ patient.pat_reg_no|default:''|escapejs }}";
+
+            // --- load TimeSlot catalog from server and populate slot-select ---
+            let timeSlotCatalog = []; // [{slot_number, start_time, label}]
+            function populateSlotsFromCatalog() {
+                // keep first placeholder option, remove others
+                $('#slot-select').find('option').not(':first').remove();
+                if (timeSlotCatalog.length === 0) {
+                    // fallback static list if DB empty
+                    const fallback = ["06:30","08:30","10:00","11:30","14:30","16:00","17:30"];
+                    fallback.forEach(v => {
+                        $('#slot-select').append(`<option class="ts-option" value="${v}">${formatSlotDisplay(v)}</option>`);
+                    });
+                    return;
+                }
+                timeSlotCatalog.forEach(ts => {
+                    $('#slot-select').append(`<option class="ts-option" data-slot-number="${ts.slot_number}" value="${ts.start_time}">${ts.label}</option>`);
+                });
+            }
+
+            function loadTimeSlotCatalog() {
+                $.ajax({
+                    url: '{% url "patient:time_slots" %}',
+                    method: 'GET',
+                    dataType: 'json',
+                    success: function(resp) {
+                        if (!resp || !resp.slots) {
+                            populateSlotsFromCatalog();
+                            return;
+                        }
+                        timeSlotCatalog = resp.slots;
+                        populateSlotsFromCatalog();
+                    },
+                    error: function(err) {
+                        console.error('Error loading time slots:', err);
+                        populateSlotsFromCatalog();
+                    }
+                });
+            }
+
+            // helper to format slot
+            function formatSlotDisplay(slotValue) {
+                if (!slotValue) return '';
+                const parts = slotValue.split(':');
+                if (parts.length !== 2) return slotValue;
+                let hour = parseInt(parts[0], 10);
+                const minute = parts[1];
+                const ampm = hour >= 12 ? 'PM' : 'AM';
+                if (hour === 0) hour = 12;
+                if (hour > 12) hour = hour - 12;
+                return `${hour}:${minute} ${ampm}`;
+            }
+
+            // --- available slots refresh (calls server with from_date & to_date) ---
+            let _slot_refresh_token = 0;
+            function getPatientType() {
+                // derive type from patient reg no: if digits-only length == 5 => OP, else IP
+                try {
+                    const digitsOnly = (PATIENT_REG_NO || '').toString().replace(/\D/g, '');
+                    if (digitsOnly.length === 5) {
+                        return 'OP';
+                    } else if (digitsOnly.length > 0) {
+                        return 'IP';
+                    }
+                } catch (e) {
+                    console.warn('getPatientType: reg no parse error', e);
+                }
+                // fallback to ext/int if no reg no present
+                const ext = extIntSelect.value;
+                if (!ext) return '';
+                if (ext.toLowerCase() === 'internal') return 'IP';
+                if (ext.toLowerCase() === 'external') return 'OP';
+                return '';
+            }
+
+            // compute intersection of arrays
+            function intersectArrays(arrays) {
+                if (!arrays || arrays.length === 0) return [];
+                return arrays.reduce((a,b) => a.filter(c => b.includes(c)));
+            }
+            // union
+            function unionArrays(arrays) {
+                const s = new Set();
+                arrays.forEach(a => (a||[]).forEach(x => s.add(x)));
+                return Array.from(s);
+            }
+
+            function refreshAvailableSlots() {
+                const therapyData = $('#therapy-select').select2('data')[0];
+                const therapyName = therapyData ? therapyData.text : '';
+                const fromVal = fromDateInput.value;
+                const toVal = toDateInput.value || fromVal;
+                const patientType = getPatientType();
+
+                $('#slot-helper').text('Loading available slots...');
+
+                if (!therapyName || !fromVal) {
+                    // enable all options if no therapy/date selected
+                    $('#slot-select').find('option.ts-option').prop('disabled', false).show();
+                    $('#slot-helper').text('Select therapy and from/to dates to load availability.');
+                    return;
+                }
+
+                const token = ++_slot_refresh_token;
+                $.ajax({
+                    url: '{% url "patient:available_slots" %}',
+                    method: 'GET',
+                    dataType: 'json',
+                    data: {
+                        therapy_name: therapyName,
+                        from_date: fromVal,
+                        to_date: toVal,
+                        patient_type: patientType
+                    },
+                    success: function(resp) {
+                        if (token !== _slot_refresh_token) return; // stale
+                        let perDateLists = [];
+
+                        if (resp.slots) {
+                            // server returned single-day format (treat as single-day for each date in range)
+                            perDateLists.push(resp.slots.map(s => s.value));
+                        } else if (resp.dates && Array.isArray(resp.dates)) {
+                            // build map date->slots
+                            const map = {};
+                            resp.dates.forEach(d => { map[d.date] = (d.slots||[]).map(s => s.value); });
+                            // iterate requested range
+                            const start = new Date(fromVal);
+                            const end = new Date(toVal);
+                            for (let d = new Date(start); d <= end; d.setDate(d.getDate()+1)) {
+                                const iso = d.toISOString().slice(0,10);
+                                perDateLists.push(map[iso] || []);
+                            }
+                        }
+
+                        let intersection = intersectArrays(perDateLists);
+                        let finalSlots = intersection;
+                        let usedUnion = false;
+                        if (!finalSlots || finalSlots.length === 0) {
+                            finalSlots = unionArrays(perDateLists);
+                            usedUnion = true;
+                        }
+
+                        // If no slots available at all -> disable all options + show helper
+                        if (!finalSlots || finalSlots.length === 0) {
+                            $('#slot-select').find('option.ts-option').each(function(){ $(this).prop('disabled', true).hide(); });
+                            if (!$('#slot-select').find('option.no-available').length) {
+                                $('#slot-select').append('<option class="no-available" value="" disabled>No slots available</option>');
+                            }
+                            $('#slot-helper').html('<span class="text-danger">No slots available for selected therapy/date range.</span>');
+                            return;
+                        }
+
+                        // remove any no-available option
+                        $('#slot-select').find('option.no-available').remove();
+
+                        // enable only finalSlots
+                        $('#slot-select').find('option.ts-option').each(function(){
+                            const v = $(this).val();
+                            if (finalSlots.includes(v)) {
+                                $(this).prop('disabled', false).show();
+                            } else {
+                                $(this).prop('disabled', true).hide();
+                            }
+                        });
+
+                        if (usedUnion) {
+                            $('#slot-helper').text('No single slot available across all days — showing slots available on at least one day.');
+                        } else {
+                            $('#slot-helper').text('Slots shown are available for all selected days.');
+                        }
+                    },
+                    error: function(err) {
+                        console.error('available_slots error', err);
+                        $('#slot-helper').text('Could not load slots (check server).');
+                    }
+                });
+            }
+
+            // When therapy/from/to change -> refresh
+            $('#therapy-select').on('select2:select', function(){ refreshAvailableSlots(); });
+            $('#therapy-select').on('select2:clear', function(){ $('#slot-select').find('option.ts-option').prop('disabled', false).show(); $('#slot-helper').text('Select therapy and from/to dates to load availability.'); });
+            fromDateInput.addEventListener('change', function(){ calculateDays(); refreshAvailableSlots(); });
+            toDateInput.addEventListener('change', function(){ calculateDays(); refreshAvailableSlots(); });
+            // NOTE: ext-int change no longer triggers slot refresh (patient type derived from reg no)
 
             // When user selects an item, fetch details to fill oil/usage/procured
             itemSelect.addEventListener('change', () => {
@@ -474,9 +674,6 @@
             });
 
             // Calculate days
-            fromDateInput.addEventListener('change', calculateDays);
-            toDateInput.addEventListener('change', calculateDays);
-
             function calculateDays() {
                 const fromVal = fromDateInput.value;
                 const toVal = toDateInput.value;
@@ -488,7 +685,6 @@
                 const toDate = new Date(toVal);
                 if (fromDate && toDate && fromDate <= toDate) {
                     const timeDiff = toDate.getTime() - fromDate.getTime();
-                    // include both dates:
                     const daysDiff = Math.ceil(timeDiff / (1000 * 3600 * 24)) + 1;
                     daysInput.value = daysDiff;
                 } else {
@@ -586,6 +782,7 @@
                     therapy_name: selectedTherapyOption.text,
                     therapy_code: selectedTherapyOption.value,
                     ext_int: extIntSelect.value,
+                    slot: slotSelect.value || '', // NEW: store slot
                     items: JSON.parse(JSON.stringify(currentItems)), // deep copy
                     from_date: fromDateInput.value,
                     to_date: toDateInput.value,
@@ -610,11 +807,15 @@
                         return `<div style="margin-bottom:6px;"><strong>${it.item_name}</strong>${meta}</div>`;
                     }).join('');
 
+                    // Format slot display (friendly)
+                    const slotDisplay = therapy.slot ? (formatSlotDisplay(therapy.slot)) : '';
+
                     const newRow = document.createElement('tr');
                     newRow.innerHTML = `
                         <td>${index + 1}</td>
                         <td>${therapy.therapy_name}</td>
                         <td>${therapy.ext_int || ''}</td>
+                        <td>${slotDisplay}</td>
                         <td>${itemsHtml}</td>
                         <td>${therapy.from_date}</td>
                         <td>${therapy.to_date}</td>
@@ -639,6 +840,7 @@
             function clearInputs() {
                 $('#therapy-select').val(null).trigger('change'); // Clear Select2
                 extIntSelect.value = '';
+                slotSelect.value = ''; // NEW: reset slot
                 itemSelect.value = '';
                 oilClassInput.value = '';
                 usageInput.value = '';
@@ -676,9 +878,10 @@
                 .catch(error => console.error('Submission error:', error));
             });
 
-            // initial render
+            // initial render & load catalog
             renderCurrentItems();
             renderTable();
+            loadTimeSlotCatalog();
         });
     </script>
 </body>

@@ -14,7 +14,7 @@
         {% if request.user.role == "doctor_admin" or request.user.role == "doctor" or request.user.role == "super_admin" %}
         <div class="menu-section">
             <div class="menu-section-title">Doctor Options</div>
-            <a href="{% url 'patient:patient_lookup' %}" class="menu-item">
+            <a href="{% url 'patient_therapy' %}" class="menu-item">
                 <span>🏥</span> Add Therapy Prescription
             </a>
       
@@ -101,6 +101,32 @@
             </a>
             <a href="{% url 'Audit_Log' %}" class="menu-item">
                 <span>📑</span> Audit Log
+            </a>
+            <a href="{% url 'procured_manage' %}" class="menu-item">
+                <span>📑</span> Procured Master
+            </a>
+        </div>
+            <div class="menu-section">
+            <div class="menu-section-title">Table Masters</div>
+             <a href="{% url 'oilclass_manage' %}" class="menu-item">
+                <span>📑</span> Oilclass Master
+            </a>
+            <a href="{% url 'procured_manage' %}" class="menu-item">
+                <span>📑</span> Procured Master
+            </a>
+               <a href="{% url 'usagetype_manage' %}" class="menu-item">
+                <span>📑</span> Usage Master
+            </a>
+              </a>
+               <a href="{% url 'prestime_manage' %}" class="menu-item">
+                <span>📑</span> Prescription Time Master
+            </a>
+              </a>
+               <a href="{% url 'prescope_manage' %}" class="menu-item">
+                <span>📑</span> Ext/Int Master
+            </a>
+              <a href="{% url 'unit_list' %}" class="menu-item">
+                <span>📑</span>Unit Master
             </a>
         </div>
         {% endif %}
