@@ -103,6 +103,17 @@ def get_patient_details_api(request):
 
 
 # Step 2: Therapy Entry
+import json
+from datetime import datetime
+from django.shortcuts import get_object_or_404, redirect, render
+from django.http import JsonResponse
+from django.views.decorators.http import require_http_methods
+
+# import your models
+from .models import TimeSlot  # TimeSlot model you showed
+
+
+@require_http_methods(["GET", "POST"])
 def therapy_entry_view(request):
     patient_reg_no = request.session.get('patient_reg_no')
     if not patient_reg_no:
@@ -113,23 +124,83 @@ def therapy_entry_view(request):
 
     if request.method == 'POST':
         try:
-            # Safely load the JSON data sent from the JavaScript fetch request
-            therapy_data = json.loads(request.body.decode('utf-8')).get('therapy_data', [])
+            incoming = json.loads(request.body.decode('utf-8'))
         except json.JSONDecodeError:
             return JsonResponse({'status': 'error', 'message': 'Invalid JSON data.'}, status=400)
 
-        # Store the collected data in the session for later use
-        request.session['therapy_rows_data'] = therapy_data
-        
-        # Send a success response so the JavaScript knows to redirect
-        return JsonResponse({'status': 'success'}, status=200)
+        therapy_data = incoming.get('therapy_data', [])
+        sanitized = []
+        warnings = []
 
-    # This is for a GET request (initial page load)
+        for idx, row in enumerate(therapy_data):
+            # read fields safely
+            therapy_name = row.get('therapy_name') or row.get('therapy_code') or ''
+            ext_int = row.get('ext_int') or ''
+            from_date_raw = row.get('from_date')
+            to_date_raw = row.get('to_date')
+            days = row.get('days')
+            slot_value = row.get('slot')  # expected "HH:MM" string (or empty)
+
+            # normalize dates (store ISO or None)
+            from_date_iso = None
+            to_date_iso = None
+            try:
+                if from_date_raw:
+                    d = datetime.strptime(from_date_raw, "%Y-%m-%d").date()
+                    from_date_iso = d.isoformat()
+                if to_date_raw:
+                    d2 = datetime.strptime(to_date_raw, "%Y-%m-%d").date()
+                    to_date_iso = d2.isoformat()
+            except Exception as e:
+                warnings.append(f"Row {idx+1}: invalid from/to date format ({e}).")
+
+            # resolve timeslot if provided
+            time_slot_id = None
+            time_slot_found = None
+            if slot_value:
+                try:
+                    parsed_time = datetime.strptime(slot_value.strip(), "%H:%M").time()
+                    # try to find TimeSlot row with matching start_time
+                    time_slot_found = TimeSlot.objects.filter(start_time=parsed_time).first()
+                    if time_slot_found:
+                        time_slot_id = getattr(time_slot_found, 'slot_number', None) or getattr(time_slot_found, 'pk', None)
+                    else:
+                        warnings.append(f"Row {idx+1}: slot '{slot_value}' not found in TimeSlot table.")
+                except Exception:
+                    warnings.append(f"Row {idx+1}: slot '{slot_value}' has invalid format; expected HH:MM.")
+
+            # keep items as-is (you may want deeper validation later)
+            items = row.get('items', [])
+
+            sanitized_row = {
+                'therapy_name': therapy_name,
+                'ext_int': ext_int,
+                'from_date': from_date_iso,
+                'to_date': to_date_iso,
+                'days': days,
+                'slot_value': slot_value or '',
+                'time_slot_id': time_slot_id,   # can be None if unresolved
+                'items': items
+            }
+            sanitized.append(sanitized_row)
+
+        # Save sanitized structure to session
+        request.session['therapy_rows_data'] = sanitized
+        request.session.modified = True
+
+        response = {'status': 'success', 'rows_saved': len(sanitized)}
+        if warnings:
+            response['warnings'] = warnings
+
+        return JsonResponse(response, status=200)
+
+    # GET - render page
     context = {
         'patient': patient,
         'all_therapy_items': all_therapy_items,
     }
     return render(request, 'dashboards/doctorsAndHelpDesk/therapy_entry.html', context)
+
 
 from .models import TherapyDetails
 def search_therapies_api(request):
@@ -161,7 +232,7 @@ def parse_date_safe(d):
 def prescription_entry_view(request):
     patient_reg_no = request.session.get('patient_reg_no')
     if not patient_reg_no:
-        return redirect('patient_lookup')
+        return redirect('patient:patient_lookup')
 
     patient = get_object_or_404(Registration.objects.using(DB_ALIAS), pat_reg_no=patient_reg_no)
     all_prescription_items = ItemMaster.objects.using(DB_ALIAS).all()
@@ -186,6 +257,13 @@ def prescription_entry_view(request):
     return render(request, 'dashboards/doctorsAndHelpDesk/prescription_entry.html', context)
 
 
+# views.py (where your review_view lives)
+from datetime import datetime
+from django.shortcuts import get_object_or_404, redirect, render
+from django.conf import settings
+
+DB_ALIAS = getattr(settings, 'DB_ALIAS', 'therapy_db')  # if you use a constant, keep that
+
 def review_view(request):
     patient_reg_no = request.session.get('patient_reg_no')
     if not patient_reg_no:
@@ -203,8 +281,8 @@ def review_view(request):
     admission_days = request.session.get('admission_days')
     is_ip_or_op = request.session.get('is_ip_or_op')
     repeated_status = request.session.get('repeated_status')
-    therapy_data = request.session.get('therapy_rows_data', [])
-    prescription_data = request.session.get('prescription_rows_data', [])
+    therapy_data = request.session.get('therapy_rows_data', []) or []
+    prescription_data = request.session.get('prescription_rows_data', []) or []
 
     # Resolve item names for therapies (supports multiple items per therapy)
     for therapy_row in therapy_data:
@@ -231,6 +309,33 @@ def review_view(request):
                         'procured': it.get('procured') or '',
                     })
         therapy_row['resolved_items'] = resolved
+
+        # --- NEW: resolve slot to friendly label ---
+        slot_label = ''
+        # Try time_slot_id first (your sanitized view stores time_slot_id)
+        time_slot_id = therapy_row.get('time_slot_id')
+        if time_slot_id:
+            # TimeSlot primary key is slot_number per your model; attempt both ways
+            ts = TimeSlot.objects.filter(slot_number=time_slot_id).first()
+            if not ts:
+                ts = TimeSlot.objects.filter(pk=time_slot_id).first()
+            if ts:
+                try:
+                    slot_label = ts.start_time.strftime("%I:%M %p").lstrip("0")
+                except Exception:
+                    slot_label = str(ts.start_time)
+        else:
+            # fallback to free-text slot_value (expected "HH:MM")
+            sv = therapy_row.get('slot_value') or therapy_row.get('slot') or ''
+            if sv:
+                try:
+                    dt = datetime.strptime(sv.strip(), "%H:%M")
+                    slot_label = dt.strftime("%I:%M %p").lstrip("0")
+                except Exception:
+                    # if format differs, just show raw value
+                    slot_label = sv
+
+        therapy_row['slot_label'] = slot_label or ''
 
     # Resolve prescription row item names and ensure from/to/days fields are present
     for pres_row in prescription_data:
@@ -260,12 +365,23 @@ def review_view(request):
     }
     return render(request, 'dashboards/doctorsAndHelpDesk/review_page.html', context)
 
+
 DEFAULT_DB = 'default'
+def parse_date_safe(s):
+    """Use your existing parse helper or a simple safe wrapper."""
+    if not s:
+        return None
+    try:
+        return datetime.strptime(s, "%Y-%m-%d").date()
+    except Exception:
+        return None
+
 def submit_all_data(request):
     patient_reg_no = request.session.get('patient_reg_no')
     if not patient_reg_no:
         return redirect('patient:patient_lookup')
 
+    # load patient from the external DB alias you already use
     patient = get_object_or_404(Registration.objects.using(DB_ALIAS), pat_reg_no=patient_reg_no)
 
     from_date_str = request.session.get('from_date')
@@ -276,8 +392,8 @@ def submit_all_data(request):
     from_date = parse_date_safe(from_date_str)
     to_date = parse_date_safe(to_date_str)
 
-    therapy_rows_data = request.session.get('therapy_rows_data', [])
-    prescription_rows_data = request.session.get('prescription_rows_data', [])
+    therapy_rows_data = request.session.get('therapy_rows_data', []) or []
+    prescription_rows_data = request.session.get('prescription_rows_data', []) or []
 
     # Atomic writes on therapy DB
     with transaction.atomic(using=DEFAULT_DB):
@@ -297,17 +413,72 @@ def submit_all_data(request):
             therapy_to_date = parse_date_safe(row.get('to_date')) or to_date
             therapy_days = int(row.get('days') or ((therapy_to_date - therapy_from_date).days + 1) if therapy_from_date and therapy_to_date else 0)
 
-            therapy = store_Therapy.objects.using(DEFAULT_DB).create(
-                visit=visit,
-                patient_id=int(patient_reg_no),
-                therapy_name=row.get('therapy_name'),
-                ext_int=row.get('ext_int') or '',
-                procured=row.get('procured') or '',
-                from_date=therapy_from_date,
-                to_date=therapy_to_date,
-                days=therapy_days,
-            )
+            # -------------------------
+            # Resolve preferred TimeSlot
+            # -------------------------
+            preferred_ts_obj = None
+            preferred_slot_text = ''
 
+            # 1) Prefer explicit id from frontend (could be slot_number)
+            ts_id = row.get('time_slot_id') or row.get('preferred_time_slot_id')
+            if ts_id:
+                try:
+                    # Try matching slot_number first (your TimeSlot model uses slot_number as PK)
+                    preferred_ts_obj = TimeSlot.objects.using(DEFAULT_DB).filter(slot_number=ts_id).first()
+                    if not preferred_ts_obj:
+                        preferred_ts_obj = TimeSlot.objects.using(DEFAULT_DB).filter(pk=ts_id).first()
+                except Exception:
+                    preferred_ts_obj = None
+
+            # 2) Fallback: try parse text like "06:30"
+            if not preferred_ts_obj:
+                sv = (row.get('slot_value') or row.get('slot') or row.get('preferred_time_slot_value') or '').strip()
+                if sv:
+                    preferred_slot_text = sv
+                    try:
+                        parsed_time = datetime.strptime(sv, "%H:%M").time()
+                        preferred_ts_obj = TimeSlot.objects.using(DEFAULT_DB).filter(start_time=parsed_time).first()
+                    except Exception:
+                        preferred_ts_obj = None
+
+            # 3) If we found an object, ensure we also have text form for debugging
+            if not preferred_slot_text and preferred_ts_obj:
+                try:
+                    preferred_slot_text = preferred_ts_obj.start_time.strftime("%H:%M")
+                except Exception:
+                    preferred_slot_text = ''
+
+            # Prepare preferred_time_slot_id (slot_number PK) for assignment
+            preferred_ts_pk = None
+            if preferred_ts_obj:
+                # TimeSlot uses slot_number as primary key in your model
+                preferred_ts_pk = getattr(preferred_ts_obj, 'slot_number', None) or getattr(preferred_ts_obj, 'pk', None)
+
+            # -------------------------
+            # Create the store_Therapy row
+            # -------------------------
+            therapy_kwargs = {
+                'visit': visit,
+                'patient_id': int(patient_reg_no),
+                'therapy_name': row.get('therapy_name'),
+                'ext_int': row.get('ext_int') or '',
+                'procured': row.get('procured') or '',
+                'from_date': therapy_from_date,
+                'to_date': therapy_to_date,
+                'days': therapy_days,
+                # save text fallback
+                'preferred_time_slot_value': preferred_slot_text[:8] if preferred_slot_text else ''
+            }
+
+            # Assign FK by id to avoid instance/class mismatch issues.
+            if preferred_ts_pk is not None:
+                therapy_kwargs['preferred_time_slot_id'] = preferred_ts_pk
+
+            therapy = store_Therapy.objects.using(DEFAULT_DB).create(**therapy_kwargs)
+
+            # -------------------------
+            # Create associated therapy items
+            # -------------------------
             items_payload = row.get('items') or []
             items_to_create = []
             for it in items_payload:
@@ -357,23 +528,124 @@ def submit_all_data(request):
             if pres_items:
                 store_PrescriptionItem.objects.using(DEFAULT_DB).bulk_create(pres_items)
 
-    # Run allocation outside transaction (may be long-running)
+    # Run allocation outside transaction (may be long-running).
+    # expand_therapies_for_visit should read store_Therapy.preferred_time_slot / preferred_time_slot_value
+    allocation_tasks = []
     try:
-        tasks = expand_therapies_for_visit(visit.id)
-        # optional logging here
+        # expand_therapies_for_visit returns the list of tasks we discussed
+        allocation_tasks = expand_therapies_for_visit(visit.id)
     except Exception as e:
-        # log exception
-        pass
+        # log for debugging and create a failure summary entry
+        logger.exception("Allocation failed for visit %s: %s", getattr(visit, 'id', None), str(e))
+        allocation_tasks = [{
+            "date": None,
+            "therapy_name": "Allocation run failed",
+            "slot": None,
+            "status": "FAILED",
+            "reason": str(e),
+            "room_no": None,
+            "therapists": []
+        }]
 
-    # Clear session keys
+    # store the tasks in session so the next page can show them
+    request.session['allocation_tasks'] = allocation_tasks
+
+    # Clear other session keys you previously cleared
     for key in ['patient_reg_no', 'from_date', 'to_date', 'admission_days', 'is_ip_or_op', 'therapy_rows_data', 'prescription_rows_data']:
         request.session.pop(key, None)
 
-    return redirect('patient:patient_lookup')
+    # Redirect the doctor to an allocation-result page
+    return redirect(reverse('patient:allocation_result'))
 
+from Patient.models import AllocationAttempt
+def _friendly_slot_label(slot_value):
+    """
+    slot_value expected as "HH:MM" (string) or None.
+    Returns "H:MM AM/PM" or empty string.
+    """
+    if not slot_value:
+        return ''
+    try:
+        dt = datetime.strptime(slot_value, "%H:%M")
+        label = dt.strftime("%I:%M %p")
+        # remove leading zero e.g. "08:30 AM" -> "8:30 AM"
+        if label.startswith("0"):
+            label = label[1:]
+        return label
+    except Exception:
+        return slot_value
 
+def allocation_result_view(request):
+    visit_id = request.session.get('last_visit_id')
 
+    tasks = []
 
+    if visit_id:
+        # try DB-backed AllocationAttempt first
+        try:
+            visit_id_int = int(visit_id)
+        except Exception:
+            visit_id_int = None
+
+        if visit_id_int:
+            attempts = AllocationAttempt.objects.filter(visit_id=visit_id_int).order_by('date')
+            for a in attempts:
+                extra = a.extra or {}
+                slot_value = getattr(a, 'requested_time_slot_value', '') or ''
+                slot_label = _friendly_slot_label(slot_value)
+                tasks.append({
+                    'date': a.date.isoformat() if a.date else None,
+                    'therapy_name': getattr(a.therapy, 'therapy_name', a.therapy_name),
+                    'slot': slot_value,
+                    'slot_label': slot_label,
+                    'status': a.status,
+                    'reason': a.reason,
+                    'room_no': extra.get('room_no') if isinstance(extra, dict) else None,
+                    'therapists': extra.get('therapists') if isinstance(extra, dict) else []
+                })
+        else:
+            # fallback to session stored tasks if visit_id cannot be parsed
+            sess_tasks = request.session.pop('allocation_tasks', []) or []
+            for t in sess_tasks:
+                slot_value = t.get('slot') or t.get('requested_time_slot_value') or ''
+                slot_label = _friendly_slot_label(slot_value)
+                tasks.append({
+                    'date': t.get('date'),
+                    'therapy_name': t.get('therapy_name'),
+                    'slot': slot_value,
+                    'slot_label': slot_label,
+                    'status': t.get('status'),
+                    'reason': t.get('reason'),
+                    'room_no': t.get('room_no'),
+                    'therapists': t.get('therapists') or []
+                })
+    else:
+        # no visit_id: use session fallback
+        sess_tasks = request.session.pop('allocation_tasks', []) or []
+        for t in sess_tasks:
+            slot_value = t.get('slot') or t.get('requested_time_slot_value') or ''
+            slot_label = _friendly_slot_label(slot_value)
+            tasks.append({
+                'date': t.get('date'),
+                'therapy_name': t.get('therapy_name'),
+                'slot': slot_value,
+                'slot_label': slot_label,
+                'status': t.get('status'),
+                'reason': t.get('reason'),
+                'room_no': t.get('room_no'),
+                'therapists': t.get('therapists') or []
+            })
+
+    # summary counts
+    success_count = sum(1 for t in tasks if (t.get('status') or '').upper() in ('BOOKED','SUCCESS'))
+    failed_count  = sum(1 for t in tasks if (t.get('status') or '').upper() in ('FAILED','PARTIAL'))
+
+    context = {
+        'tasks': tasks,
+        'success_count': success_count,
+        'failed_count': failed_count,
+    }
+    return render(request, 'dashboards/doctorsAndHelpDesk/allocation_result.html', context)
 
 
 # API for autofill data
@@ -702,34 +974,76 @@ def complete_session_bookings(request):
 # =====================================================
 ############## Therapy item update/cancel/add/send-to-procurement ##############
 
+from django.shortcuts import get_object_or_404, redirect, render
+from django.contrib import messages
+from django.utils import timezone
+from django.views.decorators.http import require_POST
+from django.contrib.auth.decorators import login_required
+from datetime import datetime
+from MySql_Data_pull.models import store_TherapyItem, store_TherapyItemDay
+
 @login_required
 def update_therapy_item(request, item_id):
-    from MySql_Data_pull.models import store_TherapyItem
     item = get_object_or_404(store_TherapyItem, id=item_id)
 
     if request.method == "POST":
-        # accept posted values (keep previous if empty)
-        item.usage = request.POST.get("usage", item.usage)
-        from_date = request.POST.get("from_date", None)
-        to_date = request.POST.get("to_date", None)
-        days = request.POST.get("days", None)
+        usage = request.POST.get("usage", item.usage)
         procured = request.POST.get("procured", item.procured)
 
-        if from_date:
-            item.from_date = from_date
-        if to_date:
-            item.to_date = to_date
+        from_date_str = request.POST.get("from_date")
+        to_date_str = request.POST.get("to_date")
+        days_str = request.POST.get("days")
+
+        # parse safely
+        def parse_date_safe(s):
+            try:
+                return datetime.strptime(s, "%Y-%m-%d").date() if s else None
+            except Exception:
+                return None
+
+        new_from_date = parse_date_safe(from_date_str) or item.from_date
+        new_to_date = parse_date_safe(to_date_str) or item.to_date
+
         try:
-            item.days = int(days) if days not in (None, "") else item.days
+            new_days = int(days_str) if days_str not in (None, "") else item.days
         except ValueError:
-            pass
+            new_days = item.days
+
+        # track old range for cleanup
+        old_from, old_to = item.from_date, item.to_date
+
+        # update parent item
+        item.usage = usage
         item.procured = procured
+        item.from_date = new_from_date
+        item.to_date = new_to_date
+        item.days = new_days
         item.updated_at = timezone.now()
-        item.save(update_fields=["usage", "from_date", "to_date", "days", "procured", "updated_at"])
-        messages.success(request, "Therapy item updated.")
+        item.save()
+
+        # ---- update the day rows ----
+        # 1. cancel days that are no longer in the range
+        obsolete_days = store_TherapyItemDay.objects.filter(
+            therapy_item=item,
+            date__lt=new_from_date
+        ) | store_TherapyItemDay.objects.filter(
+            therapy_item=item,
+            date__gt=new_to_date
+        )
+        for day in obsolete_days:
+            day.status = "cancelled"
+            day.cancelled_by = request.user
+            day.cancelled_at = timezone.now()
+            day.save(update_fields=["status", "cancelled_by", "cancelled_at", "updated_at"])
+
+        # 2. add missing days (if extended range)
+        store_TherapyItemDay.expand_for_item(item)
+
+        messages.success(request, "Therapy item and day schedule updated successfully.")
         return redirect(request.META.get("HTTP_REFERER", reverse("patient:patient_list")))
 
     return render(request, "dashboards/prescriptions/update_therapy_item.html", {"item": item})
+
 
 
 @login_required
@@ -1006,3 +1320,213 @@ def add_therapy_item(request, visit_id):
     }
     return render(request, "dashboards/prescriptions/add_therapy_item.html", context)
 
+
+
+
+# put this in Patient/views.py (replace your old functions)
+import logging
+from datetime import datetime, timedelta
+from django.http import JsonResponse
+from django.views.decorators.http import require_GET
+
+logger = logging.getLogger(__name__)
+
+GENERAL_SLOTS = ["06:30","08:30","10:00","11:30","14:30","16:00","17:30"]
+
+def slot_to_time(s):
+    return datetime.strptime(s, "%H:%M").time()
+
+def friendly_label(slot_str):
+    try:
+        dt = datetime.strptime(slot_str, "%H:%M")
+        label = dt.strftime("%I:%M %p")
+        if label.startswith("0"):
+            label = label[1:]
+        return label
+    except:
+        return slot_str
+
+def compute_available_slots_for_date(date_obj, therapy_name, patient_type):
+    """
+    Returns list of {"value":"HH:MM","label":"H:MM AM/PM"} available on date_obj.
+    Respects:
+      - patient_type OP/IP rules
+      - therapy category (hard/special)
+      - room availability (if therapy requires room)
+      - therapist capacity & leave (uses TherapistBooking and TherapistLeave)
+    """
+    from .models import TimeSlot, TreatmentRoom, RoomBooking, Therapist, TherapistBooking, TherapistLeave, TherapyDetails
+
+    candidate_slots = GENERAL_SLOTS.copy()
+    if patient_type == "OP":
+        candidate_slots = ["11:30", "17:30"]
+
+    try:
+        details = TherapyDetails.objects.get(therapy_name__iexact=therapy_name)
+        therapy_category = (getattr(details, "therapy_category", "") or "").lower()
+    except TherapyDetails.DoesNotExist:
+        details = None
+        therapy_category = ""
+
+    if therapy_category in ["hard", "special"]:
+        candidate_slots = [s for s in candidate_slots if s not in ["11:30", "17:30"]]
+
+    def requirements_from_details(det):
+        if not det:
+            return {"super_senior":0,"senior":0,"junior":0,"trainee":0,"total":0}
+        return {
+            "super_senior": det.no_of_super_senior_therapist or 0,
+            "senior": det.no_of_senior_therapist or 0,
+            "junior": det.no_of_junior_therapist or 0,
+            "trainee": det.no_of_trainee_therapist or 0,
+            "total": det.total_no_of_therapist or 0,
+        }
+
+    reqs = requirements_from_details(details)
+    needs_room = bool(details and getattr(details, 'treatment_room_required', '').lower() == 'yes')
+    needs_bath = bool(details and getattr(details, 'bathing_required', '').lower() == 'yes')
+
+    available = []
+    weekday = date_obj.weekday()
+
+    # base queryset and leave set (use FK 'therapist' on TherapistLeave)
+    all_therapists_qs = Therapist.objects.all()
+    on_leave_ids = TherapistLeave.objects.filter(leave_day=weekday).values_list('therapist', flat=True)
+
+    for slot_str in candidate_slots:
+        start_time = slot_to_time(slot_str)
+
+        # Room availability check (if therapy needs a room)
+        room_ok = True
+        if needs_room:
+            timeslot_q = TimeSlot.objects.filter(start_time=start_time).first()
+            if timeslot_q:
+                # RoomBooking.room is FK named 'room' — values_list('room',flat=True) returns PKs
+                booked_room_pks = RoomBooking.objects.filter(date=date_obj, time_slot=timeslot_q, status='BOOKED').values_list('room', flat=True)
+                # exclude by pk (works even if TreatmentRoom PK isn't 'id')
+                free_room_exists = TreatmentRoom.objects.exclude(pk__in=booked_room_pks).exists()
+            else:
+                # if timeslot row missing, assume rooms exist (or optionally create timeslot)
+                free_room_exists = TreatmentRoom.objects.exists()
+            room_ok = free_room_exists
+
+        if not room_ok:
+            # no room => slot unavailable
+            continue
+
+        # Therapist capacity check
+        timeslot_q = TimeSlot.objects.filter(start_time=start_time).first()
+
+        # exclude therapists on leave using pk
+        available_therapists = all_therapists_qs.exclude(pk__in=on_leave_ids)
+
+        if timeslot_q:
+            # TherapistBooking.therapist is FK named 'therapist' -> values_list('therapist', flat=True) returns PKs
+            booked_therapist_pks = TherapistBooking.objects.filter(date=date_obj, time_slot=timeslot_q, status='BOOKED').values_list('therapist', flat=True)
+            available_therapists = available_therapists.exclude(pk__in=booked_therapist_pks)
+
+        if needs_bath:
+            available_therapists = available_therapists.filter(is_bathing_therapist=True)
+
+        # Check grade counts
+        grade_map = {
+            "Super Senior Therapist": reqs["super_senior"],
+            "Senior Therapist": reqs["senior"],
+            "Junior Therapist": reqs["junior"],
+            "Trainee Therapist": reqs["trainee"],
+        }
+
+        grade_ok = True
+        for grade_name, needed_count in grade_map.items():
+            if needed_count <= 0:
+                continue
+            have_count = available_therapists.filter(therapist_grade=grade_name).count()
+            if have_count < needed_count:
+                grade_ok = False
+                break
+
+        if not grade_ok:
+            continue
+
+        # passes checks
+        available.append({"value": slot_str, "label": friendly_label(slot_str)})
+
+    return available
+
+
+@require_GET
+def available_slots(request):
+    """
+    Supports:
+      - date=YYYY-MM-DD  => {"slots":[...]}
+      - from_date=YYYY-MM-DD&to_date=YYYY-MM-DD => {"dates":[{"date":"YYYY-MM-DD","slots":[...]}]}
+    Required: therapy_name param
+    Optional: patient_type (IP/OP)
+    """
+    therapy_name = request.GET.get("therapy_name", "").strip()
+    patient_type = request.GET.get("patient_type", "").strip().upper()
+
+    if not therapy_name:
+        return JsonResponse({"error":"therapy_name is required"}, status=400)
+
+    date_str = request.GET.get("date")
+    from_date_str = request.GET.get("from_date")
+    to_date_str = request.GET.get("to_date")
+
+    if date_str:
+        try:
+            date_obj = datetime.strptime(date_str, "%Y-%m-%d").date()
+        except Exception:
+            return JsonResponse({"error":"invalid date format for 'date', expected YYYY-MM-DD"}, status=400)
+        slots = compute_available_slots_for_date(date_obj, therapy_name, patient_type)
+        return JsonResponse({"slots": slots})
+
+    if from_date_str:
+        try:
+            from_date_obj = datetime.strptime(from_date_str, "%Y-%m-%d").date()
+        except Exception:
+            return JsonResponse({"error":"invalid date format for 'from_date', expected YYYY-MM-DD"}, status=400)
+        if to_date_str:
+            try:
+                to_date_obj = datetime.strptime(to_date_str, "%Y-%m-%d").date()
+            except Exception:
+                return JsonResponse({"error":"invalid date format for 'to_date', expected YYYY-MM-DD"}, status=400)
+        else:
+            to_date_obj = from_date_obj
+
+        if from_date_obj > to_date_obj:
+            return JsonResponse({"error":"'from_date' must be <= 'to_date'"}, status=400)
+
+        # safety cap
+        max_days = 31
+        delta_days = (to_date_obj - from_date_obj).days + 1
+        if delta_days > max_days:
+            return JsonResponse({"error": f"date range too large (max {max_days} days)"}, status=400)
+
+        result_dates = []
+        cur = from_date_obj
+        while cur <= to_date_obj:
+            slots = compute_available_slots_for_date(cur, therapy_name, patient_type)
+            result_dates.append({"date": cur.isoformat(), "slots": slots})
+            cur = cur + timedelta(days=1)
+
+        return JsonResponse({"dates": result_dates})
+
+    return JsonResponse({"error":"provide either 'date' or 'from_date' (with optional to_date)"}, status=400)
+
+
+@require_GET
+def time_slots(request):
+    """
+    Return all TimeSlot rows in order:
+      { "slots": [ {"slot_number":1, "start_time":"06:30", "label":"6:30 AM"}, ... ] }
+    """
+    from .models import TimeSlot
+    qs = TimeSlot.objects.order_by('slot_number')
+    slots = []
+    for t in qs:
+        # ensure start_time exists; format HH:MM and friendly label
+        st = t.start_time.strftime("%H:%M")
+        label = t.start_time.strftime("%I:%M %p").lstrip("0")
+        slots.append({"slot_number": t.slot_number, "start_time": st, "label": label})
+    return JsonResponse({"slots": slots})

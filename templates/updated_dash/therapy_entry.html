@@ -1,0 +1,608 @@
+{# templates/updated_dash/therapy_entry.html #}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Therapy Entry — Allocation Status Minimal</title>
+
+  <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+  <link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet" />
+  <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
+
+  <style>
+    body{font-family:sans-serif;margin:20px;background:#fafafa}
+    .form-row{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px}
+    .form-group{flex:1;min-width:200px}
+    label{display:block;font-weight:600;margin-bottom:6px}
+    input,select,textarea{width:100%;padding:8px;border:1px solid #ccc;border-radius:6px}
+    button{padding:8px 12px;border-radius:6px;background:#1976d2;color:#fff;border:0;cursor:pointer}
+    .muted{color:#666}
+    .card{background:#fff;padding:12px;border-radius:8px;border:1px solid #eee;margin-bottom:12px}
+    .tag{display:inline-block;padding:6px 8px;border-radius:999px;border:1px solid #eee;margin-right:6px;background:#f7f7f7}
+    .small { max-width:160px; }
+    table { width:100%; border-collapse:collapse; }
+    th, td { padding:8px; border-bottom:1px solid #eee; text-align:left; vertical-align:top; }
+    /* Modal styles */
+    .modal-backdrop { position:fixed; inset:0; background:rgba(0,0,0,0.4); display:none; align-items:center; justify-content:center; z-index:9999; }
+    .modal { background:#fff; width:920px; max-width:98%; padding:16px; border-radius:8px; box-shadow:0 6px 24px rgba(0,0,0,0.2); max-height:86vh; overflow:auto; }
+    .modal h3 { margin-top:0; }
+    .modal-footer { display:flex; justify-content:flex-end; gap:8px; margin-top:12px; }
+    .btn-ghost { background:#fff; color:#1976d2; border:1px solid #1976d2; }
+    .btn-danger { background:#d9534f; color:#fff; }
+    .status-pill { padding:6px 8px; border-radius:999px; display:inline-block; font-weight:700; font-size:0.85em; }
+    .status-scheduled { background:#e8f4ff; color:#0b66b2; border:1px solid #d0eafc; }
+    .status-cancelreq { background:#fff4e6; color:#b36b00; border:1px solid #ffebd1; }
+    .status-cancelled { background:#fdecea; color:#b02a2a; border:1px solid #f8d7da; }
+    .status-completed { background:#e9f9ec; color:#19692a; border:1px solid #d7f1d9; }
+    .small-muted { font-size:0.9em; color:#666; margin-top:6px; }
+    .date-row { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:8px 6px; border-bottom:1px solid #f1f1f1; }
+    .date-left { display:flex; align-items:center; gap:12px; min-width:260px; }
+    .input-inline { width:220px; }
+    .muted-small { font-size:0.85em; color:#666; }
+    .action-btn { margin-right:6px; }
+  </style>
+</head>
+<body>
+  <h2>Therapy Entry — Allocation Status Minimal</h2>
+
+  <div style="display:flex;gap:20px;align-items:flex-end;margin-bottom:12px;">
+    <div style="min-width:360px;">
+      <label for="header-patient-select">Search Patient</label>
+      <select id="header-patient-select" style="width:100%"></select>
+    </div>
+    <div style="flex:1"></div>
+    <div>
+      <button id="export-json">Export JSON</button>
+    </div>
+  </div>
+
+  <div id="header-patient-summary" class="card">
+    <h4><span id="hdr-pat-name">No patient selected</span> <small id="hdr-pat-badge" class="muted"></small></h4>
+    <div id="hdr-pat-meta" class="muted">Registration: — • Age/Gender: — / —</div>
+    <div id="hdr-pat-vip" class="muted">VIP: — • Room: —</div>
+    <div id="hdr-pat-ip" class="muted">IP No: —</div>
+    <div id="hdr-pat-unique" class="muted">Unique ID: —</div>
+    <div id="hdr-pat-type" class="muted">Patient Type: —</div>
+  </div>
+
+  <div class="card">
+    <h3 id="form-title">Allocate Therapy</h3>
+
+    <div class="form-row">
+      <div class="form-group" style="flex:2">
+        <label for="therapy-select">Therapy</label>
+        <select id="therapy-select"></select>
+      </div>
+
+      <div class="form-group small">
+        <label for="ext-int-select">Ext/Int</label>
+        <select id="ext-int-select"><option value="">--</option><option>Internal</option><option>External</option></select>
+      </div>
+
+      <div class="form-group small">
+        <label for="slot-select">Slot</label>
+        <select id="slot-select"><option value="">--</option></select>
+      </div>
+    </div>
+
+    <div class="form-row">
+      <div class="form-group small">
+        <label for="from-date-input">From</label><input type="date" id="from-date-input">
+      </div>
+      <div class="form-group small">
+        <label for="to-date-input">To</label><input type="date" id="to-date-input">
+      </div>
+      <div class="form-group small">
+        <label for="days-input">Days</label><input type="text" id="days-input" readonly>
+      </div>
+
+      <div class="form-group">
+        <label for="usage-select">Usage</label>
+        <select id="usage-select"><option value="">--</option></select>
+      </div>
+
+      <div class="form-group">
+        <label for="oil-class-select">Oil Class</label>
+        <select id="oil-class-select"><option value="">--</option></select>
+      </div>
+
+      <div class="form-group small">
+        <label for="procured-select">Procured From</label>
+        <select id="procured-select"><option value="">--</option></select>
+      </div>
+    </div>
+
+    <h4>Item Groups</h4>
+    <div style="border:1px dashed #ddd;padding:10px;border-radius:6px;margin-bottom:10px;">
+      <div class="form-row">
+        <div class="form-group">
+          <label for="item-builder-select">Select Items (multi)</label>
+          <select id="item-builder-select" multiple="multiple"></select>
+        </div>
+        <div class="form-group small">
+          <label for="item-builder-dosage">Dosage</label><input id="item-builder-dosage" type="text" placeholder="e.g. 2 tsp">
+        </div>
+        <div class="form-group small">
+          <label for="item-builder-uno">UNO</label><input id="item-builder-uno" type="text" placeholder="e.g. 1">
+        </div>
+        <div style="display:flex;align-items:flex-end;">
+          <button id="add-item-group-btn">Add Group</button>
+        </div>
+      </div>
+      <div id="item-groups-list" style="margin-top:10px"></div>
+    </div>
+
+    <div style="display:flex;justify-content:flex-end;gap:8px;">
+      <button id="allocate-therapy-btn">Allocate Therapy</button>
+      <button id="update-therapy-btn" style="display:none;background:#28a745">Update Therapy</button>
+      <button id="clear-form" style="background:#eee;color:#333">Clear</button>
+    </div>
+  </div>
+
+  <h3>Allocated Therapies</h3>
+  <table style="width:100%;border-collapse:collapse;margin-top:12px;">
+    <thead>
+      <tr style="text-align:left"><th>#</th><th>Therapy</th><th>Ext/Int</th><th>Slot</th><th>Items</th><th>From</th><th>To</th><th>Days</th><th>Allocated</th><th>Action</th></tr>
+    </thead>
+    <tbody id="therapies-table-body"></tbody>
+  </table>
+
+  <!-- Cancellation Modal -->
+  <div id="cancel-modal-backdrop" class="modal-backdrop">
+    <div class="modal" role="dialog" aria-modal="true">
+      <h3>Request Cancellation (Date Range)</h3>
+      <div id="cancel-modal-info" class="small-muted"></div>
+      <div style="margin-top:12px;" class="form-row">
+        <div class="form-group"><label for="cancel-from">Cancel From</label><input type="date" id="cancel-from" /></div>
+        <div class="form-group"><label for="cancel-to">Cancel To</label><input type="date" id="cancel-to" /></div>
+      </div>
+      <div style="margin-top:10px;"><label>Reason for cancellation</label><textarea id="cancel-reason" placeholder="Enter reason" rows="3" style="resize:vertical"></textarea></div>
+      <div class="modal-footer">
+        <button id="cancel-modal-close" class="btn-ghost">Close</button>
+        <button id="cancel-submit" class="btn-danger">Submit Cancellation Request</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Allocation Status Modal (minimal: status + mark completed only) -->
+  <div id="status-modal-backdrop" class="modal-backdrop">
+    <div class="modal" role="dialog" aria-modal="true">
+      <h3>Allocation Status (Minimal)</h3>
+      <div id="status-modal-info" class="small-muted"></div>
+
+      <div style="margin-top:12px;">
+        <div style="display:flex;gap:8px;font-weight:700;padding:6px 8px;border-bottom:1px solid #ddd;">
+          <div style="width:140px">Date</div>
+          <div style="width:120px">Slot</div>
+          <div style="width:200px">Treatment Room</div>
+          <div style="width:200px">Therapist</div>
+          <div style="width:140px">Status</div>
+        </div>
+
+        <div id="status-dates-list"></div>
+      </div>
+
+      <div class="modal-footer">
+        <button id="status-modal-close" class="btn-ghost">Close</button>
+      </div>
+    </div>
+  </div>
+
+<script>
+$(function(){
+
+  // --- config/fallbacks ---
+  const API_URL = window.location.pathname;
+  const FALLBACK_USAGE = [{name:'Internal'},{name:'Dispensed'}];
+  const FALLBACK_PROCURED = [{name:'IP Pharmacy'},{name:'Kashaya room'}];
+  const FALLBACK_OIL = [{name:'Dhara'},{name:'Pizichil'},{name:'Head'}];
+  const FALLBACK_SLOTS = [{start_time:'06:30'},{start_time:'08:30'},{start_time:'10:00'},{start_time:'11:30'},{start_time:'14:30'},{start_time:'16:00'},{start_time:'17:30'}];
+
+  // --- helpers ---
+  function ajax(params){
+    const url = API_URL + '?' + $.param(params);
+    return fetch(url).then(r => { if (!r.ok) throw new Error('Network'); return r.json(); });
+  }
+  function esc(s){ return String(s||''); }
+  function getDateRange(from, to){ const out=[]; let cur=new Date(from+'T00:00:00'), end=new Date(to+'T00:00:00'); while(cur<=end){ out.push(cur.toISOString().slice(0,10)); cur.setDate(cur.getDate()+1);} return out; }
+  function getCookie(name) { let v = document.cookie.match('(^|;)\\s*' + name + '\\s*=\\s*([^;]+)'); return v ? v.pop() : ''; }
+
+  // --- DOM refs ---
+  const $patientSelect = $('#header-patient-select');
+  const $hdrName = $('#hdr-pat-name'), $hdrMeta = $('#hdr-pat-meta'), $hdrVip = $('#hdr-pat-vip'), $hdrIp = $('#hdr-pat-ip'), $hdrUnique = $('#hdr-pat-unique'), $hdrType = $('#hdr-pat-type');
+  const $therapySelect = $('#therapy-select'), $slotSelect = $('#slot-select'), $fromDate = $('#from-date-input'), $toDate = $('#to-date-input'), $daysInput = $('#days-input');
+  const $usageSelect = $('#usage-select'), $oilClassSelect = $('#oil-class-select'), $procuredSelect = $('#procured-select');
+  const $itemBuilder = $('#item-builder-select'), $itemGroupsList = $('#item-groups-list');
+  const $allocateBtn = $('#allocate-therapy-btn'), $updateBtn = $('#update-therapy-btn'), $clearBtn = $('#clear-form');
+  const $therapiesTableBody = $('#therapies-table-body');
+
+  const $cancelModal = $('#cancel-modal-backdrop'), $cancelFrom = $('#cancel-from'), $cancelTo = $('#cancel-to'), $cancelReason = $('#cancel-reason');
+  const $cancelSubmitBtn = $('#cancel-submit'), $cancelCloseBtn = $('#cancel-modal-close'), $cancelModalInfo = $('#cancel-modal-info');
+
+  const $statusModal = $('#status-modal-backdrop'), $statusDatesList = $('#status-dates-list'), $statusModalInfo = $('#status-modal-info');
+  const $statusCloseBtn = $('#status-modal-close');
+
+  // --- state ---
+  let itemGroups = [];
+  let addedTherapies = [];
+  let bookings = []; // local cache mapping of bookings (keeps UI responsive)
+  let editTherapyIndex = null;
+  let viewingStatusTherapyIndex = null;
+  let cancelingTherapyIndex = null;
+
+  // --- init select2s ---
+  $therapySelect.select2({ placeholder:'Search therapy (2+)', minimumInputLength:2, ajax:{
+    transport: function(p,s,f){ ajax({action:'search_therapies', q: p.data.q}).then(s).catch(f); },
+    processResults: data => ({ results: (data||[]).map(t => ({id: t.therapy_code, text: t.therapy_name})) }),
+    cache:true
+  }});
+
+  $itemBuilder.select2({
+    placeholder:'Search or type items (multi)',
+    minimumInputLength: 0,
+    tags: true,
+    tokenSeparators: [','],
+    ajax: {
+      transport: function(p, s, f){
+        ajax({action:'search_items', q: p.data.q}).then(s).catch(function(){ s({ results: [] }); });
+      },
+      processResults: data => ({ results: (data||[]).map(i => ({ id: i.item_code, text: i.item_name })) }),
+      cache:true
+    }
+  });
+
+  $patientSelect.select2({
+    placeholder: 'Search patients (3+)...', minimumInputLength:3, ajax:{
+      transport: function(p,s,f){ ajax({action:'search_patients', q: p.data.q}).then(s).catch(f); },
+      processResults: data => ({ results: (data||[]).map(p => ({ id: p.pat_reg_no || p.reg_no || p.pat_reg_no, text: `${p.pat_reg_no || p.reg_no || ''} - ${p.pat_name || p.name || ''}`, raw: p })) }),
+      cache:true
+    }, allowClear:true
+  });
+
+  $patientSelect.on('change', function(){
+    const reg = $(this).val();
+    if (!reg) { $hdrName.text('No patient selected'); $hdrMeta.text('Registration: — • Age/Gender: — / —'); $hdrType.text('Patient Type: —'); addedTherapies=[]; bookings=[]; renderAll(); return; }
+    ajax({action:'get_patient', reg_no: reg}).then(d => {
+      $hdrName.text(d.pat_name || d.name || reg);
+      $hdrMeta.text('Registration: ' + (d.pat_reg_no||reg) + ' • Age/Gender: ' + ((d.pat_age||'—') + ' / ' + (d.pat_sex||'—')));
+      $hdrVip.text('Room: ' + (d.pat_room_no || '—'));
+      $hdrIp.text('IP No: ' + (d.pat_op_reg_no || d.ip_no || d.pat_reg_no || '—'));
+      $hdrUnique.text('Unique ID: ' + (d.pat_ref_id || '—'));
+      const digits = (''+reg).replace(/\D/g,''); $hdrType.text('Patient Type: ' + ((digits.length===5)?'OP':'IP'));
+    }).catch(()=>{ $hdrName.text(reg); $hdrMeta.text('Registration: ' + reg); const digits = (''+reg).replace(/\D/g,''); $hdrType.text('Patient Type: ' + ((digits.length===5)?'OP':'IP')); });
+
+    // load allocations from server (persisted)
+    ajax({action:'patient_therapies', patient_reg_no: reg}).then(list => {
+      addedTherapies = list || [];
+      bookings = [];
+      addedTherapies.forEach((t, idx) => {
+        if (t.from_date && t.to_date) getDateRange(t.from_date, t.to_date).forEach(d => bookings.push({ id: Math.random().toString(36).slice(2,9), allocation_id: t.allocation_id || t.allocation_id || t.allocation_id, therapyIndex: idx, date:d, slot: t.slot||'', room: t.room||'', therapist: t.therapist||'', status: 'scheduled' }));
+      });
+      renderAll();
+    }).catch(()=>{ renderAll(); });
+  });
+
+  // populate masters & slots with fallback
+  function populateMasters(){
+    ajax({action:'masters', type:'usage'}).then(list => { $usageSelect.empty().append('<option value="">--</option>'); (list||FALLBACK_USAGE).forEach(u => $usageSelect.append(new Option(u.name, u.name))); }).catch(()=>{ $usageSelect.empty().append('<option value="">--</option>'); FALLBACK_USAGE.forEach(u => $usageSelect.append(new Option(u.name, u.name))); });
+    ajax({action:'masters', type:'procured'}).then(list => { $procuredSelect.empty().append('<option value="">--</option>'); (list||FALLBACK_PROCURED).forEach(p => $procuredSelect.append(new Option(p.name, p.name))); }).catch(()=>{ $procuredSelect.empty().append('<option value="">--</option>'); FALLBACK_PROCURED.forEach(p => $procuredSelect.append(new Option(p.name, p.name))); });
+    ajax({action:'masters', type:'oil'}).then(list => { $oilClassSelect.empty().append('<option value="">--</option>'); (list||FALLBACK_OIL).forEach(o => $oilClassSelect.append(new Option(o.name, o.name))); }).catch(()=>{ $oilClassSelect.empty().append('<option value="">--</option>'); FALLBACK_OIL.forEach(o => $oilClassSelect.append(new Option(o.name, o.name))); });
+    ajax({action:'slots'}).then(resp => { const slots = (resp && resp.slots) || resp || FALLBACK_SLOTS; $slotSelect.find('option').not(':first').remove(); (slots||FALLBACK_SLOTS).forEach(s => { const st = s.start_time || s; $slotSelect.append(`<option value="${st}">${st}</option>`); }); }).catch(()=>{ $slotSelect.find('option').not(':first').remove(); FALLBACK_SLOTS.forEach(s => $slotSelect.append(`<option value="${s.start_time}">${s.start_time}</option>`)); });
+  }
+  populateMasters();
+
+  // Add Group
+  $('#add-item-group-btn').on('click', function(){
+    const selected = $itemBuilder.select2('data') || [];
+    if (!selected.length){ alert('Select or type items before adding a group.'); return; }
+    const dosage = $('#item-builder-dosage').val().trim();
+    const uno = $('#item-builder-uno').val().trim();
+    const items = selected.map(s => ({ item_code: s.id, item_name: s.text || s.id }));
+    const grp = { id: Math.random().toString(36).slice(2,9), items, dosage, uno };
+    itemGroups.push(grp);
+    $itemBuilder.val(null).trigger('change');
+    $('#item-builder-dosage').val('');
+    $('#item-builder-uno').val('');
+    renderItemGroups();
+  });
+
+  function renderItemGroups(){
+    $itemGroupsList.empty();
+    if (!itemGroups.length){ $itemGroupsList.text('No item groups added'); return; }
+    itemGroups.forEach((g,i) => {
+      const itemsHtml = g.items.map(it => `<span class="tag">${esc(it.item_name)}</span>`).join(' ');
+      const $div = $(`
+        <div style="padding:8px;border:1px solid #eee;margin-bottom:8px;border-radius:6px;display:flex;justify-content:space-between;align-items:center;">
+          <div>
+            <div style="font-weight:600">Group ${i+1}</div>
+            <div>${itemsHtml}</div>
+            <div class="muted-small">Dosage: ${esc(g.dosage||'—')} • UNO: ${esc(g.uno||'—')}</div>
+          </div>
+          <div>
+            <button class="edit-group action-btn" data-id="${g.id}">Edit</button>
+            <button class="remove-group action-btn" data-id="${g.id}" style="background:#d9534f;color:#fff">Remove</button>
+          </div>
+        </div>
+      `);
+      $itemGroupsList.append($div);
+    });
+  }
+
+  $itemGroupsList.on('click', '.remove-group', function(){ const id = $(this).data('id'); itemGroups = itemGroups.filter(g=>g.id!==id); renderItemGroups(); });
+  $itemGroupsList.on('click', '.edit-group', function(){ const id = $(this).data('id'); const g = itemGroups.find(x=>x.id===id); if(!g) return; $itemBuilder.val(null).trigger('change'); g.items.forEach(it=>{ const opt = new Option(it.item_name, it.item_code, true, true); $itemBuilder.append(opt); }); $itemBuilder.trigger('change'); $('#item-builder-dosage').val(g.dosage||''); $('#item-builder-uno').val(g.uno||''); itemGroups = itemGroups.filter(x=>x.id!==id); renderItemGroups(); });
+
+  // days calc
+  function calcDays(){ const f = $fromDate.val(), t = $toDate.val(); if(!f||!t){ $daysInput.val(''); return; } const fd=new Date(f), td=new Date(t); if(fd<=td) $daysInput.val(Math.ceil((td.getTime()-fd.getTime())/(1000*60*60*24))+1); else $daysInput.val(''); }
+  $fromDate.on('change', calcDays); $toDate.on('change', calcDays);
+
+  // allocate therapy -> POST to server (saves to DB)
+  $allocateBtn.on('click', function(){
+    const therapy = $therapySelect.select2('data')[0];
+    if (!therapy){ alert('Select a therapy'); return; }
+    if (!itemGroups.length){ alert('Add at least one item group'); return; }
+    const from = $fromDate.val(), to = $toDate.val();
+    if (!from || !to){ alert('Please set From and To dates'); return; }
+    if (from > to){ alert('From must be <= To'); return; }
+
+    const payload = {
+      patient_reg_no: $patientSelect.val(),
+      patient_name: $hdrName.text(),
+      pat_ref_id: $hdrUnique.text().replace('Unique ID: ','') || '',
+      therapy_code: therapy.id,
+      therapy_name: therapy.text,
+      ext_int: $('#ext-int-select').val(),
+      timeslot: $slotSelect.val() || '',
+      room_no: '', // add room chooser if needed
+      from_date: from,
+      to_date: to,
+      oil_class: $oilClassSelect.val()||'',
+      usage: $usageSelect.val()||'',
+      procured: $procuredSelect.val()||'',
+      items_groups: itemGroups.map(g => ({ items: g.items, dosage: g.dosage, uno: g.uno })),
+      notes: ''
+    };
+
+    fetch(API_URL + '?action=allocate', {
+      method:'POST',
+      headers: {'Content-Type':'application/json', 'X-Requested-With':'XMLHttpRequest'},
+      body: JSON.stringify(payload)
+    }).then(r => r.json().then(j => ({ok: r.ok, status: r.status, json: j}))).then(resp => {
+      if (!resp.ok) {
+        alert('Allocate failed: ' + (resp.json.error||JSON.stringify(resp.json)));
+        return;
+      }
+      alert('Allocation saved (id: ' + resp.json.allocation_id + '). Loading from server...');
+      // reload patient allocations
+      const reg = $patientSelect.val();
+      if (reg) {
+        ajax({action:'patient_therapies', patient_reg_no: reg}).then(list => {
+          addedTherapies = list || [];
+          bookings = [];
+          addedTherapies.forEach((t, idx) => {
+            if (t.from_date && t.to_date) getDateRange(t.from_date, t.to_date).forEach(d => bookings.push({ id: Math.random().toString(36).slice(2,9), allocation_id: t.allocation_id || t.allocation_id || t.allocation_id, therapyIndex: idx, date:d, slot: t.slot||'', room: t.room||'', therapist: t.therapist||'', status: 'scheduled' }));
+          });
+          renderAll();
+        }).catch(()=>{ alert('Could not refresh allocations'); });
+      }
+      // reset form locally
+      itemGroups = []; renderItemGroups();
+      $therapySelect.val(null).trigger('change'); $('#ext-int-select').val(''); $slotSelect.val(''); $fromDate.val(''); $toDate.val(''); $daysInput.val(''); $usageSelect.val(''); $oilClassSelect.val(''); $procuredSelect.val('');
+    }).catch(e => { console.error(e); alert('Network error'); });
+  });
+
+  // render therapies table
+  function renderTherapies(){
+    $therapiesTableBody.empty();
+    if (!addedTherapies.length){ $therapiesTableBody.append('<tr><td colspan="10" class="muted">No therapies</td></tr>'); return; }
+    addedTherapies.forEach((t,i) => {
+      const groupsHtml = (t.items_groups||[]).map(g => (g.items||[]).map(it => `<span class="tag">${esc(it.item_name)}</span>`).join(' ') + `<div class="muted-small">Dosage:${esc(g.dosage||'—')} • UNO:${esc(g.uno||'—')}</div>`).join('<hr/>');
+      const allocCount = bookings.filter(b=>b.therapyIndex===i).length;
+      const scheduled = bookings.filter(b=>b.therapyIndex===i && b.status==='scheduled').length;
+      const cancelReq = bookings.filter(b=>b.therapyIndex===i && b.status==='cancel_requested').length;
+      const cancelled = bookings.filter(b=>b.therapyIndex===i && b.status==='cancelled').length;
+      const done = bookings.filter(b=>b.therapyIndex===i && b.status==='completed').length;
+      const allocBadge = `${allocCount} total (${scheduled} scheduled, ${cancelReq} req, ${cancelled} cancelled, ${done} done)`;
+      const row = `<tr>
+        <td>${i+1}</td>
+        <td>${esc(t.therapy_name)}</td>
+        <td>${esc(t.ext_int||'')}</td>
+        <td>${esc(t.slot||'')}</td>
+        <td>${groupsHtml}</td>
+        <td>${esc(t.from_date||'')}</td>
+        <td>${esc(t.to_date||'')}</td>
+        <td>${esc(t.days||'')}</td>
+        <td>${esc(allocBadge)}</td>
+        <td>
+          <button class="view-status action-btn" data-i="${i}">Allocation Status</button>
+          <button class="request-cancel action-btn" data-i="${i}" style="background:#f39c12">Request Cancel</button>
+          <button class="edit-therapy action-btn" data-i="${i}" style="background:#6c757d">Edit</button>
+        </td>
+      </tr>`;
+      $therapiesTableBody.append(row);
+    });
+  }
+
+  function renderAll(){ renderItemGroups(); renderTherapies(); }
+
+  // Allocation Status (server-backed) — show date, slot, room, therapist, status; Mark as Completed allowed
+  $therapiesTableBody.on('click', '.view-status', function(){ const i=$(this).data('i'); openStatusModal(i); });
+
+  function openStatusModal(index){
+    viewingStatusTherapyIndex = index;
+    const t = addedTherapies[index]; if(!t) return;
+    if (!t.allocation_id) {
+      // fallback: show local bookings (existing behavior)
+      $statusModalInfo.text(`Therapy: ${t.therapy_name} — ${t.from_date} → ${t.to_date}`);
+      $statusDatesList.empty();
+      const rows = bookings.filter(b=>b.therapyIndex===index).sort((a,b)=>a.date.localeCompare(b.date));
+      if (!rows.length) $statusDatesList.append('<div class="small-muted">No per-day allocations for this therapy.</div>');
+      rows.forEach(b=> {
+        const pillClass = ({scheduled:'status-scheduled', cancel_requested:'status-cancelreq', cancelled:'status-cancelled', completed:'status-completed'})[b.status] || 'status-scheduled';
+        const statusText = ({scheduled:'Scheduled', cancel_requested:'Cancel Requested', cancelled:'Cancelled', completed:'Completed'})[b.status] || b.status;
+        const $row = $(`
+          <div class="date-row" data-id="${b.id}">
+            <div style="display:flex;gap:12px;align-items:center;min-width:760px;">
+              <div style="width:140px">${b.date}</div>
+              <div style="width:120px">${esc(b.slot||'')}</div>
+              <div style="width:200px">${esc(b.room||'—')}</div>
+              <div style="width:200px">${esc(b.therapist||'—')}</div>
+              <div style="width:140px"><span class="status-pill ${pillClass}">${statusText}</span></div>
+            </div>
+            <div>
+              ${b.status === 'completed' ? '<button disabled style="background:#6c757d">Completed</button>' : `<button class="mark-completed action-btn">Mark as Completed</button>`}
+            </div>
+          </div>`);
+        $statusDatesList.append($row);
+      });
+      $statusModal.show();
+      return;
+    }
+
+    // fetch server allocation_status
+    ajax({action:'allocation_status', allocation_id: t.allocation_id}).then(data => {
+      $statusModalInfo.text(`Therapy: ${data.therapy_name} — ${data.from_date} → ${data.to_date}`);
+      $statusDatesList.empty();
+      (data.bookings||[]).forEach(b => {
+        const pillClass = ({scheduled:'status-scheduled', cancel_requested:'status-cancelreq', cancelled:'status-cancelled', completed:'status-completed'})[b.status] || 'status-scheduled';
+        const statusText = ({scheduled:'Scheduled', cancel_requested:'Cancel Requested', cancelled:'Cancelled', completed:'Completed'})[b.status] || b.status;
+        const $row = $(`
+          <div class="date-row" data-id="${b.booking_id}">
+            <div style="display:flex;gap:12px;align-items:center;min-width:760px;">
+              <div style="width:140px">${b.date}</div>
+              <div style="width:120px">${esc(b.slot||'')}</div>
+              <div style="width:200px">${esc(b.room||'')}</div>
+              <div style="width:200px">${esc((b.therapists||[]).join(', ')||'—')}</div>
+              <div style="width:140px"><span class="status-pill ${pillClass}">${statusText}</span></div>
+            </div>
+            <div>
+              ${b.status === 'completed' ? '<button disabled style="background:#6c757d">Completed</button>' : `<button class="mark-completed action-btn">Mark as Completed</button>`}
+            </div>
+          </div>`);
+        $statusDatesList.append($row);
+      });
+      $statusModal.show();
+    }).catch(()=>{ alert('Could not load allocation status'); });
+  }
+
+  // Mark as Completed (server)
+  $statusDatesList.on('click', '.mark-completed', function(){
+    const booking_id = $(this).closest('.date-row').data('id');
+    if (!confirm('Mark this date booking as Completed?')) return;
+    fetch(API_URL + '?action=mark_completed', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ booking_id: booking_id })
+    }).then(r => r.json()).then(j => {
+      if (j.status === 'ok') {
+        alert('Marked completed');
+        // refresh current allocation modal
+        if (typeof viewingStatusTherapyIndex !== 'undefined' && viewingStatusTherapyIndex !== null) openStatusModal(viewingStatusTherapyIndex);
+        // also update local bookings state
+        bookings.forEach(b => { if (b.id === booking_id) b.status = 'completed'; });
+        renderAll();
+      } else {
+        alert('Failed: ' + JSON.stringify(j));
+      }
+    }).catch(()=>alert('Network error'));
+  });
+
+  $statusCloseBtn.on('click', function(){ $statusModal.hide(); viewingStatusTherapyIndex = null; });
+
+  // Request cancel flow (server)
+  $therapiesTableBody.on('click', '.request-cancel', function(){ const i=$(this).data('i'); openCancelModal(i); });
+  function openCancelModal(index){
+    cancelingTherapyIndex = index; const t = addedTherapies[index]; if(!t) return;
+    $('#cancel-modal-info').text(`Therapy: ${t.therapy_name} — Allowed cancel range: ${t.from_date||'—'} → ${t.to_date||'—'}`);
+    if (t.from_date) $cancelFrom.attr('min', t.from_date).val(t.from_date); else $cancelFrom.removeAttr('min').val('');
+    if (t.to_date) $cancelTo.attr('max', t.to_date).val(t.to_date); else $cancelTo.removeAttr('max').val('');
+    if (t.from_date && t.to_date){ $cancelFrom.attr('max', t.to_date); $cancelTo.attr('min', t.from_date); if(!$cancelFrom.val()) $cancelFrom.val(t.from_date); if(!$cancelTo.val()) $cancelTo.val(t.to_date); }
+    else { $cancelFrom.removeAttr('max'); $cancelTo.removeAttr('min'); }
+    $cancelReason.val(''); $cancelModal.show();
+  }
+
+  $cancelCloseBtn.on('click', function(){ $cancelModal.hide(); cancelingTherapyIndex=null; });
+
+  $cancelSubmitBtn.on('click', function(){
+    if (cancelingTherapyIndex === null) return;
+    const t = addedTherapies[cancelingTherapyIndex];
+    if (!t || !t.allocation_id) { alert('Cannot request cancel for unsaved allocation.'); return; }
+    const cfrom = $cancelFrom.val(), cto = $cancelTo.val(), reason = $cancelReason.val().trim();
+    if (!cfrom || !cto){ alert('Pick both Cancel From and Cancel To'); return; }
+    if (cfrom > cto){ alert('Cancel From must be <= Cancel To'); return; }
+    if (t.from_date && cfrom < t.from_date){ alert('Cancel From < therapy start'); return; }
+    if (t.to_date && cto > t.to_date){ alert('Cancel To > therapy end'); return; }
+    if (!reason && !confirm('No reason entered. Continue?')) return;
+    fetch(API_URL + '?action=request_cancellation', {
+      method:'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ allocation_id: t.allocation_id, from_date: cfrom, to_date: cto, reason: reason })
+    }).then(r => r.json()).then(j => {
+      if (j.status === 'ok') {
+        alert('Cancellation request submitted to admin.');
+        $cancelModal.hide();
+        bookings.forEach(b => { if (b.therapyIndex===cancelingTherapyIndex && b.date>=cfrom && b.date<=cto && b.status==='scheduled') b.status='cancel_requested'; });
+        renderAll();
+      } else {
+        alert('Failed: ' + JSON.stringify(j));
+      }
+    }).catch(()=>alert('Network error'));
+  });
+
+  // Edit therapy (lock therapy & slot & dates)
+  $therapiesTableBody.on('click', '.edit-therapy', function(){ const i=$(this).data('i'); loadTherapyForEdit(i); });
+  function loadTherapyForEdit(index){
+    const t = addedTherapies[index]; if(!t) return;
+    editTherapyIndex = index;
+    $('#form-title').text('Edit Therapy (slot & therapy locked)');
+    const opt = new Option(t.therapy_name, t.therapy_code, true, true);
+    $therapySelect.append(opt).val(t.therapy_code).trigger('change');
+    $therapySelect.prop('disabled', true);
+    $slotSelect.val(t.slot||'').prop('disabled', true);
+    $('#ext-int-select').val(t.ext_int||'');
+    $fromDate.val(t.from_date||'').prop('disabled', true);
+    $toDate.val(t.to_date||'').prop('disabled', true);
+    $daysInput.val(t.days||'');
+    $usageSelect.val(t.usage||''); $oilClassSelect.val(t.oil_class||''); $procuredSelect.val(t.procured||'');
+    itemGroups = (t.items_groups||[]).map(g=>({ id: Math.random().toString(36).slice(2,9), items: g.items||[], dosage: g.dosage||'', uno: g.uno||'' }));
+    renderItemGroups();
+    $allocateBtn.hide(); $updateBtn.show(); window.scrollTo({top:0, behavior:'smooth'});
+  }
+  $updateBtn.on('click', function(){
+    if (editTherapyIndex === null) { alert('No therapy in edit mode'); return; }
+    const t = addedTherapies[editTherapyIndex]; if(!t) return;
+    t.ext_int = $('#ext-int-select').val();
+    t.usage = $usageSelect.val()||''; t.oil_class = $oilClassSelect.val()||''; t.procured = $procuredSelect.val()||'';
+    t.items_groups = itemGroups.map(g=>({items:g.items, dosage:g.dosage, uno:g.uno}));
+    alert('Therapy updated locally.');
+    resetFormState(); renderAll();
+  });
+
+  function resetFormState(){
+    editTherapyIndex = null; $('#form-title').text('Allocate Therapy');
+    $therapySelect.val(null).trigger('change').prop('disabled', false);
+    $slotSelect.val('').prop('disabled', false);
+    $('#ext-int-select').val(''); $fromDate.val('').prop('disabled', false); $toDate.val('').prop('disabled', false); $daysInput.val('');
+    $usageSelect.val(''); $oilClassSelect.val(''); $procuredSelect.val('');
+    itemGroups = []; renderItemGroups();
+    $allocateBtn.show(); $updateBtn.hide();
+  }
+
+  // export JSON
+  $('#export-json').on('click', function(){
+    const patient = $patientSelect.val() || '';
+    const payload = { patient_reg_no: patient, therapies: addedTherapies, bookings };
+    const blob = new Blob([JSON.stringify(payload,null,2)], {type:'application/json'});
+    const url = URL.createObjectURL(blob);
+    const a=document.createElement('a'); a.href=url; a.download=(patient?patient+'-':'therapies-')+(new Date().toISOString().slice(0,10))+'.json'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+  });
+
+  // initial render
+  renderAll();
+
+  // expose for debug
+  window._therapyApp = { addedTherapies, bookings, itemGroups, renderAll };
+});
+</script>
+</body>
+</html>

@@ -345,3 +345,30 @@ class BookingCancellations(models.Model):
     def __str__(self):
         return f"Canceled: Patient {self.patient_id} - {self.therapy_name} on {self.date}"
     
+
+
+
+class AllocationAttempt(models.Model):
+    STATUS_CHOICES = [
+        ('SUCCESS', 'Success'),
+        ('FAILED', 'Failed'),
+    ]
+
+    visit = models.ForeignKey('MySql_Data_pull.Visit', null=True, blank=True, on_delete=models.SET_NULL)
+    therapy = models.ForeignKey('MySql_Data_pull.store_Therapy', null=True, blank=True, on_delete=models.SET_NULL)
+    date = models.DateField()
+    requested_time_slot = models.ForeignKey(TimeSlot, null=True, blank=True, on_delete=models.SET_NULL)
+    requested_time_slot_value = models.CharField(max_length=8, blank=True, null=True)  # backup text
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default='FAILED')
+    reason = models.TextField(blank=True, null=True)  # e.g. "room_unavailable" or "therapist_conflict: T1,T2"
+    created_at = models.DateTimeField(auto_now_add=True)
+    extra = models.JSONField(null=True, blank=True)  # optional: store attempted therapist codes, room_no, etc.
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['date']),
+            models.Index(fields=['status']),
+        ]
+
+    def __str__(self):
+        return f"{self.therapy} @ {self.date} - {self.requested_time_slot_value or self.requested_time_slot} - {self.status}"

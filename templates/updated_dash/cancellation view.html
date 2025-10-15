@@ -1,0 +1,385 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Therapy Cancellation — Admin Logic Demo</title>
+<style>
+  body{font-family:Inter,system-ui,Segoe UI,Roboto,Arial;margin:18px;background:#f4f6f8;color:#111}
+  h1,h2{margin:6px 0}
+  .card{background:#fff;border-radius:8px;padding:12px;border:1px solid #e6e9ee;margin-bottom:12px;box-shadow:0 1px 2px rgba(0,0,0,0.03)}
+  label{display:block;font-weight:600;margin-top:8px}
+  input,select{width:100%;padding:8px;border-radius:6px;border:1px solid #d7dde6;box-sizing:border-box;margin-top:6px}
+  .row{display:flex;gap:12px;flex-wrap:wrap}
+  .col{flex:1;min-width:200px}
+  button{padding:8px 12px;border-radius:6px;border:0;background:#1976d2;color:#fff;cursor:pointer}
+  button.ghost{background:#fff;color:#1976d2;border:1px solid #1976d2}
+  button.warn{background:#d9534f}
+  table{width:100%;border-collapse:collapse;margin-top:10px}
+  th,td{padding:8px;border-bottom:1px solid #eee;text-align:left;font-size:0.95em}
+  th{background:#fbfdff;font-weight:700}
+  .muted{color:#666;font-size:0.9em}
+  .badge{display:inline-block;padding:4px 8px;border-radius:999px;background:#e9f5ff;color:#0b66b2;font-weight:700;font-size:0.8em}
+  .small{font-size:0.85em;color:#444}
+  .flex-end{display:flex;justify-content:flex-end;gap:8px}
+  pre.log{background:#0b1220;color:#e6f0ff;padding:10px;border-radius:6px;overflow:auto;max-height:220px}
+</style>
+</head>
+<body>
+  <h1>Therapy Cancellation — Admin Logic Demo</h1>
+
+  <div class="card">
+    <h2>Create & Allocate Therapies</h2>
+    <div class="row">
+      <div class="col">
+        <label>Therapy Name</label>
+        <input id="t-name" placeholder="e.g. Abhyanga">
+      </div>
+      <div class="col">
+        <label>From date</label>
+        <input id="t-from" type="date">
+      </div>
+      <div class="col">
+        <label>To date</label>
+        <input id="t-to" type="date">
+      </div>
+      <div style="min-width:160px">
+        <label>Slot</label>
+        <select id="t-slot">
+          <option value="">--select--</option>
+          <option>06:30</option><option>08:30</option><option>10:00</option><option>11:30</option><option>14:30</option><option>16:00</option><option>17:30</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="row" style="margin-top:8px">
+      <div class="col">
+        <label>Room</label>
+        <select id="t-room">
+          <option>Room A</option><option>Room B</option><option>Room C</option>
+        </select>
+      </div>
+      <div class="col">
+        <label>Therapist</label>
+        <select id="t-therapist">
+          <option>Therapist A</option><option>Therapist B</option><option>Therapist C</option>
+        </select>
+      </div>
+      <div style="min-width:160px">
+        <label>&nbsp;</label>
+        <button id="create-alloc">Create & Allocate</button>
+      </div>
+    </div>
+
+    <div class="muted small" style="margin-top:8px">
+      This demo allocates per-day bookings for the selected date range (one booking per date). You can create overlapping therapies (to simulate real cases).
+    </div>
+  </div>
+
+  <div class="row">
+    <div style="flex:1 1 520px">
+      <div class="card">
+        <h2>Therapies</h2>
+        <table>
+          <thead><tr><th>#</th><th>Name</th><th>Range</th><th>Slot</th><th>Room / Therapist</th><th>Status</th><th>Action</th></tr></thead>
+          <tbody id="therapies-body"><tr><td colspan="7" class="muted">No therapies yet</td></tr></tbody>
+        </table>
+      </div>
+
+      <div class="card">
+        <h2>Request Cancellation (user)</h2>
+        <div class="row">
+          <div class="col">
+            <label>Pick therapy</label>
+            <select id="request-therapy"><option value="">--select therapy--</option></select>
+          </div>
+          <div style="min-width:160px">
+            <label>Date</label>
+            <input id="request-date" type="date">
+          </div>
+          <div style="min-width:160px">
+            <label>&nbsp;</label>
+            <button id="make-request" class="ghost">Create Cancel Request</button>
+          </div>
+        </div>
+        <div class="muted small" style="margin-top:8px">A request targets a specific therapy and a specific date (only that therapy's bookings on that date will be affected if approved).</div>
+      </div>
+    </div>
+
+    <div style="flex:1 1 420px">
+      <div class="card">
+        <h2>Admin — Pending Cancellation Requests</h2>
+        <table>
+          <thead><tr><th>#</th><th>Therapy / Date</th><th>Requested By</th><th>Details / Action</th></tr></thead>
+          <tbody id="requests-body"><tr><td colspan="4" class="muted">No requests</td></tr></tbody>
+        </table>
+      </div>
+
+      <div class="card">
+        <h2>Bookings & Exceptions (debug)</h2>
+        <div class="small muted">Bookings show per-day allocations. Exceptions represent approved per-day cancellations.</div>
+        <div id="bookings-debug" style="margin-top:8px"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Audit Log</h2>
+    <pre id="log" class="log"></pre>
+  </div>
+
+<script>
+/*
+  Demo in-memory state:
+    therapies = [{id,name,from,to,slot,room,therapist,status}]
+    bookings = [{id,therapyId,date,slot,room,therapist}]
+    cancelRequests = [{id,therapyId,date,requestedBy,status,reason}]
+    exceptions = [{id,therapyId,date,reason,approvedBy,approvedAt}]
+  Admin approve algorithm:
+    - lock (simulate) the request
+    - fetch bookings where therapyId & date
+    - fetch "other bookings" where same resource/date/slot but different therapyId
+    - if approve: delete bookings for target therapy/date; insert exception
+    - deny: mark denied
+*/
+
+(function(){
+  // helpers
+  const $ = id => document.getElementById(id);
+  const uid = (p='id') => p + '_' + Math.random().toString(36).slice(2,9);
+  const fmt = s => String(s||'');
+  const logEl = $('log');
+  function log(msg){ logEl.textContent = new Date().toISOString() + '  ' + msg + '\n' + logEl.textContent; }
+
+  // state
+  let therapies = [];
+  let bookings = [];
+  let cancelRequests = [];
+  let exceptions = [];
+
+  // DOM
+  const tName = $('t-name'), tFrom = $('t-from'), tTo = $('t-to'), tSlot = $('t-slot'), tRoom = $('t-room'), tTher = $('t-therapist'), createAlloc = $('create-alloc');
+  const therapiesBody = $('therapies-body'), requestTher = $('request-therapy'), requestDate = $('request-date'), makeRequest = $('make-request'), requestsBody = $('requests-body'), bookingsDebug = $('bookings-debug');
+
+  // create & allocate
+  createAlloc.addEventListener('click', function(){
+    const name = tName.value.trim(); const from = tFrom.value; const to = tTo.value;
+    const slot = tSlot.value; const room = tRoom.value; const ther = tTher.value;
+    if(!name || !from || !to || !slot){ alert('Provide name, from, to, slot'); return; }
+    const id = uid('T');
+    const therapy = { id, name, from, to, slot, room, therapist: ther, status:'ALLOCATED' };
+    therapies.push(therapy);
+    // create per-day bookings for each date in [from..to]
+    const dates = dateRange(from,to);
+    dates.forEach(d => {
+      bookings.push({ id: uid('B'), therapyId: id, date: d, slot, room, therapist: ther });
+    });
+    log(`Allocated therapy "${name}" (${from}→${to}) slot=${slot}, room=${room}, therapist=${ther}. Created ${dates.length} bookings.`);
+    renderAll();
+  });
+
+  // create cancel request
+  makeRequest.addEventListener('click', function(){
+    const therapyId = requestTher.value; const date = requestDate.value;
+    if(!therapyId){ alert('Select therapy'); return; }
+    if(!date){ alert('Select date'); return; }
+    // validate date in range
+    const th = therapies.find(t => t.id === therapyId);
+    if(!th){ alert('Therapy not found'); return; }
+    if(date < th.from || date > th.to){ alert('Date not in therapy range'); return; }
+    // create request
+    const req = { id: uid('R'), therapyId, date, requestedBy: 'user1', status: 'PENDING', reason: '' };
+    cancelRequests.push(req);
+    log(`Cancel request created for therapy "${th.name}" on ${date}`);
+    renderAll();
+  });
+
+  // render functions
+  function renderAll(){
+    renderTherapies();
+    renderRequests();
+    renderDebug();
+    renderRequestPicker();
+  }
+
+  function renderTherapies(){
+    therapiesBody.innerHTML = '';
+    if(!therapies.length){ therapiesBody.innerHTML = '<tr><td colspan="7" class="muted">No therapies</td></tr>'; return; }
+    therapies.forEach((t, i) => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td>${i+1}</td>
+        <td>${escapeHtml(t.name)}</td>
+        <td>${t.from} → ${t.to}</td>
+        <td>${t.slot}</td>
+        <td>${escapeHtml(t.room)} / ${escapeHtml(t.therapist)}</td>
+        <td>${t.status}</td>
+        <td>
+          <button data-id="${t.id}" class="view">View</button>
+          <button data-id="${t.id}" class="list" style="margin-left:6px">Bookings</button>
+        </td>`;
+      therapiesBody.appendChild(tr);
+    });
+    Array.from(document.querySelectorAll('.view')).forEach(b => b.onclick = onViewTherapy);
+    Array.from(document.querySelectorAll('.list')).forEach(b => b.onclick = onListBookingsForTherapy);
+  }
+
+  function renderRequestPicker(){
+    requestTher.innerHTML = '<option value="">--select therapy--</option>';
+    therapies.forEach(t => {
+      const opt = document.createElement('option'); opt.value = t.id; opt.textContent = `${t.name} (${t.from}→${t.to})`;
+      requestTher.appendChild(opt);
+    });
+  }
+
+  function renderRequests(){
+    requestsBody.innerHTML = '';
+    const pend = cancelRequests.filter(r => r.status === 'PENDING');
+    if(!pend.length){ requestsBody.innerHTML = '<tr><td colspan="4" class="muted">No requests</td></tr>'; return; }
+    pend.forEach((r,i) => {
+      const th = therapies.find(t=>t.id===r.therapyId) || {name:'(missing)'};
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td>${i+1}</td>
+        <td>${escapeHtml(th.name)} / ${r.date}</td>
+        <td>${escapeHtml(r.requestedBy)}</td>
+        <td>
+          <button data-id="${r.id}" class="inspect">Inspect</button>
+          <button data-id="${r.id}" class="approve" style="margin-left:6px">Approve</button>
+          <button data-id="${r.id}" class="deny" style="margin-left:6px;background:#d9534f;color:#fff">Deny</button>
+        </td>`;
+      requestsBody.appendChild(tr);
+    });
+    Array.from(document.querySelectorAll('.inspect')).forEach(b => b.onclick = onInspectRequest);
+    Array.from(document.querySelectorAll('.approve')).forEach(b => b.onclick = onApproveRequest);
+    Array.from(document.querySelectorAll('.deny')).forEach(b => b.onclick = onDenyRequest);
+  }
+
+  function renderDebug(){
+    // bookings grouped by date
+    let html = '<div class="small"><strong>Bookings:</strong></div><table><thead><tr><th>#</th><th>Date</th><th>Therapy</th><th>Slot</th><th>Room</th><th>Therapist</th></tr></thead><tbody>';
+    if(!bookings.length) html += '<tr><td colspan="6" class="muted">No bookings</td></tr>';
+    bookings.slice().forEach((b,i) => {
+      const th = therapies.find(t=>t.id===b.therapyId) || {name:'(unknown)'};
+      html += `<tr><td>${i+1}</td><td>${b.date}</td><td>${escapeHtml(th.name)}</td><td>${b.slot}</td><td>${escapeHtml(b.room)}</td><td>${escapeHtml(b.therapist)}</td></tr>`;
+    });
+    html += '</tbody></table>';
+    // exceptions
+    html += '<div style="margin-top:10px" class="small"><strong>Exceptions (approved cancellations):</strong></div>';
+    if(!exceptions.length) html += '<div class="muted small">None</div>'; else {
+      html += '<ul>';
+      exceptions.forEach(e => {
+        const th = therapies.find(t=>t.id===e.therapyId) || {name:'(unknown)'};
+        html += `<li>${e.date} — ${escapeHtml(th.name)} — approved by ${escapeHtml(e.approvedBy)} at ${e.approvedAt}</li>`;
+      });
+      html += '</ul>';
+    }
+    bookingsDebug.innerHTML = html;
+  }
+
+  // interactions
+  function onViewTherapy(ev){
+    const id = ev.target.dataset.id; const t = therapies.find(x=>x.id===id); if(!t) return alert(JSON.stringify(t,null,2));
+  }
+
+  function onListBookingsForTherapy(ev){
+    const id = ev.target.dataset.id; const list = bookings.filter(b=>b.therapyId===id);
+    if(!list.length) return alert('No bookings for that therapy (maybe none allocated).');
+    let txt = 'Bookings for selected therapy:\n\n';
+    list.forEach(b => txt += `• ${b.date} | slot ${b.slot} | ${b.room} / ${b.therapist}\n`);
+    alert(txt);
+  }
+
+  // inspect request: show target bookings and other bookings that share same resource/date/slot
+  function onInspectRequest(ev){
+    const id = ev.target.dataset.id; const req = cancelRequests.find(r=>r.id===id); if(!req) return;
+    const th = therapies.find(t => t.id === req.therapyId) || {name:'(missing)'};
+    // bookings owned by this therapy & date
+    const targetBookings = bookings.filter(b => b.therapyId === req.therapyId && b.date === req.date);
+    // other bookings that share either same room/date/slot or same therapist/date/slot (exclude target bookings)
+    const otherBookings = bookings.filter(b => b.date === req.date && b.therapyId !== req.therapyId && (
+      targetBookings.some(tb => tb.room === b.room && tb.slot === b.slot) ||
+      targetBookings.some(tb => tb.therapist === b.therapist && tb.slot === b.slot)
+    ));
+    let details = `Request -> Therapy: ${th.name}\nDate: ${req.date}\n\nTarget bookings for this therapy on that date:\n`;
+    if(!targetBookings.length) details += '  — None (already removed?)\n';
+    else targetBookings.forEach(tb => details += `  • ${tb.date} | slot ${tb.slot} | ${tb.room} / ${tb.therapist}\n`);
+    details += '\nOther bookings on same resource/date/slot:\n';
+    if(!otherBookings.length) details += '  — None\n';
+    else otherBookings.forEach(ob => {
+      const oth = therapies.find(t=>t.id===ob.therapyId) || {name:'(unknown)'};
+      details += `  • ${ob.date} | slot ${ob.slot} | ${ob.room} / ${ob.therapist} (therapy: ${oth.name})\n`;
+    });
+    details += '\nApprove will remove only the Target bookings (not other bookings).';
+    alert(details);
+  }
+
+  // approve request — atomic simulation
+  function onApproveRequest(ev){
+    const id = ev.target.dataset.id; const reqIndex = cancelRequests.findIndex(r=>r.id===id); if(reqIndex < 0) return;
+    const req = cancelRequests[reqIndex];
+    if(req.status !== 'PENDING') return alert('Request already processed');
+    if(!confirm(`Approve cancellation request for therapy on ${req.date}?`)) return;
+    // Simulate transaction: lock request (single-threaded here)
+    // fetch target bookings
+    const targetBookings = bookings.filter(b => b.therapyId === req.therapyId && b.date === req.date);
+    // fetch other bookings sharing same resource/slot (for info) — but we will only remove the target bookings
+    const otherBookings = bookings.filter(b => b.date === req.date && b.therapyId !== req.therapyId && (
+      targetBookings.some(tb => tb.room === b.room && tb.slot === b.slot) ||
+      targetBookings.some(tb => tb.therapist === b.therapist && tb.slot === b.slot)
+    ));
+    // remove target bookings
+    const removedCount = bookings.reduce((acc, b) => {
+      if(b.therapyId === req.therapyId && b.date === req.date) {
+        return acc + 1;
+      }
+      return acc;
+    }, 0);
+    bookings = bookings.filter(b => !(b.therapyId === req.therapyId && b.date === req.date));
+    // create exception record
+    exceptions.push({ id: uid('E'), therapyId: req.therapyId, date: req.date, reason: req.reason || 'user request', approvedBy: 'admin', approvedAt: new Date().toISOString() });
+    // mark request approved
+    cancelRequests[reqIndex].status = 'APPROVED';
+    cancelRequests[reqIndex].processedAt = new Date().toISOString();
+    log(`Admin approved cancellation for therapyId=${req.therapyId} date=${req.date}. Removed ${removedCount} bookings. Other bookings on same resources: ${otherBookings.length}`);
+    renderAll();
+  }
+
+  // deny request
+  function onDenyRequest(ev){
+    const id = ev.target.dataset.id; const idx = cancelRequests.findIndex(r=>r.id===id); if(idx<0) return;
+    if(!confirm('Deny this cancellation request?')) return;
+    cancelRequests[idx].status = 'DENIED';
+    cancelRequests[idx].processedAt = new Date().toISOString();
+    log(`Admin denied cancellation request ${id}`);
+    renderAll();
+  }
+
+  // utility: date range array inclusive (YYYY-MM-DD strings)
+  function dateRange(from, to){
+    const a = []; let cur = new Date(from + 'T00:00:00'); const end = new Date(to + 'T00:00:00');
+    while(cur <= end){ a.push(cur.toISOString().slice(0,10)); cur.setDate(cur.getDate()+1); }
+    return a;
+  }
+
+  // helper to create an initial overlapping scenario (optional)
+  (function seedDemo(){
+    // create two overlapping therapies to demonstrate
+    const t1 = { id: 'T_A', name: 'Therapy-1', from: '2025-10-12', to: '2025-10-18', slot: '10:00', room: 'Room A', therapist: 'Therapist A', status: 'ALLOCATED' };
+    const t2 = { id: 'T_B', name: 'Therapy-2', from: '2025-10-12', to: '2025-10-25', slot: '10:00', room: 'Room B', therapist: 'Therapist B', status: 'ALLOCATED' };
+    therapies.push(t1, t2);
+    // Add bookings for both (they use different therapists/rooms in this seed)
+    dateRange(t1.from, t1.to).forEach(d => bookings.push({ id: uid('B'), therapyId: t1.id, date: d, slot: t1.slot, room: t1.room, therapist: t1.therapist }));
+    dateRange(t2.from, t2.to).forEach(d => bookings.push({ id: uid('B'), therapyId: t2.id, date: d, slot: t2.slot, room: t2.room, therapist: t2.therapist }));
+    log('Seeded demo: Therapy-1 (12→18) and Therapy-2 (12→25) created with bookings.');
+    renderAll();
+  })();
+
+  // make request inspector accessible: direct inspect when clicking
+  // Attach handlers created earlier via renderAll calls
+  renderAll();
+
+  // escape HTML safe
+  function escapeHtml(s){ return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+})();
+</script>
+</body>
+</html>

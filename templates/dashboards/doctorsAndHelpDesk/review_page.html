@@ -47,6 +47,7 @@
             <tr>
               <th>Therapy Name</th>
               <th>Ext/Int</th>
+              <th>Slot</th> <!-- NEW column -->
               <th>Procured</th>
               <th>Items (all)</th>
               <th>From Date</th>
@@ -59,7 +60,15 @@
             <tr>
               <td>{{ therapy.therapy_name }}</td>
               <td>{{ therapy.ext_int }}</td>
-              <td>{{ therapy.procured }}</td>
+              <td>{{ therapy.slot_label }}</td> <!-- display slot label -->
+              <td>
+                {# therapy may contain a 'procured' top-level or items may have procured - keep present behavior #}
+                {% if therapy.procured %}
+                  {{ therapy.procured }}
+                {% else %}
+                  <span class="muted">—</span>
+                {% endif %}
+              </td>
               <td style="min-width:300px;">
                 {% if therapy.resolved_items %}
                   <div style="display:flex;flex-direction:column;gap:8px;">

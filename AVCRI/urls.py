@@ -23,5 +23,7 @@ urlpatterns = [
       path('authentication/', include('authentication.urls')),  # Add this line
       path('therapy/', include('MySql_Data_pull.urls')),
       path("predictor/", include("predictor.urls")),
+      path("sheduling/", include("Sheduling.urls")),
+      path("Masters/", include("masters.urls")),
 ]
 
