@@ -1,0 +1,288 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Schedule Demo — Therapy Entries</title>
+<link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet"/>
+<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+<style>
+  body{font-family:Inter,system-ui,Arial,sans-serif;margin:18px;background:#f7f9fb;color:#1f2937}
+  h1{font-size:20px;margin-bottom:6px}
+  .topbar{display:flex;gap:12px;align-items:end;margin-bottom:12px}
+  label{display:block;font-size:13px;color:#374151;margin-bottom:6px}
+  input[type=date], input[type=text], select {padding:8px;border:1px solid #d1d5db;border-radius:6px;background:#fff}
+  button {padding:8px 12px;border-radius:6px;border:0;background:#0b74ff;color:white;cursor:pointer}
+  button.ghost{background:#fff;color:#0b74ff;border:1px solid #c7ddff}
+  .card{background:white;border:1px solid #e6eef8;padding:12px;border-radius:8px}
+  .controls{display:flex;gap:12px;align-items:center}
+  .muted{color:#6b7280;font-size:13px}
+  table{width:100%;border-collapse:collapse;margin-top:12px}
+  th, td{padding:10px;border-bottom:1px solid #eef2f7;text-align:left;vertical-align:top}
+  th{background:#fbfcfe;font-weight:700;font-size:13px}
+  .tag{display:inline-block;padding:6px 8px;border-radius:999px;background:#f1f5f9;border:1px solid #e2e8f0;font-size:12px}
+  .status-ok{color:#065f46;background:#ecfdf5;border:1px solid #bbf7d0;padding:4px 8px;border-radius:999px;font-weight:700;font-size:12px}
+  .status-fail{color:#7f1d1d;background:#fff1f2;border:1px solid #fecaca;padding:4px 8px;border-radius:999px;font-weight:700;font-size:12px}
+  .result-panel{margin-top:12px;padding:12px;border-radius:8px;background:#fff; border:1px solid #e6eef8}
+  .small{font-size:13px;color:#6b7280}
+  .row-actions button{margin-right:6px}
+  .checkbox{transform:scale(1.15)}
+  .flex{display:flex;gap:8px;align-items:center}
+  .pill{padding:6px 10px;border-radius:999px;border:1px solid #e6eef8;background:#fff}
+  .controls-right{margin-left:auto;display:flex;gap:8px;align-items:center}
+  .notice{font-size:13px;color:#374151;margin-bottom:8px}
+  .footer-note{margin-top:14px;font-size:13px;color:#6b7280}
+  .search-input{min-width:320px}
+  @media (max-width:800px){
+    .topbar{flex-direction:column;align-items:stretch}
+    .controls-right{margin-left:0}
+    .search-input{min-width:100%}
+  }
+</style>
+</head>
+<body>
+  <h1>Schedule Demo — Therapy Entries</h1>
+  <div class="muted">Demo UI: pick a target date, select therapy entries and click "Schedule Selected". No backend required — simulation only.</div>
+
+  <div class="topbar">
+    <div class="card" style="min-width:360px">
+      <label for="target-date">Target Schedule Date</label>
+      <input id="target-date" type="date" value="">
+      <div class="small muted" style="margin-top:6px">Choose the date you want to schedule the selected therapy(s) for.</div>
+    </div>
+
+    <div class="card" style="flex:1">
+      <label for="search">Search patient or therapy</label>
+      <input id="search" class="search-input" type="text" placeholder="search by patient reg / name / therapy name" />
+    </div>
+
+    <div class="card controls">
+      <div>
+        <label>&nbsp;</label>
+        <div class="flex">
+          <button id="btn-refresh">Refresh</button>
+          <button id="btn-select-all" class="ghost">Select All</button>
+          <button id="btn-schedule-selected">Schedule Selected</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="notice">Below are therapy entries that were created (from therapy-entry page). Each row represents one therapy allocation (covers a date range). Use the target date to schedule them for a specific day.</div>
+
+    <table id="entries-table" aria-describedby="table-desc">
+      <thead>
+        <tr>
+          <th style="width:40px"><input id="master-check" type="checkbox" class="checkbox"></th>
+          <th>#</th>
+          <th>Patient</th>
+          <th>Therapy</th>
+          <th>Time Slot</th>
+          <th>Date Range</th>
+          <th>Procured From</th>
+          <th>Room</th>
+          <th>Already Scheduled</th>
+          <th>Action</th>
+        </tr>
+      </thead>
+      <tbody id="entries-body"></tbody>
+    </table>
+  </div>
+
+  <div id="results" class="result-panel" style="display:none">
+    <h3 style="margin:0 0 8px 0">Results</h3>
+    <div id="results-list"></div>
+  </div>
+
+  <div class="footer-note">This is a client-side simulated demo. The scheduling rules shown (date range check, already scheduled check, and room/time conflict detection) reflect the real flow you described.</div>
+
+<script>
+(function(){
+  // --- sample demo data (pretend these were created earlier on the therapy-entry page) ---
+  const sampleAllocations = [
+    { id: 101, patient_reg: '00012', patient_name: 'Asha Kumar', therapy: 'Abhyangam', slot: '06:30', from: '2025-10-01', to: '2025-10-10', procured: 'IP Pharmacy', room: 'D2', already_scheduled_dates: [] },
+    { id: 102, patient_reg: '00013', patient_name: 'Rahul Menon', therapy: 'Murivenna', slot: '08:30', from: '2025-10-05', to: '2025-10-20', procured: 'Kashayam Room', room: 'D2', already_scheduled_dates: [] },
+    { id: 103, patient_reg: '12345', patient_name: 'Priya R', therapy: 'Pizhichil', slot: '10:00', from: '2025-10-03', to: '2025-10-08', procured: 'IP Pharmacy', room: 'D3', already_scheduled_dates: ['2025-10-06'] },
+    { id: 104, patient_reg: '54321', patient_name: 'Vikram S', therapy: 'Thailam', slot: '11:30', from: '2025-10-08', to: '2025-10-15', procured: '', room: '', already_scheduled_dates: [] },
+    { id: 105, patient_reg: '00014', patient_name: 'Leela K', therapy: 'Shirodhara', slot: '14:30', from: '2025-10-10', to: '2025-10-20', procured: 'Kashayam Room', room: 'D1', already_scheduled_dates: [] },
+    { id: 106, patient_reg: '00015', patient_name: 'Sandeep G', therapy: 'Abhyangam', slot: '06:30', from: '2025-10-02', to: '2025-10-04', procured: 'IP Pharmacy', room: 'D1', already_scheduled_dates: [] },
+    { id: 107, patient_reg: '00016', patient_name: 'Meena P', therapy: 'Murivenna+Kashayam', slot: '08:30', from: '2025-10-01', to: '2025-10-30', procured: 'Kashayam Room', room: 'D4', already_scheduled_dates: [] },
+    { id: 108, patient_reg: '00017', patient_name: 'Arjun N', therapy: 'Pizhichil', slot: '10:00', from: '2025-10-01', to: '2025-10-12', procured: '', room: 'D3', already_scheduled_dates: [] }
+  ];
+
+  // application state (client-side)
+  let allocations = JSON.parse(JSON.stringify(sampleAllocations)); // clone
+  let filtered = allocations.slice();
+  const $body = $('#entries-body');
+  const $date = $('#target-date');
+  const $search = $('#search');
+  const $results = $('#results');
+  const $resultsList = $('#results-list');
+
+  // helper
+  function isoToday(){ const d=new Date(); return d.toISOString().slice(0,10); }
+  $date.val(isoToday());
+
+  function renderTable(){
+    const q = $search.val().trim().toLowerCase();
+    filtered = allocations.filter(a => {
+      if(!q) return true;
+      return (''+a.patient_reg).toLowerCase().includes(q) || (a.patient_name || '').toLowerCase().includes(q) || (a.therapy||'').toLowerCase().includes(q);
+    });
+    $body.empty();
+    if(!filtered.length){
+      $body.append(`<tr><td colspan="10" class="muted">No allocations found</td></tr>`);
+      return;
+    }
+    filtered.forEach((a, idx) => {
+      const alreadyFlag = a.already_scheduled_dates.includes($date.val());
+      const row = $(`
+        <tr data-id="${a.id}">
+          <td><input type="checkbox" class="row-check checkbox"></td>
+          <td>${idx+1}</td>
+          <td><div style="font-weight:700">${a.patient_reg}</div><div class="small">${a.patient_name}</div></td>
+          <td>${a.therapy}</td>
+          <td>${a.slot || '—'}</td>
+          <td>${a.from} → ${a.to}</td>
+          <td>${a.procured || '—'}</td>
+          <td>${a.room || '—'}</td>
+          <td>${alreadyFlag ? '<span class="tag">Yes</span>' : '<span class="tag" style="background:#f8fafc">No</span>'}</td>
+          <td class="row-actions">
+            <button class="btn-sched-this ghost">Schedule</button>
+            <button class="btn-view small">View</button>
+          </td>
+        </tr>
+      `);
+      $body.append(row);
+    });
+  }
+
+  // initial render
+  renderTable();
+
+  // search / refresh handlers
+  $search.on('input', () => renderTable());
+  $('#btn-refresh').on('click', () => { $search.val(''); renderTable(); });
+
+  // master select
+  $('#master-check').on('change', function(){ $('.row-check').prop('checked', this.checked); });
+
+  // select all convenience
+  $('#btn-select-all').on('click', function(){
+    const allOnPage = $('.row-check').length>0;
+    const anyUnchecked = $('.row-check:not(:checked)').length>0;
+    $('.row-check').prop('checked', anyUnchecked);
+  });
+
+  // helper: gather selected allocation objects
+  function getSelectedAllocations(){
+    const ids = $('.row-check:checked').closest('tr').map(function(){ return Number($(this).attr('data-id')); }).get();
+    return allocations.filter(a => ids.includes(a.id));
+  }
+
+  // core scheduling simulation
+  function simulateScheduleForDate(targetDate, allocs){
+    // simple rules:
+    // - if targetDate not in [from,to] => fail 'date_out_of_range'
+    // - if already_scheduled_dates contains date => fail 'already_scheduled'
+    // - detect room-time conflicts among the successful ones of this batch: if two items have same room & slot -> second fails 'room_conflict'
+    // - otherwise succeed -> push targetDate into already_scheduled_dates
+    const results = [];
+    // keep track of room+slot used in this scheduling run (simulate DB)
+    const usedRoomSlot = {}; // key = room|slot => alloc.id
+    for(const a of allocs){
+      let status = 'ok', reason = '';
+      if (!targetDate) { status = 'failed'; reason = 'no_target_date'; }
+      else if (targetDate < a.from || targetDate > a.to) { status = 'failed'; reason = 'date_out_of_range'; }
+      else if (a.already_scheduled_dates.includes(targetDate)) { status = 'failed'; reason = 'already_scheduled'; }
+      else {
+        // room-slot conflict: only if room exists (if room missing treat as no room conflict)
+        const key = (a.room || '<<noroom>>') + '|' + (a.slot || '<<noslot>>');
+        if (a.room && usedRoomSlot[key]) {
+          status = 'failed';
+          reason = `room_conflict_with_alloc_${usedRoomSlot[key]}`;
+        } else {
+          // mark as used
+          usedRoomSlot[key] = a.id;
+        }
+      }
+
+      // if ok, mark scheduled (update client-side state)
+      if (status === 'ok'){
+        a.already_scheduled_dates.push(targetDate);
+      }
+      results.push({ allocation_id: a.id, patient: a.patient_name, therapy: a.therapy, status, reason });
+    }
+    return results;
+  }
+
+  // clicking Schedule Selected
+  $('#btn-schedule-selected').on('click', function(){
+    const target = $date.val();
+    const toSchedule = getSelectedAllocations();
+    if (!toSchedule.length){ alert('Select at least one allocation to schedule.'); return; }
+    // run simulation
+    const results = simulateScheduleForDate(target, toSchedule);
+
+    // show results & update table rows
+    showResults(results);
+    renderTable();
+  });
+
+  // per-row schedule button
+  $body.on('click', '.btn-sched-this', function(){
+    const tr = $(this).closest('tr');
+    const id = Number(tr.attr('data-id'));
+    const target = $date.val();
+    const alloc = allocations.find(a => a.id === id);
+    const res = simulateScheduleForDate(target, [alloc]);
+    showResults(res);
+    renderTable();
+  });
+
+  // view details
+  $body.on('click', '.btn-view', function(){
+    const tr = $(this).closest('tr');
+    const id = Number(tr.attr('data-id'));
+    const a = allocations.find(x => x.id===id);
+    alert(`Allocation #${a.id}\nPatient: ${a.patient_name} (${a.patient_reg})\nTherapy: ${a.therapy}\nTimeSlot: ${a.slot}\nDate range: ${a.from} → ${a.to}\nProcured: ${a.procured}\nRoom: ${a.room || '—'}\nAlready scheduled dates: ${a.already_scheduled_dates.join(', ') || '—'}`);
+  });
+
+  // results UI
+  function showResults(results){
+    $resultsList.empty();
+    $results.show();
+    results.forEach(r => {
+      const el = $(`<div style="padding:8px;border-bottom:1px solid #f1f5f9;display:flex;align-items:center;justify-content:space-between">
+        <div>
+          <div style="font-weight:700">${r.patient} — ${r.allocation_id || r.allocation_id === 0 ? '#'+r.allocation_id : ''}</div>
+          <div class="small">${r.therapy}</div>
+        </div>
+        <div style="min-width:320px; text-align:right">
+          ${r.status === 'ok' ? `<span class="status-ok">Scheduled</span>` : `<span class="status-fail">Failed</span>`}
+          ${r.reason ? `<div class="small muted" style="margin-top:6px">${r.reason}</div>` : ''}
+        </div>
+      </div>`);
+      $resultsList.append(el);
+    });
+    // scroll to results
+    $('html,body').animate({ scrollTop: $results.offset().top - 12 }, 250);
+  }
+
+  // small UI: clicking a row selects it
+  $body.on('click', 'tr', function(e){
+    if ($(e.target).is('input, button')) return;
+    const $chk = $(this).find('.row-check');
+    $chk.prop('checked', !$chk.prop('checked'));
+  });
+
+  // allow pressing Enter in search to focus table
+  $search.on('keydown', function(e){ if(e.key==='Enter'){ e.preventDefault(); $body.find('tr:first').focus(); } });
+
+  // expose for debugging (optional)
+  window._demo = { allocations, renderTable, simulateScheduleForDate };
+})();
+</script>
+</body>
+</html>

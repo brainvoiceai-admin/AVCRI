@@ -542,7 +542,11 @@ def therapy_entry(request):
 
 
 
-
+def prescription_entry_page(request):
+    """
+    Renders the HTML template (save your HTML as templates/prescription_entry.html).
+    """
+    return render(request, 'updated_dash/prescription_entry.html')
 
 
 
