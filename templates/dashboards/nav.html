@@ -14,10 +14,15 @@
         {% if request.user.role == "doctor_admin" or request.user.role == "doctor" or request.user.role == "super_admin" %}
         <div class="menu-section">
             <div class="menu-section-title">Doctor Options</div>
-            <a href="{% url 'patient_therapy' %}" class="menu-item">
-                <span>🏥</span> Add Therapy Prescription
+            <a href="{% url 'patient:patient_lookup' %}" class="menu-item">
+                <span>🏥</span> patient_lookup
             </a>
-      
+            <a href="{% url 'patient_therapy' %}" class="menu-item">
+                <span>🏥</span> Add Therapy
+            </a>
+            <a href="{% url 'prescription_entry' %}" class="menu-item">
+                <span>🏥</span> Add Prescription
+            </a>
             <a href="{% url 'Therapy_Report' %}" class="menu-item">
                 <span>📊</span> Reports & Analytics
             </a>
