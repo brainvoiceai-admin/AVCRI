@@ -47,6 +47,7 @@ path('api/get-item-details/', views.get_item_details, name='get_item_details'),
 path('prescription/<int:prescription_id>/add-item/', views.add_prescription_item, name='add_prescription_item'),
   path('available_slots/', views.available_slots, name='available_slots'),
   path('time_slots/', views.time_slots, name='time_slots'),
+  path('unit_numbers/', views.unit_numbers, name='unit_numbers'),
   path('allocation-result/', views.allocation_result_view, name='allocation_result'),
 
 ]

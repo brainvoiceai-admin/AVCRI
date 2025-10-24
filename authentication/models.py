@@ -116,6 +116,13 @@ class AuditLog(models.Model):
         ('export', 'Export'),
         ('import', 'Import'),
         ('error', 'Error'),
+        # Therapy-specific actions
+        ('allocate_therapy', 'Allocate Therapy'),
+        ('update_therapy', 'Update Therapy'),
+        ('cancel_therapy', 'Cancel Therapy'),
+        ('resume_therapy', 'Resume Therapy'),
+        ('remove_item', 'Remove Item'),
+        ('view_therapy', 'View Therapy'),
     ]
     
     STATUS_CHOICES = [

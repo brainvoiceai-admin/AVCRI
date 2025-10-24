@@ -32,6 +32,7 @@
     .btn-danger { background:#d9534f; color:#fff; }
     .status-pill { padding:6px 8px; border-radius:999px; display:inline-block; font-weight:700; font-size:0.85em; }
     .status-scheduled { background:#e8f4ff; color:#0b66b2; border:1px solid #d0eafc; }
+    .status-draft { background:#f8f9fa; color:#6c757d; border:1px solid #dee2e6; }
     .status-cancelreq { background:#fff4e6; color:#b36b00; border:1px solid #ffebd1; }
     .status-cancelled { background:#fdecea; color:#b02a2a; border:1px solid #f8d7da; }
     .status-completed { background:#e9f9ec; color:#19692a; border:1px solid #d7f1d9; }
@@ -44,7 +45,7 @@
   </style>
 </head>
 <body>
-  <h2>Therapy Entry — Allocation Status Minimal</h2>
+  <h2>Add Therapy — Multiple Therapy Management</h2>
 
   <div style="display:flex;gap:20px;align-items:flex-end;margin-bottom:12px;">
     <div style="min-width:360px;">
@@ -71,7 +72,7 @@
   </div>
 
   <div class="card">
-    <h3 id="form-title">Allocate Therapy</h3>
+    <h3 id="form-title">Add Therapy</h3>
 
     <div class="form-row">
       <div class="form-group" style="flex:2">
@@ -128,7 +129,10 @@
           <label for="item-builder-dosage">Dosage</label><input id="item-builder-dosage" type="text" placeholder="e.g. 2 tsp">
         </div>
         <div class="form-group small">
-          <label for="item-builder-uno">UNO</label><input id="item-builder-uno" type="text" placeholder="e.g. 1">
+          <label for="item-builder-uno">UNO</label>
+          <select id="item-builder-uno">
+            <option value="">Select Unit</option>
+          </select>
         </div>
         <div style="display:flex;align-items:flex-end;">
           <button id="add-item-group-btn">Add Group</button>
@@ -138,7 +142,7 @@
     </div>
 
     <div style="display:flex;justify-content:flex-end;gap:8px;">
-      <button id="allocate-therapy-btn">Allocate Therapy</button>
+      <button id="allocate-therapy-btn">Add Therapy</button>
       <button id="update-therapy-btn" style="display:none;background:#28a745">Update Therapy</button>
       <button id="clear-form" style="background:#eee;color:#333">Clear</button>
     </div>
@@ -147,7 +151,7 @@
   <h3>Allocated Therapies</h3>
   <table style="width:100%;border-collapse:collapse;margin-top:12px;">
     <thead>
-      <tr style="text-align:left"><th>#</th><th>Therapy</th><th>Ext/Int</th><th>Slot</th><th>Items</th><th>From</th><th>To</th><th>Days</th><th>Allocated</th><th>Action</th></tr>
+      <tr style="text-align:left"><th>#</th><th>Therapy</th><th>Ext/Int</th><th>Slot</th><th>Items</th><th>From</th><th>To</th><th>Days</th><th>Status</th><th>Actions</th></tr>
     </thead>
     <tbody id="therapies-table-body"></tbody>
   </table>
@@ -165,6 +169,22 @@
       <div class="modal-footer">
         <button id="cancel-modal-close" class="btn-ghost">Close</button>
         <button id="cancel-submit" class="btn-danger">Submit Cancellation Request</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Resume Modal -->
+  <div id="resume-modal-backdrop" class="modal-backdrop">
+    <div class="modal" role="dialog" aria-modal="true">
+      <h3>Resume Therapy</h3>
+      <div id="resume-modal-info" class="small-muted"></div>
+      <div style="margin-top:12px;" class="form-row">
+        <div class="form-group"><label for="resume-from">Resume From</label><input type="date" id="resume-from" /></div>
+        <div class="form-group"><label for="resume-to">Resume To</label><input type="date" id="resume-to" /></div>
+      </div>
+      <div class="modal-footer">
+        <button id="resume-modal-close" class="btn-ghost">Close</button>
+        <button id="resume-submit" style="background:#28a745;color:#fff">Resume Therapy</button>
       </div>
     </div>
   </div>
@@ -211,6 +231,24 @@ $(function(){
   function esc(s){ return String(s||''); }
   function getDateRange(from, to){ const out=[]; let cur=new Date(from+'T00:00:00'), end=new Date(to+'T00:00:00'); while(cur<=end){ out.push(cur.toISOString().slice(0,10)); cur.setDate(cur.getDate()+1);} return out; }
   function getCookie(name) { let v = document.cookie.match('(^|;)\\s*' + name + '\\s*=\\s*([^;]+)'); return v ? v.pop() : ''; }
+
+  // Load UnitNo options from master table
+  function loadUnitNumbers() {
+    fetch('/unit_numbers/')
+      .then(response => response.json())
+      .then(data => {
+        const $unitSelect = $('#item-builder-uno');
+        $unitSelect.find('option').not(':first').remove(); // Keep first option
+        if (data.units && data.units.length > 0) {
+          data.units.forEach(unit => {
+            $unitSelect.append(`<option value="${unit.unit_name}">${unit.unit_name}</option>`);
+          });
+        }
+      })
+      .catch(error => {
+        console.error('Error loading unit numbers:', error);
+      });
+  }
 
   // --- DOM refs ---
   const $patientSelect = $('#header-patient-select');
@@ -317,7 +355,7 @@ $(function(){
               </div>
             </div>
             <div>
-              <span style="background:#007bff;color:white;padding:2px 6px;border-radius:3px;font-size:0.8em;">IP</span>
+              ${patient.patient_type === 'IP' ? '<span style="background:#007bff;color:white;padding:2px 6px;border-radius:3px;font-size:0.8em;">IP</span>' : '<span style="background:#28a745;color:white;padding:2px 6px;border-radius:3px;font-size:0.8em;">OP</span>'}
             </div>
           </div>
         </div>
@@ -349,6 +387,7 @@ $(function(){
       .then(data => {
         if (data.pat_name) {
           selectedPatient = data;
+          console.log(selectedPatient);
           populatePatientInfo(selectedPatient);
         } else {
           alert('Patient details not found');
@@ -363,7 +402,7 @@ $(function(){
   function populatePatientInfo(patient) {
     $('#header-patient-select').val(patient.pat_op_reg_no || patient.pat_reg_no);
     $('#hdr-pat-name').text(patient.pat_name || 'Unknown');
-    $('#hdr-pat-meta').text('Registration: ' + (patient.pat_op_reg_no || patient.pat_reg_no) + ' • Age/Gender: ' + ((patient.pat_age || '—') + ' / ' + (patient.pat_sex || '—')));
+    $('#hdr-pat-meta').text('Registration: ' + (patient.pat_reg_no || patient.pat_op_reg_no ) + ' • Age/Gender: ' + ((patient.pat_age || '—') + ' / ' + (patient.pat_sex || '—')));
     $('#hdr-pat-vip').text('VIP: ' + (patient.vip_status || 'No') + ' • Room: ' + (patient.pat_room_no || '—'));
     $('#hdr-pat-ip').text('IP No: ' + (patient.pat_op_reg_no || '—'));
     $('#hdr-pat-unique').text('Unique ID: ' + (patient.pat_ref_id || '—'));
@@ -454,7 +493,7 @@ $(function(){
   function calcDays(){ const f = $fromDate.val(), t = $toDate.val(); if(!f||!t){ $daysInput.val(''); return; } const fd=new Date(f), td=new Date(t); if(fd<=td) $daysInput.val(Math.ceil((td.getTime()-fd.getTime())/(1000*60*60*24))+1); else $daysInput.val(''); }
   $fromDate.on('change', calcDays); $toDate.on('change', calcDays);
 
-  // allocate therapy -> POST to server (saves to DB)
+  // add therapy - auto-save to server as draft
   $allocateBtn.on('click', function(){
     if (!selectedPatient) {
       alert('Please select a patient first');
@@ -468,17 +507,16 @@ $(function(){
     if (!from || !to){ alert('Please set From and To dates'); return; }
     if (from > to){ alert('From must be <= To'); return; }
 
-    const payload = {
-      patient_reg_no: selectedPatient.pat_op_reg_no || selectedPatient.pat_reg_no,
-      patient_name: selectedPatient.pat_name,
-      pat_ref_id: selectedPatient.pat_ref_id || '',
+    // Prepare therapy data for server
+    const therapyData = {
+      patient_reg_no: selectedPatient.pat_reg_no,
       therapy_code: therapy.id,
       therapy_name: therapy.text,
       ext_int: $('#ext-int-select').val(),
-      timeslot: $slotSelect.val() || '',
-      room_no: selectedPatient.pat_room_no || '', // use patient's room number
+      slot: $slotSelect.val() || '',
       from_date: from,
       to_date: to,
+      days: Math.ceil((new Date(to).getTime() - new Date(from).getTime()) / (1000 * 60 * 60 * 24)) + 1,
       oil_class: $oilClassSelect.val()||'',
       usage: $usageSelect.val()||'',
       procured: $procuredSelect.val()||'',
@@ -486,31 +524,37 @@ $(function(){
       notes: ''
     };
 
+    // Send to server immediately
     fetch(API_URL + '?action=allocate', {
-      method:'POST',
-      headers: {'Content-Type':'application/json', 'X-Requested-With':'XMLHttpRequest'},
-      body: JSON.stringify(payload)
-    }).then(r => r.json().then(j => ({ok: r.ok, status: r.status, json: j}))).then(resp => {
-      if (!resp.ok) {
-        alert('Allocate failed: ' + (resp.json.error||JSON.stringify(resp.json)));
-        return;
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(therapyData)
+    })
+    .then(response => response.json())
+    .then(data => {
+      if (data.status === 'ok') {
+        // Add to local list with server response
+        const newTherapy = {
+          ...therapyData,
+          allocation_id: data.allocation_id,
+          status: 'draft' // Server saves as draft
+        };
+        addedTherapies.push(newTherapy);
+        
+        // Reset form
+        itemGroups = []; renderItemGroups();
+        $therapySelect.val(null).trigger('change'); $('#ext-int-select').val(''); $slotSelect.val(''); $fromDate.val(''); $toDate.val(''); $daysInput.val(''); $usageSelect.val(''); $oilClassSelect.val(''); $procuredSelect.val('');
+        
+        renderAll();
+        alert('Therapy added and saved to server as Draft.');
+      } else {
+        alert('Error: ' + (data.error || 'Failed to save therapy'));
       }
-      alert('Allocation saved (id: ' + resp.json.allocation_id + '). Loading from server...');
-      // reload patient allocations
-      if (selectedPatient) {
-        ajax({action:'patient_therapies', patient_reg_no: selectedPatient.pat_op_reg_no || selectedPatient.pat_reg_no}).then(list => {
-          addedTherapies = list || [];
-          bookings = [];
-          addedTherapies.forEach((t, idx) => {
-            if (t.from_date && t.to_date) getDateRange(t.from_date, t.to_date).forEach(d => bookings.push({ id: Math.random().toString(36).slice(2,9), allocation_id: t.allocation_id || t.allocation_id || t.allocation_id, therapyIndex: idx, date:d, slot: t.slot||'', room: t.room||'', therapist: t.therapist||'', status: 'scheduled' }));
-          });
-          renderAll();
-        }).catch(()=>{ alert('Could not refresh allocations'); });
-      }
-      // reset form locally
-      itemGroups = []; renderItemGroups();
-      $therapySelect.val(null).trigger('change'); $('#ext-int-select').val(''); $slotSelect.val(''); $fromDate.val(''); $toDate.val(''); $daysInput.val(''); $usageSelect.val(''); $oilClassSelect.val(''); $procuredSelect.val('');
-    }).catch(e => { console.error(e); alert('Network error'); });
+    })
+    .catch(error => {
+      console.error('Error:', error);
+      alert('Error saving therapy to server');
+    });
   });
 
   // render therapies table
@@ -519,13 +563,31 @@ $(function(){
     if (!addedTherapies.length){ $therapiesTableBody.append('<tr><td colspan="10" class="muted">No therapies</td></tr>'); return; }
     addedTherapies.forEach((t,i) => {
       const groupsHtml = (t.items_groups||[]).map(g => (g.items||[]).map(it => `<span class="tag">${esc(it.item_name)}</span>`).join(' ') + `<div class="muted-small">Dosage:${esc(g.dosage||'—')} • UNO:${esc(g.uno||'—')}</div>`).join('<hr/>');
-      const allocCount = bookings.filter(b=>b.therapyIndex===i).length;
-      const scheduled = bookings.filter(b=>b.therapyIndex===i && b.status==='scheduled').length;
-      const cancelReq = bookings.filter(b=>b.therapyIndex===i && b.status==='cancel_requested').length;
-      const cancelled = bookings.filter(b=>b.therapyIndex===i && b.status==='cancelled').length;
-      const done = bookings.filter(b=>b.therapyIndex===i && b.status==='completed').length;
-      const allocBadge = `${allocCount} total (${scheduled} scheduled, ${cancelReq} req, ${cancelled} cancelled, ${done} done)`;
-      const row = `<tr>
+      
+      // Status logic
+      let statusHtml = '';
+      let statusClass = 'status-scheduled';
+      console.log('Therapy status:', t.status); // Debug log
+      
+      if (t.status === 'draft') {
+        statusHtml = '<span class="status-pill status-draft">Draft</span>';
+        statusClass = 'status-draft';
+      } else if (t.status === 'cancelled') {
+        statusHtml = '<span class="status-pill status-cancelled">Cancelled</span>';
+        statusClass = 'status-cancelled';
+      } else if (t.status === 'allocated') {
+        statusHtml = '<span class="status-pill status-scheduled">Allocated</span>';
+        statusClass = 'status-scheduled';
+      } else if (t.status === 'failed') {
+        statusHtml = '<span class="status-pill status-cancelled">Failed</span>';
+        statusClass = 'status-cancelled';
+      } else {
+        // Default to draft for any unknown status
+        statusHtml = '<span class="status-pill status-draft">Draft</span>';
+        statusClass = 'status-draft';
+      }
+      
+      const row = `<tr class="${statusClass}">
         <td>${i+1}</td>
         <td>${esc(t.therapy_name)}</td>
         <td>${esc(t.ext_int||'')}</td>
@@ -534,11 +596,15 @@ $(function(){
         <td>${esc(t.from_date||'')}</td>
         <td>${esc(t.to_date||'')}</td>
         <td>${esc(t.days||'')}</td>
-        <td>${esc(allocBadge)}</td>
+        <td>${statusHtml}</td>
         <td>
-          <button class="view-status action-btn" data-i="${i}">Allocation Status</button>
-          <button class="request-cancel action-btn" data-i="${i}" style="background:#f39c12">Request Cancel</button>
+          <button class="view-status action-btn" data-i="${i}">View Status</button>
           <button class="edit-therapy action-btn" data-i="${i}" style="background:#6c757d">Edit</button>
+          <button class="update-therapy action-btn" data-i="${i}" style="background:#28a745;display:none">Update</button>
+          ${t.status === 'cancelled' ? 
+            `<button class="resume-therapy action-btn" data-i="${i}" style="background:#28a745">Resume</button>` : 
+            `<button class="cancel-therapy action-btn" data-i="${i}" style="background:#f39c12">Cancel</button>`
+          }
         </td>
       </tr>`;
       $therapiesTableBody.append(row);
@@ -560,8 +626,8 @@ $(function(){
       const rows = bookings.filter(b=>b.therapyIndex===index).sort((a,b)=>a.date.localeCompare(b.date));
       if (!rows.length) $statusDatesList.append('<div class="small-muted">No per-day allocations for this therapy.</div>');
       rows.forEach(b=> {
-        const pillClass = ({scheduled:'status-scheduled', cancel_requested:'status-cancelreq', cancelled:'status-cancelled', completed:'status-completed'})[b.status] || 'status-scheduled';
-        const statusText = ({scheduled:'Scheduled', cancel_requested:'Cancel Requested', cancelled:'Cancelled', completed:'Completed'})[b.status] || b.status;
+        const pillClass = ({scheduled:'status-scheduled', draft:'status-draft', pending:'status-draft', cancel_requested:'status-cancelreq', cancelled:'status-cancelled', completed:'status-completed'})[b.status] || 'status-scheduled';
+        const statusText = ({scheduled:'Scheduled', draft:'Draft', pending:'Pending', cancel_requested:'Cancel Requested', cancelled:'Cancelled', completed:'Completed'})[b.status] || b.status;
         const $row = $(`
           <div class="date-row" data-id="${b.id}">
             <div style="display:flex;gap:12px;align-items:center;min-width:760px;">
@@ -572,7 +638,6 @@ $(function(){
               <div style="width:140px"><span class="status-pill ${pillClass}">${statusText}</span></div>
             </div>
             <div>
-              ${b.status === 'completed' ? '<button disabled style="background:#6c757d">Completed</button>' : `<button class="mark-completed action-btn">Mark as Completed</button>`}
             </div>
           </div>`);
         $statusDatesList.append($row);
@@ -586,8 +651,8 @@ $(function(){
       $statusModalInfo.text(`Therapy: ${data.therapy_name} — ${data.from_date} → ${data.to_date}`);
       $statusDatesList.empty();
       (data.bookings||[]).forEach(b => {
-        const pillClass = ({scheduled:'status-scheduled', cancel_requested:'status-cancelreq', cancelled:'status-cancelled', completed:'status-completed'})[b.status] || 'status-scheduled';
-        const statusText = ({scheduled:'Scheduled', cancel_requested:'Cancel Requested', cancelled:'Cancelled', completed:'Completed'})[b.status] || b.status;
+        const pillClass = ({scheduled:'status-scheduled', draft:'status-draft', pending:'status-draft', cancel_requested:'status-cancelreq', cancelled:'status-cancelled', completed:'status-completed'})[b.status] || 'status-scheduled';
+        const statusText = ({scheduled:'Scheduled', draft:'Draft', pending:'Pending', cancel_requested:'Cancel Requested', cancelled:'Cancelled', completed:'Completed'})[b.status] || b.status;
         const $row = $(`
           <div class="date-row" data-id="${b.booking_id}">
             <div style="display:flex;gap:12px;align-items:center;min-width:760px;">
@@ -598,7 +663,6 @@ $(function(){
               <div style="width:140px"><span class="status-pill ${pillClass}">${statusText}</span></div>
             </div>
             <div>
-              ${b.status === 'completed' ? '<button disabled style="background:#6c757d">Completed</button>' : `<button class="mark-completed action-btn">Mark as Completed</button>`}
             </div>
           </div>`);
         $statusDatesList.append($row);
@@ -607,32 +671,15 @@ $(function(){
     }).catch(()=>{ alert('Could not load allocation status'); });
   }
 
-  // Mark as Completed (server)
-  $statusDatesList.on('click', '.mark-completed', function(){
-    const booking_id = $(this).closest('.date-row').data('id');
-    if (!confirm('Mark this date booking as Completed?')) return;
-    fetch(API_URL + '?action=mark_completed', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ booking_id: booking_id })
-    }).then(r => r.json()).then(j => {
-      if (j.status === 'ok') {
-        alert('Marked completed');
-        // refresh current allocation modal
-        if (typeof viewingStatusTherapyIndex !== 'undefined' && viewingStatusTherapyIndex !== null) openStatusModal(viewingStatusTherapyIndex);
-        // also update local bookings state
-        bookings.forEach(b => { if (b.id === booking_id) b.status = 'completed'; });
-        renderAll();
-      } else {
-        alert('Failed: ' + JSON.stringify(j));
-      }
-    }).catch(()=>alert('Network error'));
-  });
 
   $statusCloseBtn.on('click', function(){ $statusModal.hide(); viewingStatusTherapyIndex = null; });
 
   // Request cancel flow (server)
   $therapiesTableBody.on('click', '.request-cancel', function(){ const i=$(this).data('i'); openCancelModal(i); });
+  
+  // New action handlers
+  $therapiesTableBody.on('click', '.cancel-therapy', function(){ const i=$(this).data('i'); openCancelModal(i); });
+  $therapiesTableBody.on('click', '.resume-therapy', function(){ const i=$(this).data('i'); openResumeModal(i); });
   function openCancelModal(index){
     cancelingTherapyIndex = index; const t = addedTherapies[index]; if(!t) return;
     $('#cancel-modal-info').text(`Therapy: ${t.therapy_name} — Allowed cancel range: ${t.from_date||'—'} → ${t.to_date||'—'}`);
@@ -648,27 +695,42 @@ $(function(){
   $cancelSubmitBtn.on('click', function(){
     if (cancelingTherapyIndex === null) return;
     const t = addedTherapies[cancelingTherapyIndex];
-    if (!t || !t.allocation_id) { alert('Cannot request cancel for unsaved allocation.'); return; }
     const cfrom = $cancelFrom.val(), cto = $cancelTo.val(), reason = $cancelReason.val().trim();
     if (!cfrom || !cto){ alert('Pick both Cancel From and Cancel To'); return; }
     if (cfrom > cto){ alert('Cancel From must be <= Cancel To'); return; }
     if (t.from_date && cfrom < t.from_date){ alert('Cancel From < therapy start'); return; }
     if (t.to_date && cto > t.to_date){ alert('Cancel To > therapy end'); return; }
-    if (!reason && !confirm('No reason entered. Continue?')) return;
-    fetch(API_URL + '?action=request_cancellation', {
-      method:'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ allocation_id: t.allocation_id, from_date: cfrom, to_date: cto, reason: reason })
-    }).then(r => r.json()).then(j => {
-      if (j.status === 'ok') {
-        alert('Cancellation request submitted to admin.');
-        $cancelModal.hide();
-        bookings.forEach(b => { if (b.therapyIndex===cancelingTherapyIndex && b.date>=cfrom && b.date<=cto && b.status==='scheduled') b.status='cancel_requested'; });
-        renderAll();
-      } else {
-        alert('Failed: ' + JSON.stringify(j));
-      }
-    }).catch(()=>alert('Network error'));
+    if (!reason){ alert('Cancellation reason is mandatory'); return; }
+    
+    if (t.allocation_id) {
+      // Server-side cancellation
+      fetch(API_URL + '?action=cancel_therapy', {
+        method:'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ allocation_id: t.allocation_id, cancel_from: cfrom, cancel_to: cto, reason: reason })
+      }).then(r => r.json()).then(j => {
+        if (j.status === 'ok') {
+          t.status = 'cancelled';
+          t.cancelled_date_from = cfrom;
+          t.cancelled_date_to = cto;
+          t.cancellation_reason = reason;
+          alert('Therapy cancelled successfully.');
+          $cancelModal.hide();
+          renderAll();
+        } else {
+          alert('Failed: ' + JSON.stringify(j));
+        }
+      }).catch(()=>alert('Network error'));
+    } else {
+      // Local cancellation
+      t.status = 'cancelled';
+      t.cancelled_date_from = cfrom;
+      t.cancelled_date_to = cto;
+      t.cancellation_reason = reason;
+      alert('Therapy cancelled locally.');
+      $cancelModal.hide();
+      renderAll();
+    }
   });
 
   // Edit therapy (lock therapy & slot & dates)
@@ -693,11 +755,50 @@ $(function(){
   $updateBtn.on('click', function(){
     if (editTherapyIndex === null) { alert('No therapy in edit mode'); return; }
     const t = addedTherapies[editTherapyIndex]; if(!t) return;
+    
+    // Update local data
     t.ext_int = $('#ext-int-select').val();
-    t.usage = $usageSelect.val()||''; t.oil_class = $oilClassSelect.val()||''; t.procured = $procuredSelect.val()||'';
+    t.usage = $usageSelect.val()||''; 
+    t.oil_class = $oilClassSelect.val()||''; 
+    t.procured = $procuredSelect.val()||'';
     t.items_groups = itemGroups.map(g=>({items:g.items, dosage:g.dosage, uno:g.uno}));
-    alert('Therapy updated locally.');
-    resetFormState(); renderAll();
+    
+    // Send update to server if therapy has allocation_id
+    if (t.allocation_id) {
+      const updatePayload = {
+        allocation_id: t.allocation_id,
+        therapy_name: t.therapy_name,
+        ext_int: t.ext_int,
+        items_groups: t.items_groups,
+        oil_class: t.oil_class,
+        usage: t.usage,
+        procured_from: t.procured,
+        notes: t.notes || ''
+      };
+      
+      fetch(API_URL + '?action=update_therapy', {
+        method:'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify(updatePayload)
+      }).then(r => r.json()).then(j => {
+        if (j.status === 'ok') {
+          alert('Therapy updated successfully on server.');
+          resetFormState(); 
+          renderAll();
+        } else {
+          alert('Failed to update therapy: ' + JSON.stringify(j));
+        }
+      }).catch(() => {
+        alert('Network error. Therapy updated locally only.');
+        resetFormState(); 
+        renderAll();
+      });
+    } else {
+      // Local update only (for unsaved therapies)
+      alert('Therapy updated locally.');
+      resetFormState(); 
+      renderAll();
+    }
   });
 
   function resetFormState(){
@@ -710,6 +811,84 @@ $(function(){
     $allocateBtn.show(); $updateBtn.hide();
   }
 
+  // Resume modal handlers
+  const $resumeModal = $('#resume-modal-backdrop');
+  const $resumeCloseBtn = $('#resume-modal-close');
+  const $resumeSubmitBtn = $('#resume-submit');
+  const $resumeFrom = $('#resume-from');
+  const $resumeTo = $('#resume-to');
+  let resumingTherapyIndex = null;
+  
+  $resumeCloseBtn.on('click', function(){ $resumeModal.hide(); resumingTherapyIndex = null; });
+  $resumeSubmitBtn.on('click', function(){ submitResume(); });
+  
+  
+  function openResumeModal(index){
+    resumingTherapyIndex = index; 
+    const t = addedTherapies[index]; 
+    if(!t) return;
+    $('#resume-modal-info').text(`Therapy: ${t.therapy_name} — Resume range: ${t.from_date||'—'} → ${t.to_date||'—'}`);
+    if (t.from_date) $resumeFrom.attr('min', t.from_date).val(t.from_date); 
+    else $resumeFrom.removeAttr('min').val('');
+    if (t.to_date) $resumeTo.attr('max', t.to_date).val(t.to_date); 
+    else $resumeTo.removeAttr('max').val('');
+    if (t.from_date && t.to_date){ 
+      $resumeFrom.attr('max', t.to_date); 
+      $resumeTo.attr('min', t.from_date); 
+      if(!$resumeFrom.val()) $resumeFrom.val(t.from_date); 
+      if(!$resumeTo.val()) $resumeTo.val(t.to_date); 
+    }
+    else { 
+      $resumeFrom.removeAttr('max'); 
+      $resumeTo.removeAttr('min'); 
+    }
+    $resumeModal.show();
+  }
+  
+  function submitResume(){
+    if (resumingTherapyIndex === null) return;
+    const from = $resumeFrom.val();
+    const to = $resumeTo.val();
+    if (!from || !to) { alert('Please select both dates'); return; }
+    if (from > to) { alert('From date must be <= To date'); return; }
+    
+    const therapy = addedTherapies[resumingTherapyIndex];
+    
+    if (therapy.allocation_id) {
+      // Server-side resume
+      fetch(API_URL + '?action=resume_therapy', {
+        method:'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ allocation_id: therapy.allocation_id, resume_from: from, resume_to: to })
+      }).then(r => r.json()).then(j => {
+        if (j.status === 'ok') {
+          therapy.status = 'draft';
+          therapy.cancelled_date_from = null;
+          therapy.cancelled_date_to = null;
+          therapy.cancellation_reason = '';
+          alert('Therapy resumed successfully.');
+          $resumeModal.hide();
+          resumingTherapyIndex = null;
+          renderAll();
+        } else {
+          alert('Failed: ' + JSON.stringify(j));
+        }
+      }).catch(()=>alert('Network error'));
+    } else {
+      // Local resume
+      therapy.status = 'draft';
+      therapy.cancelled_date_from = null;
+      therapy.cancelled_date_to = null;
+      therapy.cancellation_reason = '';
+      
+      renderAll();
+      $resumeModal.hide();
+      resumingTherapyIndex = null;
+      alert('Therapy resumed successfully');
+    }
+  }
+  
+
   // export JSON
   $('#export-json').on('click', function(){
     const patient = $patientSelect.val() || '';
@@ -721,6 +900,9 @@ $(function(){
 
   // initial render
   renderAll();
+
+  // Initialize UnitNo dropdown
+  loadUnitNumbers();
 
   // expose for debug
   window._therapyApp = { addedTherapies, bookings, itemGroups, renderAll };

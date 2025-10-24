@@ -16,7 +16,8 @@ from django.shortcuts import render, redirect, get_object_or_404
 from django.http import JsonResponse
 from django.db.models import Q
 from datetime import date
-from MySql_Data_pull.models import Registration, store_Therapy, store_TherapyItem, store_Prescription, store_PrescriptionItem, ItemMaster,Visit
+from MySql_Data_pull.models import Registration, OPMaster, store_Therapy, store_TherapyItem, store_Prescription, store_PrescriptionItem, ItemMaster,Visit
+from masters.models import UnitNo
 import json
 from .models import Repeated_Visitors
 from datetime import date, datetime
@@ -29,28 +30,50 @@ def patient_lookup_view(request):
         from_date_str = request.POST.get('from_date')
         to_date_str = request.POST.get('to_date')
 
+        patient_found = False
+        
+        # First, try to find in IP patients (Registration table)
         try:
             patient = Registration.objects.using('therapy_db').get(pat_reg_no=reg_number)
             request.session['patient_reg_no'] = str(patient.pat_reg_no)
-
+            request.session['is_ip_or_op'] = 'IP'
+            patient_found = True
+        except Registration.DoesNotExist:
+            pass
+        except Exception as e:
+            print(f"Error searching IP patients: {e}")
+        
+        # If not found in IP patients, try OP patients (OPMaster table)
+        if not patient_found:
+            try:
+                op_patient = OPMaster.objects.using('hospital_db').filter(NPat_Reg_No=reg_number).first()
+                
+                if op_patient:
+                    request.session['patient_reg_no'] = str(op_patient.NPat_Reg_No)
+                    request.session['is_ip_or_op'] = 'OP'
+                    patient_found = True
+            except Exception as e:
+                print(f"Error searching OP patients: {e}")
+        
+        if patient_found:
             # Store date and days data in the session
             request.session['from_date'] = from_date_str
             request.session['to_date'] = to_date_str
             
             if from_date_str and to_date_str:
-                from_date = datetime.strptime(from_date_str, '%Y-%m-%d').date()
-                to_date = datetime.strptime(to_date_str, '%Y-%m-%d').date()
-                admission_days = (to_date - from_date).days + 1
-                request.session['admission_days'] = admission_days
+                try:
+                    from_date = datetime.strptime(from_date_str, '%Y-%m-%d').date()
+                    to_date = datetime.strptime(to_date_str, '%Y-%m-%d').date()
+                    admission_days = (to_date - from_date).days + 1
+                    request.session['admission_days'] = admission_days
+                except ValueError:
+                    request.session['admission_days'] = None
             else:
                 request.session['admission_days'] = None
-            
-            # 🎯 Calculate and store IP/OP status
-            request.session['is_ip_or_op'] = 'OP' if len(str(reg_number)) == 5 else 'IP'
 
             return redirect('patient:therapy_entry')
-        except Registration.DoesNotExist:
-            error_message = "Registration number not found."
+        else:
+            error_message = "Registration number not found in IP or OP patients."
             return render(request, 'patient_lookup.html', {'error': error_message})
     
     return render(request, 'dashboards/doctorsAndHelpDesk/patient_lookup.html')
@@ -58,44 +81,126 @@ def patient_lookup_view(request):
 
 def search_patients_api(request):
     query = request.GET.get('q', '')
-    if query:
-        patients = Registration.objects.using('therapy_db').filter(
-            Q(pat_reg_no__icontains=query) | Q(pat_name__icontains=query)
-        ).values('pat_reg_no', 'pat_name')[:10]
-        return JsonResponse(list(patients), safe=False)
-    return JsonResponse([], safe=False)
+    if not query or len(query) < 3:
+        return JsonResponse([], safe=False)
+    
+    try:
+        patients = []
+        
+        # Search in IP patients (Registration table)
+        try:
+            ip_patients = Registration.objects.using('therapy_db').filter(
+                Q(pat_reg_no__icontains=query) | Q(pat_name__icontains=query)
+            ).values('pat_reg_no', 'pat_name')[:10]
+            
+            for patient in ip_patients:
+                patients.append({
+                    'pat_reg_no': str(patient['pat_reg_no']),
+                    'pat_name': patient['pat_name'] or 'Unknown',
+                    'patient_type': 'IP'
+                })
+        except Exception as e:
+            print(f"Error searching IP patients: {e}")
+        
+        # Search in OP patients (OPMaster table)
+        try:
+            op_patients = OPMaster.objects.using('hospital_db').filter(
+                Q(NPat_Reg_No__icontains=query) | Q(NPat_Name__icontains=query)
+            ).values('NPat_Reg_No', 'NPat_Name')[:10]
+            print(op_patients)
+            for patient in op_patients:
+                patients.append({
+                    'pat_reg_no': str(patient['NPat_Reg_No']),
+                    'pat_name': patient['NPat_Name'] or 'Unknown',
+                    'patient_type': 'OP'
+                })
+        except Exception as e:
+            print(f"Error searching OP patients: {e}")
+        
+        # Remove duplicates based on registration number
+        seen_reg_nos = set()
+        unique_patients = []
+        for patient in patients:
+            if patient['pat_reg_no'] not in seen_reg_nos:
+                seen_reg_nos.add(patient['pat_reg_no'])
+                unique_patients.append(patient)
+        return JsonResponse(unique_patients[:10], safe=False)
+    except Exception as e:
+        print(f"Error in search_patients_api: {e}")
+        return JsonResponse({'error': 'Database connection error'}, status=500)
 
 # In yourappname/views.py
 
 def get_patient_details_api(request):
     pat_reg_no = request.GET.get('pat_reg_no')
+    if not pat_reg_no:
+        return JsonResponse({'error': 'Registration number is required'}, status=400)
+    
+    patient_details = None
+    print(pat_reg_no)
+    # Try to find in IP patients first
     try:
-        # Step 1: Query the patient details from the live server.
         patient = Registration.objects.using('therapy_db').get(pat_reg_no=pat_reg_no)
         
-        # Step 2: Query the VIP status from your local Django database.
-        # Your database router will handle this automatically because
-        # the `Repeated_Visitors` model is not marked as `managed=False`
-        # and doesn't have a `db_table` pointing to the live server.
-        vip_status = "Yes" if Repeated_Visitors.objects.filter(register_number=pat_reg_no, is_vip=1).exists() else "No"
-        repeated_status = "Yes" if Repeated_Visitors.objects.filter(register_number=pat_reg_no, total_visits__gt=2).exists() else "No"
-
+        # Handle VIP status lookup
+        try:
+            reg_no_int = int(pat_reg_no)
+            vip_status = "Yes" if Repeated_Visitors.objects.filter(register_number=reg_no_int, is_vip=1).exists() else "No"
+            repeated_status = "Yes" if Repeated_Visitors.objects.filter(register_number=reg_no_int, total_visits__gt=2).exists() else "No"
+        except (ValueError, TypeError):
+            vip_status = "No"
+            repeated_status = "No"
         
-        data = {
-    'pat_name': patient.pat_name,
-    'pat_age': patient.pat_age,
-    'pat_sex': patient.pat_sex,
-    'vip_status': vip_status,
-    'pat_op_reg_no': patient.pat_op_reg_no,
-    'pat_room_no': patient.pat_room_no,
-    'pat_ref_id': patient.pat_ref_id,
-    'repeated_status': repeated_status,
-}
-        return JsonResponse(data)
+        patient_details = {
+            'pat_reg_no': patient.pat_reg_no,
+            'pat_name': patient.pat_name or 'Unknown',
+            'pat_age': patient.pat_age or 'Unknown',
+            'pat_sex': patient.pat_sex or 'Unknown',
+            'vip_status': vip_status,
+            'pat_op_reg_no': patient.pat_op_reg_no or '',
+            'pat_room_no': patient.pat_room_no or '',
+            'pat_ref_id': patient.pat_ref_id or '',
+            'repeated_status': repeated_status,
+            'patient_type': 'IP'
+        }
     except Registration.DoesNotExist:
-        return JsonResponse({'error': 'Patient with this registration number does not exist.'}, status=404)
+        pass
     except Exception as e:
-        return JsonResponse({'error': str(e)}, status=500)
+        print(f"Error searching IP patients: {e}")
+    
+    # If not found in IP patients, try OP patients
+    if not patient_details:
+        try:
+            op_patient = OPMaster.objects.using('hospital_db').filter(NPat_Reg_No=pat_reg_no).first()
+            if op_patient:
+                # Handle VIP status lookup for OP patients
+                try:
+                    reg_no_int = int(pat_reg_no)
+                    vip_status = "Yes" if Repeated_Visitors.objects.filter(register_number=reg_no_int, is_vip=1).exists() else "No"
+                    repeated_status = "Yes" if Repeated_Visitors.objects.filter(register_number=reg_no_int, total_visits__gt=2).exists() else "No"
+                except (ValueError, TypeError):
+                    vip_status = "No"
+                    repeated_status = "No"
+                
+                patient_details = {
+                    'pat_reg_no': op_patient.NPat_Reg_No,
+                    'pat_name': op_patient.NPat_Name or 'Unknown',
+                    'pat_age': 'Unknown',  # OP patients don't have age in this table
+                    'pat_sex': op_patient.NPat_Sex or 'Unknown',
+                    'vip_status': vip_status,
+                    'pat_op_reg_no': '',  # OP patients don't have OP reg no
+                    'pat_room_no': '',  # OP patients don't have room number
+                    'pat_ref_id': '',  # OP patients don't have ref ID
+                    'repeated_status': repeated_status,
+                    'patient_type': 'OP'
+                }
+        except Exception as e:
+            print(f"Error searching OP patients: {e}")
+    
+    if patient_details:
+        return JsonResponse(patient_details)
+    else:
+        return JsonResponse({'error': 'Patient with this registration number does not exist.'}, status=404)
     
 
 
@@ -230,31 +335,8 @@ def parse_date_safe(d):
 
 
 def prescription_entry_view(request):
-    patient_reg_no = request.session.get('patient_reg_no')
-    if not patient_reg_no:
-        return redirect('patient:patient_lookup')
-
-    patient = get_object_or_404(Registration.objects.using(DB_ALIAS), pat_reg_no=patient_reg_no)
-    all_prescription_items = ItemMaster.objects.using(DB_ALIAS).all()
-
-    if request.method == 'POST':
-        try:
-            data = json.loads(request.body.decode('utf-8'))
-            prescription_rows = data.get('prescription_data', [])
-        except json.JSONDecodeError:
-            return JsonResponse({'status': 'error', 'message': 'Invalid JSON data'}, status=400)
-
-        request.session['prescription_rows_data'] = prescription_rows
-
-        if prescription_rows:
-            return JsonResponse({'status': 'success'}, status=200)
-        return JsonResponse({'status': 'error', 'message': 'No prescription data provided.'}, status=400)
-
-    context = {
-        'patient': patient,
-        'all_prescription_items': all_prescription_items,
-    }
-    return render(request, 'dashboards/doctorsAndHelpDesk/prescription_entry.html', context)
+    # Redirect to the new comprehensive prescription entry
+    return redirect('prescription_entry')
 
 
 # views.py (where your review_view lives)
@@ -1530,3 +1612,23 @@ def time_slots(request):
         label = t.start_time.strftime("%I:%M %p").lstrip("0")
         slots.append({"slot_number": t.slot_number, "start_time": st, "label": label})
     return JsonResponse({"slots": slots})
+
+
+@require_GET
+def unit_numbers(request):
+    """
+    Return all active UnitNo options from master table:
+      { "units": [ {"id": 1, "unit_name": "ml"}, ... ] }
+    """
+    try:
+        units = UnitNo.objects.filter(is_active=True).order_by('unit_name')
+        units_list = []
+        for unit in units:
+            units_list.append({
+                "id": unit.id,
+                "unit_name": unit.unit_name
+            })
+        return JsonResponse({"units": units_list})
+    except Exception as e:
+        print(f"Error fetching unit numbers: {e}")
+        return JsonResponse({"units": []}, status=500)

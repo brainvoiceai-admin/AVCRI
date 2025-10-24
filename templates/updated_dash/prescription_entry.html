@@ -1,9 +1,10 @@
+{# templates/updated_dash/prescription_entry.html #}
 <!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Prescription Entry — Demo</title>
+  <title>Prescription Entry — Multiple Prescription Management</title>
 
   <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
   <link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet" />
@@ -22,6 +23,7 @@
     .small { max-width:160px; }
     table { width:100%; border-collapse:collapse; }
     th, td { padding:8px; border-bottom:1px solid #eee; text-align:left; vertical-align:top; }
+    /* Modal styles */
     .modal-backdrop { position:fixed; inset:0; background:rgba(0,0,0,0.4); display:none; align-items:center; justify-content:center; z-index:9999; }
     .modal { background:#fff; width:920px; max-width:98%; padding:16px; border-radius:8px; box-shadow:0 6px 24px rgba(0,0,0,0.2); max-height:86vh; overflow:auto; }
     .modal h3 { margin-top:0; }
@@ -29,23 +31,29 @@
     .btn-ghost { background:#fff; color:#1976d2; border:1px solid #1976d2; }
     .btn-danger { background:#d9534f; color:#fff; }
     .status-pill { padding:6px 8px; border-radius:999px; display:inline-block; font-weight:700; font-size:0.85em; }
-    .status-active { background:#e8f4ff; color:#0b66b2; border:1px solid #d0eafc; }
-    .status-cancelreq { background:#fff4e6; color:#b36b00; border:1px solid #ffebd1; }
-    .status-cancelled { background:#fdecea; color:#b02a2a; border:1px solid #f8d7da; }
+    .status-draft { background:#fff3cd;color:#856404;border:1px solid #ffeaa7; }
+    .status-active { background:#e9f9ec;color:#19692a;border:1px solid #d7f1d9; }
+    .status-cancelled { background:#fdecea;color:#b02a2a;border:1px solid #f8d7da; }
+    .status-failed { background:#fdecea;color:#b02a2a;border:1px solid #f8d7da; }
     .small-muted { font-size:0.9em; color:#666; margin-top:6px; }
+    .date-row { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:8px 6px; border-bottom:1px solid #f1f1f1; }
+    .date-left { display:flex; align-items:center; gap:12px; min-width:260px; }
+    .input-inline { width:220px; }
     .muted-small { font-size:0.85em; color:#666; }
     .action-btn { margin-right:6px; }
-    .group-box { padding:10px;border:1px dashed #ddd;border-radius:6px;margin-bottom:8px;background:#fff; }
-    .group-actions { display:flex;gap:8px;align-items:flex-end; }
   </style>
 </head>
 <body>
-  <h2>Prescription Entry — Demo (dummy data)</h2>
+  <h2>Add Prescription — Multiple Prescription Management</h2>
 
   <div style="display:flex;gap:20px;align-items:flex-end;margin-bottom:12px;">
     <div style="min-width:360px;">
       <label for="header-patient-select">Search Patient</label>
-      <select id="header-patient-select" style="width:100%"></select>
+      <div style="display:flex;gap:8px;">
+        <input type="text" id="header-patient-select" placeholder="Enter at least 3 characters to search..." style="flex:1;padding:8px;border:1px solid #ccc;border-radius:6px;">
+        <button id="clear-patient-btn" style="padding:8px 12px;background:#dc3545;color:white;border:none;border-radius:6px;cursor:pointer;">Clear</button>
+      </div>
+      <div id="search-results" style="position:absolute;z-index:1000;background:white;border:1px solid #ccc;border-radius:6px;max-height:300px;overflow-y:auto;display:none;width:360px;margin-top:2px;"></div>
     </div>
     <div style="flex:1"></div>
     <div>
@@ -65,113 +73,97 @@
   <div class="card">
     <h3 id="form-title">Add Prescription</h3>
 
-    <!-- ITEM BUILDER FIRST (moved before single fields) -->
-    <h4 style="margin-top:6px">Item Groups (combination per prescription)</h4>
-    <div id="item-groups-area" style="border:1px dashed #ddd;padding:10px;border-radius:6px;margin-bottom:10px;">
-      <!-- builder row -->
-      <div class="form-row" style="align-items:flex-end;">
+    <div class="form-row">
+      <div class="form-group" style="flex:2">
+        <label for="prescription-name-input">Prescription Name</label>
+        <input type="text" id="prescription-name-input" placeholder="Enter prescription name">
+      </div>
+
+      <div class="form-group">
+        <label for="procured-from-select">Procured From</label>
+        <select id="procured-from-select"><option value="">--</option></select>
+      </div>
+    </div>
+
+    <div class="form-row">
+      <div class="form-group small">
+        <label for="from-date-input">From</label><input type="date" id="from-date-input">
+      </div>
+      <div class="form-group small">
+        <label for="to-date-input">To</label><input type="date" id="to-date-input">
+      </div>
+      <div class="form-group small">
+        <label for="days-input">Days</label><input type="text" id="days-input" readonly>
+      </div>
+    </div>
+
+    <h4>Item Groups</h4>
+    <div style="border:1px dashed #ddd;padding:10px;border-radius:6px;margin-bottom:10px;">
+      <div class="form-row">
         <div class="form-group">
           <label for="item-builder-select">Select Items (multi)</label>
           <select id="item-builder-select" multiple="multiple"></select>
         </div>
         <div class="form-group small">
-          <label for="item-builder-dosage">Dosage</label>
-          <input id="item-builder-dosage" type="text" placeholder="e.g. 2 tsp" />
+          <label for="item-builder-dosage">Dosage</label><input id="item-builder-dosage" type="text" placeholder="e.g. 2 tsp">
         </div>
         <div class="form-group small">
           <label for="item-builder-uno">UNO</label>
           <select id="item-builder-uno">
-            <option value="">--</option>
-            <option value="ml">ml</option>
-            <option value="tbs">tbs</option>
+            <option value="">Select Unit</option>
           </select>
         </div>
-        <div class="form-group small">
-          <label for="item-builder-time">Time</label>
-          <select id="item-builder-time"><option value="">--</option></select>
-        </div>
-        <div class="group-actions">
+        <div style="display:flex;align-items:flex-end;">
           <button id="add-item-group-btn">Add Group</button>
         </div>
       </div>
-
-      <div id="item-groups-list" style="margin-top:10px">No item groups added</div>
-    </div>
-
-    <!-- COMMON SINGLE-FIELDS (moved after item builder) -->
-    <div class="form-row">
-      <div class="form-group">
-        <label for="usage-select">Usage</label>
-        <select id="usage-select"></select>
-      </div>
-
-      <div class="form-group small">
-        <label for="ext-int-select">Ext/Int (Scope)</label>
-        <select id="ext-int-select"></select>
-      </div>
-
-      <div class="form-group small">
-        <label for="procured-select">Procured From</label>
-        <select id="procured-select"></select>
-      </div>
-
-      <div class="form-group small">
-        <label for="from-date-input">From Date</label>
-        <input type="date" id="from-date-input" />
-      </div>
-
-      <div class="form-group small">
-        <label for="to-date-input">To Date</label>
-        <input type="date" id="to-date-input" />
-      </div>
-
-      <div class="form-group small">
-        <label for="days-input">Days</label>
-        <input type="text" id="days-input" readonly />
-      </div>
+      <div id="item-groups-list" style="margin-top:10px"></div>
     </div>
 
     <div style="display:flex;justify-content:flex-end;gap:8px;">
-      <button id="add-prescription-btn">Add Prescription</button>
+      <button id="allocate-prescription-btn">Add Prescription</button>
       <button id="update-prescription-btn" style="display:none;background:#28a745">Update Prescription</button>
       <button id="clear-form" style="background:#eee;color:#333">Clear</button>
     </div>
   </div>
 
-  <h3>Prescriptions</h3>
+  <h3>Allocated Prescriptions</h3>
   <table style="width:100%;border-collapse:collapse;margin-top:12px;">
     <thead>
-      <tr style="text-align:left">
-        <th>#</th>
-        <th>Item (Dosage • UNO)</th>
-        <th>Usage</th>
-        <th>Ext/Int</th>
-        <th>Procured From</th>
-        <th>Time</th>
-        <th>From → To (Days)</th>
-        <th>Status</th>
-        <th>Action</th>
-      </tr>
+      <tr style="text-align:left"><th>#</th><th>Prescription</th><th>Items</th><th>From</th><th>To</th><th>Days</th><th>Status</th><th>Actions</th></tr>
     </thead>
     <tbody id="prescriptions-table-body"></tbody>
   </table>
 
-  <!-- Cancellation Modal (for prescriptions) -->
+  <!-- Cancellation Modal -->
   <div id="cancel-modal-backdrop" class="modal-backdrop">
     <div class="modal" role="dialog" aria-modal="true">
-      <h3>Request Cancellation</h3>
+      <h3>Request Cancellation (Date Range)</h3>
       <div id="cancel-modal-info" class="small-muted"></div>
-
       <div style="margin-top:12px;" class="form-row">
         <div class="form-group"><label for="cancel-from">Cancel From</label><input type="date" id="cancel-from" /></div>
         <div class="form-group"><label for="cancel-to">Cancel To</label><input type="date" id="cancel-to" /></div>
       </div>
-
       <div style="margin-top:10px;"><label>Reason for cancellation</label><textarea id="cancel-reason" placeholder="Enter reason" rows="3" style="resize:vertical"></textarea></div>
-
       <div class="modal-footer">
         <button id="cancel-modal-close" class="btn-ghost">Close</button>
-        <button id="cancel-submit" class="btn-danger">Cancel Prescription</button>
+        <button id="cancel-submit" class="btn-danger">Submit Cancellation Request</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Resume Modal -->
+  <div id="resume-modal-backdrop" class="modal-backdrop">
+    <div class="modal" role="dialog" aria-modal="true">
+      <h3>Resume Prescription</h3>
+      <div id="resume-modal-info" class="small-muted"></div>
+      <div style="margin-top:12px;" class="form-row">
+        <div class="form-group"><label for="resume-from">Resume From</label><input type="date" id="resume-from" /></div>
+        <div class="form-group"><label for="resume-to">Resume To</label><input type="date" id="resume-to" /></div>
+      </div>
+      <div class="modal-footer">
+        <button id="resume-modal-close" class="btn-ghost">Close</button>
+        <button id="resume-submit" style="background:#28a745;color:#fff">Resume Prescription</button>
       </div>
     </div>
   </div>
@@ -179,189 +171,251 @@
 <script>
 $(function(){
 
-  // -------------------------
-  // DUMMY DATA (replace later)
-  // -------------------------
-  const DUMMY_PATIENTS = [
-    { pat_reg_no: 'OP12345', pat_name: 'Ravi Kumar', pat_age: 35, pat_sex: 'M', pat_room_no: '—', pat_op_reg_no: 'OP12345', pat_ref_id: 'REF-1001' },
-    { pat_reg_no: 'IP54321', pat_name: 'Sita Devi', pat_age: 62, pat_sex: 'F', pat_room_no: '101A', pat_op_reg_no: 'IP54321', pat_ref_id: 'REF-2002' },
-    { pat_reg_no: 'OP67890', pat_name: 'Ajay Singh', pat_age: 28, pat_sex: 'M', pat_room_no: '—', pat_op_reg_no: 'OP67890', pat_ref_id: 'REF-3003' }
-  ];
+  // --- config/fallbacks ---
+  const API_URL = window.location.pathname;
+  const FALLBACK_PROCURED = [{name:'IP Pharmacy'},{name:'Kashaya room'}];
 
-  const DUMMY_ITEMS = [
-    { item_code: 'ITM001', item_name: 'Ashwagandha Churna' },
-    { item_code: 'ITM002', item_name: 'Brahmi Tailam' },
-    { item_code: 'ITM003', item_name: 'Triphala Powder' },
-    { item_code: 'ITM004', item_name: 'Hingvastak Churna' },
-    { item_code: 'ITM005', item_name: 'Dashamoola Kashayam' }
-  ];
-
-  const DUMMY_USAGE = [{name:'Internal'},{name:'Topical'},{name:'Dispensed'}];
-  const DUMMY_SCOPE = [{name:'Internal'},{name:'External'}];
-  const DUMMY_PROCURED = [{name:'IP Pharmacy'},{name:'Kashaya room'},{name:'OP Pharmacy'}];
-  const DUMMY_TIMES = ['08:00','10:00','12:00','14:00','16:00','18:00'];
-
-  // -------------------------
-  // Helpers
-  // -------------------------
+  // --- helpers ---
+  function ajax(params){
+    const url = API_URL + '?' + $.param(params);
+    return fetch(url).then(r => { if (!r.ok) throw new Error('Network'); return r.json(); });
+  }
   function esc(s){ return String(s||''); }
-  function flattenGroupsForDisplay(groups){
-    return groups.map(g => {
-      const items = (g.items||[]).map(it => `<span class="tag">${esc(it.item_name)}</span>`).join(' ');
-      const meta = `Dosage: ${esc(g.dosage||'—')} • UNO: ${esc(g.uno||'—')}`;
-      const time = g.time ? ` • Time: ${esc(g.time)}` : '';
-      return `<div style="margin-bottom:6px">${items}<div class="muted-small">${meta}${time}</div></div>`;
-    }).join('');
+  function getDateRange(from, to){ const out=[]; let cur=new Date(from+'T00:00:00'), end=new Date(to+'T00:00:00'); while(cur<=end){ out.push(cur.toISOString().slice(0,10)); cur.setDate(cur.getDate()+1);} return out; }
+  function getCookie(name) { let v = document.cookie.match('(^|;)\\s*' + name + '\\s*=\\s*([^;]+)'); return v ? v.pop() : ''; }
+
+  // Load UnitNo options from master table
+  function loadUnitNumbers() {
+    fetch('/unit_numbers/')
+      .then(response => response.json())
+      .then(data => {
+        const $unitSelect = $('#item-builder-uno');
+        $unitSelect.find('option').not(':first').remove(); // Keep first option
+        if (data.units && data.units.length > 0) {
+          data.units.forEach(unit => {
+            $unitSelect.append(`<option value="${unit.unit_name}">${unit.unit_name}</option>`);
+          });
+        }
+      })
+      .catch(error => {
+        console.error('Error loading unit numbers:', error);
+      });
   }
 
-  // -------------------------
-  // DOM refs
-  // -------------------------
+  // --- DOM refs ---
   const $patientSelect = $('#header-patient-select');
   const $hdrName = $('#hdr-pat-name'), $hdrMeta = $('#hdr-pat-meta'), $hdrVip = $('#hdr-pat-vip'), $hdrIp = $('#hdr-pat-ip'), $hdrUnique = $('#hdr-pat-unique'), $hdrType = $('#hdr-pat-type');
+  const $prescriptionName = $('#prescription-name-input'), $fromDate = $('#from-date-input'), $toDate = $('#to-date-input'), $daysInput = $('#days-input');
+  const $procuredSelect = $('#procured-from-select');
+  const $itemBuilder = $('#item-builder-select'), $itemGroupsList = $('#item-groups-list');
+  const $allocateBtn = $('#allocate-prescription-btn'), $updateBtn = $('#update-prescription-btn'), $clearBtn = $('#clear-form');
+  const $prescriptionsTableBody = $('#prescriptions-table-body');
 
-  const $usageSelect = $('#usage-select'), $extInt = $('#ext-int-select'), $procured = $('#procured-select'), $fromDate = $('#from-date-input'), $toDate = $('#to-date-input'), $daysInput = $('#days-input');
+  const $cancelModal = $('#cancel-modal-backdrop'), $cancelFrom = $('#cancel-from'), $cancelTo = $('#cancel-to'), $cancelReason = $('#cancel-reason');
+  const $cancelSubmitBtn = $('#cancel-submit'), $cancelCloseBtn = $('#cancel-modal-close'), $cancelModalInfo = $('#cancel-modal-info');
 
-  const $itemBuilder = $('#item-builder-select'), $itemDosage = $('#item-builder-dosage'), $itemUno = $('#item-builder-uno'), $itemTime = $('#item-builder-time');
-  const $addGroupBtn = $('#add-item-group-btn'), $itemGroupsList = $('#item-groups-list');
+  const $resumeModal = $('#resume-modal-backdrop'), $resumeFrom = $('#resume-from'), $resumeTo = $('#resume-to');
+  const $resumeSubmitBtn = $('#resume-submit'), $resumeCloseBtn = $('#resume-modal-close'), $resumeModalInfo = $('#resume-modal-info');
 
-  const $addPrescriptionBtn = $('#add-prescription-btn'), $updatePrescriptionBtn = $('#update-prescription-btn'), $clearFormBtn = $('#clear-form');
-  const $prescriptionsTable = $('#prescriptions-table-body');
-
-  const $cancelModal = $('#cancel-modal-backdrop'), $cancelFrom = $('#cancel-from'), $cancelTo = $('#cancel-to'), $cancelReason = $('#cancel-reason'), $cancelModalInfo = $('#cancel-modal-info');
-  const $cancelSubmitBtn = $('#cancel-submit'), $cancelCloseBtn = $('#cancel-modal-close');
-
-  // -------------------------
-  // State
-  // -------------------------
-  let itemGroups = []; // groups being built for current prescription
-  let prescriptions = []; // list of added prescriptions
+  // --- state ---
+  let itemGroups = [];
+  let addedPrescriptions = [];
   let editPrescriptionIndex = null;
-  let cancelingIndex = null;
+  let cancelingPrescriptionIndex = null;
+  let resumingPrescriptionIndex = null;
 
-  // -------------------------
-  // select2 in-memory search
-  // -------------------------
-  $patientSelect.select2({
-    placeholder: 'Search patients (type name or reg no)...',
-    minimumInputLength: 1,
-    data: DUMMY_PATIENTS.map(p => ({ id: p.pat_reg_no, text: `${p.pat_reg_no} - ${p.pat_name}`, raw: p })),
-    matcher: function(params, data) {
-      if (!params || !params.term) return data;
-      const term = params.term.toLowerCase();
-      if ((data.text || '').toLowerCase().indexOf(term) > -1) return data;
-      if (data.raw && (data.raw.pat_name||'').toLowerCase().indexOf(term) > -1) return data;
-      return null;
-    },
-    allowClear: true
-  });
-
+  // --- init select2s ---
   $itemBuilder.select2({
-    placeholder: 'Search or type items (multi)',
+    placeholder:'Search or type items (multi)',
+    minimumInputLength: 0,
     tags: true,
-    data: DUMMY_ITEMS.map(i => ({ id: i.item_code, text: i.item_name })),
     tokenSeparators: [','],
-    matcher: function(params, data) {
-      if (!params || !params.term) return data;
-      const term = params.term.toLowerCase();
-      if ((data.text || '').toLowerCase().indexOf(term) > -1) return data;
-      return null;
+    ajax: {
+      transport: function(p, s, f){
+        ajax({action:'search_items', q: p.data.q}).then(s).catch(function(){ s({ results: [] }); });
+      },
+      processResults: data => ({ results: (data||[]).map(i => ({ id: i.item_code, text: i.item_name })) }),
+      cache:true
     }
   });
 
-  // populate masters dropdowns with dummy values
-  function populateMasterSelect($el, arr, key='name'){ $el.empty().append('<option value="">--</option>'); arr.forEach(a => $el.append(new Option(a[key], a[key]))); }
-  populateMasterSelect($usageSelect, DUMMY_USAGE);
-  populateMasterSelect($extInt, DUMMY_SCOPE);
-  populateMasterSelect($procured, DUMMY_PROCURED);
-
-  // populate time builder
-  function populateTimeBuilder(times){
-    $itemTime.empty().append('<option value="">--</option>');
-    (times||DUMMY_TIMES).forEach(t => $itemTime.append(new Option(t,t)));
-  }
-  populateTimeBuilder(DUMMY_TIMES);
-
-  // -------------------------
-  // Patient select -> autofill
-  // -------------------------
-  $patientSelect.on('change', function(){
-    const reg = $(this).val();
-    if (!reg) {
-      $hdrName.text('No patient selected');
-      $hdrMeta.text('Registration: — • Age/Gender: — / —');
-      $hdrVip.text('VIP: — • Room: —');
-      $hdrIp.text('IP No: —');
-      $hdrUnique.text('Unique ID: —');
-      $hdrType.text('Patient Type: —');
-      prescriptions = []; renderAll();
+  // Patient search with auto-fill functionality
+  let selectedPatient = null;
+  let searchTimeout;
+  
+  $('#header-patient-select').on('input', function() {
+    const query = $(this).val().trim();
+    
+    clearTimeout(searchTimeout);
+    
+    if (query.length === 0) {
+      $('#search-results').hide();
       return;
     }
-    const p = DUMMY_PATIENTS.find(x => x.pat_reg_no === reg);
-    if (p) {
-      $hdrName.text(p.pat_name);
-      $hdrMeta.text('Registration: ' + (p.pat_reg_no || reg) + ' • Age/Gender: ' + ((p.pat_age||'—') + ' / ' + (p.pat_sex||'—')));
-      $hdrVip.text('Room: ' + (p.pat_room_no || '—'));
-      $hdrIp.text('IP No: ' + (p.pat_op_reg_no || '—'));
-      $hdrUnique.text('Unique ID: ' + (p.pat_ref_id || '—'));
-      const digits = (''+reg).replace(/\D/g,''); $hdrType.text('Patient Type: ' + ((digits.length===5)?'OP':'IP'));
-    } else {
-      $hdrName.text(reg); $hdrMeta.text('Registration: ' + reg);
+    
+    if (query.length < 3) {
+      $('#search-results').html('<div style="padding:10px;color:#666;">Enter at least 3 characters to search</div>').show();
+      return;
     }
-    const list = prescriptions.filter(pr => pr.patient_reg_no === reg);
-    renderAll(list);
+
+    searchTimeout = setTimeout(() => {
+      searchPatients(query);
+    }, 300);
   });
 
-  // -------------------------
-  // Days calculation
-  // -------------------------
-  function calcDays(){
-    const f = $fromDate.val(), t = $toDate.val();
-    if (!f || !t) { $daysInput.val(''); return; }
-    const fd = new Date(f), td = new Date(t);
-    if (fd <= td) {
-      const diff = Math.ceil((td.getTime() - fd.getTime())/(1000*60*60*24)) + 1;
-      $daysInput.val(diff);
-    } else {
-      $daysInput.val('');
+  function searchPatients(query) {
+    if (query.length < 3) {
+      $('#search-results').html('<div style="padding:10px;color:#666;">Enter at least 3 characters to search</div>').show();
+      return;
     }
+    
+    fetch('/search-patients/?q=' + encodeURIComponent(query))
+      .then(response => response.json())
+      .then(data => {
+        displaySearchResults(data || []);
+      })
+      .catch(error => {
+        console.error('Search error:', error);
+        $('#search-results').html('<div style="padding:10px;color:#d9534f;">Error searching patients</div>').show();
+      });
   }
-  $fromDate.on('change', calcDays);
-  $toDate.on('change', calcDays);
 
-  // When ext/int/procured/date change, update time options for groups (demo uses dummy rule)
-  function computeTimesForGroups(){
-    const ext = $extInt.val(), proc = $procured.val();
-    let times = DUMMY_TIMES.slice();
-    if (ext === 'External') times = ['12:00','14:00','16:00','18:00'];
-    if (ext === 'Internal') times = ['08:00','09:00','11:00','13:00'];
-    if (proc && proc.toLowerCase().indexOf('pharmacy') !== -1) times = ['09:00','13:00','17:00'];
-    populateTimeBuilder(times);
+  function displaySearchResults(patients) {
+    const resultsContainer = $('#search-results');
+    resultsContainer.empty();
+
+    if (patients.length === 0) {
+      resultsContainer.html('<div style="padding:10px;color:#666;">No patients found</div>').show();
+      return;
+    }
+
+    patients.forEach(patient => {
+      const resultItem = $(`
+        <div style="padding:10px;border-bottom:1px solid #eee;cursor:pointer;" class="search-result-item" data-reg-no="${patient.pat_reg_no}">
+          <div style="display:flex;justify-content:space-between;align-items:center;">
+            <div>
+              <strong>${patient.pat_name || 'Unknown'}</strong>
+              <div style="font-size:0.9em;color:#666;margin-top:2px;">
+                Reg: ${patient.pat_reg_no}
+              </div>
+            </div>
+            <div>
+              ${patient.patient_type === 'IP' ? '<span style="background:#007bff;color:white;padding:2px 6px;border-radius:3px;font-size:0.8em;">IP</span>' : '<span style="background:#28a745;color:white;padding:2px 6px;border-radius:3px;font-size:0.8em;">OP</span>'}
+            </div>
+          </div>
+        </div>
+      `);
+      resultsContainer.append(resultItem);
+    });
+
+    resultsContainer.show();
   }
-  $extInt.on('change', computeTimesForGroups);
-  $procured.on('change', computeTimesForGroups);
-  $fromDate.on('change', computeTimesForGroups);
 
-  // -------------------------
-  // Item groups - add/edit/remove
-  // -------------------------
+  // Handle patient selection
+  $(document).on('click', '.search-result-item', function() {
+    const regNo = $(this).data('reg-no');
+    loadPatientDetails(regNo);
+  });
+
+  // Hide search results when clicking outside
+  $(document).on('click', function(e) {
+    if (!$(e.target).closest('#header-patient-select, #search-results').length) {
+      $('#search-results').hide();
+    }
+  });
+
+  function loadPatientDetails(regNo) {
+    $('#search-results').hide();
+
+    fetch('/get-patient-details/?pat_reg_no=' + encodeURIComponent(regNo))
+      .then(response => response.json())
+      .then(data => {
+        if (data.pat_name) {
+          selectedPatient = data;
+          console.log(selectedPatient);
+          populatePatientInfo(selectedPatient);
+        } else {
+          alert('Patient details not found');
+        }
+      })
+      .catch(error => {
+        console.error('Error loading patient details:', error);
+        alert('Error loading patient details');
+      });
+  }
+
+  function populatePatientInfo(patient) {
+    $('#header-patient-select').val(patient.pat_op_reg_no || patient.pat_reg_no);
+    $('#hdr-pat-name').text(patient.pat_name || 'Unknown');
+    $('#hdr-pat-meta').text('Registration: ' + (patient.pat_reg_no || patient.pat_op_reg_no ) + ' • Age/Gender: ' + ((patient.pat_age || '—') + ' / ' + (patient.pat_sex || '—')));
+    $('#hdr-pat-vip').text('VIP: ' + (patient.vip_status || 'No') + ' • Room: ' + (patient.pat_room_no || '—'));
+    $('#hdr-pat-ip').text('IP No: ' + (patient.pat_op_reg_no || '—'));
+    $('#hdr-pat-unique').text('Unique ID: ' + (patient.pat_ref_id || '—'));
+    $('#hdr-pat-type').text('Patient Type: ' + (patient.patient_type || '—'));
+    
+    // Load patient prescriptions
+    ajax({action:'patient_prescriptions', patient_reg_no: patient.pat_op_reg_no || patient.pat_reg_no}).then(list => {
+      addedPrescriptions = list || [];
+      renderAll();
+    }).catch(()=>{ renderAll(); });
+  }
+
+  // Clear patient selection functionality
+  function clearPatientSelection() {
+    selectedPatient = null;
+    $('#header-patient-select').val('');
+    $('#hdr-pat-name').text('No patient selected');
+    $('#hdr-pat-meta').text('Registration: — • Age/Gender: — / —');
+    $('#hdr-pat-vip').text('VIP: — • Room: —');
+    $('#hdr-pat-ip').text('IP No: —');
+    $('#hdr-pat-unique').text('Unique ID: —');
+    $('#hdr-pat-type').text('Patient Type: —');
+    addedPrescriptions = [];
+    renderAll();
+  }
+
+  // Clear button event handler
+  $('#clear-patient-btn').on('click', function() {
+    clearPatientSelection();
+    $('#search-results').hide();
+  });
+
+  // populate masters with fallback
+  function populateMasters(){
+    ajax({action:'masters', type:'procured'}).then(list => { $procuredSelect.empty().append('<option value="">--</option>'); (list||FALLBACK_PROCURED).forEach(p => $procuredSelect.append(new Option(p.name, p.name))); }).catch(()=>{ $procuredSelect.empty().append('<option value="">--</option>'); FALLBACK_PROCURED.forEach(p => $procuredSelect.append(new Option(p.name, p.name))); });
+  }
+  populateMasters();
+
+  // Add Group
+  $('#add-item-group-btn').on('click', function(){
+    const selected = $itemBuilder.select2('data') || [];
+    if (!selected.length){ alert('Select or type items before adding a group.'); return; }
+    const dosage = $('#item-builder-dosage').val().trim();
+    const uno = $('#item-builder-uno').val().trim();
+    const items = selected.map(s => ({ item_code: s.id, item_name: s.text || s.id }));
+    const grp = { id: Math.random().toString(36).slice(2,9), items, dosage, uno };
+    itemGroups.push(grp);
+    $itemBuilder.val(null).trigger('change');
+    $('#item-builder-dosage').val('');
+    $('#item-builder-uno').val('');
+    renderItemGroups();
+  });
+
   function renderItemGroups(){
     $itemGroupsList.empty();
-    if (!itemGroups.length) { $itemGroupsList.text('No item groups added'); return; }
-    itemGroups.forEach((g, idx) => {
-      const itemsHtml = (g.items||[]).map(it => `<span class="tag">${esc(it.item_name)}</span>`).join(' ');
+    if (!itemGroups.length){ $itemGroupsList.text('No item groups added'); return; }
+    itemGroups.forEach((g,i) => {
+      const itemsHtml = g.items.map(it => `<span class="tag">${esc(it.item_name)}</span>`).join(' ');
       const $div = $(`
-        <div class="group-box" data-id="${g.id}">
-          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
-            <div style="flex:1">
-              <div style="font-weight:700">Items</div>
-              <div style="margin-top:6px">${itemsHtml}</div>
-              <div class="muted-small">Dosage: ${esc(g.dosage||'—')} • UNO: ${esc(g.uno||'—')} • Time: ${esc(g.time||'—')}</div>
+        <div style="padding:8px;border:1px solid #eee;margin-bottom:8px;border-radius:6px;display:flex;justify-content:space-between;align-items:center;">
+          <div>
+            <div style="font-weight:600">Group ${i+1}</div>
+            <div>${itemsHtml}</div>
+            <div class="muted-small">Dosage: ${esc(g.dosage||'—')} • UNO: ${esc(g.uno||'—')}</div>
             </div>
-            <div style="min-width:120px;display:flex;flex-direction:column;gap:6px">
+          <div>
               <button class="edit-group action-btn" data-id="${g.id}">Edit</button>
               <button class="remove-group action-btn" data-id="${g.id}" style="background:#d9534f;color:#fff">Remove</button>
-            </div>
           </div>
         </div>
       `);
@@ -369,209 +423,340 @@ $(function(){
     });
   }
 
-  $addGroupBtn.on('click', function(){
-    const selected = $itemBuilder.select2('data') || [];
-    if (!selected.length) { alert('Select or type items before adding a group.'); return; }
-    const dosage = $itemDosage.val().trim();
-    const uno = $itemUno.val() || '';
-    const time = $itemTime.val() || '';
-    const items = selected.map(s => ({ item_code: s.id, item_name: s.text || s.id }));
-    const grp = { id: Math.random().toString(36).slice(2,9), items, dosage, uno, time };
-    itemGroups.push(grp);
-    $itemBuilder.val(null).trigger('change'); $itemDosage.val(''); $itemUno.val(''); $itemTime.val('');
-    renderItemGroups();
-  });
+  $itemGroupsList.on('click', '.remove-group', function(){ const id = $(this).data('id'); itemGroups = itemGroups.filter(g=>g.id!==id); renderItemGroups(); });
+  $itemGroupsList.on('click', '.edit-group', function(){ const id = $(this).data('id'); const g = itemGroups.find(x=>x.id===id); if(!g) return; $itemBuilder.val(null).trigger('change'); g.items.forEach(it=>{ const opt = new Option(it.item_name, it.item_code, true, true); $itemBuilder.append(opt); }); $itemBuilder.trigger('change'); $('#item-builder-dosage').val(g.dosage||''); $('#item-builder-uno').val(g.uno||''); itemGroups = itemGroups.filter(x=>x.id!==id); renderItemGroups(); });
 
-  $itemGroupsList.on('click', '.remove-group', function(){
-    const id = $(this).data('id');
-    itemGroups = itemGroups.filter(g => g.id !== id);
-    renderItemGroups();
-  });
+  // days calc
+  function calcDays(){ const f = $fromDate.val(), t = $toDate.val(); if(!f||!t){ $daysInput.val(''); return; } const fd=new Date(f), td=new Date(t); if(fd<=td) $daysInput.val(Math.ceil((td.getTime()-fd.getTime())/(1000*60*60*24))+1); else $daysInput.val(''); }
+  $fromDate.on('change', calcDays); $toDate.on('change', calcDays);
 
-  $itemGroupsList.on('click', '.edit-group', function(){
-    const id = $(this).data('id');
-    const g = itemGroups.find(x => x.id === id);
-    if (!g) return;
-    $itemBuilder.val(null).trigger('change');
-    g.items.forEach(it => {
-      const opt = new Option(it.item_name, it.item_code, true, true);
-      $itemBuilder.append(opt);
-    });
-    $itemBuilder.trigger('change');
-    $itemDosage.val(g.dosage||'');
-    $itemUno.val(g.uno||'');
-    $itemTime.val(g.time||'');
-    itemGroups = itemGroups.filter(x => x.id !== id);
-    renderItemGroups();
-  });
-
-  // -------------------------
-  // Add / Update Prescription
-  // -------------------------
-  function buildPrescriptionFromForm(){
-    const patient_reg_no = $patientSelect.val();
-    if (!patient_reg_no){ alert('Select a patient'); return null; }
-    if (!itemGroups.length){ alert('Add at least one item group for this prescription'); return null; }
-    const from_date = $fromDate.val(); const to_date = $toDate.val();
-    if (!from_date || !to_date){ alert('Please set From Date and To Date'); return null; }
-    if (from_date > to_date){ alert('From Date must be <= To Date'); return null; }
-    const days = $daysInput.val() || null;
-    const times = [...new Set(itemGroups.map(g => g.time || '').filter(Boolean))];
-    const timeDisplay = times.join(', ');
-
-    const pres = {
-      id: Math.random().toString(36).slice(2,9),
-      patient_reg_no: patient_reg_no,
-      patient_name: $hdrName.text(),
-      usage: $usageSelect.val()||'',
-      ext_int: $extInt.val()||'',
-      procured: $procured.val()||'',
-      from_date: from_date,
-      to_date: to_date,
-      days: days,
-      groups: JSON.parse(JSON.stringify(itemGroups)), // deep copy
-      time: timeDisplay,
-      status: 'active',
-      created_at: new Date().toISOString()
-    };
-    return pres;
-  }
-
-  $addPrescriptionBtn.on('click', function(){
-    const p = buildPrescriptionFromForm();
-    if (!p) return;
-    prescriptions.push(p);
-    itemGroups = [];
-    resetForm();
-    renderAll();
-  });
-
-  $updatePrescriptionBtn.on('click', function(){
-    if (editPrescriptionIndex === null) { alert('No prescription in edit mode'); return; }
-    const p = buildPrescriptionFromForm();
-    if (!p) return;
-    p.id = prescriptions[editPrescriptionIndex].id;
-    p.created_at = prescriptions[editPrescriptionIndex].created_at;
-    prescriptions[editPrescriptionIndex] = p;
-    editPrescriptionIndex = null;
-    resetForm();
-    renderAll();
-    $addPrescriptionBtn.show(); $updatePrescriptionBtn.hide();
-  });
-
-  function resetForm(){
-    $('#form-title').text('Add Prescription');
-    $usageSelect.val(''); $extInt.val(''); $procured.val(''); $fromDate.val(''); $toDate.val(''); $daysInput.val('');
-    itemGroups = []; renderItemGroups();
-    $itemBuilder.val(null).trigger('change'); $itemDosage.val(''); $itemUno.val(''); $itemTime.val('');
-  }
-
-  // -------------------------
-  // Render prescriptions table
-  // -------------------------
-  function renderAll(filteredList){
-    const list = filteredList || prescriptions;
-    $prescriptionsTable.empty();
-    if (!list.length){
-      $prescriptionsTable.append('<tr><td colspan="9" class="muted">No prescriptions</td></tr>');
+  // add prescription directly to server as draft
+  $allocateBtn.on('click', function(){
+    if (!selectedPatient) {
+      alert('Please select a patient first');
       return;
     }
-    list.forEach((pr, idx) => {
-      const itemsHtml = flattenGroupsForDisplay(pr.groups);
-      const daysText = pr.days ? `${pr.from_date} → ${pr.to_date} (${pr.days})` : `${pr.from_date} → ${pr.to_date}`;
-      const statusClass = pr.status === 'cancel_requested' ? 'status-cancelreq' : (pr.status === 'cancelled' ? 'status-cancelled' : 'status-active');
-      const statusText = pr.status === 'cancel_requested' ? 'Cancel Requested' : (pr.status === 'cancelled' ? 'Cancelled' : 'Active');
+    
+    const prescriptionName = $prescriptionName.val().trim();
+    if (!prescriptionName){ alert('Enter prescription name'); return; }
+    if (!itemGroups.length){ alert('Add at least one item group'); return; }
+    const from = $fromDate.val(), to = $toDate.val();
+    if (!from || !to){ alert('Please set From and To dates'); return; }
+    if (from > to){ alert('From must be <= To'); return; }
 
-      const row = `
-        <tr>
-          <td>${idx+1}</td>
-          <td>${itemsHtml}</td>
-          <td>${esc(pr.usage||'—')}</td>
-          <td>${esc(pr.ext_int||'—')}</td>
-          <td>${esc(pr.procured||'—')}</td>
-          <td>${esc(pr.time||'—')}</td>
-          <td>${daysText}</td>
-          <td><span class="status-pill ${statusClass}">${statusText}</span></td>
-          <td>
-            <button class="request-cancel action-btn" data-i="${idx}" style="background:#f39c12">Request Cancel</button>
-            <button class="edit-prescription action-btn" data-i="${idx}" style="background:#6c757d">Edit</button>
+    // Prepare prescription data
+    const prescriptionData = {
+      prescription_name: prescriptionName,
+      from_date: from,
+      to_date: to,
+      days: Math.ceil((new Date(to).getTime() - new Date(from).getTime()) / (1000 * 60 * 60 * 24)) + 1,
+      procured_from: $procuredSelect.val()||'',
+      items_groups: itemGroups.map(g => ({ items: g.items, dosage: g.dosage, uno: g.uno })),
+      notes: ''
+    };
+
+    // Save directly to server as draft
+    const payload = {
+      patient_reg_no: selectedPatient.pat_op_reg_no || selectedPatient.pat_reg_no,
+      patient_name: selectedPatient.pat_name,
+      pat_ref_id: selectedPatient.pat_ref_id || '',
+      ...prescriptionData
+    };
+    
+    // Show loading state
+    $allocateBtn.prop('disabled', true).text('Saving...');
+    
+    fetch(API_URL + '?action=allocate', {
+      method:'POST',
+      headers: {'Content-Type':'application/json', 'X-Requested-With':'XMLHttpRequest'},
+      body: JSON.stringify(payload)
+    }).then(r => r.json()).then(j => {
+      if (r.ok && j.allocation_id) {
+        // Add to local list with server data
+        const newPrescription = {
+          ...prescriptionData,
+          allocation_id: j.allocation_id,
+          status: 'draft' // Server saves as draft by default
+        };
+        addedPrescriptions.push(newPrescription);
+        
+        // Reset form
+        itemGroups = []; renderItemGroups();
+        $prescriptionName.val(''); $fromDate.val(''); $toDate.val(''); $daysInput.val(''); $procuredSelect.val('');
+        
+    renderAll();
+        alert('Prescription saved to server as Draft.');
+      } else {
+        alert('Failed to save prescription: ' + (j.error || 'Unknown error'));
+      }
+    }).catch(e => {
+      console.error('Network error saving prescription:', e);
+      alert('Network error. Please try again.');
+    }).finally(() => {
+      // Reset button state
+      $allocateBtn.prop('disabled', false).text('Add Prescription');
+    });
+  });
+
+  // render prescriptions table
+  function renderPrescriptions(){
+    $prescriptionsTableBody.empty();
+    if (!addedPrescriptions.length){ $prescriptionsTableBody.append('<tr><td colspan="8" class="muted">No prescriptions</td></tr>'); return; }
+    addedPrescriptions.forEach((p,i) => {
+      const groupsHtml = (p.items_groups||[]).map(g => (g.items||[]).map(it => `<span class="tag">${esc(it.item_name)}</span>`).join(' ') + `<div class="muted-small">Dosage:${esc(g.dosage||'—')} • UNO:${esc(g.uno||'—')}</div>`).join('<hr/>');
+      
+      // Status logic
+      let statusHtml = '';
+      let statusClass = 'status-active';
+      if (p.status === 'cancelled') {
+        statusHtml = '<span class="status-pill status-cancelled">Cancelled</span>';
+        statusClass = 'status-cancelled';
+      } else if (p.status === 'draft') {
+        statusHtml = '<span class="status-pill status-draft">Draft</span>';
+        statusClass = 'status-draft';
+      } else if (p.status === 'active') {
+        statusHtml = '<span class="status-pill status-active">Active</span>';
+        statusClass = 'status-active';
+      } else if (p.status === 'failed') {
+        statusHtml = '<span class="status-pill status-failed">Failed</span>';
+        statusClass = 'status-failed';
+      } else {
+        statusHtml = '<span class="status-pill status-draft">Draft</span>';
+        statusClass = 'status-draft';
+      }
+      
+      const row = `<tr class="${statusClass}">
+        <td>${i+1}</td>
+        <td>${esc(p.prescription_name)}</td>
+        <td>${groupsHtml}</td>
+        <td>${esc(p.from_date||'')}</td>
+        <td>${esc(p.to_date||'')}</td>
+        <td>${esc(p.days||'')}</td>
+        <td>${statusHtml}</td>
+        <td>
+          <button class="edit-prescription action-btn" data-i="${i}" style="background:#6c757d">Edit</button>
+          <button class="update-prescription action-btn" data-i="${i}" style="background:#28a745;display:none">Update</button>
+          ${p.status === 'cancelled' ? 
+            `<button class="resume-prescription action-btn" data-i="${i}" style="background:#28a745">Resume</button>` : 
+            `<button class="cancel-prescription action-btn" data-i="${i}" style="background:#f39c12">Cancel</button>`
+          }
           </td>
-        </tr>
-      `;
-      $prescriptionsTable.append(row);
+      </tr>`;
+      $prescriptionsTableBody.append(row);
     });
   }
 
-  // Edit prescription (load into form)
-  $prescriptionsTable.on('click', '.edit-prescription', function(){
-    const i = $(this).data('i'); const p = prescriptions[i]; if(!p) return;
-    editPrescriptionIndex = i;
+  function renderAll(){ renderItemGroups(); renderPrescriptions(); }
+
+  // Edit prescription
+  $prescriptionsTableBody.on('click', '.edit-prescription', function(){ const i=$(this).data('i'); loadPrescriptionForEdit(i); });
+  function loadPrescriptionForEdit(index){
+    const p = addedPrescriptions[index]; if(!p) return;
+    editPrescriptionIndex = index;
     $('#form-title').text('Edit Prescription');
-    $usageSelect.val(p.usage||''); $extInt.val(p.ext_int||''); $procured.val(p.procured||''); $fromDate.val(p.from_date||''); $toDate.val(p.to_date||''); $daysInput.val(p.days||'');
-    itemGroups = JSON.parse(JSON.stringify(p.groups||[]));
+    $prescriptionName.val(p.prescription_name);
+    $fromDate.val(p.from_date||'');
+    $toDate.val(p.to_date||'');
+    $daysInput.val(p.days||'');
+    $procuredSelect.val(p.procured_from||'');
+    itemGroups = (p.items_groups||[]).map(g=>({ id: Math.random().toString(36).slice(2,9), items: g.items||[], dosage: g.dosage||'', uno: g.uno||'' }));
     renderItemGroups();
-    $addPrescriptionBtn.hide(); $updatePrescriptionBtn.show();
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    $allocateBtn.hide(); $updateBtn.show(); window.scrollTo({top:0, behavior:'smooth'});
+  }
+  $updateBtn.on('click', function(){
+    if (editPrescriptionIndex === null) { alert('No prescription in edit mode'); return; }
+    const p = addedPrescriptions[editPrescriptionIndex]; if(!p) return;
+    
+    // Update local data
+    p.prescription_name = $prescriptionName.val();
+    p.procured_from = $procuredSelect.val()||'';
+    p.items_groups = itemGroups.map(g=>({items:g.items, dosage:g.dosage, uno:g.uno}));
+    
+    // Send update to server if prescription has allocation_id
+    if (p.allocation_id) {
+      const updatePayload = {
+        allocation_id: p.allocation_id,
+        prescription_name: p.prescription_name,
+        items_groups: p.items_groups,
+        procured_from: p.procured_from,
+        notes: p.notes || ''
+      };
+      
+      fetch(API_URL + '?action=update_prescription', {
+        method:'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify(updatePayload)
+      }).then(r => r.json()).then(j => {
+        if (j.status === 'ok') {
+          alert('Prescription updated successfully on server.');
+          resetFormState(); 
+          renderAll();
+        } else {
+          alert('Failed to update prescription: ' + JSON.stringify(j));
+        }
+      }).catch(() => {
+        alert('Network error. Prescription updated locally only.');
+        resetFormState(); 
+        renderAll();
+      });
+    } else {
+      // Update local data only (for unsaved prescriptions)
+      alert('Prescription updated locally.');
+      resetFormState(); 
+      renderAll();
+    }
   });
 
-  // -------------------------
-  // Cancel flow (date range + reason)
-  // -------------------------
-  $prescriptionsTable.on('click', '.request-cancel', function(){
-    const i = $(this).data('i'); const p = prescriptions[i]; if(!p) return;
-    cancelingIndex = i;
-    $('#cancel-modal-info').text(`Prescription for ${p.patient_name} — Allowed cancel range: ${p.from_date} → ${p.to_date}`);
-    // set constraints on both cancel-from and cancel-to
-    $cancelFrom.attr('min', p.from_date).attr('max', p.to_date).val(p.from_date);
-    $cancelTo.attr('min', p.from_date).attr('max', p.to_date).val(p.to_date);
-    $cancelReason.val('');
-    $cancelModal.show();
-  });
+  function resetFormState(){
+    editPrescriptionIndex = null; $('#form-title').text('Add Prescription');
+    $prescriptionName.val(''); $fromDate.val(''); $toDate.val(''); $daysInput.val('');
+    $procuredSelect.val('');
+    itemGroups = []; renderItemGroups();
+    $allocateBtn.show(); $updateBtn.hide();
+  }
 
-  $cancelCloseBtn.on('click', function(){ $cancelModal.hide(); cancelingIndex = null; });
+  // Cancel prescription
+  $prescriptionsTableBody.on('click', '.cancel-prescription', function(){ const i=$(this).data('i'); openCancelModal(i); });
+  function openCancelModal(index){
+    cancelingPrescriptionIndex = index; const p = addedPrescriptions[index]; if(!p) return;
+    $('#cancel-modal-info').text(`Prescription: ${p.prescription_name} — Allowed cancel range: ${p.from_date||'—'} → ${p.to_date||'—'}`);
+    if (p.from_date) $cancelFrom.attr('min', p.from_date).val(p.from_date); else $cancelFrom.removeAttr('min').val('');
+    if (p.to_date) $cancelTo.attr('max', p.to_date).val(p.to_date); else $cancelTo.removeAttr('max').val('');
+    if (p.from_date && p.to_date){ $cancelFrom.attr('max', p.to_date); $cancelTo.attr('min', p.from_date); if(!$cancelFrom.val()) $cancelFrom.val(p.from_date); if(!$cancelTo.val()) $cancelTo.val(p.to_date); }
+    else { $cancelFrom.removeAttr('max'); $cancelTo.removeAttr('min'); }
+    $cancelReason.val(''); $cancelModal.show();
+  }
+
+  $cancelCloseBtn.on('click', function(){ $cancelModal.hide(); cancelingPrescriptionIndex=null; });
 
   $cancelSubmitBtn.on('click', function(){
-    if (cancelingIndex === null) return;
-    const p = prescriptions[cancelingIndex];
-    if (!p) return;
+    if (cancelingPrescriptionIndex === null) return;
+    const p = addedPrescriptions[cancelingPrescriptionIndex];
     const cfrom = $cancelFrom.val(), cto = $cancelTo.val(), reason = $cancelReason.val().trim();
-    if (!cfrom || !cto) { alert('Pick both Cancel From and Cancel To'); return; }
-    if (cfrom > cto) { alert('Cancel From must be <= Cancel To'); return; }
-    if (cfrom < p.from_date) { alert('Cancel From < prescription start'); return; }
-    if (cto > p.to_date) { alert('Cancel To > prescription end'); return; }
-    if (!reason && !confirm('No reason entered. Continue?')) return;
-
-    // Demo: mark local status to cancel_requested; in real app you'd POST to server
-    p.status = 'cancel_requested';
-    p.cancellation = { from: cfrom, to: cto, reason: reason, requested_at: new Date().toISOString() };
-
+    if (!cfrom || !cto){ alert('Pick both Cancel From and Cancel To'); return; }
+    if (cfrom > cto){ alert('Cancel From must be <= Cancel To'); return; }
+    if (p.from_date && cfrom < p.from_date){ alert('Cancel From < prescription start'); return; }
+    if (p.to_date && cto > p.to_date){ alert('Cancel To > prescription end'); return; }
+    if (!reason){ alert('Cancellation reason is mandatory'); return; }
+    
+    if (p.allocation_id) {
+      // Server-side cancellation
+      fetch(API_URL + '?action=cancel_prescription', {
+        method:'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ allocation_id: p.allocation_id, cancel_from: cfrom, cancel_to: cto, reason: reason })
+      }).then(r => r.json()).then(j => {
+        if (j.status === 'ok') {
+          p.status = 'cancelled';
+          p.cancelled_date_from = cfrom;
+          p.cancelled_date_to = cto;
+          p.cancellation_reason = reason;
+          alert('Prescription cancelled successfully.');
+          $cancelModal.hide();
+          renderAll();
+        } else {
+          alert('Failed: ' + JSON.stringify(j));
+        }
+      }).catch(()=>alert('Network error'));
+    } else {
+      // Local cancellation
+      p.status = 'cancelled';
+      p.cancelled_date_from = cfrom;
+      p.cancelled_date_to = cto;
+      p.cancellation_reason = reason;
+      alert('Prescription cancelled locally.');
     $cancelModal.hide();
     renderAll();
-    cancelingIndex = null;
-    alert('Cancellation request submitted (demo only)');
+    }
   });
 
-  // -------------------------
-  // Export JSON
-  // -------------------------
+  // Resume prescription
+  $prescriptionsTableBody.on('click', '.resume-prescription', function(){ const i=$(this).data('i'); openResumeModal(i); });
+  function openResumeModal(index){
+    resumingPrescriptionIndex = index; 
+    const p = addedPrescriptions[index]; 
+    if(!p) return;
+    $('#resume-modal-info').text(`Prescription: ${p.prescription_name} — Resume range: ${p.from_date||'—'} → ${p.to_date||'—'}`);
+    if (p.from_date) $resumeFrom.attr('min', p.from_date).val(p.from_date); 
+    else $resumeFrom.removeAttr('min').val('');
+    if (p.to_date) $resumeTo.attr('max', p.to_date).val(p.to_date); 
+    else $resumeTo.removeAttr('max').val('');
+    if (p.from_date && p.to_date){ 
+      $resumeFrom.attr('max', p.to_date); 
+      $resumeTo.attr('min', p.from_date); 
+      if(!$resumeFrom.val()) $resumeFrom.val(p.from_date); 
+      if(!$resumeTo.val()) $resumeTo.val(p.to_date); 
+    }
+    else { 
+      $resumeFrom.removeAttr('max'); 
+      $resumeTo.removeAttr('min'); 
+    }
+    $resumeModal.show();
+  }
+  
+  $resumeCloseBtn.on('click', function(){ $resumeModal.hide(); resumingPrescriptionIndex = null; });
+  $resumeSubmitBtn.on('click', function(){ submitResume(); });
+  
+  function submitResume(){
+    if (resumingPrescriptionIndex === null) return;
+    const from = $resumeFrom.val();
+    const to = $resumeTo.val();
+    if (!from || !to) { alert('Please select both dates'); return; }
+    if (from > to) { alert('From date must be <= To date'); return; }
+    
+    const prescription = addedPrescriptions[resumingPrescriptionIndex];
+    
+    if (prescription.allocation_id) {
+      // Server-side resume
+      fetch(API_URL + '?action=resume_prescription', {
+        method:'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ allocation_id: prescription.allocation_id, resume_from: from, resume_to: to })
+      }).then(r => r.json()).then(j => {
+        if (j.status === 'ok') {
+          prescription.status = 'draft';
+          prescription.cancelled_date_from = null;
+          prescription.cancelled_date_to = null;
+          prescription.cancellation_reason = '';
+          alert('Prescription resumed successfully and set to Draft status.');
+          $resumeModal.hide();
+          resumingPrescriptionIndex = null;
+          renderAll();
+        } else {
+          alert('Failed: ' + JSON.stringify(j));
+        }
+      }).catch(()=>alert('Network error'));
+    } else {
+      // Local resume
+      prescription.status = 'draft';
+      prescription.cancelled_date_from = null;
+      prescription.cancelled_date_to = null;
+      prescription.cancellation_reason = '';
+      
+      renderAll();
+      $resumeModal.hide();
+      resumingPrescriptionIndex = null;
+      alert('Prescription resumed successfully and set to Draft status');
+    }
+  }
+
+  // export JSON
   $('#export-json').on('click', function(){
     const patient = $patientSelect.val() || '';
-    const payload = { patient_reg_no: patient, prescriptions: prescriptions };
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const payload = { patient_reg_no: patient, prescriptions: addedPrescriptions };
+    const blob = new Blob([JSON.stringify(payload,null,2)], {type:'application/json'});
     const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href = url; a.download = (patient ? patient+'-' : 'prescriptions-') + (new Date().toISOString().slice(0,10)) + '.json';
-    document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+    const a=document.createElement('a'); a.href=url; a.download=(patient?patient+'-':'prescriptions-')+(new Date().toISOString().slice(0,10))+'.json'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
   });
 
-  // -------------------------
-  // Initial render
-  // -------------------------
-  renderItemGroups();
+  // initial render
   renderAll();
 
-  // Expose for debugging
-  window._prescriptionDemo = { DUMMY_PATIENTS, DUMMY_ITEMS, prescriptions, itemGroups };
+  // Initialize UnitNo dropdown
+  loadUnitNumbers();
 
+  // expose for debug
+  window._prescriptionApp = { addedPrescriptions, itemGroups, renderAll };
 });
 </script>
 </body>
