@@ -1,3 +1,4 @@
+{% load static %}
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -9,34 +10,36 @@
     body {
       font-family: Arial, sans-serif;
       background-color: #f8f9fa;
-      margin: 0;
-      padding: 0;
     }
     .sidebar {
-      background-color: #198754; /* Green color */
+      background-color: #343a40;
       color: white;
       min-height: 100vh;
       position: fixed;
-      top: 0;
-      left: 0;
-      width: 250px;
-      z-index: 1000;
-      padding-top: 20px;
-      box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+      width: 18%;
+    }
+    .sidebar a {
+      color: #adb5bd;
+      padding: 10px 15px;
+      display: block;
+      text-decoration: none;
+    }
+    .sidebar a:hover {
+      color: white;
+      background-color: #495057;
     }
     .main {
-      margin-left: 270px;
       padding: 20px;
-      width: calc(100% - 250px);
+       margin-left: 18%;
+       width: calc(100% - 18%);
+       max-width: calc(100vw - 18%);
+       overflow-x: auto;
     }
     .card {
       box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
-      border: none;
     }
     .table th {
       white-space: nowrap;
-      background-color: #198754;
-      color: white;
     }
     .table td {
       vertical-align: middle;
@@ -44,100 +47,113 @@
     .btn-sm {
       margin: 2px;
     }
-    .badge {
-      font-size: 0.85em;
-    }
     @media (max-width: 768px) {
       .sidebar {
         position: static;
         width: 100%;
-        min-height: auto;
       }
       .main {
         margin-left: 0;
-        width: 100%;
+        padding: 10px;
       }
     }
   </style>
 </head>
 <body>
+  <div class="container-fluid">
+    <div class="row">
+      <!-- Sidebar -->
+      <div class="sidebar p-0">
 {% include 'dashboards/nav.html' %}
+      </div>
 
       <!-- Main Content -->
-      <div class="col-md-9 col-lg-10 main">
-        <h2 class="mb-4">User Management Dashboard</h2>
-
-        <!-- Filters & Search -->
-        <div class="row mb-3 g-3">
-          <div class="col-md-4">
-            <label for="roleFilter" class="form-label">Filter by Role</label>
-            <select id="roleFilter" class="form-select">
-              <option value="">-- All Roles --</option>
-              <option value="Super Admin">Super Admin (IT Department)</option>
-              <option value="Admin">Admin (GM / Management)</option>
-              <option value="Doctor">Doctor</option>
-              <option value="Scheduling Staff">Scheduling Staff</option>
-              <option value="Therapist">Therapist</option>
-              <option value="Nurse">Nurse</option>
-              <option value="Patient">Patient</option>
-              <option value="IP Pharmacy Staff">IP Pharmacy Staff</option>
-              <option value="IMU Staff">IMU Staff (Instant Medical Unit)</option>
-              <option value="Finance Staff">Finance Staff</option>
-              <option value="HR">HR</option>
-              <option value="Housekeeping Staff">Housekeeping Staff</option>
-            </select>
-          </div>
-          <div class="col-md-4">
-            <label for="searchBox" class="form-label">Search</label>
-            <input type="text" id="searchBox" class="form-control" placeholder="Search by name or email">
+      <div class="main">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+          <h2>User Management Dashboard</h2>
+          <div>
+            <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addUserModal">+ Add User</button>
+            <a href="{% url 'role_management' %}" class="btn btn-success">Manage Roles</a>
+            <a href="{% url 'user_role_assignment' %}" class="btn btn-info">Assign Roles</a>
           </div>
         </div>
 
+        <!-- Messages -->
+        {% if messages %}
+          {% for message in messages %}
+            <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
+              {{ message }}
+              <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+          {% endfor %}
+        {% endif %}
+
         <!-- User Table -->
-        <div class="card mt-3">
-          <div class="card-header d-flex justify-content-between align-items-center bg-success text-white">
-            <span>Manage Users</span>
-            <button class="btn btn-sm btn-light">+ Add User</button>
+        <div class="card">
+          <div class="card-header">
+            <h5 class="mb-0">System Users</h5>
           </div>
           <div class="card-body p-0">
             <div class="table-responsive">
-              <table class="table table-bordered table-striped mb-0" id="userTable">
-                <thead>
+              <table class="table table-bordered table-striped mb-0">
+                <thead class="table-dark">
                   <tr>
-                    <th>User Name</th>
-                    <th>Name</th>
+                    <th>Username</th>
+                    <th>Full Name</th>
                     <th>Email</th>
-                    <th>Role</th>
+                    <th>Default Role</th>
+                    <th>Custom Role</th>
+                    <th>Mobile</th>
+                    <th>Registration/Code</th>
                     <th>Status</th>
                     <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
-                  <tr data-role="Doctor">
-                    <td>DOC001</td>
-                    <td>Dr. John Doe</td>
-                    <td>john.doe@example.com</td>
-                    <td>Doctor</td>
-                    <td><span class="badge bg-success">Active</span></td>
+                  {% for user in users %}
+                  <tr>
+                    <td>{{ user.username }}</td>
+                    <td>{{ user.get_full_name }}</td>
+                    <td>{{ user.email }}</td>
                     <td>
-                      <button class="btn btn-sm btn-warning">Edit</button>
-                      <button class="btn btn-sm btn-danger">Delete</button>
-                      <button class="btn btn-sm btn-secondary">Disable</button>
+                      <span class="badge bg-primary">{{ user.get_role_display }}</span>
+                    </td>
+                    <td>
+                      {% if user.custom_role %}
+                        <span class="badge bg-success">{{ user.custom_role.display_name }}</span>
+                      {% else %}
+                        <span class="text-muted">None</span>
+                      {% endif %}
+                    </td>
+                    <td>{{ user.mobile|default:"-" }}</td>
+                    <td>
+                      {% if user.role == 'patient' and user.patient_registration_number %}
+                        <span class="badge bg-info">Reg: {{ user.patient_registration_number }}</span>
+                      {% elif user.role == 'therapist' and user.therapist_code %}
+                        <span class="badge bg-warning">Code: {{ user.therapist_code }}</span>
+                      {% else %}
+                        <span class="text-muted">-</span>
+                      {% endif %}
+                    </td>
+                    <td>
+                      {% if user.is_active %}
+                        <span class="badge bg-success">Active</span>
+                      {% else %}
+                        <span class="badge bg-danger">Inactive</span>
+                      {% endif %}
+                    </td>
+                    <td>
+                      <button class="btn btn-sm btn-warning" data-bs-toggle="modal" 
+                              data-bs-target="#editUserModal{{ user.id }}">Edit</button>
+                      <button class="btn btn-sm btn-info" onclick="changeRole({{ user.id }}, '{{ user.username }}', '{{ user.role }}')">Change Role</button>
+                      <button class="btn btn-sm btn-danger" onclick="deleteUser({{ user.id }}, '{{ user.username }}')">Delete</button>
                     </td>
                   </tr>
-                  <tr data-role="Doctor">
-                    <td>DOC002</td>
-                    <td>Dr. Mary Smith</td>
-                    <td>mary.smith@example.com</td>
-                    <td>Doctor</td>
-                    <td><span class="badge bg-secondary">Inactive</span></td>
-                    <td>
-                      <button class="btn btn-sm btn-warning">Edit</button>
-                      <button class="btn btn-sm btn-danger">Delete</button>
-                      <button class="btn btn-sm btn-secondary">Disable</button>
-                    </td>
+                  {% empty %}
+                  <tr>
+                    <td colspan="8" class="text-center text-muted">No users found</td>
                   </tr>
-                  <!-- More rows here -->
+                  {% endfor %}
                 </tbody>
               </table>
             </div>
@@ -147,27 +163,450 @@
     </div>
   </div>
 
-  <!-- Filtering Logic -->
+  <!-- Add User Modal -->
+  <div class="modal fade" id="addUserModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">Add New User</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <form method="post">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="create_user">
+          <div class="modal-body">
+            <div class="row">
+              <div class="col-md-6">
+                <div class="mb-3">
+                  <label for="username" class="form-label">Username *</label>
+                  <input type="text" class="form-control" id="username" name="username" required>
+                </div>
+              </div>
+              <div class="col-md-6">
+                <div class="mb-3">
+                  <label for="email" class="form-label">Email *</label>
+                  <input type="email" class="form-control" id="email" name="email" required>
+                </div>
+              </div>
+            </div>
+            
+            <div class="row">
+              <div class="col-md-6">
+                <div class="mb-3">
+                  <label for="first_name" class="form-label">First Name</label>
+                  <input type="text" class="form-control" id="first_name" name="first_name">
+                </div>
+              </div>
+              <div class="col-md-6">
+                <div class="mb-3">
+                  <label for="last_name" class="form-label">Last Name</label>
+                  <input type="text" class="form-control" id="last_name" name="last_name">
+                </div>
+              </div>
+            </div>
+            
+            <div class="row">
+              <div class="col-md-6">
+                <div class="mb-3">
+                  <label for="role" class="form-label">Default Role *</label>
+                  <select class="form-select" id="role" name="role" required>
+                    <option value="">Select Role</option>
+                    <option value="super_admin">Super Admin (IT Department)</option>
+                    <option value="admin">Admin (GM / Management)</option>
+                    <option value="doctor">Doctor</option>
+                    <option value="scheduling_staff">Scheduling Staff</option>
+                    <option value="therapist">Therapist</option>
+                    <option value="nurse">Nurse</option>
+                    <option value="patient">Patient</option>
+                    <option value="ip_pharmacy_staff">IP Pharmacy Staff</option>
+                    <option value="imu_staff">IMU Staff (Instant Medical Unit)</option>
+                    <option value="finance_staff">Finance Staff</option>
+                    <option value="hr">HR</option>
+                    <option value="housekeeping_staff">Housekeeping Staff</option>
+                  </select>
+                </div>
+              </div>
+              <div class="col-md-6">
+                <div class="mb-3">
+                  <label for="custom_role" class="form-label">Custom Role (Optional)</label>
+                  <select class="form-select" id="custom_role" name="custom_role">
+                    <option value="">No Custom Role</option>
+                    {% for role in roles %}
+                    <option value="{{ role.id }}">{{ role.display_name }}</option>
+                    {% endfor %}
+                  </select>
+                </div>
+              </div>
+            </div>
+            
+            <div class="row">
+              <div class="col-md-6">
+                <div class="mb-3">
+                  <label for="mobile" class="form-label">Mobile</label>
+                  <input type="text" class="form-control" id="mobile" name="mobile">
+                </div>
+              </div>
+              <div class="col-md-6">
+                <div class="mb-3">
+                  <label for="password" class="form-label">Password *</label>
+                  <input type="password" class="form-control" id="password" name="password" required>
+                </div>
+              </div>
+            </div>
+            
+            <!-- Role-specific fields -->
+            <div class="row" id="roleSpecificFields" style="display: none;">
+              <div class="col-md-6" id="patientRegistrationField" style="display: none;">
+                <div class="mb-3">
+                  <label for="patient_registration_number" class="form-label">Patient Registration Number</label>
+                  <input type="text" class="form-control" id="patient_registration_number" name="patient_registration_number">
+                  <div class="form-text">Required for patient role to track therapy sessions</div>
+                </div>
+              </div>
+              <div class="col-md-6" id="therapistCodeField" style="display: none;">
+                <div class="mb-3">
+                  <label for="therapist_code" class="form-label">Therapist Code</label>
+                  <input type="text" class="form-control" id="therapist_code" name="therapist_code">
+                  <div class="form-text">Required for therapist role to track sessions and schedules</div>
+                </div>
+              </div>
+              <div class="col-md-6" id="employeeCodeField" style="display: none;">
+                <div class="mb-3">
+                  <label for="employee_code" class="form-label">Employee Code</label>
+                  <input type="text" class="form-control" id="employee_code" name="employee_code">
+                  <div class="form-text">Required for therapist role for emergency leave API mapping</div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+            <button type="submit" class="btn btn-primary">Create User</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Edit User Modals -->
+  {% for user in users %}
+  <div class="modal fade" id="editUserModal{{ user.id }}" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">Edit User: {{ user.username }}</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <form method="post">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="update_user">
+          <input type="hidden" name="user_id" value="{{ user.id }}">
+          <div class="modal-body">
+            <div class="row">
+              <div class="col-md-6">
+                <div class="mb-3">
+                  <label for="edit_username{{ user.id }}" class="form-label">Username</label>
+                  <input type="text" class="form-control" id="edit_username{{ user.id }}" 
+                         value="{{ user.username }}" readonly>
+                  <small class="text-muted">Username cannot be changed</small>
+                </div>
+              </div>
+              <div class="col-md-6">
+                <div class="mb-3">
+                  <label for="edit_email{{ user.id }}" class="form-label">Email *</label>
+                  <input type="email" class="form-control" id="edit_email{{ user.id }}" 
+                         name="email" value="{{ user.email }}" required>
+                </div>
+              </div>
+            </div>
+            
+            <div class="row">
+              <div class="col-md-6">
+                <div class="mb-3">
+                  <label for="edit_first_name{{ user.id }}" class="form-label">First Name</label>
+                  <input type="text" class="form-control" id="edit_first_name{{ user.id }}" 
+                         name="first_name" value="{{ user.first_name }}">
+                </div>
+              </div>
+              <div class="col-md-6">
+                <div class="mb-3">
+                  <label for="edit_last_name{{ user.id }}" class="form-label">Last Name</label>
+                  <input type="text" class="form-control" id="edit_last_name{{ user.id }}" 
+                         name="last_name" value="{{ user.last_name }}">
+                </div>
+              </div>
+            </div>
+            
+            <div class="row">
+              <div class="col-md-6">
+                <div class="mb-3">
+                  <label for="edit_role{{ user.id }}" class="form-label">Default Role</label>
+                  <select class="form-select" id="edit_role{{ user.id }}" name="role">
+                    {% for role_choice, role_display in user.ROLE_CHOICES %}
+                    <option value="{{ role_choice }}" {% if user.role == role_choice %}selected{% endif %}>
+                      {{ role_display }}
+                    </option>
+                    {% endfor %}
+                  </select>
+                </div>
+              </div>
+              <div class="col-md-6">
+                <div class="mb-3">
+                  <label for="edit_custom_role{{ user.id }}" class="form-label">Custom Role</label>
+                  <select class="form-select" id="edit_custom_role{{ user.id }}" name="custom_role">
+                    <option value="">No Custom Role</option>
+                    {% for role in roles %}
+                    <option value="{{ role.id }}" {% if user.custom_role == role %}selected{% endif %}>
+                      {{ role.display_name }}
+                    </option>
+                    {% endfor %}
+                  </select>
+                </div>
+              </div>
+            </div>
+            
+            <div class="row">
+              <div class="col-md-6">
+                <div class="mb-3">
+                  <label for="edit_mobile{{ user.id }}" class="form-label">Mobile</label>
+                  <input type="text" class="form-control" id="edit_mobile{{ user.id }}" 
+                         name="mobile" value="{{ user.mobile }}">
+                </div>
+              </div>
+              <div class="col-md-6">
+                <div class="mb-3">
+                  <div class="form-check">
+                    <input class="form-check-input" type="checkbox" id="edit_is_active{{ user.id }}" 
+                           name="is_active" {% if user.is_active %}checked{% endif %}>
+                    <label class="form-check-label" for="edit_is_active{{ user.id }}">
+                      Active User
+                    </label>
+                  </div>
+                </div>
+              </div>
+            </div>
+            
+            <!-- Role-specific fields for edit -->
+            <div class="row" id="editRoleSpecificFields{{ user.id }}" style="display: none;">
+              <div class="col-md-6" id="editPatientRegistrationField{{ user.id }}" style="display: none;">
+                <div class="mb-3">
+                  <label for="edit_patient_registration_number{{ user.id }}" class="form-label">Patient Registration Number</label>
+                  <input type="text" class="form-control" id="edit_patient_registration_number{{ user.id }}" 
+                         name="patient_registration_number" value="{{ user.patient_registration_number }}">
+                  <div class="form-text">Required for patient role to track therapy sessions</div>
+                </div>
+              </div>
+              <div class="col-md-6" id="editTherapistCodeField{{ user.id }}" style="display: none;">
+                <div class="mb-3">
+                  <label for="edit_therapist_code{{ user.id }}" class="form-label">Therapist Code</label>
+                  <input type="text" class="form-control" id="edit_therapist_code{{ user.id }}" 
+                         name="therapist_code" value="{% if user.therapist_profile %}{{ user.therapist_profile.therapist_code }}{% endif %}">
+                  <div class="form-text">Required for therapist role to track sessions and schedules</div>
+                </div>
+              </div>
+              <div class="col-md-6" id="editEmployeeCodeField{{ user.id }}" style="display: none;">
+                <div class="mb-3">
+                  <label for="edit_employee_code{{ user.id }}" class="form-label">Employee Code</label>
+                  <input type="text" class="form-control" id="edit_employee_code{{ user.id }}" 
+                         name="employee_code" value="{% if user.therapist_profile %}{{ user.therapist_profile.employee_code }}{% endif %}">
+                  <div class="form-text">Required for therapist role for emergency leave API mapping</div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+            <button type="submit" class="btn btn-primary">Update User</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
   <script>
-    document.addEventListener("DOMContentLoaded", function() {
-      const roleFilter = document.getElementById("roleFilter");
-      const searchBox = document.getElementById("searchBox");
-      const rows = document.querySelectorAll("#userTable tbody tr");
+    function deleteUser(userId, username) {
+      if (confirm(`Are you sure you want to delete user "${username}"? This action cannot be undone.`)) {
+        const form = document.createElement('form');
+        form.method = 'POST';
+        form.innerHTML = `
+          {% csrf_token %}
+          <input type="hidden" name="action" value="delete_user">
+          <input type="hidden" name="user_id" value="${userId}">
+        `;
+        document.body.appendChild(form);
+        form.submit();
+      }
+    }
 
-      function filterTable() {
-        const role = roleFilter.value.toLowerCase();
-        const search = searchBox.value.toLowerCase();
+    // Handle role-specific fields
+    function toggleRoleSpecificFields(roleSelectId) {
+      const roleSelect = document.getElementById(roleSelectId);
+      const roleSpecificFields = document.getElementById('roleSpecificFields');
+      const patientField = document.getElementById('patientRegistrationField');
+      const therapistField = document.getElementById('therapistCodeField');
+      const employeeField = document.getElementById('employeeCodeField');
+      
+      if (roleSelect.value === 'patient') {
+        roleSpecificFields.style.display = 'block';
+        patientField.style.display = 'block';
+        therapistField.style.display = 'none';
+        employeeField.style.display = 'none';
+        document.getElementById('patient_registration_number').required = true;
+        document.getElementById('therapist_code').required = false;
+        document.getElementById('employee_code').required = false;
+      } else if (roleSelect.value === 'therapist') {
+        roleSpecificFields.style.display = 'block';
+        patientField.style.display = 'none';
+        therapistField.style.display = 'block';
+        employeeField.style.display = 'block';
+        document.getElementById('patient_registration_number').required = false;
+        document.getElementById('therapist_code').required = true;
+        document.getElementById('employee_code').required = true;
+      } else {
+        roleSpecificFields.style.display = 'none';
+        patientField.style.display = 'none';
+        therapistField.style.display = 'none';
+        employeeField.style.display = 'none';
+        document.getElementById('patient_registration_number').required = false;
+        document.getElementById('therapist_code').required = false;
+        document.getElementById('employee_code').required = false;
+      }
+    }
 
-        rows.forEach(row => {
-          const rowRole = row.getAttribute("data-role").toLowerCase();
-          const text = row.innerText.toLowerCase();
-          row.style.display = ((role === "" || rowRole === role) && text.includes(search)) ? "" : "none";
+    // Add event listeners when page loads
+    document.addEventListener('DOMContentLoaded', function() {
+      const roleSelect = document.getElementById('role');
+      if (roleSelect) {
+        roleSelect.addEventListener('change', function() {
+          toggleRoleSpecificFields('role');
         });
       }
-
-      roleFilter.addEventListener("change", filterTable);
-      searchBox.addEventListener("input", filterTable);
+      
+      // Handle edit modals
+      {% for user in users %}
+      const editRoleSelect{{ user.id }} = document.getElementById('edit_role{{ user.id }}');
+      if (editRoleSelect{{ user.id }}) {
+        editRoleSelect{{ user.id }}.addEventListener('change', function() {
+          toggleEditRoleSpecificFields('edit_role{{ user.id }}', {{ user.id }});
+        });
+        // Initialize on page load
+        toggleEditRoleSpecificFields('edit_role{{ user.id }}', {{ user.id }});
+      }
+      {% endfor %}
     });
+
+    // Handle edit role-specific fields
+    function toggleEditRoleSpecificFields(roleSelectId, userId) {
+      const roleSelect = document.getElementById(roleSelectId);
+      const roleSpecificFields = document.getElementById('editRoleSpecificFields' + userId);
+      const patientField = document.getElementById('editPatientRegistrationField' + userId);
+      const therapistField = document.getElementById('editTherapistCodeField' + userId);
+      
+      if (roleSelect.value === 'patient') {
+        roleSpecificFields.style.display = 'block';
+        patientField.style.display = 'block';
+        therapistField.style.display = 'none';
+        document.getElementById('edit_patient_registration_number' + userId).required = true;
+        document.getElementById('edit_therapist_code' + userId).required = false;
+      } else if (roleSelect.value === 'therapist') {
+        roleSpecificFields.style.display = 'block';
+        patientField.style.display = 'none';
+        therapistField.style.display = 'block';
+        document.getElementById('editEmployeeCodeField' + userId).style.display = 'block';
+        document.getElementById('edit_patient_registration_number' + userId).required = false;
+        document.getElementById('edit_therapist_code' + userId).required = true;
+        document.getElementById('edit_employee_code' + userId).required = true;
+      } else {
+        roleSpecificFields.style.display = 'none';
+        patientField.style.display = 'none';
+        therapistField.style.display = 'none';
+        document.getElementById('editEmployeeCodeField' + userId).style.display = 'none';
+        document.getElementById('edit_patient_registration_number' + userId).required = false;
+        document.getElementById('edit_therapist_code' + userId).required = false;
+        document.getElementById('edit_employee_code' + userId).required = false;
+      }
+    }
+
+    function changeRole(userId, username, currentRole) {
+      // Show role change modal
+      const modal = new bootstrap.Modal(document.getElementById('roleChangeModal'));
+      document.getElementById('roleChangeUserId').value = userId;
+      document.getElementById('roleChangeUsername').textContent = username;
+      document.getElementById('roleChangeCurrentRole').textContent = currentRole;
+      modal.show();
+    }
+
+    function confirmRoleChange() {
+      const userId = document.getElementById('roleChangeUserId').value;
+      const newRole = document.getElementById('newRole').value;
+      
+      if (!newRole) {
+        alert('Please select a new role');
+        return;
+      }
+      
+      if (newRole === document.getElementById('roleChangeCurrentRole').textContent) {
+        alert('Please select a different role');
+        return;
+      }
+      
+      // Redirect to role change confirmation page
+      window.location.href = `/authentication/confirm-role-change/${userId}/?new_role=${newRole}`;
+    }
   </script>
+
+  <!-- Role Change Modal -->
+  <div class="modal fade" id="roleChangeModal" tabindex="-1">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header bg-warning">
+          <h5 class="modal-title">⚠️ Change User Role</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <div class="alert alert-warning">
+            <strong>Warning:</strong> Changing the user role will permanently delete ALL existing profile data and dependent records. This action cannot be undone.
+          </div>
+          
+          <div class="mb-3">
+            <label class="form-label"><strong>User:</strong> <span id="roleChangeUsername"></span></label>
+          </div>
+          
+          <div class="mb-3">
+            <label class="form-label"><strong>Current Role:</strong> <span id="roleChangeCurrentRole"></span></label>
+          </div>
+          
+          <div class="mb-3">
+            <label for="newRole" class="form-label">New Role *</label>
+            <select class="form-select" id="newRole" required>
+              <option value="">Select New Role</option>
+              <option value="super_admin">Super Admin (IT Department)</option>
+              <option value="admin">Admin (GM / Management)</option>
+              <option value="doctor">Doctor</option>
+              <option value="scheduling_staff">Scheduling Staff</option>
+              <option value="therapist">Therapist</option>
+              <option value="nurse">Nurse</option>
+              <option value="patient">Patient</option>
+              <option value="ip_pharmacy_staff">IP Pharmacy Staff</option>
+              <option value="imu_staff">IMU Staff (Instant Medical Unit)</option>
+              <option value="finance_staff">Finance Staff</option>
+              <option value="hr">HR</option>
+              <option value="housekeeping_staff">Housekeeping Staff</option>
+            </select>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" class="btn btn-warning" onclick="confirmRoleChange()">
+            <i class="fas fa-exclamation-triangle"></i> Proceed to Confirmation
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <input type="hidden" id="roleChangeUserId" value="">
 </body>
 </html>

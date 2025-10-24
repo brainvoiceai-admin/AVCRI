@@ -1,0 +1,159 @@
+# Generated manually for profile models
+
+from django.db import migrations, models
+import django.db.models.deletion
+
+
+class Migration(migrations.Migration):
+
+    dependencies = [
+        ('authentication', '0008_auto_20251023_2249'),
+    ]
+
+    operations = [
+        # Add created_at and updated_at to CustomUser
+        migrations.AddField(
+            model_name='customuser',
+            name='created_at',
+            field=models.DateTimeField(auto_now_add=True, null=True),
+        ),
+        migrations.AddField(
+            model_name='customuser',
+            name='updated_at',
+            field=models.DateTimeField(auto_now=True, null=True),
+        ),
+        
+        # Create PatientProfile
+        migrations.CreateModel(
+            name='PatientProfile',
+            fields=[
+                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
+                ('patient_reg_no', models.CharField(max_length=50, unique=True, verbose_name='Patient Registration Number')),
+                ('date_of_birth', models.DateField(blank=True, null=True, verbose_name='Date of Birth')),
+                ('gender', models.CharField(blank=True, choices=[('male', 'Male'), ('female', 'Female'), ('other', 'Other')], max_length=10, null=True)),
+                ('address', models.TextField(blank=True, null=True, verbose_name='Address')),
+                ('emergency_contact', models.CharField(blank=True, max_length=100, null=True, verbose_name='Emergency Contact')),
+                ('emergency_phone', models.CharField(blank=True, max_length=15, null=True, verbose_name='Emergency Phone')),
+                ('medical_history', models.TextField(blank=True, null=True, verbose_name='Medical History')),
+                ('allergies', models.TextField(blank=True, null=True, verbose_name='Allergies')),
+                ('is_vip', models.BooleanField(default=False, verbose_name='VIP Patient')),
+                ('created_at', models.DateTimeField(auto_now_add=True)),
+                ('updated_at', models.DateTimeField(auto_now=True)),
+                ('user', models.OneToOneField(on_delete=django.db.models.deletion.CASCADE, related_name='patient_profile', to='authentication.customuser')),
+            ],
+            options={
+                'verbose_name': 'Patient Profile',
+                'verbose_name_plural': 'Patient Profiles',
+                'ordering': ['patient_reg_no'],
+            },
+        ),
+        
+        # Create TherapistProfile
+        migrations.CreateModel(
+            name='TherapistProfile',
+            fields=[
+                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
+                ('therapist_code', models.CharField(max_length=20, unique=True, verbose_name='Therapist Code')),
+                ('employee_code', models.CharField(max_length=50, unique=True, verbose_name='Employee Code')),
+                ('therapist_grade', models.CharField(max_length=100, verbose_name='Therapist Grade')),
+                ('department', models.CharField(blank=True, max_length=100, null=True, verbose_name='Department')),
+                ('specialization', models.CharField(blank=True, max_length=200, null=True, verbose_name='Specialization')),
+                ('is_bathing_therapist', models.BooleanField(default=True, verbose_name='Bathing Therapist')),
+                ('joining_date', models.DateField(blank=True, null=True, verbose_name='Joining Date')),
+                ('qualification', models.TextField(blank=True, null=True, verbose_name='Qualification')),
+                ('experience_years', models.IntegerField(blank=True, null=True, verbose_name='Experience (Years)')),
+                ('created_at', models.DateTimeField(auto_now_add=True)),
+                ('updated_at', models.DateTimeField(auto_now=True)),
+                ('user', models.OneToOneField(on_delete=django.db.models.deletion.CASCADE, related_name='therapist_profile', to='authentication.customuser')),
+            ],
+            options={
+                'verbose_name': 'Therapist Profile',
+                'verbose_name_plural': 'Therapist Profiles',
+                'ordering': ['therapist_code'],
+            },
+        ),
+        
+        # Create DoctorProfile
+        migrations.CreateModel(
+            name='DoctorProfile',
+            fields=[
+                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
+                ('doctor_id', models.CharField(max_length=20, unique=True, verbose_name='Doctor ID')),
+                ('specialization', models.CharField(max_length=200, verbose_name='Specialization')),
+                ('department', models.CharField(max_length=100, verbose_name='Department')),
+                ('qualification', models.TextField(verbose_name='Qualification')),
+                ('experience_years', models.IntegerField(verbose_name='Experience (Years)')),
+                ('license_number', models.CharField(blank=True, max_length=50, null=True, verbose_name='Medical License Number')),
+                ('consultation_fee', models.DecimalField(blank=True, decimal_places=2, max_digits=10, null=True, verbose_name='Consultation Fee')),
+                ('created_at', models.DateTimeField(auto_now_add=True)),
+                ('updated_at', models.DateTimeField(auto_now=True)),
+                ('user', models.OneToOneField(on_delete=django.db.models.deletion.CASCADE, related_name='doctor_profile', to='authentication.customuser')),
+            ],
+            options={
+                'verbose_name': 'Doctor Profile',
+                'verbose_name_plural': 'Doctor Profiles',
+                'ordering': ['doctor_id'],
+            },
+        ),
+        
+        # Create AdminProfile
+        migrations.CreateModel(
+            name='AdminProfile',
+            fields=[
+                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
+                ('admin_id', models.CharField(max_length=20, unique=True, verbose_name='Admin ID')),
+                ('department', models.CharField(max_length=100, verbose_name='Department')),
+                ('designation', models.CharField(max_length=100, verbose_name='Designation')),
+                ('reporting_manager', models.CharField(blank=True, max_length=100, null=True, verbose_name='Reporting Manager')),
+                ('created_at', models.DateTimeField(auto_now_add=True)),
+                ('updated_at', models.DateTimeField(auto_now=True)),
+                ('user', models.OneToOneField(on_delete=django.db.models.deletion.CASCADE, related_name='admin_profile', to='authentication.customuser')),
+            ],
+            options={
+                'verbose_name': 'Admin Profile',
+                'verbose_name_plural': 'Admin Profiles',
+                'ordering': ['admin_id'],
+            },
+        ),
+        
+        # Create NurseProfile
+        migrations.CreateModel(
+            name='NurseProfile',
+            fields=[
+                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
+                ('nurse_id', models.CharField(max_length=20, unique=True, verbose_name='Nurse ID')),
+                ('department', models.CharField(max_length=100, verbose_name='Department')),
+                ('qualification', models.CharField(max_length=200, verbose_name='Qualification')),
+                ('experience_years', models.IntegerField(blank=True, null=True, verbose_name='Experience (Years)')),
+                ('shift', models.CharField(blank=True, max_length=50, null=True, verbose_name='Shift')),
+                ('created_at', models.DateTimeField(auto_now_add=True)),
+                ('updated_at', models.DateTimeField(auto_now=True)),
+                ('user', models.OneToOneField(on_delete=django.db.models.deletion.CASCADE, related_name='nurse_profile', to='authentication.customuser')),
+            ],
+            options={
+                'verbose_name': 'Nurse Profile',
+                'verbose_name_plural': 'Nurse Profiles',
+                'ordering': ['nurse_id'],
+            },
+        ),
+        
+        # Create StaffProfile
+        migrations.CreateModel(
+            name='StaffProfile',
+            fields=[
+                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
+                ('staff_id', models.CharField(max_length=20, unique=True, verbose_name='Staff ID')),
+                ('department', models.CharField(max_length=100, verbose_name='Department')),
+                ('designation', models.CharField(max_length=100, verbose_name='Designation')),
+                ('reporting_manager', models.CharField(blank=True, max_length=100, null=True, verbose_name='Reporting Manager')),
+                ('created_at', models.DateTimeField(auto_now_add=True)),
+                ('updated_at', models.DateTimeField(auto_now=True)),
+                ('user', models.OneToOneField(on_delete=django.db.models.deletion.CASCADE, related_name='staff_profile', to='authentication.customuser')),
+            ],
+            options={
+                'verbose_name': 'Staff Profile',
+                'verbose_name_plural': 'Staff Profiles',
+                'ordering': ['staff_id'],
+            },
+        ),
+    ]

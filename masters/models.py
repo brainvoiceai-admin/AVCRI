@@ -101,4 +101,130 @@ class UnitNo(models.Model):
         ordering = ['unit_name']
 
     def __str__(self):
-        return self.unit_name
+        return self.unit_name# Therapy Master
+class TherapyMaster(models.Model):
+    """Master list of therapy names and details."""
+    therapy_code = models.CharField(max_length=20, unique=True, verbose_name="Therapy Code")
+    therapy_name = models.CharField(max_length=255, verbose_name="Therapy Name")
+    therapy_group = models.CharField(max_length=100, null=True, blank=True, verbose_name="Therapy Group")
+    therapy_category = models.CharField(max_length=100, null=True, blank=True, verbose_name="Therapy Category")
+    therapy_duration = models.CharField(max_length=50, null=True, blank=True, verbose_name="Duration")
+    bathing_required = models.CharField(max_length=10, null=True, blank=True, verbose_name="Bathing Required")
+    treatment_room_required = models.CharField(max_length=10, null=True, blank=True, verbose_name="Room Required")
+    cost_of_therapy = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, verbose_name="Cost")
+    
+    # Therapist count fields (from original TherapyDetails model)
+    no_of_super_senior_therapist = models.IntegerField(default=0, verbose_name="Super Senior Therapists")
+    no_of_senior_therapist = models.IntegerField(default=0, verbose_name="Senior Therapists")
+    no_of_junior_therapist = models.IntegerField(default=0, verbose_name="Junior Therapists")
+    no_of_trainee_therapist = models.IntegerField(default=0, verbose_name="Trainee Therapists")
+    total_no_of_therapist = models.IntegerField(default=0, verbose_name="Total Therapists")
+    
+    is_active = models.BooleanField(default=True, verbose_name="Active")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Created At")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="Updated At")
+
+    def __str__(self):
+        return f"{self.therapy_code} - {self.therapy_name}"
+
+    class Meta:
+        verbose_name = "Therapy Master"
+        verbose_name_plural = "Therapy Masters"
+        ordering = ["therapy_name"]
+
+# Item Master
+class ItemMaster(models.Model):
+    """Master list of items used in therapies and prescriptions."""
+    item_code = models.CharField(max_length=20, unique=True, verbose_name="Item Code")
+    item_name = models.CharField(max_length=255, verbose_name="Item Name")
+    item_category = models.CharField(max_length=100, null=True, blank=True, verbose_name="Category")
+    unit_of_measure = models.CharField(max_length=50, null=True, blank=True, verbose_name="Unit")
+    is_active = models.BooleanField(default=True, verbose_name="Active")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Created At")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="Updated At")
+
+    def __str__(self):
+        return f"{self.item_code} - {self.item_name}"
+
+    class Meta:
+        verbose_name = "Item Master"
+        verbose_name_plural = "Item Masters"
+        ordering = ["item_name"]
+
+# Slot Master
+class SlotMaster(models.Model):
+    """Master list of time slots for therapy scheduling."""
+    slot_number = models.IntegerField(unique=True, verbose_name="Slot Number")
+    start_time = models.TimeField(verbose_name="Start Time")
+    end_time = models.TimeField(verbose_name="End Time")
+    slot_name = models.CharField(max_length=100, null=True, blank=True, verbose_name="Slot Name")
+    is_active = models.BooleanField(default=True, verbose_name="Active")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Created At")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="Updated At")
+
+    def __str__(self):
+        return f"Slot {self.slot_number}: {self.start_time.strftime('%H:%M')} - {self.end_time.strftime('%H:%M')}"
+
+    class Meta:
+        verbose_name = "Slot Master"
+        verbose_name_plural = "Slot Masters"
+        ordering = ["slot_number"]
+
+# Therapist Master
+class TherapistMaster(models.Model):
+    """Master list of therapists with leave management."""
+    # Foreign keys to user system
+    user = models.ForeignKey('authentication.CustomUser', on_delete=models.CASCADE, related_name='therapist_master', verbose_name="User", null=True, blank=True)
+    therapist_profile = models.ForeignKey('authentication.TherapistProfile', on_delete=models.CASCADE, related_name='therapist_master', verbose_name="Therapist Profile", null=True, blank=True)
+    
+    # Therapist details (can be synced from user profile)
+    therapist_code = models.CharField(max_length=20, unique=True, verbose_name="Therapist Code")
+    therapist_name = models.CharField(max_length=255, verbose_name="Therapist Name")
+    therapist_grade = models.CharField(max_length=100, verbose_name="Therapist Grade")
+    employee_code = models.CharField(max_length=50, unique=True, verbose_name="Employee Code", help_text="Used for emergency leave API mapping")
+    is_bathing_therapist = models.BooleanField(default=True, verbose_name="Bathing Therapist")
+    is_active = models.BooleanField(default=True, verbose_name="Active")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Created At")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="Updated At")
+
+    def __str__(self):
+        return f"{self.therapist_name} ({self.therapist_code})"
+
+    class Meta:
+        verbose_name = "Therapist Master"
+        verbose_name_plural = "Therapist Masters"
+        ordering = ["therapist_name"]
+
+# Therapist Leave Master
+class TherapistLeaveMaster(models.Model):
+    """Weekly leave management for therapists."""
+    WEEK_DAYS = [
+        (0, "Monday"),
+        (1, "Tuesday"),
+        (2, "Wednesday"),
+        (3, "Thursday"),
+        (4, "Friday"),
+        (5, "Saturday"),
+        (6, "Sunday"),
+    ]
+
+    therapist = models.ForeignKey(TherapistMaster, on_delete=models.CASCADE, related_name='leaves', verbose_name="Therapist")
+    leave_day = models.IntegerField(choices=WEEK_DAYS, verbose_name="Leave Day")
+    leave_day_name = models.CharField(max_length=10, blank=True, verbose_name="Day Name")
+    is_active = models.BooleanField(default=True, verbose_name="Active")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Created At")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="Updated At")
+
+    def save(self, *args, **kwargs):
+        # Auto-fill day name based on leave_day
+        self.leave_day_name = dict(self.WEEK_DAYS).get(self.leave_day, "")
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.therapist.therapist_name} - {self.leave_day_name}"
+
+    class Meta:
+        verbose_name = "Therapist Leave"
+        verbose_name_plural = "Therapist Leaves"
+        ordering = ["therapist__therapist_name", "leave_day"]
+        unique_together = ['therapist', 'leave_day']

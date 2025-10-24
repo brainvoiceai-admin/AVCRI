@@ -82,7 +82,7 @@
         {# --- 2. UNIT LIST (Read View) --- #}
         {# ------------------------------------------------------------------ #}
         <h4>Current Units List</h4>
-        {% if units %}
+        {% if unitno_list %}
             <table class="table table-striped table-hover">
                 <thead class="thead-dark">
                     <tr>
@@ -92,7 +92,7 @@
                     </tr>
                 </thead>
                 <tbody>
-                    {% for unit in units %}
+                    {% for unit in unitno_list %}
                         <tr>
                             <td>{{ unit.unit_name }}</td>
                             <td>
