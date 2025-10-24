@@ -1,458 +1,880 @@
-from django.shortcuts import render, redirect, get_object_or_404
-from django.urls import reverse_lazy
-from django.views import View
-from django import forms # Import forms module
-from .models import Procured
-
-# 1. Define the ModelForm within the views.py file
-class ProcuredForm(forms.ModelForm):
-    class Meta:
-        model = Procured
-        fields = ['name', 'is_active']
-        
-        # Optional: Add Bootstrap classes for better styling if not using crispy-forms
-        widgets = {
-            'name': forms.TextInput(attrs={'class': 'form-control'}),
-            'is_active': forms.CheckboxInput(attrs={'class': 'form-check-input'}),
-        }
-
-
-class ProcuredManagementView(View):
-    """Handles listing, creating, and updating Procured sources on a single page."""
-    
-    def get(self, request, pk=None):
-        # Read: Get all sources
-        sources = Procured.objects.all().order_by('name')
-        
-        # Determine if we are Creating or Updating
-        if pk:
-            # Update: Load existing instance
-            instance = get_object_or_404(Procured, pk=pk)
-            form = ProcuredForm(instance=instance)
-            action_url = reverse_lazy('procured_manage_update', kwargs={'pk': pk})
-        else:
-            # Create: Empty form
-            form = ProcuredForm()
-            action_url = reverse_lazy('procured_manage')
-            
-        context = {
-            'procured_sources': sources,
-            'form': form,
-            'action_url': action_url,
-            'editing_pk': pk
-        }
-        return render(request, 'masters/procured_manage.html', context)
-
-    def post(self, request, pk=None):
-        # Determine if we are Creating or Updating
-        if pk:
-            # Update Logic
-            instance = get_object_or_404(Procured, pk=pk)
-            form = ProcuredForm(request.POST, instance=instance)
-        else:
-            # Create Logic
-            form = ProcuredForm(request.POST)
-
-        if form.is_valid():
-            form.save()
-            # Redirect to the base list URL on success (removes the ID from the URL)
-            return redirect('procured_manage')
-        
-        # If form is NOT valid, re-render the GET view with errors
-        sources = Procured.objects.all().order_by('name')
-        context = {
-            'procured_sources': sources,
-            'form': form,
-            'action_url': reverse_lazy('procured_manage_update', kwargs={'pk': pk}) if pk else reverse_lazy('procured_manage'),
-            'editing_pk': pk
-        }
-        return render(request, 'masters/procured_manage.html', context)
-
-
-class ProcuredDeleteView(View):
-    """Handles deletion of a Procured source via POST request."""
-    def post(self, request, pk):
-        source = get_object_or_404(Procured, pk=pk)
-        source.delete()
-        return redirect('procured_manage')
-
-
-
-
-
-#Oil class master
-
-from django.shortcuts import render, redirect, get_object_or_404
-from django.urls import reverse_lazy
-from django.views import View
-from .models import OilClass # Import the new model
-
-# Note: Since you opted out of forms.py, the ProcuredForm 
-# you defined earlier would be irrelevant here. 
-# We'll stick to the manual data handling for OilClass.
-
-class OilClassManagementView(View):
-    """Handles listing, creating, and simple enabling/disabling of Oil Classes."""
-    
-    def get(self, request, pk=None):
-        sources = OilClass.objects.all().order_by('name')
-        
-        # We don't need to load instance data for the simplified view, 
-        # but we keep the variables to handle potential POST failures cleanly.
-        instance_data = None 
-        action_url = reverse_lazy('oilclass_manage')
-        
-        if pk:
-            instance = get_object_or_404(OilClass, pk=pk)
-            instance_data = {'name': instance.name, 'is_active': instance.is_active}
-            action_url = reverse_lazy('oilclass_manage_update', kwargs={'pk': pk})
-        
-        context = {
-            'oil_classes': sources,
-            'editing_data': instance_data,
-            'action_url': action_url,
-            'editing_pk': pk
-        }
-        return render(request, 'masters/oilclass_manage.html', context)
-
-    def post(self, request, pk=None):
-        # Manual Data Extraction and Validation
-        name = request.POST.get('name', '').strip()
-        is_active = request.POST.get('is_active') == 'on'
-        
-        errors = {}
-        if not name:
-            errors['name'] = "Oil Class name cannot be empty."
-        
-        if not errors:
-            try:
-                if pk:
-                    # Update (Enable/Disable action)
-                    source = get_object_or_404(OilClass, pk=pk)
-                    source.name = name # Must update the name field from the hidden input
-                    source.is_active = is_active
-                    source.save()
-                else:
-                    # Create (Add action)
-                    OilClass.objects.create(name=name, is_active=is_active)
-                
-                return redirect('oilclass_manage')
-            except Exception as e:
-                # Handle database errors, particularly IntegrityError for unique constraint
-                errors['general'] = f"A database error occurred: {e}. Check if the name already exists."
-
-        # If validation or database save fails, re-render with errors
-        sources = OilClass.objects.all().order_by('name')
-        context = {
-            'oil_classes': sources,
-            'editing_data': {'name': name, 'is_active': is_active},
-            'action_url': reverse_lazy('oilclass_manage_update', kwargs={'pk': pk}) if pk else reverse_lazy('oilclass_manage'),
-            'editing_pk': pk,
-            'errors': errors
-        }
-        return render(request, 'masters/oilclass_manage.html', context)
-
-
-class OilClassDeleteView(View):
-    """Handles deletion of an Oil Class via POST request."""
-    def post(self, request, pk):
-        source = get_object_or_404(OilClass, pk=pk)
-        source.delete()
-        return redirect('oilclass_manage')
-    
-
-#Usage Master
-from django.shortcuts import render, redirect, get_object_or_404
-from django.urls import reverse_lazy
-from django.views import View
-# ... existing Procured and OilClass imports ...
-from .models import UsageType # Import the new model
-
-class UsageTypeManagementView(View):
-    """Handles listing, creating, and simple enabling/disabling of Usage Types."""
-    
-    def get(self, request, pk=None):
-        sources = UsageType.objects.all().order_by('name')
-        
-        instance_data = None 
-        action_url = reverse_lazy('usagetype_manage')
-        
-        if pk:
-            instance = get_object_or_404(UsageType, pk=pk)
-            instance_data = {'name': instance.name, 'is_active': instance.is_active}
-            action_url = reverse_lazy('usagetype_manage_update', kwargs={'pk': pk})
-        
-        context = {
-            'usage_types': sources,
-            'editing_data': instance_data,
-            'action_url': action_url,
-            'editing_pk': pk
-        }
-        return render(request, 'masters/usagetype_manage.html', context)
-
-    def post(self, request, pk=None):
-        # Manual Data Extraction and Validation
-        name = request.POST.get('name', '').strip()
-        is_active = request.POST.get('is_active') == 'on'
-        
-        errors = {}
-        if not name:
-            errors['name'] = "Usage Type name cannot be empty."
-        
-        if not errors:
-            try:
-                if pk:
-                    # Update (Enable/Disable action)
-                    source = get_object_or_404(UsageType, pk=pk)
-                    source.name = name
-                    source.is_active = is_active
-                    source.save()
-                else:
-                    # Create (Add action)
-                    UsageType.objects.create(name=name, is_active=is_active)
-                
-                return redirect('usagetype_manage')
-            except Exception as e:
-                errors['general'] = f"A database error occurred: {e}. Check if the name already exists."
-
-        # If validation or database save fails, re-render with errors
-        sources = UsageType.objects.all().order_by('name')
-        context = {
-            'usage_types': sources,
-            'editing_data': {'name': name, 'is_active': is_active},
-            'action_url': reverse_lazy('usagetype_manage_update', kwargs={'pk': pk}) if pk else reverse_lazy('usagetype_manage'),
-            'editing_pk': pk,
-            'errors': errors
-        }
-        return render(request, 'masters/usagetype_manage.html', context)
-
-
-class UsageTypeDeleteView(View):
-    """Handles deletion of a Usage Type via POST request."""
-    def post(self, request, pk):
-        source = get_object_or_404(UsageType, pk=pk)
-        source.delete()
-        return redirect('usagetype_manage')
-    
-
-
-#Prescription Time Master
-from django.shortcuts import render, redirect, get_object_or_404
-from django.urls import reverse_lazy
-from django.views import View
-# ... existing Procured, OilClass, and UsageType imports ...
-from .models import PrescriptionTime # Import the new model
-
-class PrescriptionTimeManagementView(View):
-    """Handles listing, creating, and simple enabling/disabling of Prescription Time Slots."""
-    
-    def get(self, request, pk=None):
-        sources = PrescriptionTime.objects.all().order_by('name')
-        
-        instance_data = None 
-        action_url = reverse_lazy('prestime_manage')
-        
-        if pk:
-            instance = get_object_or_404(PrescriptionTime, pk=pk)
-            instance_data = {'name': instance.name, 'is_active': instance.is_active}
-            action_url = reverse_lazy('prestime_manage_update', kwargs={'pk': pk})
-        
-        context = {
-            'prescription_times': sources,
-            'editing_data': instance_data,
-            'action_url': action_url,
-            'editing_pk': pk
-        }
-        return render(request, 'masters/prestime_manage.html', context)
-
-    def post(self, request, pk=None):
-        # Manual Data Extraction and Validation
-        name = request.POST.get('name', '').strip()
-        is_active = request.POST.get('is_active') == 'on'
-        
-        errors = {}
-        if not name:
-            errors['name'] = "Time Slot name cannot be empty."
-        
-        if not errors:
-            try:
-                if pk:
-                    # Update (Enable/Disable action)
-                    source = get_object_or_404(PrescriptionTime, pk=pk)
-                    source.name = name
-                    source.is_active = is_active
-                    source.save()
-                else:
-                    # Create (Add action)
-                    PrescriptionTime.objects.create(name=name, is_active=is_active)
-                
-                return redirect('prestime_manage')
-            except Exception as e:
-                errors['general'] = f"A database error occurred: {e}. Check if the name already exists."
-
-        # If validation or database save fails, re-render with errors
-        sources = PrescriptionTime.objects.all().order_by('name')
-        context = {
-            'prescription_times': sources,
-            'editing_data': {'name': name, 'is_active': is_active},
-            'action_url': reverse_lazy('prestime_manage_update', kwargs={'pk': pk}) if pk else reverse_lazy('prestime_manage'),
-            'editing_pk': pk,
-            'errors': errors
-        }
-        return render(request, 'masters/prestime_manage.html', context)
-
-
-class PrescriptionTimeDeleteView(View):
-    """Handles deletion of a Prescription Time Slot via POST request."""
-    def post(self, request, pk):
-        source = get_object_or_404(PrescriptionTime, pk=pk)
-        source.delete()
-        return redirect('prestime_manage')
-    
-
-#Ext/Int Master
-from django.shortcuts import render, redirect, get_object_or_404
-from django.urls import reverse_lazy
-from django.views import View
-from .models import PrescriptionScope # Import the new model
-
-class PrescriptionScopeManagementView(View):
-    """Handles listing, creating, and simple enabling/disabling of Prescription Scopes."""
-    
-    def get(self, request, pk=None):
-        sources = PrescriptionScope.objects.all().order_by('name')
-        
-        instance_data = None 
-        action_url = reverse_lazy('prescope_manage')
-        
-        if pk:
-            instance = get_object_or_404(PrescriptionScope, pk=pk)
-            instance_data = {'name': instance.name, 'is_active': instance.is_active}
-            action_url = reverse_lazy('prescope_manage_update', kwargs={'pk': pk})
-        
-        context = {
-            'prescription_scopes': sources,
-            'editing_data': instance_data,
-            'action_url': action_url,
-            'editing_pk': pk
-        }
-        return render(request, 'masters/prescope_manage.html', context)
-
-    def post(self, request, pk=None):
-        # Manual Data Extraction and Validation
-        name = request.POST.get('name', '').strip()
-        is_active = request.POST.get('is_active') == 'on'
-        
-        errors = {}
-        if not name:
-            errors['name'] = "Prescription Scope name cannot be empty."
-        
-        if not errors:
-            try:
-                if pk:
-                    # Update (Enable/Disable action)
-                    source = get_object_or_404(PrescriptionScope, pk=pk)
-                    source.name = name
-                    source.is_active = is_active
-                    source.save()
-                else:
-                    # Create (Add action)
-                    PrescriptionScope.objects.create(name=name, is_active=is_active)
-                
-                return redirect('prescope_manage')
-            except Exception as e:
-                errors['general'] = f"A database error occurred: {e}. Check if the name already exists."
-
-        # If validation or database save fails, re-render with errors
-        sources = PrescriptionScope.objects.all().order_by('name')
-        context = {
-            'prescription_scopes': sources,
-            'editing_data': {'name': name, 'is_active': is_active},
-            'action_url': reverse_lazy('prescope_manage_update', kwargs={'pk': pk}) if pk else reverse_lazy('prescope_manage'),
-            'editing_pk': pk,
-            'errors': errors
-        }
-        return render(request, 'masters/prescope_manage.html', context)
-
-
-class PrescriptionScopeDeleteView(View):
-    """Handles deletion of a Prescription Scope via POST request."""
-    def post(self, request, pk):
-        source = get_object_or_404(PrescriptionScope, pk=pk)
-        source.delete()
-        return redirect('prescope_manage')
-    
-
-#Unit No 
-# inventory/views.py
-
-from django.shortcuts import get_object_or_404, redirect
-from django.urls import reverse_lazy
-from django.views.generic import (
-    ListView, CreateView, UpdateView, DeleteView
-)
-from django.contrib.auth.mixins import LoginRequiredMixin
+from django.http import JsonResponse
+from django.views.decorators.http import require_http_methods
+from django.views.decorators.csrf import csrf_exempt
 from django.contrib.auth.decorators import login_required
-from .models import UnitNo
-
-# --- Set the single template name ---
-MASTER_TEMPLATE = 'masters/unitno_master.html'
-SUCCESS_URL = reverse_lazy('unit_list')
-
-# --- CRUD Operations using Class-Based Views (CBV) ---
-
-class UnitNoListView(LoginRequiredMixin, ListView):
-    """Lists all UnitNo objects."""
-    model = UnitNo
-    context_object_name = 'units'
-    template_name = MASTER_TEMPLATE # <--- Use the single template
-
-class UnitNoCreateView(LoginRequiredMixin, CreateView):
-    """Handles adding a new UnitNo."""
-    model = UnitNo
-    fields = ['unit_name', 'is_active']
-    template_name = MASTER_TEMPLATE # <--- Use the single template
-    success_url = SUCCESS_URL
-
-    def get_context_data(self, **kwargs):
-        # Indicate to the template that we are in 'create' mode
-        context = super().get_context_data(**kwargs)
-        context['mode'] = 'create'
-        return context
-
-class UnitNoUpdateView(LoginRequiredMixin, UpdateView):
-    """Handles updating an existing UnitNo."""
-    model = UnitNo
-    fields = ['unit_name', 'is_active']
-    template_name = MASTER_TEMPLATE # <--- Use the single template
-    success_url = SUCCESS_URL
-
-    def get_context_data(self, **kwargs):
-        # Indicate to the template that we are in 'update' mode
-        context = super().get_context_data(**kwargs)
-        context['mode'] = 'update'
-        return context
-
-class UnitNoDeleteView(LoginRequiredMixin, DeleteView):
-    """Handles deleting an existing UnitNo. (This must remain separate for security)"""
-    model = UnitNo
-    context_object_name = 'unit'
-    template_name = 'inventory/unitno_confirm_delete.html' # <--- Separate delete confirmation is crucial
-    success_url = SUCCESS_URL
-
-
-# --- Enable/Disable Actions (Remain the same) ---
+from django.shortcuts import render, get_object_or_404, redirect
+from django.contrib import messages
+from django.views.generic import ListView, CreateView, UpdateView, DeleteView
+from django.urls import reverse_lazy
+from authentication.decorators import super_admin_required
+from .models import (
+    Procured, OilClass, UsageType, PrescriptionTime, 
+    PrescriptionScope, UnitNo, TherapyMaster, ItemMaster, SlotMaster,
+    TherapistMaster, TherapistLeaveMaster
+)
+import json
 
 @login_required
+@require_http_methods(["GET"])
+def get_master_data(request):
+    """API endpoint to get master data for dropdowns"""
+    master_type = request.GET.get('type', '')
+    
+    try:
+        if master_type == 'therapy':
+            data = list(TherapyMaster.objects.filter(is_active=True).values(
+                'therapy_code', 'therapy_name', 'therapy_group', 'therapy_category'
+            ))
+        elif master_type == 'item':
+            data = list(ItemMaster.objects.filter(is_active=True).values(
+                'item_code', 'item_name', 'item_category'
+            ))
+        elif master_type == 'slot':
+            data = list(SlotMaster.objects.filter(is_active=True).values(
+                'slot_number', 'slot_name', 'start_time', 'end_time'
+            ))
+        elif master_type == 'procured':
+            data = list(Procured.objects.filter(is_active=True).values('id', 'name'))
+        elif master_type == 'oil_class':
+            data = list(OilClass.objects.filter(is_active=True).values('id', 'name'))
+        elif master_type == 'usage_type':
+            data = list(UsageType.objects.filter(is_active=True).values('id', 'name'))
+        elif master_type == 'prescription_time':
+            data = list(PrescriptionTime.objects.filter(is_active=True).values('id', 'name'))
+        elif master_type == 'prescription_scope':
+            data = list(PrescriptionScope.objects.filter(is_active=True).values('id', 'name'))
+        elif master_type == 'unit_no':
+            data = list(UnitNo.objects.filter(is_active=True).values('id', 'unit_name'))
+        elif master_type == 'therapist':
+            data = list(TherapistMaster.objects.filter(is_active=True).values(
+                'therapist_code', 'therapist_name', 'therapist_grade', 'employee_code', 'is_bathing_therapist'
+            ))
+        elif master_type == 'therapist_leave':
+            therapist_code = request.GET.get('therapist_code', '')
+            if therapist_code:
+                data = list(TherapistLeaveMaster.objects.filter(
+                    therapist__therapist_code=therapist_code, is_active=True
+                ).values('leave_day', 'leave_day_name', 'is_active'))
+            else:
+                data = list(TherapistLeaveMaster.objects.filter(is_active=True).values(
+                    'therapist__therapist_code', 'therapist__therapist_name', 'leave_day', 'leave_day_name'
+                ))
+        else:
+            return JsonResponse({'error': 'Invalid master type'}, status=400)
+        
+        return JsonResponse({'data': data})
+        
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)
+
+@login_required
+@super_admin_required
+@require_http_methods(["POST"])
+@csrf_exempt
+def create_master_item(request):
+    """API endpoint to create master items (Super Admin only)"""
+    try:
+        data = json.loads(request.body)
+        master_type = data.get('type', '')
+        
+        if master_type == 'therapy':
+            item = TherapyMaster.objects.create(
+                therapy_code=data['therapy_code'],
+                therapy_name=data['therapy_name'],
+                therapy_group=data.get('therapy_group', ''),
+                therapy_category=data.get('therapy_category', ''),
+                therapy_duration=data.get('therapy_duration', ''),
+                bathing_required=data.get('bathing_required', ''),
+                treatment_room_required=data.get('treatment_room_required', ''),
+                cost_of_therapy=data.get('cost_of_therapy', 0)
+            )
+        elif master_type == 'item':
+            item = ItemMaster.objects.create(
+                item_code=data['item_code'],
+                item_name=data['item_name'],
+                item_category=data.get('item_category', ''),
+                unit_of_measure=data.get('unit_of_measure', '')
+            )
+        elif master_type == 'slot':
+            item = SlotMaster.objects.create(
+                slot_number=data['slot_number'],
+                start_time=data['start_time'],
+                end_time=data['end_time'],
+                slot_name=data.get('slot_name', '')
+            )
+        else:
+            return JsonResponse({'error': 'Invalid master type'}, status=400)
+        
+        return JsonResponse({'success': True, 'id': item.id})
+        
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)
+
+@login_required
+@super_admin_required
+@require_http_methods(["PUT"])
+@csrf_exempt
+def update_master_item(request, item_id):
+    """API endpoint to update master items (Super Admin only)"""
+    try:
+        data = json.loads(request.body)
+        master_type = data.get('type', '')
+        
+        if master_type == 'therapy':
+            item = TherapyMaster.objects.get(id=item_id)
+            item.therapy_name = data.get('therapy_name', item.therapy_name)
+            item.therapy_group = data.get('therapy_group', item.therapy_group)
+            item.therapy_category = data.get('therapy_category', item.therapy_category)
+            item.is_active = data.get('is_active', item.is_active)
+        elif master_type == 'item':
+            item = ItemMaster.objects.get(id=item_id)
+            item.item_name = data.get('item_name', item.item_name)
+            item.item_category = data.get('item_category', item.item_category)
+            item.is_active = data.get('is_active', item.is_active)
+        elif master_type == 'slot':
+            item = SlotMaster.objects.get(id=item_id)
+            item.slot_name = data.get('slot_name', item.slot_name)
+            item.start_time = data.get('start_time', item.start_time)
+            item.end_time = data.get('end_time', item.end_time)
+            item.is_active = data.get('is_active', item.is_active)
+        else:
+            return JsonResponse({'error': 'Invalid master type'}, status=400)
+        
+        item.save()
+        return JsonResponse({'success': True})
+        
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)
+
+@login_required
+@super_admin_required
+@require_http_methods(["DELETE"])
+@csrf_exempt
+def delete_master_item(request, item_id):
+    """API endpoint to delete master items (Super Admin only)"""
+    try:
+        data = json.loads(request.body)
+        master_type = data.get('type', '')
+        
+        if master_type == 'therapy':
+            item = TherapyMaster.objects.get(id=item_id)
+        elif master_type == 'item':
+            item = ItemMaster.objects.get(id=item_id)
+        elif master_type == 'slot':
+            item = SlotMaster.objects.get(id=item_id)
+        else:
+            return JsonResponse({'error': 'Invalid master type'}, status=400)
+        
+        item.delete()
+        return JsonResponse({'success': True})
+        
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)
+
+# Class-based views for master management
+class ProcuredManagementView(ListView):
+    model = Procured
+    template_name = 'masters/procured_manage.html'
+    context_object_name = 'procured_list'
+    paginate_by = 20
+
+    def get_queryset(self):
+        return Procured.objects.all().order_by('name')
+    
+    def post(self, request, *args, **kwargs):
+        """Handle POST requests for creating new procurement sources or updating existing ones"""
+        pk = kwargs.get('pk')
+        name = request.POST.get('name')
+        is_active = request.POST.get('is_active') == 'on'
+        
+        if pk:
+            # Update existing record (enable/disable)
+            try:
+                procured = Procured.objects.get(pk=pk)
+                procured.is_active = is_active
+                procured.save()
+                action = "enabled" if is_active else "disabled"
+                messages.success(request, f'Procurement source "{procured.name}" {action} successfully.')
+            except Procured.DoesNotExist:
+                messages.error(request, 'Procurement source not found.')
+            except Exception as e:
+                messages.error(request, f'Error updating procurement source: {str(e)}')
+        else:
+            # Create new record
+            if name:
+                try:
+                    Procured.objects.create(
+                        name=name,
+                        is_active=is_active
+                    )
+                    messages.success(request, f'Procurement source "{name}" created successfully.')
+                except Exception as e:
+                    messages.error(request, f'Error creating procurement source: {str(e)}')
+            else:
+                messages.error(request, 'Name is required.')
+        
+        return redirect('procured_manage')
+
+class ProcuredDeleteView(DeleteView):
+    model = Procured
+    success_url = reverse_lazy('procured_manage')
+    
+    def delete(self, request, *args, **kwargs):
+        messages.success(request, 'Procured item deleted successfully.')
+        return super().delete(request, *args, **kwargs)
+
+class OilClassManagementView(ListView):
+    model = OilClass
+    template_name = 'masters/oilclass_manage.html'
+    context_object_name = 'oilclass_list'
+    paginate_by = 20
+
+    def get_queryset(self):
+        return OilClass.objects.all().order_by('name')
+    
+    def post(self, request, *args, **kwargs):
+        """Handle POST requests for creating new oil classes or updating existing ones"""
+        pk = kwargs.get('pk')
+        name = request.POST.get('name')
+        is_active = request.POST.get('is_active') == 'on'
+        
+        if pk:
+            # Update existing record (enable/disable)
+            try:
+                oil_class = OilClass.objects.get(pk=pk)
+                oil_class.is_active = is_active
+                oil_class.save()
+                action = "enabled" if is_active else "disabled"
+                messages.success(request, f'Oil class "{oil_class.name}" {action} successfully.')
+            except OilClass.DoesNotExist:
+                messages.error(request, 'Oil class not found.')
+            except Exception as e:
+                messages.error(request, f'Error updating oil class: {str(e)}')
+        else:
+            # Create new record
+            if name:
+                try:
+                    OilClass.objects.create(
+                        name=name,
+                        is_active=is_active
+                    )
+                    messages.success(request, f'Oil class "{name}" created successfully.')
+                except Exception as e:
+                    messages.error(request, f'Error creating oil class: {str(e)}')
+            else:
+                messages.error(request, 'Name is required.')
+        
+        return redirect('oilclass_manage')
+
+class OilClassDeleteView(DeleteView):
+    model = OilClass
+    success_url = reverse_lazy('oilclass_manage')
+    
+    def delete(self, request, *args, **kwargs):
+        messages.success(request, 'Oil class deleted successfully.')
+        return super().delete(request, *args, **kwargs)
+
+class UsageTypeManagementView(ListView):
+    model = UsageType
+    template_name = 'masters/usagetype_manage.html'
+    context_object_name = 'usagetype_list'
+    paginate_by = 20
+
+    def get_queryset(self):
+        return UsageType.objects.all().order_by('name')
+    
+    def post(self, request, *args, **kwargs):
+        """Handle POST requests for creating new usage types or updating existing ones"""
+        pk = kwargs.get('pk')
+        name = request.POST.get('name')
+        is_active = request.POST.get('is_active') == 'on'
+        
+        if pk:
+            # Update existing record (enable/disable)
+            try:
+                usage_type = UsageType.objects.get(pk=pk)
+                usage_type.is_active = is_active
+                usage_type.save()
+                action = "enabled" if is_active else "disabled"
+                messages.success(request, f'Usage type "{usage_type.name}" {action} successfully.')
+            except UsageType.DoesNotExist:
+                messages.error(request, 'Usage type not found.')
+            except Exception as e:
+                messages.error(request, f'Error updating usage type: {str(e)}')
+        else:
+            # Create new record
+            if name:
+                try:
+                    UsageType.objects.create(
+                        name=name,
+                        is_active=is_active
+                    )
+                    messages.success(request, f'Usage type "{name}" created successfully.')
+                except Exception as e:
+                    messages.error(request, f'Error creating usage type: {str(e)}')
+            else:
+                messages.error(request, 'Name is required.')
+                
+            return redirect('usagetype_manage')
+
+class UsageTypeDeleteView(DeleteView):
+    model = UsageType
+    success_url = reverse_lazy('usagetype_manage')
+    
+    def delete(self, request, *args, **kwargs):
+        messages.success(request, 'Usage type deleted successfully.')
+        return super().delete(request, *args, **kwargs)
+
+class PrescriptionTimeManagementView(ListView):
+    model = PrescriptionTime
+    template_name = 'masters/prestime_manage.html'
+    context_object_name = 'prestime_list'
+    paginate_by = 20
+
+    def get_queryset(self):
+        return PrescriptionTime.objects.all().order_by('name')
+    
+    def post(self, request, *args, **kwargs):
+        """Handle POST requests for creating new prescription times or updating existing ones"""
+        pk = kwargs.get('pk')
+        name = request.POST.get('name')
+        is_active = request.POST.get('is_active') == 'on'
+        
+        if pk:
+            # Update existing record (enable/disable)
+            try:
+                prescription_time = PrescriptionTime.objects.get(pk=pk)
+                prescription_time.is_active = is_active
+                prescription_time.save()
+                action = "enabled" if is_active else "disabled"
+                messages.success(request, f'Prescription time "{prescription_time.name}" {action} successfully.')
+            except PrescriptionTime.DoesNotExist:
+                messages.error(request, 'Prescription time not found.')
+            except Exception as e:
+                messages.error(request, f'Error updating prescription time: {str(e)}')
+        else:
+            # Create new record
+            if name:
+                try:
+                    PrescriptionTime.objects.create(
+                        name=name,
+                        is_active=is_active
+                    )
+                    messages.success(request, f'Prescription time "{name}" created successfully.')
+                except Exception as e:
+                    messages.error(request, f'Error creating prescription time: {str(e)}')
+            else:
+                messages.error(request, 'Name is required.')
+                
+            return redirect('prestime_manage')
+
+class PrescriptionTimeDeleteView(DeleteView):
+    model = PrescriptionTime
+    success_url = reverse_lazy('prestime_manage')
+    
+    def delete(self, request, *args, **kwargs):
+        messages.success(request, 'Prescription time deleted successfully.')
+        return super().delete(request, *args, **kwargs)
+
+class PrescriptionScopeManagementView(ListView):
+    model = PrescriptionScope
+    template_name = 'masters/prescope_manage.html'
+    context_object_name = 'prescope_list'
+    paginate_by = 20
+
+    def get_queryset(self):
+        return PrescriptionScope.objects.all().order_by('name')
+    
+    def post(self, request, *args, **kwargs):
+        """Handle POST requests for creating new prescription scopes or updating existing ones"""
+        pk = kwargs.get('pk')
+        name = request.POST.get('name')
+        is_active = request.POST.get('is_active') == 'on'
+        
+        if pk:
+            # Update existing record (enable/disable)
+            try:
+                prescription_scope = PrescriptionScope.objects.get(pk=pk)
+                prescription_scope.is_active = is_active
+                prescription_scope.save()
+                action = "enabled" if is_active else "disabled"
+                messages.success(request, f'Prescription scope "{prescription_scope.name}" {action} successfully.')
+            except PrescriptionScope.DoesNotExist:
+                messages.error(request, 'Prescription scope not found.')
+            except Exception as e:
+                messages.error(request, f'Error updating prescription scope: {str(e)}')
+        else:
+            # Create new record
+            if name:
+                try:
+                    PrescriptionScope.objects.create(
+                        name=name,
+                        is_active=is_active
+                    )
+                    messages.success(request, f'Prescription scope "{name}" created successfully.')
+                except Exception as e:
+                    messages.error(request, f'Error creating prescription scope: {str(e)}')
+            else:
+                messages.error(request, 'Name is required.')
+        
+        return redirect('prescope_manage')
+
+class PrescriptionScopeDeleteView(DeleteView):
+    model = PrescriptionScope
+    success_url = reverse_lazy('prescope_manage')
+    
+    def delete(self, request, *args, **kwargs):
+        messages.success(request, 'Prescription scope deleted successfully.')
+        return super().delete(request, *args, **kwargs)
+
+# UnitNo views
+class UnitNoListView(ListView):
+    model = UnitNo
+    template_name = 'masters/unitno_master.html'
+    context_object_name = 'unitno_list'
+    paginate_by = 20
+
+    def get_queryset(self):
+        return UnitNo.objects.all().order_by('unit_name')
+    
+    def post(self, request, *args, **kwargs):
+        """Handle POST requests for creating new units"""
+        unit_name = request.POST.get('unit_name')
+        is_active = request.POST.get('is_active') == 'on'
+        
+        if unit_name:
+            try:
+                UnitNo.objects.create(
+                    unit_name=unit_name,
+                    is_active=is_active
+                )
+                messages.success(request, f'Unit "{unit_name}" created successfully.')
+            except Exception as e:
+                messages.error(request, f'Error creating unit: {str(e)}')
+        else:
+            messages.error(request, 'Unit name is required.')
+        
+        return redirect('unit_list')
+
+class UnitNoCreateView(CreateView):
+    model = UnitNo
+    fields = ['unit_name', 'is_active']
+    template_name = 'masters/unitno_form.html'
+    success_url = reverse_lazy('unit_list')
+    
+    def form_valid(self, form):
+        messages.success(self.request, 'Unit created successfully.')
+        return super().form_valid(form)
+
+class UnitNoUpdateView(UpdateView):
+    model = UnitNo
+    fields = ['unit_name', 'is_active']
+    template_name = 'masters/unitno_form.html'
+    success_url = reverse_lazy('unit_list')
+    
+    def form_valid(self, form):
+        messages.success(self.request, 'Unit updated successfully.')
+        return super().form_valid(form)
+
+class UnitNoDeleteView(DeleteView):
+    model = UnitNo
+    success_url = reverse_lazy('unit_list')
+
+    def delete(self, request, *args, **kwargs):
+        messages.success(request, 'Unit deleted successfully.')
+        return super().delete(request, *args, **kwargs)
+
+@login_required
+@super_admin_required
 def unit_no_enable(request, pk):
     unit = get_object_or_404(UnitNo, pk=pk)
     unit.is_active = True
     unit.save()
-    return redirect(SUCCESS_URL)
+    messages.success(request, f'Unit {unit.unit_name} enabled successfully.')
+    return redirect('unit_list')
 
 @login_required
+@super_admin_required
 def unit_no_disable(request, pk):
     unit = get_object_or_404(UnitNo, pk=pk)
     unit.is_active = False
     unit.save()
-    return redirect(SUCCESS_URL)
+    messages.success(request, f'Unit {unit.unit_name} disabled successfully.')
+    return redirect('unit_list')
+
+# Master Management Dashboard
+@login_required
+@super_admin_required
+def master_management_dashboard(request):
+    """Comprehensive master management dashboard for Super Admin"""
+    context = {
+        'master_tables': [
+            {
+                'name': 'Therapy Master',
+                'model': 'TherapyMaster',
+                'url': 'therapy_master_manage',
+                'description': 'Manage therapy types and details',
+                'count': TherapyMaster.objects.count(),
+                'active_count': TherapyMaster.objects.filter(is_active=True).count(),
+            },
+            {
+                'name': 'Item Master',
+                'model': 'ItemMaster',
+                'url': 'item_master_manage',
+                'description': 'Manage items used in therapies',
+                'count': ItemMaster.objects.count(),
+                'active_count': ItemMaster.objects.filter(is_active=True).count(),
+            },
+            {
+                'name': 'Slot Master',
+                'model': 'SlotMaster',
+                'url': 'slot_master_manage',
+                'description': 'Manage therapy time slots',
+                'count': SlotMaster.objects.count(),
+                'active_count': SlotMaster.objects.filter(is_active=True).count(),
+            },
+            {
+                'name': 'Therapist Master',
+                'model': 'TherapistMaster',
+                'url': 'therapist_master_manage',
+                'description': 'Manage therapists and their details',
+                'count': TherapistMaster.objects.count(),
+                'active_count': TherapistMaster.objects.filter(is_active=True).count(),
+            },
+            {
+                'name': 'Procurement Sources',
+                'model': 'Procured',
+                'url': 'procured_manage',
+                'description': 'Manage procurement sources',
+                'count': Procured.objects.count(),
+                'active_count': Procured.objects.filter(is_active=True).count(),
+            },
+            {
+                'name': 'Oil Classes',
+                'model': 'OilClass',
+                'url': 'oilclass_manage',
+                'description': 'Manage oil categories',
+                'count': OilClass.objects.count(),
+                'active_count': OilClass.objects.filter(is_active=True).count(),
+            },
+            {
+                'name': 'Usage Types',
+                'model': 'UsageType',
+                'url': 'usagetype_manage',
+                'description': 'Manage usage types',
+                'count': UsageType.objects.count(),
+                'active_count': UsageType.objects.filter(is_active=True).count(),
+            },
+            {
+                'name': 'Prescription Times',
+                'model': 'PrescriptionTime',
+                'url': 'prestime_manage',
+                'description': 'Manage prescription time slots',
+                'count': PrescriptionTime.objects.count(),
+                'active_count': PrescriptionTime.objects.filter(is_active=True).count(),
+            },
+            {
+                'name': 'Prescription Scopes',
+                'model': 'PrescriptionScope',
+                'url': 'prescope_manage',
+                'description': 'Manage prescription scopes',
+                'count': PrescriptionScope.objects.count(),
+                'active_count': PrescriptionScope.objects.filter(is_active=True).count(),
+            },
+            {
+                'name': 'Unit Numbers',
+                'model': 'UnitNo',
+                'url': 'unit_list',
+                'description': 'Manage unit measurements',
+                'count': UnitNo.objects.count(),
+                'active_count': UnitNo.objects.filter(is_active=True).count(),
+            },
+        ]
+    }
+    return render(request, 'masters/master_management_dashboard.html', context)
+
+# Therapy Master CRUD Views
+class TherapyMasterManagementView(ListView):
+    model = TherapyMaster
+    template_name = 'masters/therapy_master_manage.html'
+    context_object_name = 'therapy_list'
+    paginate_by = 20
+
+    def get_queryset(self):
+        return TherapyMaster.objects.all().order_by('therapy_name')
+
+class TherapyMasterCreateView(CreateView):
+    model = TherapyMaster
+    fields = ['therapy_code', 'therapy_name', 'therapy_group', 'therapy_category', 'therapy_duration', 'bathing_required', 'treatment_room_required', 'cost_of_therapy', 'no_of_super_senior_therapist', 'no_of_senior_therapist', 'no_of_junior_therapist', 'no_of_trainee_therapist', 'total_no_of_therapist', 'is_active']
+    template_name = 'masters/therapy_master_form.html'
+    success_url = reverse_lazy('therapy_master_manage')
+    
+    def form_valid(self, form):
+        messages.success(self.request, 'Therapy created successfully.')
+        return super().form_valid(form)
+
+class TherapyMasterUpdateView(UpdateView):
+    model = TherapyMaster
+    fields = ['therapy_code', 'therapy_name', 'therapy_group', 'therapy_category', 'therapy_duration', 'bathing_required', 'treatment_room_required', 'cost_of_therapy', 'no_of_super_senior_therapist', 'no_of_senior_therapist', 'no_of_junior_therapist', 'no_of_trainee_therapist', 'total_no_of_therapist', 'is_active']
+    template_name = 'masters/therapy_master_form.html'
+    success_url = reverse_lazy('therapy_master_manage')
+    
+    def form_valid(self, form):
+        messages.success(self.request, 'Therapy updated successfully.')
+        return super().form_valid(form)
+
+class TherapyMasterDeleteView(DeleteView):
+    model = TherapyMaster
+    success_url = reverse_lazy('therapy_master_manage')
+    
+    def delete(self, request, *args, **kwargs):
+        messages.success(request, 'Therapy deleted successfully.')
+        return super().delete(request, *args, **kwargs)
+
+# Item Master CRUD Views
+class ItemMasterManagementView(ListView):
+    model = ItemMaster
+    template_name = 'masters/item_master_manage.html'
+    context_object_name = 'item_list'
+    paginate_by = 20
+
+    def get_queryset(self):
+        return ItemMaster.objects.all().order_by('item_name')
+
+class ItemMasterCreateView(CreateView):
+    model = ItemMaster
+    fields = ['item_code', 'item_name', 'item_category', 'unit_of_measure', 'is_active']
+    template_name = 'masters/item_master_form.html'
+    success_url = reverse_lazy('item_master_manage')
+    
+    def form_valid(self, form):
+        messages.success(self.request, 'Item created successfully.')
+        return super().form_valid(form)
+
+class ItemMasterUpdateView(UpdateView):
+    model = ItemMaster
+    fields = ['item_code', 'item_name', 'item_category', 'unit_of_measure', 'is_active']
+    template_name = 'masters/item_master_form.html'
+    success_url = reverse_lazy('item_master_manage')
+    
+    def form_valid(self, form):
+        messages.success(self.request, 'Item updated successfully.')
+        return super().form_valid(form)
+
+class ItemMasterDeleteView(DeleteView):
+    model = ItemMaster
+    success_url = reverse_lazy('item_master_manage')
+    
+    def delete(self, request, *args, **kwargs):
+        messages.success(request, 'Item deleted successfully.')
+        return super().delete(request, *args, **kwargs)
+
+# Slot Master CRUD Views
+class SlotMasterManagementView(ListView):
+    model = SlotMaster
+    template_name = 'masters/slot_master_manage.html'
+    context_object_name = 'slot_list'
+    paginate_by = 20
+
+    def get_queryset(self):
+        return SlotMaster.objects.all().order_by('slot_number')
+
+class SlotMasterCreateView(CreateView):
+    model = SlotMaster
+    fields = ['slot_number', 'slot_name', 'start_time', 'end_time', 'is_active']
+    template_name = 'masters/slot_master_form.html'
+    success_url = reverse_lazy('slot_master_manage')
+    
+    def form_valid(self, form):
+        messages.success(self.request, 'Slot created successfully.')
+        return super().form_valid(form)
+
+class SlotMasterUpdateView(UpdateView):
+    model = SlotMaster
+    fields = ['slot_number', 'slot_name', 'start_time', 'end_time', 'is_active']
+    template_name = 'masters/slot_master_form.html'
+    success_url = reverse_lazy('slot_master_manage')
+    
+    def form_valid(self, form):
+        messages.success(self.request, 'Slot updated successfully.')
+        return super().form_valid(form)
+
+class SlotMasterDeleteView(DeleteView):
+    model = SlotMaster
+    success_url = reverse_lazy('slot_master_manage')
+    
+    def delete(self, request, *args, **kwargs):
+        messages.success(request, 'Slot deleted successfully.')
+        return super().delete(request, *args, **kwargs)
+
+# Therapist Master CRUD Views
+class TherapistMasterManagementView(ListView):
+    model = TherapistMaster
+    template_name = 'masters/therapist_master_manage.html'
+    context_object_name = 'therapist_list'
+    paginate_by = 20
+
+    def get_queryset(self):
+        return TherapistMaster.objects.prefetch_related('leaves').all().order_by('therapist_name')
+
+class TherapistMasterCreateView(CreateView):
+    model = TherapistMaster
+    fields = ['therapist_code', 'therapist_name', 'therapist_grade', 'employee_code', 'is_bathing_therapist', 'is_active']
+    template_name = 'masters/therapist_master_form.html'
+    success_url = reverse_lazy('therapist_master_manage')
+    
+    def form_valid(self, form):
+        messages.success(self.request, 'Therapist created successfully.')
+        return super().form_valid(form)
+
+class TherapistMasterUpdateView(UpdateView):
+    model = TherapistMaster
+    fields = ['therapist_code', 'therapist_name', 'therapist_grade', 'employee_code', 'is_bathing_therapist', 'is_active']
+    template_name = 'masters/therapist_master_form.html'
+    success_url = reverse_lazy('therapist_master_manage')
+    
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        
+        # Add leave management context
+        context['therapist_leaves'] = [
+            (0, 'Monday'), (1, 'Tuesday'), (2, 'Wednesday'), (3, 'Thursday'),
+            (4, 'Friday'), (5, 'Saturday'), (6, 'Sunday')
+        ]
+        
+        # Get existing leave days for this therapist
+        existing_leaves = TherapistLeaveMaster.objects.filter(
+            therapist=self.object, is_active=True
+        ).values_list('leave_day', flat=True)
+        context['existing_leaves'] = list(existing_leaves)
+        
+        return context
+    
+    def form_valid(self, form):
+        # Save the therapist first
+        response = super().form_valid(form)
+        
+        # Handle leave days
+        if 'leave_days' in self.request.POST:
+            selected_days = self.request.POST.getlist('leave_days')
+            
+            # Remove existing leave records for this therapist
+            TherapistLeaveMaster.objects.filter(therapist=self.object).delete()
+            
+            # Create new leave records for selected days
+            for day in selected_days:
+                TherapistLeaveMaster.objects.create(
+                    therapist=self.object,
+                    leave_day=int(day),
+                    is_active=True
+                )
+        else:
+            # If no days selected, remove all leave records
+            TherapistLeaveMaster.objects.filter(therapist=self.object).delete()
+        
+        messages.success(self.request, 'Therapist and leave schedule updated successfully.')
+        return response
+
+class TherapistMasterDeleteView(DeleteView):
+    model = TherapistMaster
+    success_url = reverse_lazy('therapist_master_manage')
+    
+    def delete(self, request, *args, **kwargs):
+        messages.success(request, 'Therapist deleted successfully.')
+        return super().delete(request, *args, **kwargs)
+
+# Therapist Management API endpoints
+@login_required
+@super_admin_required
+@require_http_methods(["POST"])
+@csrf_exempt
+def create_therapist(request):
+    """API endpoint to create therapist (Super Admin only)"""
+    try:
+        data = json.loads(request.body)
+        
+        therapist = TherapistMaster.objects.create(
+            therapist_code=data['therapist_code'],
+            therapist_name=data['therapist_name'],
+            therapist_grade=data['therapist_grade'],
+            employee_code=data['employee_code'],
+            is_bathing_therapist=data.get('is_bathing_therapist', True),
+            is_active=data.get('is_active', True)
+        )
+        
+        return JsonResponse({'success': True, 'id': therapist.id})
+        
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)
+
+@login_required
+@super_admin_required
+@require_http_methods(["POST"])
+@csrf_exempt
+def create_therapist_leave(request):
+    """API endpoint to create therapist leave (Super Admin only)"""
+    try:
+        data = json.loads(request.body)
+        
+        therapist = get_object_or_404(TherapistMaster, therapist_code=data['therapist_code'])
+        
+        leave = TherapistLeaveMaster.objects.create(
+            therapist=therapist,
+            leave_day=data['leave_day'],
+            is_active=data.get('is_active', True)
+        )
+        
+        return JsonResponse({'success': True, 'id': leave.id})
+        
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)
+
+@login_required
+@super_admin_required
+@require_http_methods(["PUT"])
+@csrf_exempt
+def update_therapist(request, therapist_id):
+    """API endpoint to update therapist (Super Admin only)"""
+    try:
+        data = json.loads(request.body)
+        therapist = get_object_or_404(TherapistMaster, id=therapist_id)
+        
+        therapist.therapist_name = data.get('therapist_name', therapist.therapist_name)
+        therapist.therapist_grade = data.get('therapist_grade', therapist.therapist_grade)
+        therapist.employee_code = data.get('employee_code', therapist.employee_code)
+        therapist.is_bathing_therapist = data.get('is_bathing_therapist', therapist.is_bathing_therapist)
+        therapist.is_active = data.get('is_active', therapist.is_active)
+        therapist.save()
+        
+        return JsonResponse({'success': True})
+        
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)
+
+@login_required
+@super_admin_required
+@require_http_methods(["DELETE"])
+@csrf_exempt
+def delete_therapist(request, therapist_id):
+    """API endpoint to delete therapist (Super Admin only)"""
+    try:
+        therapist = get_object_or_404(TherapistMaster, id=therapist_id)
+        therapist.delete()
+        return JsonResponse({'success': True})
+        
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)
+
+@login_required
+@super_admin_required
+@require_http_methods(["DELETE"])
+@csrf_exempt
+def delete_therapist_leave(request, leave_id):
+    """API endpoint to delete therapist leave (Super Admin only)"""
+    try:
+        leave = get_object_or_404(TherapistLeaveMaster, id=leave_id)
+        leave.delete()
+        return JsonResponse({'success': True})
+        
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)

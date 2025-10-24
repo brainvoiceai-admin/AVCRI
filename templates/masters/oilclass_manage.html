@@ -68,7 +68,7 @@
         <hr>
 
         <h4>Current Oil Classes List</h4>
-        {% if oil_classes %}
+        {% if oilclass_list %}
             <table class="table table-striped table-hover">
                 <thead class="thead-dark">
                     <tr>
@@ -78,7 +78,7 @@
                     </tr>
                 </thead>
                 <tbody>
-                    {% for source in oil_classes %}
+                    {% for source in oilclass_list %}
                         <tr>
                             <td>{{ source.name }}</td>
                             <td>

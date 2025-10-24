@@ -71,13 +71,44 @@
             font-size: 1.1rem;
         }
         
-        .patient-info-card {
+        .patient-search-card {
             background: linear-gradient(45deg, #3498db, #2980b9);
             color: white;
             border-radius: 10px;
             padding: 20px;
             margin-bottom: 25px;
             box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        }
+        
+        .patient-info-card {
+            background: linear-gradient(45deg, #27ae60, #2ecc71);
+            color: white;
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 25px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        }
+        
+        .vip-badge {
+            background: linear-gradient(45deg, #f39c12, #e67e22);
+            color: white;
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-size: 0.9rem;
+            font-weight: 600;
+            display: inline-block;
+            margin-left: 10px;
+        }
+        
+        .patient-type-badge {
+            background: rgba(255, 255, 255, 0.2);
+            color: white;
+            padding: 3px 10px;
+            border-radius: 15px;
+            font-size: 0.8rem;
+            font-weight: 500;
+            display: inline-block;
+            margin-left: 10px;
         }
         
         .form-group {
@@ -255,6 +286,44 @@
             font-size:0.9rem;
         }
 
+        .search-results {
+            max-height: 300px;
+            overflow-y: auto;
+            border: 1px solid #ced4da;
+            border-radius: 5px;
+            background: white;
+            position: absolute;
+            width: 100%;
+            z-index: 1000;
+            display: none;
+        }
+
+        .search-result-item {
+            padding: 10px 15px;
+            border-bottom: 1px solid #eee;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+
+        .search-result-item:hover {
+            background-color: #f8f9fa;
+        }
+
+        .search-result-item:last-child {
+            border-bottom: none;
+        }
+
+        .loading-spinner {
+            display: none;
+            text-align: center;
+            padding: 20px;
+        }
+
+        .spinner-border {
+            width: 2rem;
+            height: 2rem;
+        }
+
     </style>
 </head>
 <body>
@@ -263,17 +332,59 @@
     <div class="main-content">
         
 
-        <div class="patient-info-card">
+        <!-- Patient Search Card -->
+        <div class="patient-search-card" id="patient-search-card">
+            <h3><i class="fas fa-search me-2"></i>Search Patient</h3>
             <div class="row">
                 <div class="col-md-8">
-                    <h3><i class="fas fa-user-injured me-2"></i>{{ patient.pat_name }}</h3>
-                    <p class="mb-1"><strong>Registration No:</strong> {{ patient.pat_reg_no }}</p>
-                    <p class="mb-0"><strong>Age/Gender:</strong> {{ patient.pat_age }} / {{ patient.pat_sex }}</p>
+                    <div class="form-group">
+                        <label for="patient-search">Patient Registration Number</label>
+                        <div class="input-icon-group">
+                            <i class="fas fa-user"></i>
+                            <input type="text" id="patient-search" class="form-control" placeholder="Enter at least 3 characters to search...">
+                        </div>
+                        <div class="search-results" id="search-results"></div>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="loading-spinner" id="search-loading">
+                        <div class="spinner-border text-light" role="status">
+                            <span class="visually-hidden">Searching...</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Patient Info Card (Auto-filled) -->
+        <div class="patient-info-card" id="patient-info-card" style="display: none;">
+            <div class="row">
+                <div class="col-md-8">
+                    <h3><i class="fas fa-user-injured me-2"></i><span id="patient-name">Patient Name</span>
+                        <span class="vip-badge" id="vip-badge" style="display: none;">VIP</span>
+                        <span class="patient-type-badge" id="patient-type-badge">IP</span>
+                    </h3>
+                    <div class="row">
+                        <div class="col-md-6">
+                            <p class="mb-1"><strong>Registration No:</strong> <span id="patient-reg-no">-</span></p>
+                            <p class="mb-1"><strong>Age/Gender:</strong> <span id="patient-age-sex">-</span></p>
+                            <p class="mb-1"><strong>Phone:</strong> <span id="patient-phone">-</span></p>
+                        </div>
+                        <div class="col-md-6">
+                            <p class="mb-1"><strong>Room No:</strong> <span id="patient-room">-</span></p>
+                            <p class="mb-1"><strong>IP Number:</strong> <span id="patient-ip">-</span></p>
+                            <p class="mb-1"><strong>Ref ID:</strong> <span id="patient-ref-id">-</span></p>
+                        </div>
+                    </div>
                 </div>
                 <div class="col-md-4 text-md-end">
                     <div class="btn-group">
-                        <button class="btn btn-light"><i class="fas fa-file-medical me-1"></i> Medical History</button>
-                        <button class="btn btn-light"><i class="fas fa-paste me-1"></i> Previous Therapies</button>
+                        <button class="btn btn-light" onclick="clearPatientSelection()">
+                            <i class="fas fa-times me-1"></i> Clear Selection
+                        </button>
+                        <button class="btn btn-light">
+                            <i class="fas fa-file-medical me-1"></i> Medical History
+                        </button>
                     </div>
                 </div>
             </div>
@@ -423,6 +534,158 @@
 
     <script>
         $(document).ready(function() {
+            // Patient search functionality
+            let selectedPatient = null;
+            let searchTimeout;
+            
+            $('#patient-search').on('input', function() {
+                const query = $(this).val().trim();
+                
+                clearTimeout(searchTimeout);
+                
+                if (query.length === 0) {
+                    $('#search-results').hide();
+                    return;
+                }
+                
+                if (query.length < 3) {
+                    $('#search-results').html('<div class="search-result-item text-muted">Enter at least 3 characters to search</div>').show();
+                    return;
+                }
+
+                searchTimeout = setTimeout(() => {
+                    searchPatients(query);
+                }, 300);
+            });
+
+            function searchPatients(query) {
+                if (query.length < 3) {
+                    $('#search-results').html('<div class="search-result-item text-muted">Enter at least 3 characters to search</div>').show();
+                    return;
+                }
+                
+                $('#search-loading').show();
+                
+                $.ajax({
+                    url: '{% url "search_patients" %}',
+                    method: 'GET',
+                    data: { q: query },
+                    dataType: 'json',
+                    success: function(response) {
+                        $('#search-loading').hide();
+                        displaySearchResults(response.patients || []);
+                    },
+                    error: function(xhr, status, error) {
+                        $('#search-loading').hide();
+                        console.error('Search error:', error);
+                        $('#search-results').html('<div class="search-result-item text-danger">Error searching patients</div>').show();
+                    }
+                });
+            }
+
+            function displaySearchResults(patients) {
+                const resultsContainer = $('#search-results');
+                resultsContainer.empty();
+
+                if (patients.length === 0) {
+                    resultsContainer.html('<div class="search-result-item text-muted">No patients found</div>').show();
+                    return;
+                }
+
+                patients.forEach(patient => {
+                    const resultItem = $(`
+                        <div class="search-result-item" data-reg-no="${patient.registration_number}">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <div>
+                                    <strong>${patient.patient_name || 'Unknown'}</strong>
+                                    <div class="small text-muted">
+                                        Reg: ${patient.registration_number} | 
+                                        ${patient.patient_type} | 
+                                        ${patient.sex || 'Unknown'} | 
+                                        ${patient.age ? patient.age + ' years' : 'Age unknown'}
+                                        ${patient.is_vip ? ' | VIP' : ''}
+                                    </div>
+                                </div>
+                                <div>
+                                    <span class="badge bg-${patient.patient_type === 'IP' ? 'primary' : 'success'}">${patient.patient_type}</span>
+                                    ${patient.is_vip ? '<span class="badge bg-warning ms-1">VIP</span>' : ''}
+                                </div>
+                            </div>
+                        </div>
+                    `);
+                    resultsContainer.append(resultItem);
+                });
+
+                resultsContainer.show();
+            }
+
+            // Handle patient selection
+            $(document).on('click', '.search-result-item', function() {
+                const regNo = $(this).data('reg-no');
+                loadPatientDetails(regNo);
+            });
+
+            // Hide search results when clicking outside
+            $(document).on('click', function(e) {
+                if (!$(e.target).closest('#patient-search, #search-results').length) {
+                    $('#search-results').hide();
+                }
+            });
+
+            function loadPatientDetails(regNo) {
+                $('#search-loading').show();
+                $('#search-results').hide();
+
+                $.ajax({
+                    url: '{% url "get_patient_details" %}',
+                    method: 'GET',
+                    data: { reg_no: regNo },
+                    dataType: 'json',
+                    success: function(response) {
+                        $('#search-loading').hide();
+                        if (response.patient) {
+                            selectedPatient = response.patient;
+                            populatePatientInfo(selectedPatient);
+                            $('#patient-info-card').show();
+                        } else {
+                            alert('Patient details not found');
+                        }
+                    },
+                    error: function(xhr, status, error) {
+                        $('#search-loading').hide();
+                        console.error('Error loading patient details:', error);
+                        alert('Error loading patient details');
+                    }
+                });
+            }
+
+            function populatePatientInfo(patient) {
+                $('#patient-name').text(patient.patient_name || 'Unknown');
+                $('#patient-reg-no').text(patient.registration_number);
+                $('#patient-age-sex').text(`${patient.age || 'Unknown'} / ${patient.sex || 'Unknown'}`);
+                $('#patient-phone').text(patient.phone || '-');
+                $('#patient-room').text(patient.room_number || '-');
+                $('#patient-ip').text(patient.ip_number || '-');
+                $('#patient-ref-id').text(patient.pat_ref_id || '-');
+
+                // Show VIP badge if applicable
+                if (patient.is_vip) {
+                    $('#vip-badge').show();
+                } else {
+                    $('#vip-badge').hide();
+                }
+
+                // Set patient type badge
+                $('#patient-type-badge').text(patient.patient_type).removeClass('bg-primary bg-success').addClass(patient.patient_type === 'IP' ? 'bg-primary' : 'bg-success');
+            }
+
+            window.clearPatientSelection = function() {
+                selectedPatient = null;
+                $('#patient-search').val('');
+                $('#patient-info-card').hide();
+                $('#search-results').hide();
+            };
+
             // Initialize Select2 for Therapy Name
             $('#therapy-select').select2({
                 placeholder: 'Search for a Therapy...',
@@ -854,6 +1117,11 @@
 
             // Submit to server
             nextPageBtn.addEventListener('click', () => {
+                if (!selectedPatient) {
+                    alert('Please select a patient first.');
+                    return;
+                }
+                
                 if (addedTherapies.length === 0) {
                     alert('Please add at least one therapy.');
                     return;
@@ -865,7 +1133,10 @@
                         'Content-Type': 'application/json',
                         'X-CSRFToken': '{{ csrf_token }}',
                     },
-                    body: JSON.stringify({ therapy_data: addedTherapies }),
+                    body: JSON.stringify({ 
+                        therapy_data: addedTherapies,
+                        patient: selectedPatient
+                    }),
                 })
                 .then(response => response.json())
                 .then(data => {

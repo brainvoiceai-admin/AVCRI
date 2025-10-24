@@ -25,4 +25,18 @@ path("nurse_dash/dashboard/", views.nurse_dash, name="nurse_dash"),
 path("ip_pharmacy/dashboard/", views.ip_pharmacy, name="ip_pharmacy"),
 path("prescription_dash/dashboard/", views.prescription_dash, name="prescription_dash"),
 path("patient_profile/dashboard/", views.patient_profile, name="patient_profile"),
+# Role and Module Management URLs
+path('role-management/', views.role_management, name='role_management'),
+path('create-role/', views.create_role, name='create_role'),
+path('edit-role/<int:role_id>/', views.edit_role, name='edit_role'),
+path('delete-role/<int:role_id>/', views.delete_role, name='delete_role'),
+path('user-role-assignment/', views.user_role_assignment, name='user_role_assignment'),
+path('module-management/', views.module_management, name='module_management'),
+    path('therapist-schedule/', views.therapist_schedule, name='therapist_schedule'),
+    path('add-therapy-autofill/', views.add_therapy_with_autofill, name='add_therapy_with_autofill'),
+    path('api/search-patients/', views.search_patients, name='search_patients'),
+    path('api/get-patient-details/', views.get_patient_details, name='get_patient_details'),
+    # Role change URLs
+    path('confirm-role-change/<int:user_id>/', views.confirm_role_change, name='confirm_role_change'),
+    path('execute-role-change/', views.execute_role_change, name='execute_role_change'),
 ]

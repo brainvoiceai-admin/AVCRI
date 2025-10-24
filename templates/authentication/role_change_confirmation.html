@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Role Change Confirmation</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        .main-content {
+            padding-left: 275px;
+        }
+        .warning-box {
+            background-color: #fff3cd;
+            border: 1px solid #ffeaa7;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        .mandatory-field {
+            border-left: 4px solid #dc3545;
+            background-color: #f8f9fa;
+        }
+    </style>
+</head>
+<body>
+    {% include 'dashboards/nav.html' %}
+
+    <div class="main-content container mt-4">
+        <div class="row justify-content-center">
+            <div class="col-md-8">
+                <div class="card">
+                    <div class="card-header bg-warning text-dark">
+                        <h4 class="mb-0">⚠️ Role Change Confirmation</h4>
+                    </div>
+                    <div class="card-body">
+                        <!-- Warning Message -->
+                        <div class="warning-box">
+                            <h5 class="text-warning">⚠️ Important Warning</h5>
+                            <p class="mb-0">
+                                <strong>Changing the user role will permanently delete ALL existing profile data and dependent records.</strong>
+                                This action cannot be undone. Please ensure you have backed up any important data before proceeding.
+                            </p>
+                        </div>
+
+                        <!-- User Information -->
+                        <div class="mb-4">
+                            <h5>User Information</h5>
+                            <p><strong>Name:</strong> {{ user.get_full_name }}</p>
+                            <p><strong>Username:</strong> {{ user.username }}</p>
+                            <p><strong>Current Role:</strong> {{ user.get_role_display }}</p>
+                            <p><strong>New Role:</strong> {{ new_role_display }}</p>
+                        </div>
+
+                        <!-- Data to be Deleted -->
+                        <div class="mb-4">
+                            <h5 class="text-danger">Data That Will Be Deleted</h5>
+                            <ul class="list-group">
+                                {% if user.patient_profile %}
+                                    <li class="list-group-item">Patient Profile (Registration: {{ user.patient_profile.patient_reg_no }})</li>
+                                {% endif %}
+                                {% if user.therapist_profile %}
+                                    <li class="list-group-item">Therapist Profile (Code: {{ user.therapist_profile.therapist_code }})</li>
+                                    <li class="list-group-item">Therapist Leave Records</li>
+                                {% endif %}
+                                {% if user.doctor_profile %}
+                                    <li class="list-group-item">Doctor Profile (ID: {{ user.doctor_profile.doctor_id }})</li>
+                                {% endif %}
+                                {% if user.admin_profile %}
+                                    <li class="list-group-item">Admin Profile (ID: {{ user.admin_profile.admin_id }})</li>
+                                {% endif %}
+                                {% if user.nurse_profile %}
+                                    <li class="list-group-item">Nurse Profile (ID: {{ user.nurse_profile.nurse_id }})</li>
+                                {% endif %}
+                                {% if user.staff_profile %}
+                                    <li class="list-group-item">Staff Profile (ID: {{ user.staff_profile.staff_id }})</li>
+                                {% endif %}
+                            </ul>
+                        </div>
+
+                        <!-- Mandatory Fields Form -->
+                        <form method="post" action="{% url 'execute_role_change' %}" id="roleChangeForm">
+                            {% csrf_token %}
+                            <input type="hidden" name="user_id" value="{{ user.id }}">
+                            <input type="hidden" name="new_role" value="{{ new_role }}">
+                            
+                            <h5 class="text-primary">Required Information for New Role</h5>
+                            <p class="text-muted">Please provide the mandatory information for the new role:</p>
+                            
+                            <div class="mandatory-field p-3 mb-3">
+                                {% if new_role == 'patient' %}
+                                    <div class="mb-3">
+                                        <label for="patient_reg_no" class="form-label">Patient Registration Number *</label>
+                                        <input type="text" class="form-control" id="patient_reg_no" name="patient_reg_no" 
+                                               value="{{ user.patient_profile.patient_reg_no|default:'' }}" required>
+                                    </div>
+                                
+                                {% elif new_role == 'therapist' %}
+                                    <div class="mb-3">
+                                        <label for="therapist_code" class="form-label">Therapist Code *</label>
+                                        <input type="text" class="form-control" id="therapist_code" name="therapist_code" 
+                                               value="{{ user.therapist_profile.therapist_code|default:'' }}" required>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label for="employee_code" class="form-label">Employee Code *</label>
+                                        <input type="text" class="form-control" id="employee_code" name="employee_code" 
+                                               value="{{ user.therapist_profile.employee_code|default:'' }}" required>
+                                    </div>
+                                
+                                {% elif new_role == 'doctor' %}
+                                    <div class="mb-3">
+                                        <label for="doctor_id" class="form-label">Doctor ID *</label>
+                                        <input type="text" class="form-control" id="doctor_id" name="doctor_id" 
+                                               value="{{ user.doctor_profile.doctor_id|default:'' }}" required>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label for="specialization" class="form-label">Specialization *</label>
+                                        <input type="text" class="form-control" id="specialization" name="specialization" 
+                                               value="{{ user.doctor_profile.specialization|default:'General Medicine' }}" required>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label for="department" class="form-label">Department *</label>
+                                        <input type="text" class="form-control" id="department" name="department" 
+                                               value="{{ user.doctor_profile.department|default:'Medical' }}" required>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label for="qualification" class="form-label">Qualification *</label>
+                                        <input type="text" class="form-control" id="qualification" name="qualification" 
+                                               value="{{ user.doctor_profile.qualification|default:'MBBS' }}" required>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label for="experience_years" class="form-label">Experience (Years) *</label>
+                                        <input type="number" class="form-control" id="experience_years" name="experience_years" 
+                                               value="{{ user.doctor_profile.experience_years|default:0 }}" required>
+                                    </div>
+                                
+                                {% elif new_role in 'admin,super_admin' %}
+                                    <div class="mb-3">
+                                        <label for="admin_id" class="form-label">Admin ID *</label>
+                                        <input type="text" class="form-control" id="admin_id" name="admin_id" 
+                                               value="{{ user.admin_profile.admin_id|default:'' }}" required>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label for="department" class="form-label">Department *</label>
+                                        <input type="text" class="form-control" id="department" name="department" 
+                                               value="{{ user.admin_profile.department|default:'Administration' }}" required>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label for="designation" class="form-label">Designation *</label>
+                                        <input type="text" class="form-control" id="designation" name="designation" 
+                                               value="{{ user.admin_profile.designation|default:'Administrator' }}" required>
+                                    </div>
+                                
+                                {% elif new_role == 'nurse' %}
+                                    <div class="mb-3">
+                                        <label for="nurse_id" class="form-label">Nurse ID *</label>
+                                        <input type="text" class="form-control" id="nurse_id" name="nurse_id" 
+                                               value="{{ user.nurse_profile.nurse_id|default:'' }}" required>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label for="department" class="form-label">Department *</label>
+                                        <input type="text" class="form-control" id="department" name="department" 
+                                               value="{{ user.nurse_profile.department|default:'Nursing' }}" required>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label for="qualification" class="form-label">Qualification *</label>
+                                        <input type="text" class="form-control" id="qualification" name="qualification" 
+                                               value="{{ user.nurse_profile.qualification|default:'B.Sc Nursing' }}" required>
+                                    </div>
+                                
+                                {% elif new_role in 'scheduling_staff,ip_pharmacy_staff,imu_staff,finance_staff,hr,housekeeping_staff' %}
+                                    <div class="mb-3">
+                                        <label for="staff_id" class="form-label">Staff ID *</label>
+                                        <input type="text" class="form-control" id="staff_id" name="staff_id" 
+                                               value="{{ user.staff_profile.staff_id|default:'' }}" required>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label for="department" class="form-label">Department *</label>
+                                        <input type="text" class="form-control" id="department" name="department" 
+                                               value="{{ user.staff_profile.department|default:'' }}" required>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label for="designation" class="form-label">Designation *</label>
+                                        <input type="text" class="form-control" id="designation" name="designation" 
+                                               value="{{ user.staff_profile.designation|default:'' }}" required>
+                                    </div>
+                                {% endif %}
+                            </div>
+
+                            <!-- Action Buttons -->
+                            <div class="d-flex justify-content-between">
+                                <a href="{% url 'Manage_user' %}" class="btn btn-secondary">
+                                    <i class="fas fa-arrow-left"></i> Cancel
+                                </a>
+                                <button type="submit" class="btn btn-danger" onclick="return confirmRoleChange()">
+                                    <i class="fas fa-exclamation-triangle"></i> Confirm Role Change & Delete All Data
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function confirmRoleChange() {
+            return confirm(
+                '⚠️ FINAL WARNING ⚠️\n\n' +
+                'This will permanently delete ALL existing profile data and dependent records.\n' +
+                'This action cannot be undone.\n\n' +
+                'Are you absolutely sure you want to proceed?'
+            );
+        }
+    </script>
+</body>
+</html>

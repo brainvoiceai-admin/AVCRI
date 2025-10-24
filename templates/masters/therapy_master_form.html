@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% if object %}Edit{% else %}Add{% endif %} Therapy</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    
+    <style>
+        .main-content {
+            padding-left: 275px;
+        }
+        .form-section {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 1.5rem;
+            margin-bottom: 1rem;
+        }
+    </style>
+</head>
+<body>
+    {% include 'dashboards/nav.html' %}
+
+    <div class="main-content container mt-4">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h2>
+                <i class="fas fa-spa text-primary"></i>
+                {% if object %}Edit Therapy{% else %}Add New Therapy{% endif %}
+            </h2>
+            <a href="{% url 'therapy_master_manage' %}" class="btn btn-secondary">
+                <i class="fas fa-arrow-left me-2"></i>Back to List
+            </a>
+        </div>
+
+        {% if messages %}
+            {% for message in messages %}
+                <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
+                    {{ message }}
+                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                </div>
+            {% endfor %}
+        {% endif %}
+
+        <form method="post" class="needs-validation" novalidate>
+            {% csrf_token %}
+            
+            <!-- Basic Information Section -->
+            <div class="form-section">
+                <h5 class="text-primary mb-3">
+                    <i class="fas fa-info-circle me-2"></i>Basic Information
+                </h5>
+                <div class="row">
+                    <div class="col-md-6 mb-3">
+                        <label for="id_therapy_code" class="form-label">Therapy Code *</label>
+                        <input type="text" class="form-control" id="id_therapy_code" name="therapy_code" 
+                               value="{{ form.therapy_code.value|default:'' }}" required>
+                        <div class="invalid-feedback">Please provide a therapy code.</div>
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label for="id_therapy_name" class="form-label">Therapy Name *</label>
+                        <input type="text" class="form-control" id="id_therapy_name" name="therapy_name" 
+                               value="{{ form.therapy_name.value|default:'' }}" required>
+                        <div class="invalid-feedback">Please provide a therapy name.</div>
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="col-md-6 mb-3">
+                        <label for="id_therapy_group" class="form-label">Therapy Group</label>
+                        <input type="text" class="form-control" id="id_therapy_group" name="therapy_group" 
+                               value="{{ form.therapy_group.value|default:'' }}" 
+                               placeholder="e.g., Oil Therapy, Herbal Treatment">
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label for="id_therapy_category" class="form-label">Therapy Category</label>
+                        <select class="form-select" id="id_therapy_category" name="therapy_category">
+                            <option value="">Select Category</option>
+                            <option value="Traditional" {% if form.therapy_category.value == 'Traditional' %}selected{% endif %}>Traditional</option>
+                            <option value="Modern" {% if form.therapy_category.value == 'Modern' %}selected{% endif %}>Modern</option>
+                            <option value="Ayurvedic" {% if form.therapy_category.value == 'Ayurvedic' %}selected{% endif %}>Ayurvedic</option>
+                            <option value="Panchakarma" {% if form.therapy_category.value == 'Panchakarma' %}selected{% endif %}>Panchakarma</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Therapy Details Section -->
+            <div class="form-section">
+                <h5 class="text-primary mb-3">
+                    <i class="fas fa-clock me-2"></i>Therapy Details
+                </h5>
+                <div class="row">
+                    <div class="col-md-6 mb-3">
+                        <label for="id_therapy_duration" class="form-label">Duration</label>
+                        <input type="text" class="form-control" id="id_therapy_duration" name="therapy_duration" 
+                               value="{{ form.therapy_duration.value|default:'' }}" 
+                               placeholder="e.g., 45 minutes, 1 hour">
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label for="id_cost_of_therapy" class="form-label">Cost (₹)</label>
+                        <input type="number" class="form-control" id="id_cost_of_therapy" name="cost_of_therapy" 
+                               value="{{ form.cost_of_therapy.value|default:'' }}" 
+                               step="0.01" min="0" placeholder="0.00">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Requirements Section -->
+            <div class="form-section">
+                <h5 class="text-primary mb-3">
+                    <i class="fas fa-check-circle me-2"></i>Requirements
+                </h5>
+                <div class="row">
+                    <div class="col-md-6 mb-3">
+                        <label for="id_bathing_required" class="form-label">Bathing Required</label>
+                        <select class="form-select" id="id_bathing_required" name="bathing_required">
+                            <option value="">Select Option</option>
+                            <option value="Yes" {% if form.bathing_required.value == 'Yes' %}selected{% endif %}>Yes</option>
+                            <option value="No" {% if form.bathing_required.value == 'No' %}selected{% endif %}>No</option>
+                            <option value="Optional" {% if form.bathing_required.value == 'Optional' %}selected{% endif %}>Optional</option>
+                        </select>
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label for="id_treatment_room_required" class="form-label">Treatment Room Required</label>
+                        <select class="form-select" id="id_treatment_room_required" name="treatment_room_required">
+                            <option value="">Select Option</option>
+                            <option value="Yes" {% if form.treatment_room_required.value == 'Yes' %}selected{% endif %}>Yes</option>
+                            <option value="No" {% if form.treatment_room_required.value == 'No' %}selected{% endif %}>No</option>
+                            <option value="Optional" {% if form.treatment_room_required.value == 'Optional' %}selected{% endif %}>Optional</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Therapist Requirements Section -->
+            <div class="form-section">
+                <h5 class="text-primary mb-3">
+                    <i class="fas fa-users me-2"></i>Therapist Requirements
+                </h5>
+                <div class="row">
+                    <div class="col-md-3 mb-3">
+                        <label for="id_no_of_super_senior_therapist" class="form-label">Super Senior Therapists</label>
+                        <input type="number" class="form-control" id="id_no_of_super_senior_therapist" 
+                               name="no_of_super_senior_therapist" 
+                               value="{{ form.no_of_super_senior_therapist.value|default:0 }}" 
+                               min="0" placeholder="0">
+                    </div>
+                    <div class="col-md-3 mb-3">
+                        <label for="id_no_of_senior_therapist" class="form-label">Senior Therapists</label>
+                        <input type="number" class="form-control" id="id_no_of_senior_therapist" 
+                               name="no_of_senior_therapist" 
+                               value="{{ form.no_of_senior_therapist.value|default:0 }}" 
+                               min="0" placeholder="0">
+                    </div>
+                    <div class="col-md-3 mb-3">
+                        <label for="id_no_of_junior_therapist" class="form-label">Junior Therapists</label>
+                        <input type="number" class="form-control" id="id_no_of_junior_therapist" 
+                               name="no_of_junior_therapist" 
+                               value="{{ form.no_of_junior_therapist.value|default:0 }}" 
+                               min="0" placeholder="0">
+                    </div>
+                    <div class="col-md-3 mb-3">
+                        <label for="id_no_of_trainee_therapist" class="form-label">Trainee Therapists</label>
+                        <input type="number" class="form-control" id="id_no_of_trainee_therapist" 
+                               name="no_of_trainee_therapist" 
+                               value="{{ form.no_of_trainee_therapist.value|default:0 }}" 
+                               min="0" placeholder="0">
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="col-md-6 mb-3">
+                        <label for="id_total_no_of_therapist" class="form-label">Total Therapists</label>
+                        <input type="number" class="form-control" id="id_total_no_of_therapist" 
+                               name="total_no_of_therapist" 
+                               value="{{ form.total_no_of_therapist.value|default:0 }}" 
+                               min="0" placeholder="0">
+                        <small class="form-text text-muted">Total number of therapists required for this therapy</small>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Status Section -->
+            <div class="form-section">
+                <h5 class="text-primary mb-3">
+                    <i class="fas fa-toggle-on me-2"></i>Status
+                </h5>
+                <div class="form-check form-switch">
+                    <input class="form-check-input" type="checkbox" id="id_is_active" name="is_active" 
+                           {% if form.is_active.value != False %}checked{% endif %}>
+                    <label class="form-check-label" for="id_is_active">
+                        Active (uncheck to disable this therapy)
+                    </label>
+                </div>
+            </div>
+
+            <!-- Action Buttons -->
+            <div class="d-flex justify-content-between mt-4">
+                <a href="{% url 'therapy_master_manage' %}" class="btn btn-secondary">
+                    <i class="fas fa-times me-2"></i>Cancel
+                </a>
+                <button type="submit" class="btn btn-primary">
+                    <i class="fas fa-save me-2"></i>
+                    {% if object %}Update Therapy{% else %}Create Therapy{% endif %}
+                </button>
+            </div>
+        </form>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous"></script>
+    
+    <script>
+        // Form validation
+        (function() {
+            'use strict';
+            window.addEventListener('load', function() {
+                var forms = document.getElementsByClassName('needs-validation');
+                var validation = Array.prototype.filter.call(forms, function(form) {
+                    form.addEventListener('submit', function(event) {
+                        if (form.checkValidity() === false) {
+                            event.preventDefault();
+                            event.stopPropagation();
+                        }
+                        form.classList.add('was-validated');
+                    }, false);
+                });
+            }, false);
+        })();
+
+        // Auto-generate therapy code from name
+        document.getElementById('id_therapy_name').addEventListener('input', function() {
+            const name = this.value;
+            const codeField = document.getElementById('id_therapy_code');
+            if (!codeField.value) {
+                const code = name.replace(/\s+/g, '').substring(0, 8).toUpperCase();
+                codeField.value = code;
+            }
+        });
+    </script>
+</body>
+</html>
+
+

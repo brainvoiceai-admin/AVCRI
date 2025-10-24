@@ -49,7 +49,11 @@
   <div style="display:flex;gap:20px;align-items:flex-end;margin-bottom:12px;">
     <div style="min-width:360px;">
       <label for="header-patient-select">Search Patient</label>
-      <select id="header-patient-select" style="width:100%"></select>
+      <div style="display:flex;gap:8px;">
+        <input type="text" id="header-patient-select" placeholder="Enter at least 3 characters to search..." style="flex:1;padding:8px;border:1px solid #ccc;border-radius:6px;">
+        <button id="clear-patient-btn" style="padding:8px 12px;background:#dc3545;color:white;border:none;border-radius:6px;cursor:pointer;">Clear</button>
+      </div>
+      <div id="search-results" style="position:absolute;z-index:1000;background:white;border:1px solid #ccc;border-radius:6px;max-height:300px;overflow-y:auto;display:none;width:360px;margin-top:2px;"></div>
     </div>
     <div style="flex:1"></div>
     <div>
@@ -252,28 +256,121 @@ $(function(){
     }
   });
 
-  $patientSelect.select2({
-    placeholder: 'Search patients (3+)...', minimumInputLength:3, ajax:{
-      transport: function(p,s,f){ ajax({action:'search_patients', q: p.data.q}).then(s).catch(f); },
-      processResults: data => ({ results: (data||[]).map(p => ({ id: p.pat_reg_no || p.reg_no || p.pat_reg_no, text: `${p.pat_reg_no || p.reg_no || ''} - ${p.pat_name || p.name || ''}`, raw: p })) }),
-      cache:true
-    }, allowClear:true
+  // Patient search with auto-fill functionality
+  let selectedPatient = null;
+  let searchTimeout;
+  
+  $('#header-patient-select').on('input', function() {
+    const query = $(this).val().trim();
+    
+    clearTimeout(searchTimeout);
+    
+    if (query.length === 0) {
+      $('#search-results').hide();
+      return;
+    }
+    
+    if (query.length < 3) {
+      $('#search-results').html('<div style="padding:10px;color:#666;">Enter at least 3 characters to search</div>').show();
+      return;
+    }
+
+    searchTimeout = setTimeout(() => {
+      searchPatients(query);
+    }, 300);
   });
 
-  $patientSelect.on('change', function(){
-    const reg = $(this).val();
-    if (!reg) { $hdrName.text('No patient selected'); $hdrMeta.text('Registration: — • Age/Gender: — / —'); $hdrType.text('Patient Type: —'); addedTherapies=[]; bookings=[]; renderAll(); return; }
-    ajax({action:'get_patient', reg_no: reg}).then(d => {
-      $hdrName.text(d.pat_name || d.name || reg);
-      $hdrMeta.text('Registration: ' + (d.pat_reg_no||reg) + ' • Age/Gender: ' + ((d.pat_age||'—') + ' / ' + (d.pat_sex||'—')));
-      $hdrVip.text('Room: ' + (d.pat_room_no || '—'));
-      $hdrIp.text('IP No: ' + (d.pat_op_reg_no || d.ip_no || d.pat_reg_no || '—'));
-      $hdrUnique.text('Unique ID: ' + (d.pat_ref_id || '—'));
-      const digits = (''+reg).replace(/\D/g,''); $hdrType.text('Patient Type: ' + ((digits.length===5)?'OP':'IP'));
-    }).catch(()=>{ $hdrName.text(reg); $hdrMeta.text('Registration: ' + reg); const digits = (''+reg).replace(/\D/g,''); $hdrType.text('Patient Type: ' + ((digits.length===5)?'OP':'IP')); });
+  function searchPatients(query) {
+    if (query.length < 3) {
+      $('#search-results').html('<div style="padding:10px;color:#666;">Enter at least 3 characters to search</div>').show();
+      return;
+    }
+    
+    fetch('/search-patients/?q=' + encodeURIComponent(query))
+      .then(response => response.json())
+      .then(data => {
+        displaySearchResults(data || []);
+      })
+      .catch(error => {
+        console.error('Search error:', error);
+        $('#search-results').html('<div style="padding:10px;color:#d9534f;">Error searching patients</div>').show();
+      });
+  }
 
-    // load allocations from server (persisted)
-    ajax({action:'patient_therapies', patient_reg_no: reg}).then(list => {
+  function displaySearchResults(patients) {
+    const resultsContainer = $('#search-results');
+    resultsContainer.empty();
+
+    if (patients.length === 0) {
+      resultsContainer.html('<div style="padding:10px;color:#666;">No patients found</div>').show();
+      return;
+    }
+
+    patients.forEach(patient => {
+      const resultItem = $(`
+        <div style="padding:10px;border-bottom:1px solid #eee;cursor:pointer;" class="search-result-item" data-reg-no="${patient.pat_reg_no}">
+          <div style="display:flex;justify-content:space-between;align-items:center;">
+            <div>
+              <strong>${patient.pat_name || 'Unknown'}</strong>
+              <div style="font-size:0.9em;color:#666;margin-top:2px;">
+                Reg: ${patient.pat_reg_no}
+              </div>
+            </div>
+            <div>
+              <span style="background:#007bff;color:white;padding:2px 6px;border-radius:3px;font-size:0.8em;">IP</span>
+            </div>
+          </div>
+        </div>
+      `);
+      resultsContainer.append(resultItem);
+    });
+
+    resultsContainer.show();
+  }
+
+  // Handle patient selection
+  $(document).on('click', '.search-result-item', function() {
+    const regNo = $(this).data('reg-no');
+    loadPatientDetails(regNo);
+  });
+
+  // Hide search results when clicking outside
+  $(document).on('click', function(e) {
+    if (!$(e.target).closest('#header-patient-select, #search-results').length) {
+      $('#search-results').hide();
+    }
+  });
+
+  function loadPatientDetails(regNo) {
+    $('#search-results').hide();
+
+    fetch('/get-patient-details/?pat_reg_no=' + encodeURIComponent(regNo))
+      .then(response => response.json())
+      .then(data => {
+        if (data.pat_name) {
+          selectedPatient = data;
+          populatePatientInfo(selectedPatient);
+        } else {
+          alert('Patient details not found');
+        }
+      })
+      .catch(error => {
+        console.error('Error loading patient details:', error);
+        alert('Error loading patient details');
+      });
+  }
+
+  function populatePatientInfo(patient) {
+    $('#header-patient-select').val(patient.pat_op_reg_no || patient.pat_reg_no);
+    $('#hdr-pat-name').text(patient.pat_name || 'Unknown');
+    $('#hdr-pat-meta').text('Registration: ' + (patient.pat_op_reg_no || patient.pat_reg_no) + ' • Age/Gender: ' + ((patient.pat_age || '—') + ' / ' + (patient.pat_sex || '—')));
+    $('#hdr-pat-vip').text('VIP: ' + (patient.vip_status || 'No') + ' • Room: ' + (patient.pat_room_no || '—'));
+    $('#hdr-pat-ip').text('IP No: ' + (patient.pat_op_reg_no || '—'));
+    $('#hdr-pat-unique').text('Unique ID: ' + (patient.pat_ref_id || '—'));
+    $('#hdr-pat-type').text('Patient Type: IP');
+    
+    // Load patient therapies
+    ajax({action:'patient_therapies', patient_reg_no: patient.pat_op_reg_no || patient.pat_reg_no}).then(list => {
       addedTherapies = list || [];
       bookings = [];
       addedTherapies.forEach((t, idx) => {
@@ -281,6 +378,27 @@ $(function(){
       });
       renderAll();
     }).catch(()=>{ renderAll(); });
+  }
+
+  // Clear patient selection functionality
+  function clearPatientSelection() {
+    selectedPatient = null;
+    $('#header-patient-select').val('');
+    $('#hdr-pat-name').text('No patient selected');
+    $('#hdr-pat-meta').text('Registration: — • Age/Gender: — / —');
+    $('#hdr-pat-vip').text('VIP: — • Room: —');
+    $('#hdr-pat-ip').text('IP No: —');
+    $('#hdr-pat-unique').text('Unique ID: —');
+    $('#hdr-pat-type').text('Patient Type: —');
+    addedTherapies = [];
+    bookings = [];
+    renderAll();
+  }
+
+  // Clear button event handler
+  $('#clear-patient-btn').on('click', function() {
+    clearPatientSelection();
+    $('#search-results').hide();
   });
 
   // populate masters & slots with fallback
@@ -338,6 +456,11 @@ $(function(){
 
   // allocate therapy -> POST to server (saves to DB)
   $allocateBtn.on('click', function(){
+    if (!selectedPatient) {
+      alert('Please select a patient first');
+      return;
+    }
+    
     const therapy = $therapySelect.select2('data')[0];
     if (!therapy){ alert('Select a therapy'); return; }
     if (!itemGroups.length){ alert('Add at least one item group'); return; }
@@ -346,14 +469,14 @@ $(function(){
     if (from > to){ alert('From must be <= To'); return; }
 
     const payload = {
-      patient_reg_no: $patientSelect.val(),
-      patient_name: $hdrName.text(),
-      pat_ref_id: $hdrUnique.text().replace('Unique ID: ','') || '',
+      patient_reg_no: selectedPatient.pat_op_reg_no || selectedPatient.pat_reg_no,
+      patient_name: selectedPatient.pat_name,
+      pat_ref_id: selectedPatient.pat_ref_id || '',
       therapy_code: therapy.id,
       therapy_name: therapy.text,
       ext_int: $('#ext-int-select').val(),
       timeslot: $slotSelect.val() || '',
-      room_no: '', // add room chooser if needed
+      room_no: selectedPatient.pat_room_no || '', // use patient's room number
       from_date: from,
       to_date: to,
       oil_class: $oilClassSelect.val()||'',
@@ -374,9 +497,8 @@ $(function(){
       }
       alert('Allocation saved (id: ' + resp.json.allocation_id + '). Loading from server...');
       // reload patient allocations
-      const reg = $patientSelect.val();
-      if (reg) {
-        ajax({action:'patient_therapies', patient_reg_no: reg}).then(list => {
+      if (selectedPatient) {
+        ajax({action:'patient_therapies', patient_reg_no: selectedPatient.pat_op_reg_no || selectedPatient.pat_reg_no}).then(list => {
           addedTherapies = list || [];
           bookings = [];
           addedTherapies.forEach((t, idx) => {

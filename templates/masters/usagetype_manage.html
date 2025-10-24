@@ -68,7 +68,7 @@
         <hr>
 
         <h4>Current Usage Types List</h4>
-        {% if usage_types %}
+        {% if usagetype_list %}
             <table class="table table-striped table-hover">
                 <thead class="thead-dark">
                     <tr>
@@ -78,7 +78,7 @@
                     </tr>
                 </thead>
                 <tbody>
-                    {% for source in usage_types %}
+                    {% for source in usagetype_list %}
                         <tr>
                             <td>{{ source.name }}</td>
                             <td>

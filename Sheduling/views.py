@@ -19,12 +19,17 @@ def get_model_safe(app_label, model_name):
 
 # External DB models (use .using(EXTERNAL_DB_ALIAS) when querying)
 Registration = get_model_safe('MySql_Data_pull', 'Registration')
-ItemMaster = get_model_safe('MySql_Data_pull', 'ItemMaster')
 
 # Local models for lookup (existing)
-TherapyDetails = get_model_safe('Patient', 'TherapyDetails')
-TimeSlot = get_model_safe('Patient', 'TimeSlot')
 TreatmentRoom = get_model_safe('Patient', 'TreatmentRoom')
+# Legacy TimeSlot - will be replaced by SlotMaster
+TimeSlot = get_model_safe('Patient', 'TimeSlot')
+
+# Local Master Tables (NEW - use these instead of external DB)
+ItemMaster = get_model_safe('masters', 'ItemMaster')
+TherapyMaster = get_model_safe('masters', 'TherapyMaster')
+SlotMaster = get_model_safe('masters', 'SlotMaster')
+TherapistMaster = get_model_safe('masters', 'TherapistMaster')
 
 # Masters
 Procured = get_model_safe('masters', 'Procured')
@@ -98,16 +103,16 @@ def therapy_entry(request):
                     if len(parts) == 2:
                         hh = int(parts[0]); mm = int(parts[1])
                         from_time = datetime.strptime(f"{hh:02d}:{mm:02d}", "%H:%M").time()
-                        if TimeSlot is not None:
-                            timeslot_obj = TimeSlot.objects.filter(start_time=from_time).first()
+                        if SlotMaster is not None:
+                            timeslot_obj = SlotMaster.objects.filter(start_time=from_time, is_active=True).first()
                     else:
                         # try slot_number int
-                        if TimeSlot is not None:
-                            timeslot_obj = TimeSlot.objects.filter(slot_number=int(ts_val)).first()
+                        if SlotMaster is not None:
+                            timeslot_obj = SlotMaster.objects.filter(slot_number=int(ts_val), is_active=True).first()
                 except Exception:
                     timeslot_obj = None
 
-                if timeslot_obj is None and TimeSlot is not None and ts_val:
+                if timeslot_obj is None and SlotMaster is not None and ts_val:
                     return JsonResponse({'error': 'timeslot_not_found', 'timeslot': ts_val}, status=400)
 
             # room resolution (optional)
@@ -312,8 +317,8 @@ def therapy_entry(request):
     if action == 'search_therapies':
         q = (request.GET.get('q') or '').strip()
         results = []
-        if TherapyDetails is not None:
-            qs = TherapyDetails.objects.all()
+        if TherapyMaster is not None:
+            qs = TherapyMaster.objects.filter(is_active=True).all()  # Use local master table
             if q:
                 qs = qs.filter(Q(therapy_name__icontains=q) | Q(therapy_code__icontains=q))
             qs = qs[:50]
@@ -330,7 +335,7 @@ def therapy_entry(request):
         results = []
         if ItemMaster is not None:
             try:
-                qs = ItemMaster.objects.using(EXTERNAL_DB_ALIAS).all()
+                qs = ItemMaster.objects.filter(is_active=True).all()  # Use local master table
                 if q:
                     qs = qs.filter(Q(item_name__icontains=q) | Q(item_code__icontains=q))
                 qs = qs[:50]
@@ -374,9 +379,9 @@ def therapy_entry(request):
     # slots
     if action == 'slots':
         results = []
-        if TimeSlot is not None:
+        if SlotMaster is not None:
             try:
-                qs = TimeSlot.objects.all().order_by('slot_number')
+                qs = SlotMaster.objects.filter(is_active=True).all().order_by('slot_number')  # Use local master table
                 for s in qs:
                     start = getattr(s, 'start_time', '')
                     if hasattr(start, 'strftime'):
@@ -519,9 +524,9 @@ def therapy_entry(request):
 
     # time slots
     try:
-        if TimeSlot is not None:
+        if SlotMaster is not None:
             slots = []
-            for s in TimeSlot.objects.all().order_by('slot_number'):
+            for s in SlotMaster.objects.filter(is_active=True).all().order_by('slot_number'):  # Use local master table
                 start = getattr(s, 'start_time', '')
                 if hasattr(start, 'strftime'):
                     start_s = start.strftime('%H:%M')
@@ -628,14 +633,14 @@ def allocate_therapy(request):
     timeslot = None
     if payload.get("timeslot_slot_number") is not None:
         try:
-            timeslot = TimeSlot.objects.get(slot_number=int(payload["timeslot_slot_number"]))
-        except TimeSlot.DoesNotExist:
-            return JsonResponse({"error": "TimeSlot with that slot_number not found"}, status=400)
+            timeslot = SlotMaster.objects.get(slot_number=int(payload["timeslot_slot_number"]), is_active=True)  # Use local master table
+        except SlotMaster.DoesNotExist:
+            return JsonResponse({"error": "Slot with that slot_number not found"}, status=400)
     elif payload.get("timeslot"):
         t = parse_time_hhmm(payload["timeslot"])
         if not t:
             return JsonResponse({"error": "Invalid timeslot format, expected HH:MM"}, status=400)
-        timeslot = TimeSlot.objects.filter(start_time=t).first()
+        timeslot = SlotMaster.objects.filter(start_time=t, is_active=True).first()  # Use local master table
         if not timeslot:
             # Optionally create a timeslot if you want; for safety we require an existing one:
             return JsonResponse({"error": "TimeSlot with that start_time not found"}, status=400)
