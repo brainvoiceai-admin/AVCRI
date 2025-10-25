@@ -239,6 +239,40 @@
                         {% if log.object_id %}
                           <br><code>{{ log.object_id }}</code>
                         {% endif %}
+                        {% if log.additional_data %}
+                          {% if log.action == 'allocate_therapy' %}
+                            <br><small class="text-info">
+                              Patient: {{ log.additional_data.patient_reg_no }}<br>
+                              Therapy: {{ log.additional_data.therapy_name }}<br>
+                              Period: {{ log.additional_data.from_date }} to {{ log.additional_data.to_date }}
+                            </small>
+                          {% elif log.action == 'cancel_therapy' %}
+                            <br><small class="text-danger">
+                              Patient: {{ log.additional_data.patient_reg_no }}<br>
+                              Therapy: {{ log.additional_data.therapy_name }}<br>
+                              Cancelled: {{ log.additional_data.cancel_from }} to {{ log.additional_data.cancel_to }}<br>
+                              Reason: {{ log.additional_data.reason|truncatechars:30 }}
+                            </small>
+                          {% elif log.action == 'resume_therapy' %}
+                            <br><small class="text-success">
+                              Patient: {{ log.additional_data.patient_reg_no }}<br>
+                              Therapy: {{ log.additional_data.therapy_name }}<br>
+                              Resumed: {{ log.additional_data.resume_from }} to {{ log.additional_data.resume_to }}
+                            </small>
+                          {% elif log.action == 'update_therapy' %}
+                            <br><small class="text-warning">
+                              Patient: {{ log.additional_data.patient_reg_no }}<br>
+                              Therapy: {{ log.additional_data.therapy_name }}<br>
+                              Updated Fields: {{ log.additional_data.updated_fields|join:", " }}
+                            </small>
+                          {% elif log.action == 'remove_item' %}
+                            <br><small class="text-danger">
+                              Patient: {{ log.additional_data.patient_reg_no }}<br>
+                              Therapy: {{ log.additional_data.therapy_name }}<br>
+                              Remaining Items: {{ log.additional_data.remaining_items_count }}
+                            </small>
+                          {% endif %}
+                        {% endif %}
                       {% else %}
                         <span class="text-muted">-</span>
                       {% endif %}

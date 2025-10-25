@@ -784,6 +784,95 @@ def Audit_Log(request):
     return render(request, 'dashboards/superadmin/Audit_Log.html', context)
 
 @login_required
+@super_admin_required
+def Therapy_Audit_Log(request):
+    """Therapy-specific audit log view with filtering and pagination"""
+    # Get filter parameters
+    action_filter = request.GET.get('action', '')
+    status_filter = request.GET.get('status', '')
+    user_filter = request.GET.get('user', '')
+    search_query = request.GET.get('search', '')
+    date_from = request.GET.get('date_from', '')
+    date_to = request.GET.get('date_to', '')
+    
+    # Start with therapy-related audit logs
+    therapy_actions = ['allocate_therapy', 'update_therapy', 'cancel_therapy', 'resume_therapy', 'remove_item', 'view_therapy']
+    audit_logs = AuditLog.objects.filter(action__in=therapy_actions)
+    
+    # Apply filters
+    if action_filter:
+        audit_logs = audit_logs.filter(action=action_filter)
+    
+    if status_filter:
+        audit_logs = audit_logs.filter(status=status_filter)
+    
+    if user_filter:
+        audit_logs = audit_logs.filter(user__username__icontains=user_filter)
+    
+    if search_query:
+        audit_logs = audit_logs.filter(
+            models.Q(description__icontains=search_query) |
+            models.Q(user__username__icontains=search_query) |
+            models.Q(object_type__icontains=search_query) |
+            models.Q(additional_data__icontains=search_query)
+        )
+    
+    if date_from:
+        try:
+            from datetime import datetime
+            date_from_obj = datetime.strptime(date_from, '%Y-%m-%d')
+            audit_logs = audit_logs.filter(timestamp__date__gte=date_from_obj.date())
+        except ValueError:
+            pass
+    
+    if date_to:
+        try:
+            from datetime import datetime
+            date_to_obj = datetime.strptime(date_to, '%Y-%m-%d')
+            audit_logs = audit_logs.filter(timestamp__date__lte=date_to_obj.date())
+        except ValueError:
+            pass
+    
+    # Pagination
+    paginator = Paginator(audit_logs, 50)  # Show 50 logs per page
+    page_number = request.GET.get('page')
+    page_obj = paginator.get_page(page_number)
+    
+    # Get filter options for dropdowns
+    therapy_actions_choices = [choice for choice in AuditLog.ACTION_CHOICES if choice[0] in therapy_actions]
+    statuses = AuditLog.STATUS_CHOICES
+    users = CustomUser.objects.filter(auth_audit_logs__action__in=therapy_actions).distinct().order_by('username')
+    
+    # Statistics
+    total_logs = audit_logs.count()
+    allocate_count = audit_logs.filter(action='allocate_therapy').count()
+    cancel_count = audit_logs.filter(action='cancel_therapy').count()
+    resume_count = audit_logs.filter(action='resume_therapy').count()
+    update_count = audit_logs.filter(action='update_therapy').count()
+    remove_count = audit_logs.filter(action='remove_item').count()
+    
+    context = {
+        'audit_logs': page_obj,
+        'actions': therapy_actions_choices,
+        'statuses': statuses,
+        'users': users,
+        'total_logs': total_logs,
+        'allocate_count': allocate_count,
+        'cancel_count': cancel_count,
+        'resume_count': resume_count,
+        'update_count': update_count,
+        'remove_count': remove_count,
+        'action_filter': action_filter,
+        'status_filter': status_filter,
+        'user_filter': user_filter,
+        'search_query': search_query,
+        'date_from': date_from,
+        'date_to': date_to,
+    }
+    
+    return render(request, 'dashboards/superadmin/Therapy_Audit_Log.html', context)
+
+@login_required
 def view_patient_details(request):
     """View patient details"""
     return render(request, 'dashboards/therapist/view_patient_details.html')
@@ -912,7 +1001,7 @@ def search_patients(request):
         
         # Search in OP patients (OPMaster table)
         try:
-            op_patients = OPMaster.objects.using('therapy_db').filter(
+            op_patients = OPMaster.objects.using('hospital_db').filter(
                 NPat_Reg_No__icontains=query
             ).values(
                 'NPat_Reg_No', 'NPat_Name', 'NPat_Sex', 'Reg_Date'
@@ -987,6 +1076,7 @@ def get_patient_details(request):
         
         # Try to find in IP patients first
         try:
+            print(reg_no)
             ip_patient = Registration.objects.using('therapy_db').get(pat_reg_no=reg_no)
             
             # Check VIP status
@@ -1034,42 +1124,44 @@ def get_patient_details(request):
         # If not found in IP, try OP patients
         if not patient_details:
             try:
-                op_patient = OPMaster.objects.using('therapy_db').get(NPat_Reg_No=reg_no)
                 
-                # Check VIP status
-                vip_status = False
-                try:
-                    repeated_visitor = Repeated_Visitors.objects.get(register_number=reg_no)
-                    vip_status = repeated_visitor.total_visits > 2
-                except Repeated_Visitors.DoesNotExist:
+                op_patient = OPMaster.objects.using('hospital_db').filter(NPat_Reg_No=reg_no).first()
+                
+                if op_patient:
+                    # Check VIP status
                     vip_status = False
-                
-                # Determine patient type
-                patient_type = 'OP' if len(str(reg_no)) == 5 else 'IP'
-                
-                patient_details = {
-                    'registration_number': op_patient.NPat_Reg_No,
-                    'patient_name': op_patient.NPat_Name,
-                    'sex': op_patient.NPat_Sex,
-                    'age': None,  # OP patients don't have age in this table
-                    'room_number': None,  # OP patients don't have room number
-                    'ip_number': None,  # OP patients don't have IP number
-                    'pat_ref_id': None,  # OP patients don't have pat_ref_id
-                    'phone': None,  # OP patients don't have phone in this table
-                    'email': None,  # OP patients don't have email in this table
-                    'registration_date': op_patient.Reg_Date.strftime('%Y-%m-%d') if op_patient.Reg_Date else None,
-                    'patient_type': patient_type,
-                    'is_vip': vip_status,
-                    'source': 'OP',
-                    'address': {
-                        'add1': op_patient.NPat_Add1,
-                        'add2': op_patient.NPat_Add2,
-                        'add3': op_patient.NPat_Add3,
-                        'city': op_patient.NPat_City,
-                    },
-                }
-            except OPMaster.DoesNotExist:
-                pass
+                    try:
+                        repeated_visitor = Repeated_Visitors.objects.get(register_number=reg_no)
+                        vip_status = repeated_visitor.total_visits > 2
+                    except Repeated_Visitors.DoesNotExist:
+                        vip_status = False
+                    
+                    # Determine patient type
+                    patient_type = 'OP' if len(str(reg_no)) == 5 else 'IP'
+                    
+                    patient_details = {
+                        'registration_number': op_patient.NPat_Reg_No,
+                        'patient_name': op_patient.NPat_Name,
+                        'sex': op_patient.NPat_Sex,
+                        'age': None,  # OP patients don't have age in this table
+                        'room_number': None,  # OP patients don't have room number
+                        'ip_number': None,  # OP patients don't have IP number
+                        'pat_ref_id': None,  # OP patients don't have pat_ref_id
+                        'phone': None,  # OP patients don't have phone in this table
+                        'email': None,  # OP patients don't have email in this table
+                        'registration_date': op_patient.Reg_Date.strftime('%Y-%m-%d') if op_patient.Reg_Date else None,
+                        'patient_type': patient_type,
+                        'is_vip': vip_status,
+                        'source': 'OP',
+                        'address': {
+                            'add1': op_patient.NPat_Add1,
+                            'add2': op_patient.NPat_Add2,
+                            'add3': op_patient.NPat_Add3,
+                            'city': op_patient.NPat_City,
+                        },
+                    }
+            except Exception as e:
+                print(f"Error searching OP patients: {e}")
         
         if patient_details:
             return JsonResponse({'patient': patient_details})

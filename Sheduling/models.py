@@ -37,7 +37,7 @@ class TherapyAllocation(models.Model):
     therapy_code = models.CharField(max_length=50)
     therapy_name = models.CharField(max_length=255)
     ext_int = models.CharField(max_length=50, blank=True)
-    timeslot = models.ForeignKey(TimeSlot, null=True, blank=True, on_delete=models.SET_NULL)
+    timeslot = models.ForeignKey('masters.SlotMaster', null=True, blank=True, on_delete=models.SET_NULL)
     room = models.ForeignKey(TreatmentRoom, null=True, blank=True, on_delete=models.SET_NULL)
     items_groups = models.JSONField(help_text="List of item groups (snapshot)", default=list)
     oil_class = models.CharField(max_length=100, blank=True)
@@ -50,6 +50,23 @@ class TherapyAllocation(models.Model):
     allocated_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name='allocations_created')
     locked = models.BooleanField(default=False)
     notes = models.TextField(blank=True)
+    
+    # Status and cancellation fields
+    STATUS_CHOICES = [
+        ('draft', 'Draft'),
+        ('allocated', 'Allocated'),
+        ('cancelled', 'Cancelled'),
+        ('failed', 'Failed'),
+    ]
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='draft')
+    cancelled_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name='allocations_cancelled')
+    cancelled_at = models.DateTimeField(null=True, blank=True)
+    cancellation_reason = models.TextField(blank=True, help_text="Mandatory when cancelling")
+    cancelled_date_from = models.DateField(null=True, blank=True, help_text="Cancellation date range start")
+    cancelled_date_to = models.DateField(null=True, blank=True, help_text="Cancellation date range end")
+    resumed_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name='allocations_resumed')
+    resumed_at = models.DateTimeField(null=True, blank=True)
+    
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -71,9 +88,9 @@ class Booking(models.Model):
     """
     allocation = models.ForeignKey(TherapyAllocation, on_delete=models.CASCADE, related_name='bookings')
     date = models.DateField(db_index=True)
-    timeslot = models.ForeignKey(TimeSlot, null=True, blank=True, on_delete=models.SET_NULL)
+    timeslot = models.ForeignKey('masters.SlotMaster', null=True, blank=True, on_delete=models.SET_NULL)
     room = models.ForeignKey(TreatmentRoom, null=True, blank=True, on_delete=models.SET_NULL)
-    status = models.CharField(max_length=30, default='scheduled')  # scheduled / partially_cancelled / cancelled / completed
+    status = models.CharField(max_length=30, default='draft')  # draft / scheduled / partially_cancelled / cancelled / completed
     therapist_note = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -213,6 +230,66 @@ class NotificationQueue(models.Model):
     def __str__(self):
         return f"Notification {self.pk} -> {self.target_type} ({self.status})"
 
+class TherapyNotification(models.Model):
+    """Notifications for therapy-related actions"""
+    NOTIFICATION_TYPES = [
+        ('therapy_allocated', 'Therapy Allocated'),
+        ('therapy_cancelled', 'Therapy Cancelled'),
+        ('therapy_resumed', 'Therapy Resumed'),
+        ('therapy_updated', 'Therapy Updated'),
+        ('item_removed', 'Item Removed'),
+    ]
+    
+    PRIORITY_CHOICES = [
+        ('low', 'Low'),
+        ('medium', 'Medium'),
+        ('high', 'High'),
+        ('urgent', 'Urgent'),
+    ]
+    
+    therapy_allocation = models.ForeignKey(TherapyAllocation, on_delete=models.CASCADE, related_name='notifications')
+    notification_type = models.CharField(max_length=30, choices=NOTIFICATION_TYPES)
+    title = models.CharField(max_length=200)
+    message = models.TextField()
+    priority = models.CharField(max_length=10, choices=PRIORITY_CHOICES, default='medium')
+    
+    # Recipients
+    target_users = models.ManyToManyField(settings.AUTH_USER_MODEL, related_name='therapy_notifications', blank=True)
+    target_roles = models.JSONField(default=list, help_text="List of roles to notify")
+    
+    # Status
+    is_read = models.BooleanField(default=False)
+    is_sent = models.BooleanField(default=False)
+    sent_at = models.DateTimeField(null=True, blank=True)
+    
+    # Metadata
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='created_therapy_notifications')
+    created_at = models.DateTimeField(auto_now_add=True)
+    additional_data = models.JSONField(default=dict, blank=True)
+    
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['notification_type', 'is_read']),
+            models.Index(fields=['priority', 'created_at']),
+        ]
+    
+    def __str__(self):
+        return f"{self.get_notification_type_display()} - {self.title}"
+    
+    def mark_as_read(self, user):
+        """Mark notification as read for a specific user"""
+        self.is_read = True
+        self.save()
+    
+    def send_to_roles(self, roles):
+        """Send notification to users with specific roles"""
+        from authentication.models import CustomUser
+        target_users = CustomUser.objects.filter(role__in=roles)
+        self.target_users.set(target_users)
+        self.target_roles = roles
+        self.save()
+
 
 class AuditLog(models.Model):
     user = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL)
@@ -246,4 +323,130 @@ class AllocationChange(models.Model):
 
     def __str__(self):
         return f"Change #{self.pk} for alloc {self.allocation_id} by {self.changed_by}"
+
+
+# -----------------------------------------------------------------------------
+# Prescription models (similar to therapy)
+# -----------------------------------------------------------------------------
+class PrescriptionAllocation(models.Model):
+    """
+    Header: one logical prescription allocation for a patient.
+    items_groups stores the original prescription (snapshot).
+    """
+    patient = models.ForeignKey(PatientSnapshot, on_delete=models.CASCADE, related_name='prescription_allocations')
+    prescription_name = models.CharField(max_length=255)
+    items_groups = models.JSONField(help_text="List of item groups (snapshot)", default=list)
+    procured_from = models.CharField(max_length=200, blank=True)
+    from_date = models.DateField()
+    to_date = models.DateField()
+    days = models.PositiveIntegerField()
+    allocated_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name='prescription_allocations_created')
+    locked = models.BooleanField(default=False)
+    notes = models.TextField(blank=True)
+    
+    # Status and cancellation fields
+    STATUS_CHOICES = [
+        ('draft', 'Draft'),
+        ('active', 'Active'),
+        ('cancelled', 'Cancelled'),
+        ('failed', 'Failed'),
+    ]
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='draft')
+    cancelled_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name='prescription_allocations_cancelled')
+    cancelled_at = models.DateTimeField(null=True, blank=True)
+    cancellation_reason = models.TextField(blank=True, help_text="Mandatory when cancelling")
+    cancelled_date_from = models.DateField(null=True, blank=True, help_text="Cancellation date range start")
+    cancelled_date_to = models.DateField(null=True, blank=True, help_text="Cancellation date range end")
+    resumed_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name='prescription_allocations_resumed')
+    resumed_at = models.DateTimeField(null=True, blank=True)
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['patient','from_date','to_date']),
+            models.Index(fields=['from_date', 'to_date']),
+        ]
+
+    def __str__(self):
+        return f"Prescription #{self.pk} – {self.prescription_name} for {self.patient.pat_reg_no}"
+
+
+class PrescriptionNotification(models.Model):
+    """Notifications for prescription-related actions"""
+    NOTIFICATION_TYPES = [
+        ('prescription_allocated', 'Prescription Allocated'),
+        ('prescription_cancelled', 'Prescription Cancelled'),
+        ('prescription_resumed', 'Prescription Resumed'),
+        ('prescription_updated', 'Prescription Updated'),
+        ('item_removed', 'Item Removed'),
+    ]
+    
+    PRIORITY_CHOICES = [
+        ('low', 'Low'),
+        ('medium', 'Medium'),
+        ('high', 'High'),
+        ('urgent', 'Urgent'),
+    ]
+    
+    prescription_allocation = models.ForeignKey(PrescriptionAllocation, on_delete=models.CASCADE, related_name='notifications')
+    notification_type = models.CharField(max_length=30, choices=NOTIFICATION_TYPES)
+    title = models.CharField(max_length=200)
+    message = models.TextField()
+    priority = models.CharField(max_length=10, choices=PRIORITY_CHOICES, default='medium')
+    
+    # Recipients
+    target_users = models.ManyToManyField(settings.AUTH_USER_MODEL, related_name='prescription_notifications', blank=True)
+    target_roles = models.JSONField(default=list, help_text="List of roles to notify")
+    
+    # Status
+    is_read = models.BooleanField(default=False)
+    is_sent = models.BooleanField(default=False)
+    sent_at = models.DateTimeField(null=True, blank=True)
+    
+    # Metadata
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='created_prescription_notifications')
+    created_at = models.DateTimeField(auto_now_add=True)
+    additional_data = models.JSONField(default=dict, blank=True)
+    
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['notification_type', 'is_read']),
+            models.Index(fields=['priority', 'created_at']),
+        ]
+    
+    def __str__(self):
+        return f"{self.get_notification_type_display()} - {self.title}"
+    
+    def mark_as_read(self, user):
+        """Mark notification as read for a specific user"""
+        self.is_read = True
+        self.save()
+    
+    def send_to_roles(self, roles):
+        """Send notification to users with specific roles"""
+        from authentication.models import CustomUser
+        target_users = CustomUser.objects.filter(role__in=roles)
+        self.target_users.set(target_users)
+        self.target_roles = roles
+        self.save()
+
+
+class PrescriptionChange(models.Model):
+    prescription_allocation = models.ForeignKey(PrescriptionAllocation, on_delete=models.CASCADE, related_name='changes')
+    changed_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL)
+    change_type = models.CharField(max_length=100)  # e.g., 'edit_items', 'change_dates', 'cancel', 'resume'
+    diff = models.JSONField(null=True, blank=True)  # {added:[], removed:[], updated:[]}
+    reason = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['prescription_allocation','created_at']),
+        ]
+
+    def __str__(self):
+        return f"Change #{self.pk} for prescription {self.prescription_allocation_id} by {self.changed_by}"
 

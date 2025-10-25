@@ -263,8 +263,8 @@ class OilClassManagementView(ListView):
                     messages.error(request, f'Error creating oil class: {str(e)}')
             else:
                 messages.error(request, 'Name is required.')
-        
-        return redirect('oilclass_manage')
+            
+            return redirect('oilclass_manage')
 
 class OilClassDeleteView(DeleteView):
     model = OilClass
@@ -314,7 +314,7 @@ class UsageTypeManagementView(ListView):
                     messages.error(request, f'Error creating usage type: {str(e)}')
             else:
                 messages.error(request, 'Name is required.')
-                
+            
             return redirect('usagetype_manage')
 
 class UsageTypeDeleteView(DeleteView):
@@ -365,7 +365,7 @@ class PrescriptionTimeManagementView(ListView):
                     messages.error(request, f'Error creating prescription time: {str(e)}')
             else:
                 messages.error(request, 'Name is required.')
-                
+            
             return redirect('prestime_manage')
 
 class PrescriptionTimeDeleteView(DeleteView):
@@ -416,8 +416,8 @@ class PrescriptionScopeManagementView(ListView):
                     messages.error(request, f'Error creating prescription scope: {str(e)}')
             else:
                 messages.error(request, 'Name is required.')
-        
-        return redirect('prescope_manage')
+            
+            return redirect('prescope_manage')
 
 class PrescriptionScopeDeleteView(DeleteView):
     model = PrescriptionScope
