@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% if object %}Edit{% else %}Add{% endif %} Slot Master</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    
+    <style>
+        .main-content {
+            padding-left: 275px;
+        }
+        .form-section {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+        .time-preview {
+            background: #e3f2fd;
+            border: 1px solid #bbdefb;
+            border-radius: 6px;
+            padding: 1rem;
+            margin-top: 1rem;
+        }
+        .form-check-input {
+            margin-top: 0.25rem;
+        }
+        .form-check-label {
+            margin-left: 0.5rem;
+            font-weight: 500;
+        }
+    </style>
+</head>
+<body>
+    {% include 'dashboards/nav.html' %}
+
+    <div class="main-content container mt-4">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h2>
+                <i class="fas fa-clock text-primary"></i> 
+                {% if object %}Edit Time Slot{% else %}Add New Time Slot{% endif %}
+            </h2>
+            <div>
+                <a href="{% url 'slot_master_manage' %}" class="btn btn-secondary">
+                    <i class="fas fa-arrow-left me-2"></i>Back to Slots
+                </a>
+            </div>
+        </div>
+
+        {% if messages %}
+            {% for message in messages %}
+                <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
+                    {{ message }}
+                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                </div>
+            {% endfor %}
+        {% endif %}
+
+        <div class="row">
+            <div class="col-lg-8">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="mb-0">
+                            <i class="fas fa-edit me-2"></i>Time Slot Information
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        <form method="post">
+                            {% csrf_token %}
+                            
+                            <div class="row">
+                                <div class="col-md-6 mb-3">
+                                    <label for="{{ form.slot_number.id_for_label }}" class="form-label">
+                                        Slot Number <span class="text-danger">*</span>
+                                    </label>
+                                    {{ form.slot_number }}
+                                    {% if form.slot_number.errors %}
+                                        <div class="text-danger small">
+                                            {% for error in form.slot_number.errors %}
+                                                {{ error }}
+                                            {% endfor %}
+                                        </div>
+                                    {% endif %}
+                                </div>
+                                
+                                <div class="col-md-6 mb-3">
+                                    <label for="{{ form.slot_name.id_for_label }}" class="form-label">
+                                        Slot Name
+                                    </label>
+                                    {{ form.slot_name }}
+                                    {% if form.slot_name.errors %}
+                                        <div class="text-danger small">
+                                            {% for error in form.slot_name.errors %}
+                                                {{ error }}
+                                            {% endfor %}
+                                        </div>
+                                    {% endif %}
+                                </div>
+                            </div>
+                            
+                            <div class="row">
+                                <div class="col-md-6 mb-3">
+                                    <label for="{{ form.start_time.id_for_label }}" class="form-label">
+                                        Start Time <span class="text-danger">*</span>
+                                    </label>
+                                    {{ form.start_time }}
+                                    {% if form.start_time.errors %}
+                                        <div class="text-danger small">
+                                            {% for error in form.start_time.errors %}
+                                                {{ error }}
+                                            {% endfor %}
+                                        </div>
+                                    {% endif %}
+                                </div>
+                                
+                                <div class="col-md-6 mb-3">
+                                    <label for="{{ form.end_time.id_for_label }}" class="form-label">
+                                        End Time <span class="text-danger">*</span>
+                                    </label>
+                                    {{ form.end_time }}
+                                    {% if form.end_time.errors %}
+                                        <div class="text-danger small">
+                                            {% for error in form.end_time.errors %}
+                                                {{ error }}
+                                            {% endfor %}
+                                        </div>
+                                    {% endif %}
+                                </div>
+                            </div>
+                            
+                            <div class="row">
+                                <div class="col-md-6 mb-3">
+                                    <div class="form-check">
+                                        {{ form.is_active }}
+                                        <label class="form-check-label" for="{{ form.is_active.id_for_label }}">
+                                            Active
+                                        </label>
+                                    </div>
+                                    {% if form.is_active.errors %}
+                                        <div class="text-danger small">
+                                            {% for error in form.is_active.errors %}
+                                                {{ error }}
+                                            {% endfor %}
+                                        </div>
+                                    {% endif %}
+                                </div>
+                            </div>
+                            
+                            <!-- Time Preview -->
+                            <div class="time-preview" id="timePreview" style="display: none;">
+                                <h6><i class="fas fa-eye me-2"></i>Time Slot Preview</h6>
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        <strong>Start:</strong> <span id="previewStart">-</span>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <strong>End:</strong> <span id="previewEnd">-</span>
+                                    </div>
+                                </div>
+                                <div class="mt-2">
+                                    <strong>Duration:</strong> <span id="previewDuration">-</span>
+                                </div>
+                            </div>
+                            
+                            <div class="d-flex justify-content-between">
+                                <a href="{% url 'slot_master_manage' %}" class="btn btn-secondary">
+                                    <i class="fas fa-times me-2"></i>Cancel
+                                </a>
+                                <button type="submit" class="btn btn-primary">
+                                    <i class="fas fa-save me-2"></i>
+                                    {% if object %}Update{% else %}Create{% endif %} Time Slot
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="col-lg-4">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="mb-0">
+                            <i class="fas fa-info-circle me-2"></i>Information
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        <h6>Time Slot Guidelines</h6>
+                        <ul class="list-unstyled small">
+                            <li><i class="fas fa-check text-success me-2"></i>Slot numbers must be unique</li>
+                            <li><i class="fas fa-check text-success me-2"></i>Start time must be before end time</li>
+                            <li><i class="fas fa-check text-success me-2"></i>No overlapping time slots</li>
+                            <li><i class="fas fa-check text-success me-2"></i>Use 24-hour format for times</li>
+                        </ul>
+                        
+                        <hr>
+                        
+                        <h6>Quick Tips</h6>
+                        <ul class="list-unstyled small text-muted">
+                            <li><i class="fas fa-lightbulb text-warning me-2"></i>Use descriptive slot names</li>
+                            <li><i class="fas fa-lightbulb text-warning me-2"></i>Consider therapy duration when setting slots</li>
+                            <li><i class="fas fa-lightbulb text-warning me-2"></i>Plan for breaks between sessions</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // Add form validation and styling
+        document.addEventListener('DOMContentLoaded', function() {
+            // Style form fields (excluding checkboxes)
+            const formFields = document.querySelectorAll('input:not([type="checkbox"]), select, textarea');
+            formFields.forEach(field => {
+                field.classList.add('form-control');
+            });
+            
+            // Style checkboxes properly
+            const checkboxes = document.querySelectorAll('input[type="checkbox"]');
+            checkboxes.forEach(checkbox => {
+                checkbox.classList.add('form-check-input');
+            });
+            
+            // Add required field indicators
+            const requiredFields = document.querySelectorAll('input[required], select[required]');
+            requiredFields.forEach(field => {
+                field.classList.add('border-primary');
+            });
+            
+            // Time preview functionality
+            const startTimeField = document.getElementById('{{ form.start_time.id_for_label }}');
+            const endTimeField = document.getElementById('{{ form.end_time.id_for_label }}');
+            const timePreview = document.getElementById('timePreview');
+            const previewStart = document.getElementById('previewStart');
+            const previewEnd = document.getElementById('previewEnd');
+            const previewDuration = document.getElementById('previewDuration');
+            
+            function updateTimePreview() {
+                const startTime = startTimeField.value;
+                const endTime = endTimeField.value;
+                
+                if (startTime && endTime) {
+                    timePreview.style.display = 'block';
+                    previewStart.textContent = startTime;
+                    previewEnd.textContent = endTime;
+                    
+                    // Calculate duration
+                    const start = new Date('2000-01-01 ' + startTime);
+                    const end = new Date('2000-01-01 ' + endTime);
+                    
+                    if (end > start) {
+                        const diffMs = end - start;
+                        const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+                        const diffMinutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+                        previewDuration.textContent = `${diffHours}h ${diffMinutes}m`;
+                    } else {
+                        previewDuration.textContent = 'Invalid time range';
+                    }
+                } else {
+                    timePreview.style.display = 'none';
+                }
+            }
+            
+            startTimeField.addEventListener('change', updateTimePreview);
+            endTimeField.addEventListener('change', updateTimePreview);
+        });
+    </script>
+</body>
+</html>
