@@ -10,6 +10,7 @@ from django.utils.dateparse import parse_date
 from django.utils import timezone
 from django.db import transaction, IntegrityError
 from authentication.models import AuditLog as AuthAuditLog
+from .decorators import scheduling_access_required, scheduling_admin_required, therapist_access_required, api_access_required
 
 EXTERNAL_DB_ALIAS = 'therapy_db'  # external SQL Server alias
 
@@ -1931,3 +1932,328 @@ def allocate_therapy(request):
         return JsonResponse(conflict_info, status=409)
     except Exception as exc:
         return JsonResponse({"error": "server_error", "details": str(exc)}, status=500)
+
+
+@scheduling_access_required
+def scheduling_dashboard(request):
+    """
+    Display the therapy scheduling dashboard with draft, failed, and scheduled therapies.
+    """
+    from .models import TherapyAllocation, Booking, BookingAssignment
+    from Patient.models import Therapist, TreatmentRoom, TimeSlot
+    from masters.models import SlotMaster
+    
+    # Get date filter from request
+    date_filter = request.GET.get('date')
+    if date_filter:
+        try:
+            filter_date = parse_date(date_filter)
+        except:
+            filter_date = None
+    else:
+        filter_date = None
+    
+    # Fetch therapy allocations based on status
+    draft_allocations = TherapyAllocation.objects.filter(status='draft')
+    failed_allocations = TherapyAllocation.objects.filter(status='failed')
+    scheduled_allocations = TherapyAllocation.objects.filter(status='allocated')
+    
+    # Apply date filter if provided
+    if filter_date:
+        draft_allocations = draft_allocations.filter(from_date__lte=filter_date, to_date__gte=filter_date)
+        failed_allocations = failed_allocations.filter(from_date__lte=filter_date, to_date__gte=filter_date)
+        scheduled_allocations = scheduled_allocations.filter(from_date__lte=filter_date, to_date__gte=filter_date)
+    
+    # Prepare context data
+    context = {
+        'draft_allocations': draft_allocations.select_related('patient', 'room', 'timeslot').prefetch_related('bookings__assignments__therapist'),
+        'failed_allocations': failed_allocations.select_related('patient', 'room', 'timeslot').prefetch_related('bookings__assignments__therapist'),
+        'scheduled_allocations': scheduled_allocations.select_related('patient', 'room', 'timeslot').prefetch_related('bookings__assignments__therapist'),
+        'date_filter': date_filter or '',
+        'stats': {
+            'draft_count': draft_allocations.count(),
+            'failed_count': failed_allocations.count(),
+            'scheduled_count': scheduled_allocations.count(),
+        }
+    }
+    
+    return render(request, 'scheduling.html', context)
+
+
+@csrf_exempt
+@api_access_required
+def schedule_therapies_api(request):
+    """
+    API endpoint to trigger the scheduling algorithm for draft therapies.
+    """
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST method required'}, status=405)
+    
+    try:
+        data = json.loads(request.body)
+        date_filter = data.get('date')
+        allocation_ids = data.get('allocation_ids', [])
+        
+        if not date_filter:
+            return JsonResponse({'error': 'Date is required'}, status=400)
+        
+        # Import the scheduling algorithm
+        from final_allocation import expand_therapies_for_visit
+        
+        # Get draft allocations to process
+        from .models import TherapyAllocation
+        
+        if allocation_ids:
+            # Process specific allocations
+            allocations = TherapyAllocation.objects.filter(
+                id__in=allocation_ids, 
+                status='draft'
+            )
+            if not allocations.exists():
+                return JsonResponse({'error': 'No draft therapies found with the specified IDs'}, status=400)
+        else:
+            # Process all draft allocations (regardless of date range)
+            # This allows scheduling even if no therapies exist for the specific date
+            allocations = TherapyAllocation.objects.filter(status='draft')
+            
+            if not allocations.exists():
+                return JsonResponse({
+                    'success': True,
+                    'message': 'No draft therapies found to schedule. You can create new therapy allocations first.',
+                    'results': [],
+                    'stats': {
+                        'total': 0,
+                        'successful': 0,
+                        'failed': 0
+                    }
+                })
+        
+        results = []
+        success_count = 0
+        failed_count = 0
+        
+        # Process each allocation
+        for allocation in allocations:
+            try:
+                # Convert TherapyAllocation to Visit format for the algorithm
+                # This is a simplified conversion - you may need to adjust based on your data structure
+                visit_id = allocation.id  # Using allocation ID as visit ID for now
+                
+                # Run the scheduling algorithm
+                tasks = expand_therapies_for_visit(visit_id, create_bookings=True)
+                
+                if isinstance(tasks, dict) and "error" in tasks:
+                    # Algorithm returned an error
+                    allocation.status = 'failed'
+                    allocation.save()
+                    results.append({
+                        'allocation_id': allocation.id,
+                        'status': 'failed',
+                        'reason': tasks['error']
+                    })
+                    failed_count += 1
+                else:
+                    # Process algorithm results
+                    success_tasks = [t for t in tasks if t.get('status') == 'BOOKED']
+                    failed_tasks = [t for t in tasks if t.get('status') == 'FAILED']
+                    
+                    if success_tasks:
+                        allocation.status = 'allocated'
+                        allocation.save()
+                        success_count += 1
+                        results.append({
+                            'allocation_id': allocation.id,
+                            'status': 'success',
+                            'tasks': success_tasks
+                        })
+                    else:
+                        allocation.status = 'failed'
+                        allocation.save()
+                        failed_count += 1
+                        results.append({
+                            'allocation_id': allocation.id,
+                            'status': 'failed',
+                            'reason': failed_tasks[0].get('reason', 'Unknown error') if failed_tasks else 'No available slots'
+                        })
+                        
+            except Exception as e:
+                allocation.status = 'failed'
+                allocation.save()
+                results.append({
+                    'allocation_id': allocation.id,
+                    'status': 'failed',
+                    'reason': str(e)
+                })
+                failed_count += 1
+        
+        return JsonResponse({
+            'success': True,
+            'message': f'Processed {len(allocations)} therapies: {success_count} successful, {failed_count} failed',
+            'results': results,
+            'stats': {
+                'total': len(allocations),
+                'successful': success_count,
+                'failed': failed_count
+            }
+        })
+        
+    except json.JSONDecodeError:
+        return JsonResponse({'error': 'Invalid JSON'}, status=400)
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)
+
+
+@csrf_exempt
+@api_access_required
+def get_therapy_data_api(request):
+    """
+    API endpoint to fetch therapy data for the scheduling dashboard.
+    """
+    if request.method != 'GET':
+        return JsonResponse({'error': 'GET method required'}, status=405)
+    
+    try:
+        from .models import TherapyAllocation
+        from Patient.models import Therapist, TreatmentRoom, TimeSlot
+        
+        # Get filters
+        date_filter = request.GET.get('date')
+        status_filter = request.GET.get('status', 'all')
+        
+        # Build query
+        query = {}
+        if date_filter:
+            filter_date = parse_date(date_filter)
+            if filter_date:
+                query['from_date__lte'] = filter_date
+                query['to_date__gte'] = filter_date
+        
+        if status_filter != 'all':
+            query['status'] = status_filter
+        
+        # Fetch allocations
+        allocations = TherapyAllocation.objects.filter(**query).select_related(
+            'patient', 'room', 'timeslot'
+        ).prefetch_related(
+            'bookings__assignments__therapist'
+        )
+        
+        # Convert to JSON format
+        data = []
+        for allocation in allocations:
+            # Get assigned therapists
+            therapists = []
+            for booking in allocation.bookings.all():
+                for assignment in booking.assignments.all():
+                    therapists.append({
+                        'code': assignment.therapist.therapist_code,
+                        'name': assignment.therapist.therapist_name,
+                        'grade': assignment.therapist.therapist_grade
+                    })
+            
+            data.append({
+                'id': allocation.id,
+                'patient_name': allocation.patient.pat_name,
+                'patient_reg_no': allocation.patient.pat_reg_no,
+                'therapy_name': allocation.therapy_name,
+                'therapy_code': allocation.therapy_code,
+                'from_date': allocation.from_date.isoformat(),
+                'to_date': allocation.to_date.isoformat(),
+                'status': allocation.status,
+                'room_no': allocation.room.room_no if allocation.room else None,
+                'timeslot': allocation.timeslot.start_time.strftime('%H:%M') if allocation.timeslot else None,
+                'therapists': therapists,
+                'created_at': allocation.created_at.isoformat(),
+                'allocated_by': allocation.allocated_by.username if allocation.allocated_by else None
+            })
+        
+        return JsonResponse({
+            'success': True,
+            'data': data,
+            'count': len(data)
+        })
+        
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)
+
+
+@csrf_exempt
+@api_access_required
+def reschedule_therapy_api(request):
+    """
+    API endpoint to reschedule a single failed therapy.
+    """
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST method required'}, status=405)
+    
+    try:
+        data = json.loads(request.body)
+        allocation_id = data.get('allocation_id')
+        date = data.get('date')
+        
+        if not allocation_id or not date:
+            return JsonResponse({'error': 'allocation_id and date are required'}, status=400)
+        
+        from .models import TherapyAllocation
+        
+        try:
+            allocation = TherapyAllocation.objects.get(id=allocation_id, status='failed')
+            allocation.status = 'draft'
+            allocation.save()
+            
+            return JsonResponse({
+                'success': True,
+                'message': 'Therapy moved back to draft for rescheduling'
+            })
+        except TherapyAllocation.DoesNotExist:
+            return JsonResponse({'error': 'Therapy allocation not found'}, status=404)
+            
+    except json.JSONDecodeError:
+        return JsonResponse({'error': 'Invalid JSON'}, status=400)
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)
+
+
+@csrf_exempt
+@api_access_required
+def reschedule_all_failed_api(request):
+    """
+    API endpoint to reschedule all failed therapies for a date.
+    """
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST method required'}, status=405)
+    
+    try:
+        data = json.loads(request.body)
+        date = data.get('date')
+        
+        if not date:
+            return JsonResponse({'error': 'date is required'}, status=400)
+        
+        from .models import TherapyAllocation
+        
+        filter_date = parse_date(date)
+        if not filter_date:
+            return JsonResponse({'error': 'Invalid date format'}, status=400)
+        
+        # Get all failed allocations (regardless of date range for rescheduling)
+        failed_allocations = TherapyAllocation.objects.filter(status='failed')
+        
+        if not failed_allocations.exists():
+            return JsonResponse({
+                'success': True,
+                'message': 'No failed therapies found to reschedule. You can create new therapy allocations first.'
+            })
+        
+        # Move them back to draft
+        updated_count = failed_allocations.update(status='draft')
+        
+        return JsonResponse({
+            'success': True,
+            'message': f'{updated_count} failed therapies moved back to draft for rescheduling'
+        })
+        
+    except json.JSONDecodeError:
+        return JsonResponse({'error': 'Invalid JSON'}, status=400)
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)

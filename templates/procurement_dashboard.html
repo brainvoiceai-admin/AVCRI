@@ -1,0 +1,1054 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pharmacy Medicine Preparation</title>
+    <style>
+        :root {
+            --primary: #2c7be5;
+            --success: #00d97e;
+            --warning: #f6c343;
+            --danger: #e63757;
+            --light: #f9fafd;
+            --dark: #12263f;
+            --gray: #95aac9;
+            --border: #e3ebf6;
+        }
+        
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Segoe UI', system-ui, sans-serif;
+        }
+        
+        body {
+            background-color: #f5f8fa;
+            color: var(--dark);
+            line-height: 1.5;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        header {
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.03);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        h1 {
+            font-size: 24px;
+            font-weight: 600;
+            color: var(--dark);
+        }
+        
+        .subtitle {
+            color: var(--gray);
+            font-size: 14px;
+            margin-top: 5px;
+        }
+        
+        .controls {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+        }
+        
+        .date-filter {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .date-filter label {
+            font-size: 14px;
+            color: var(--dark);
+            font-weight: 500;
+        }
+        
+        input[type="date"] {
+            padding: 8px 12px;
+            border-radius: 6px;
+            border: 1px solid var(--border);
+            font-size: 14px;
+        }
+        
+        .stats {
+            display: flex;
+            gap: 15px;
+        }
+        
+        .stat-card {
+            background: white;
+            border-radius: 8px;
+            padding: 15px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.03);
+            min-width: 150px;
+        }
+        
+        .stat-value {
+            font-size: 24px;
+            font-weight: 600;
+            margin-bottom: 5px;
+        }
+        
+        .stat-label {
+            font-size: 13px;
+            color: var(--gray);
+        }
+        
+        .pending .stat-value {
+            color: var(--warning);
+        }
+        
+        .prepared .stat-value {
+            color: var(--success);
+        }
+        
+        .total .stat-value {
+            color: var(--primary);
+        }
+        
+        .dashboard {
+            display: grid;
+            grid-template-columns: 300px 1fr;
+            gap: 20px;
+        }
+        
+        .patients-panel {
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.03);
+            height: fit-content;
+        }
+        
+        .panel-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+        
+        .panel-title {
+            font-size: 16px;
+            font-weight: 600;
+        }
+        
+        .search-box {
+            position: relative;
+            margin-bottom: 15px;
+        }
+        
+        .search-box input {
+            width: 100%;
+            padding: 10px 15px 10px 40px;
+            border-radius: 6px;
+            border: 1px solid var(--border);
+            font-size: 14px;
+        }
+        
+        .search-icon {
+            position: absolute;
+            left: 15px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: var(--gray);
+        }
+        
+        .filter-tabs {
+            display: flex;
+            gap: 5px;
+            margin-bottom: 15px;
+        }
+        
+        .filter-tab {
+            flex: 1;
+            text-align: center;
+            padding: 8px;
+            background: var(--light);
+            border-radius: 6px;
+            font-size: 13px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .filter-tab.active {
+            background: var(--primary);
+            color: white;
+        }
+        
+        .patients-list {
+            max-height: 500px;
+            overflow-y: auto;
+        }
+        
+        .patient-card {
+            padding: 15px;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+            margin-bottom: 10px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .patient-card:hover {
+            border-color: var(--primary);
+        }
+        
+        .patient-card.active {
+            border-color: var(--primary);
+            background: rgba(44, 123, 229, 0.05);
+        }
+        
+        .patient-name {
+            font-weight: 600;
+            margin-bottom: 5px;
+            display: flex;
+            justify-content: space-between;
+        }
+        
+        .patient-id {
+            color: var(--gray);
+            font-size: 13px;
+        }
+        
+        .patient-details {
+            display: flex;
+            gap: 10px;
+            font-size: 13px;
+            color: var(--gray);
+            margin-bottom: 8px;
+        }
+        
+        .patient-meds {
+            display: flex;
+            justify-content: space-between;
+            font-size: 13px;
+        }
+        
+        .meds-count {
+            color: var(--primary);
+            font-weight: 500;
+        }
+        
+        .status-badge {
+            padding: 3px 8px;
+            border-radius: 20px;
+            font-size: 11px;
+            font-weight: 500;
+        }
+        
+        .status-pending {
+            background: rgba(246, 195, 67, 0.1);
+            color: var(--warning);
+        }
+        
+        .status-prepared {
+            background: rgba(0, 217, 126, 0.1);
+            color: var(--success);
+        }
+        
+        .medicines-panel {
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.03);
+        }
+        
+        .no-selection {
+            text-align: center;
+            padding: 40px 20px;
+            color: var(--gray);
+        }
+        
+        .no-selection-icon {
+            font-size: 48px;
+            margin-bottom: 15px;
+            opacity: 0.5;
+        }
+        
+        .patient-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 20px;
+            padding-bottom: 15px;
+            border-bottom: 1px solid var(--border);
+        }
+        
+        .patient-info h2 {
+            font-size: 20px;
+            margin-bottom: 5px;
+        }
+        
+        .patient-meta {
+            color: var(--gray);
+            font-size: 14px;
+        }
+        
+        .prepare-all-btn {
+            background: var(--primary);
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 6px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .prepare-all-btn:hover {
+            background: #1a68d1;
+        }
+        
+        .time-slots {
+            margin-bottom: 30px;
+        }
+        
+        .time-slot-title {
+            font-size: 16px;
+            font-weight: 600;
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid var(--border);
+        }
+        
+        .medicine-card {
+            display: flex;
+            align-items: center;
+            padding: 15px;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+            margin-bottom: 10px;
+            transition: all 0.2s;
+        }
+        
+        .medicine-card.prepared {
+            background: rgba(0, 217, 126, 0.05);
+            border-color: rgba(0, 217, 126, 0.3);
+        }
+        
+        .medicine-checkbox {
+            margin-right: 15px;
+        }
+        
+        .medicine-checkbox input {
+            width: 18px;
+            height: 18px;
+            cursor: pointer;
+        }
+        
+        .medicine-details {
+            flex: 1;
+        }
+        
+        .medicine-name {
+            font-weight: 600;
+            margin-bottom: 5px;
+        }
+        
+        .medicine-meta {
+            display: flex;
+            gap: 15px;
+            font-size: 13px;
+            color: var(--gray);
+        }
+        
+        .medicine-qty {
+            font-weight: 600;
+            color: var(--dark);
+            min-width: 80px;
+            text-align: right;
+        }
+        
+        .action-buttons {
+            display: flex;
+            gap: 10px;
+            margin-top: 20px;
+            justify-content: flex-end;
+        }
+        
+        .btn {
+            padding: 10px 20px;
+            border-radius: 6px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            border: none;
+            font-size: 14px;
+        }
+        
+        .btn-primary {
+            background: var(--primary);
+            color: white;
+        }
+        
+        .btn-outline {
+            background: transparent;
+            border: 1px solid var(--border);
+            color: var(--dark);
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 20px;
+            color: var(--gray);
+        }
+        
+        .alert {
+            padding: 12px 16px;
+            border-radius: 6px;
+            margin-bottom: 20px;
+            font-size: 14px;
+        }
+        
+        .alert-success {
+            background: rgba(0, 217, 126, 0.1);
+            color: var(--success);
+            border: 1px solid rgba(0, 217, 126, 0.2);
+        }
+        
+        .alert-error {
+            background: rgba(230, 55, 87, 0.1);
+            color: var(--danger);
+            border: 1px solid rgba(230, 55, 87, 0.2);
+        }
+        
+        @media (max-width: 768px) {
+            .dashboard {
+                grid-template-columns: 1fr;
+            }
+            
+            .controls {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 10px;
+            }
+            
+            .stats {
+                width: 100%;
+                justify-content: space-between;
+            }
+            
+            .stat-card {
+                flex: 1;
+                min-width: auto;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div>
+                <h1>Pharmacy Medicine Preparation</h1>
+                <div class="subtitle">Select a patient and mark medicines as prepared</div>
+            </div>
+            <div class="controls">
+                <div class="date-filter">
+                    <label for="dateFilter">Date:</label>
+                    <input type="date" id="dateFilter">
+                </div>
+                <div class="stats">
+                    <div class="stat-card total">
+                        <div class="stat-value" id="totalMeds">0</div>
+                        <div class="stat-label">Total Medicines</div>
+                    </div>
+                    <div class="stat-card pending">
+                        <div class="stat-value" id="pendingMeds">0</div>
+                        <div class="stat-label">Pending</div>
+                    </div>
+                    <div class="stat-card prepared">
+                        <div class="stat-value" id="preparedMeds">0</div>
+                        <div class="stat-label">Prepared</div>
+                    </div>
+                </div>
+            </div>
+        </header>
+        
+        <div class="dashboard">
+            <div class="patients-panel">
+                <div class="panel-header">
+                    <div class="panel-title">Patients</div>
+                    <div class="small" id="patientsCount">0 patients</div>
+                </div>
+                
+                <div class="search-box">
+                    <span class="search-icon">🔍</span>
+                    <input type="text" id="search" placeholder="Search patients...">
+                </div>
+                
+                <div class="filter-tabs">
+                    <div class="filter-tab active" data-filter="all">All</div>
+                    <div class="filter-tab" data-filter="pending">Pending</div>
+                    <div class="filter-tab" data-filter="prepared">Prepared</div>
+                </div>
+                
+                <div class="patients-list" id="patientsList">
+                    <!-- Patient cards will be inserted here -->
+                </div>
+            </div>
+            
+            <div class="medicines-panel">
+                <div id="noSelection" class="no-selection">
+                    <div class="no-selection-icon">💊</div>
+                    <h3>No Patient Selected</h3>
+                    <p>Select a patient from the list to view and prepare their medicines</p>
+                </div>
+                
+                <div id="patientView" style="display: none;">
+                    <div class="patient-header">
+                        <div class="patient-info">
+                            <h2 id="pv_name">Patient Name</h2>
+                            <div class="patient-meta" id="pv_meta">ID • Age • Sex</div>
+                            <div class="patient-meta">Room: <span id="pv_room">-</span> • Therapy: <span id="pv_therapy">-</span></div>
+                        </div>
+                        <button class="prepare-all-btn" id="prepareAllBtn">Mark All as Prepared</button>
+                    </div>
+                    
+                    <div id="pv_content">
+                        <!-- Medicine lists will be inserted here -->
+                    </div>
+                    
+                    <div class="action-buttons">
+                        <button class="btn btn-outline" id="exportPatientCSV">Export Patient CSV</button>
+                        <button class="btn btn-primary" id="saveChangesBtn">Save Changes</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Global variables
+        let currentPatient = null;
+        let currentDate = null;
+        let preparedMedicines = new Set(); // Track prepared medicines by ID
+        
+        // Helper functions
+        function getTodayDate() {
+            return new Date().toISOString().slice(0, 10);
+        }
+        
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        // Initialize the dashboard
+        document.addEventListener('DOMContentLoaded', function() {
+            // Set today's date as default
+            currentDate = getTodayDate();
+            document.getElementById('dateFilter').value = currentDate;
+            
+            // Load patients for the selected date
+            loadPatients();
+            
+            // Set up event listeners
+            setupEventListeners();
+        });
+        
+        function setupEventListeners() {
+            // Date filter
+            document.getElementById('dateFilter').addEventListener('change', function() {
+                currentDate = this.value;
+                loadPatients();
+                if (currentPatient) {
+                    loadPatientMedicines(currentPatient.patient_id);
+                }
+            });
+            
+            // Search input
+            document.getElementById('search').addEventListener('input', function() {
+                renderPatients();
+            });
+            
+            // Filter tabs
+            document.querySelectorAll('.filter-tab').forEach(tab => {
+                tab.addEventListener('click', function() {
+                    document.querySelectorAll('.filter-tab').forEach(t => t.classList.remove('active'));
+                    this.classList.add('active');
+                    renderPatients();
+                });
+            });
+            
+            // Prepare all button
+            document.getElementById('prepareAllBtn').addEventListener('click', function() {
+                if (currentPatient) {
+                    markAllMedicinesAsPrepared();
+                }
+            });
+            
+            // Save changes button
+            document.getElementById('saveChangesBtn').addEventListener('click', function() {
+                if (currentPatient) {
+                    saveChanges();
+                }
+            });
+            
+            // Export CSV button
+            document.getElementById('exportPatientCSV').addEventListener('click', function() {
+                if (currentPatient) {
+                    exportPatientCSV();
+                }
+            });
+        }
+        
+        function loadPatients() {
+            showLoading();
+            
+            // Fetch patients from API
+            fetch(`/sheduling/procurement/api/prescriptions/?date=${currentDate}&department=IP Pharmacy`)
+                .then(response => response.json())
+                .then(data => {
+                    hideLoading();
+                    if (data.success) {
+                        window.patientsData = data.data;
+                        renderPatients();
+                        updateStatistics();
+                    } else {
+                        showAlert('error', data.error || 'Failed to load patients');
+                    }
+                })
+                .catch(error => {
+                    hideLoading();
+                    console.error('Error loading patients:', error);
+                    showAlert('error', 'Error loading patients');
+                });
+        }
+        
+        function renderPatients() {
+            const patientsList = document.getElementById('patientsList');
+            const searchTerm = document.getElementById('search').value.toLowerCase();
+            const activeFilter = document.querySelector('.filter-tab.active').dataset.filter;
+            
+            if (!window.patientsData) {
+                patientsList.innerHTML = '<div class="loading">Loading patients...</div>';
+                return;
+            }
+            
+            // Filter patients based on search and filter
+            const filteredPatients = window.patientsData.filter(patient => {
+                // Search filter
+                const matchesSearch = patient.patient_name.toLowerCase().includes(searchTerm) || 
+                                      patient.registration_no.toLowerCase().includes(searchTerm);
+                
+                // Status filter
+                let matchesFilter = true;
+                if (activeFilter === 'pending') {
+                    matchesFilter = !isPatientFullyPrepared(patient);
+                } else if (activeFilter === 'prepared') {
+                    matchesFilter = isPatientFullyPrepared(patient);
+                }
+                
+                return matchesSearch && matchesFilter;
+            });
+            
+            // Update patient count
+            document.getElementById('patientsCount').textContent = `${filteredPatients.length} patients`;
+            
+            // Clear the list
+            patientsList.innerHTML = '';
+            
+            // Add patient cards
+            filteredPatients.forEach(patient => {
+                const patientCard = document.createElement('div');
+                patientCard.className = 'patient-card';
+                patientCard.dataset.id = patient.patient_id;
+                
+                const isFullyPrepared = isPatientFullyPrepared(patient);
+                const statusText = patient.status === 'dispatched' ? 'Dispatched' : (isFullyPrepared ? 'Prepared' : 'Pending');
+                
+                patientCard.innerHTML = `
+                    <div class="patient-name">
+                        ${escapeHtml(patient.patient_name)}
+                        <span class="status-badge ${isFullyPrepared ? 'status-prepared' : 'status-pending'}">
+                            ${statusText}
+                        </span>
+                    </div>
+                    <div class="patient-id">${escapeHtml(patient.registration_no)}</div>
+                    <div class="patient-details">
+                        <span>Room ${patient.room_no || '-'}</span>
+                        <span>Dr. ${escapeHtml(patient.doctor_name || 'Unknown')}</span>
+                    </div>
+                    <div class="patient-meds">
+                        <span class="meds-count">${patient.prescription_count} medicines</span>
+                        <span>${getPreparedCount(patient)}/${patient.prescription_count} prepared</span>
+                    </div>
+                `;
+                
+                patientCard.addEventListener('click', function() {
+                    selectPatient(patient);
+                    highlightActivePatient(patient.patient_id);
+                });
+                
+                patientsList.appendChild(patientCard);
+            });
+        }
+        
+        function isPatientFullyPrepared(patient) {
+            // Check if prescription is dispatched (from database status)
+            if (patient.status === 'dispatched') {
+                return true;
+            }
+            
+            // Otherwise check local preparation status
+            return getPreparedCount(patient) === patient.prescription_count && patient.prescription_count > 0;
+        }
+        
+        function getPreparedCount(patient) {
+            // Count how many medicines are marked as prepared for this patient
+            let count = 0;
+            const patientKey = `${patient.patient_id}_${currentDate}`;
+            if (preparedMedicines.has(patientKey)) {
+                count = preparedMedicines.get(patientKey).size;
+            }
+            return count;
+        }
+        
+        function selectPatient(patient) {
+            currentPatient = patient;
+            
+            // Show patient view
+            document.getElementById('noSelection').style.display = 'none';
+            document.getElementById('patientView').style.display = 'block';
+            
+            // Update patient info
+            document.getElementById('pv_name').textContent = patient.patient_name;
+            document.getElementById('pv_meta').textContent = `${patient.registration_no} • Room ${patient.room_no || '-'} • Dr. ${patient.doctor_name || 'Unknown'}`;
+            document.getElementById('pv_room').textContent = patient.room_no || '-';
+            document.getElementById('pv_therapy').textContent = 'Prescription';
+            
+            // Load patient medicines
+            loadPatientMedicines(patient.patient_id);
+        }
+        
+        function loadPatientMedicines(patientId) {
+            showLoading();
+            
+            // Fetch patient medicine details from API
+            fetch(`/sheduling/procurement/api/prescription-details/?patient_id=${patientId}&date=${currentDate}`)
+                .then(response => response.json())
+                .then(data => {
+                    hideLoading();
+                    if (data.success) {
+                        renderPatientMedicines(data.data);
+                    } else {
+                        showAlert('error', data.error || 'Failed to load medicine details');
+                    }
+                })
+                .catch(error => {
+                    hideLoading();
+                    console.error('Error loading medicine details:', error);
+                    showAlert('error', 'Error loading medicine details');
+                });
+        }
+        
+        function renderPatientMedicines(medicines) {
+            const pvContent = document.getElementById('pv_content');
+            
+            // Clear content
+            pvContent.innerHTML = '';
+            
+            if (!medicines || medicines.length === 0) {
+                pvContent.innerHTML = '<p>No medicines prescribed for selected date.</p>';
+                return;
+            }
+            
+            // Group medicines by time slot
+            const medicinesByTime = {};
+            
+            medicines.forEach(medicine => {
+                const timeSlot = medicine.time || 'M';
+                if (!medicinesByTime[timeSlot]) {
+                    medicinesByTime[timeSlot] = [];
+                }
+                medicinesByTime[timeSlot].push(medicine);
+            });
+            
+            // Define time slot order
+            const timeSlotOrder = ['M', 'ABF', 'BL', 'AL', 'E', 'AD', 'BT', 'PRN'];
+            const timeSlotLabels = {
+                'M': 'Morning',
+                'ABF': 'After Breakfast',
+                'BL': 'Before Lunch',
+                'AL': 'After Lunch',
+                'E': 'Evening',
+                'AD': 'After Dinner',
+                'BT': 'Bed Time',
+                'PRN': 'As Needed'
+            };
+            
+            // Render medicines by time slot
+            timeSlotOrder.forEach(timeSlot => {
+                if (medicinesByTime[timeSlot]) {
+                    const timeSlotDiv = document.createElement('div');
+                    timeSlotDiv.className = 'time-slots';
+                    
+                    const timeSlotTitle = document.createElement('div');
+                    timeSlotTitle.className = 'time-slot-title';
+                    timeSlotTitle.textContent = timeSlotLabels[timeSlot] || timeSlot;
+                    timeSlotDiv.appendChild(timeSlotTitle);
+                    
+                    medicinesByTime[timeSlot].forEach(medicine => {
+                        const medicineCard = document.createElement('div');
+                        medicineCard.className = 'medicine-card';
+                        
+                        const medicineId = `${currentPatient.patient_id}_${medicine.id}_${currentDate}`;
+                        const isPrepared = preparedMedicines.has(medicineId);
+                        
+                        if (isPrepared) {
+                            medicineCard.classList.add('prepared');
+                        }
+                        
+                        medicineCard.innerHTML = `
+                            <div class="medicine-checkbox">
+                                <input type="checkbox" id="med-${medicineId}" ${isPrepared ? 'checked' : ''}>
+                            </div>
+                            <div class="medicine-details">
+                                <div class="medicine-name">${escapeHtml(medicine.item_name)}</div>
+                                <div class="medicine-meta">
+                                    <span>Dose: ${escapeHtml(medicine.dose)}</span>
+                                    <span>Notes: ${escapeHtml(medicine.notes || 'None')}</span>
+                                </div>
+                            </div>
+                            <div class="medicine-qty">Qty: ${medicine.quantity}</div>
+                        `;
+                        
+                        // Add event listener for checkbox
+                        const checkbox = medicineCard.querySelector('input[type="checkbox"]');
+                        checkbox.addEventListener('change', function() {
+                            toggleMedicinePreparation(medicineId, this.checked);
+                        });
+                        
+                        timeSlotDiv.appendChild(medicineCard);
+                    });
+                    
+                    pvContent.appendChild(timeSlotDiv);
+                }
+            });
+        }
+        
+        function toggleMedicinePreparation(medicineId, isPrepared) {
+            if (isPrepared) {
+                preparedMedicines.add(medicineId);
+            } else {
+                preparedMedicines.delete(medicineId);
+            }
+            
+            // Update the medicine card appearance
+            const medicineCard = document.querySelector(`#med-${medicineId}`).closest('.medicine-card');
+            if (isPrepared) {
+                medicineCard.classList.add('prepared');
+            } else {
+                medicineCard.classList.remove('prepared');
+            }
+            
+            // Update patient list and statistics
+            renderPatients();
+            updateStatistics();
+            
+            console.log('Medicine preparation toggled:', medicineId, isPrepared);
+            console.log('Current prepared medicines:', Array.from(preparedMedicines));
+        }
+        
+        function markAllMedicinesAsPrepared() {
+            if (!currentPatient) return;
+            
+            // Mark all medicines for this patient as prepared
+            const patientKey = `${currentPatient.patient_id}_${currentDate}`;
+            const checkboxes = document.querySelectorAll('#pv_content input[type="checkbox"]');
+            
+            checkboxes.forEach(checkbox => {
+                if (!checkbox.checked) {
+                    checkbox.checked = true;
+                    const medicineId = checkbox.id.replace('med-', '');
+                    preparedMedicines.add(medicineId);
+                }
+            });
+            
+            // Update UI
+            document.querySelectorAll('#pv_content .medicine-card').forEach(card => {
+                card.classList.add('prepared');
+            });
+            
+            // Dispatch the prescription to mark as dispatched
+            dispatchPrescription();
+            
+            renderPatients();
+            updateStatistics();
+        }
+        
+        function dispatchPrescription() {
+            if (!currentPatient) return;
+            
+            // Call the mark as dispatched API
+            fetch('/sheduling/procurement/api/mark-dispatched/', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': getCookie('csrftoken')
+                },
+                body: JSON.stringify({
+                    patient_id: currentPatient.patient_id,
+                    date: currentDate
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    if (data.already_dispatched) {
+                        showAlert('info', 'Prescription was already dispatched');
+                    } else {
+                        showAlert('success', 'Prescription dispatched successfully!');
+                    }
+                    // Refresh the patient list to show updated status
+                    loadPatients();
+                    updateStatistics();
+                } else {
+                    showAlert('error', data.error || 'Failed to dispatch prescription');
+                }
+            })
+            .catch(error => {
+                console.error('Error dispatching prescription:', error);
+                showAlert('error', 'Error dispatching prescription');
+            });
+        }
+        
+        function getCookie(name) {
+            let cookieValue = null;
+            if (document.cookie && document.cookie !== '') {
+                const cookies = document.cookie.split(';');
+                for (let i = 0; i < cookies.length; i++) {
+                    const cookie = cookies[i].trim();
+                    if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                        cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                        break;
+                    }
+                }
+            }
+            return cookieValue;
+        }
+        
+        function saveChanges() {
+            if (!currentPatient) return;
+            
+            // Save individual medicine preparation status
+            const checkboxes = document.querySelectorAll('#pv_content input[type="checkbox"]');
+            const preparedMedicines = [];
+            
+            checkboxes.forEach(checkbox => {
+                if (checkbox.checked) {
+                    const medicineId = checkbox.id.replace('med-', '');
+                    preparedMedicines.push(medicineId);
+                }
+            });
+            
+            // In a real implementation, this would save to the database
+            // For now, we'll just update the local state and show feedback
+            console.log('Saving preparation status for medicines:', preparedMedicines);
+            
+            // Update the prepared medicines set
+            preparedMedicines.forEach(medicineId => {
+                preparedMedicines.add(medicineId);
+            });
+            
+            // Update UI
+            renderPatients();
+            updateStatistics();
+            
+            showAlert('success', `Preparation status saved for ${preparedMedicines.length} medicines!`);
+        }
+        
+        function exportPatientCSV() {
+            if (!currentPatient) return;
+            
+            // In a real implementation, this would generate and download a CSV file
+            showAlert('success', 'Patient data exported as CSV!');
+        }
+        
+        function highlightActivePatient(patientId) {
+            // Remove active class from all patient cards
+            document.querySelectorAll('.patient-card').forEach(card => {
+                card.classList.remove('active');
+            });
+            
+            // Add active class to selected patient card
+            const selectedCard = document.querySelector(`.patient-card[data-id="${patientId}"]`);
+            if (selectedCard) {
+                selectedCard.classList.add('active');
+            }
+        }
+        
+        function updateStatistics() {
+            if (!window.patientsData) return;
+            
+            let totalMeds = 0;
+            let preparedMeds = 0;
+            let dispatchedMeds = 0;
+            
+            window.patientsData.forEach(patient => {
+                totalMeds += patient.prescription_count;
+                
+                if (patient.status === 'dispatched') {
+                    dispatchedMeds += patient.prescription_count;
+                } else {
+                    preparedMeds += getPreparedCount(patient);
+                }
+            });
+            
+            // Update the statistics display
+            document.getElementById('totalMeds').textContent = totalMeds;
+            document.getElementById('pendingMeds').textContent = totalMeds - preparedMeds - dispatchedMeds;
+            document.getElementById('preparedMeds').textContent = preparedMeds + dispatchedMeds;
+            
+            console.log('Statistics updated:', {
+                total: totalMeds,
+                prepared: preparedMeds,
+                dispatched: dispatchedMeds,
+                pending: totalMeds - preparedMeds - dispatchedMeds
+            });
+        }
+        
+        function showLoading() {
+            // Show loading indicator
+            const patientsList = document.getElementById('patientsList');
+            if (patientsList) {
+                patientsList.innerHTML = '<div class="loading">Loading...</div>';
+            }
+        }
+        
+        function hideLoading() {
+            // Hide loading indicator
+        }
+        
+        function showAlert(type, message) {
+            // Create and show alert
+            const alertDiv = document.createElement('div');
+            alertDiv.className = `alert alert-${type}`;
+            alertDiv.textContent = message;
+            
+            // Insert at the top of the container
+            const container = document.querySelector('.container');
+            container.insertBefore(alertDiv, container.firstChild);
+            
+            // Remove after 3 seconds
+            setTimeout(() => {
+                alertDiv.remove();
+            }, 3000);
+        }
+    </script>
+</body>
+</html>

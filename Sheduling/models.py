@@ -450,3 +450,91 @@ class PrescriptionChange(models.Model):
     def __str__(self):
         return f"Change #{self.pk} for prescription {self.prescription_allocation_id} by {self.changed_by}"
 
+
+# -----------------------------------------------------------------------------
+# New Prescription Scheduling Models
+# -----------------------------------------------------------------------------
+class PrescriptionScheduling(models.Model):
+    """Model to track prescription scheduling status"""
+    STATUS_CHOICES = [
+        ('draft', 'Draft'),
+        ('scheduled', 'Scheduled'),
+        ('dispatched', 'Dispatched'),
+    ]
+    
+    patient = models.ForeignKey(PatientSnapshot, on_delete=models.CASCADE, related_name='prescription_scheduling')
+    prescription_date = models.DateField()
+    doctor = models.ForeignKey('authentication.CustomUser', on_delete=models.CASCADE, related_name='prescribed_prescriptions')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='draft')
+    sent_to = models.CharField(max_length=100, blank=True, null=True)  # IP Pharmacy, Kashaya Room, etc.
+    dispatched_from = models.CharField(max_length=100, blank=True, null=True)
+    dispatched_at = models.DateTimeField(blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ['patient', 'prescription_date']
+        verbose_name = 'Prescription Scheduling'
+        verbose_name_plural = 'Prescription Scheduling'
+
+    def __str__(self):
+        return f"{self.patient.pat_name} - {self.prescription_date} ({self.status})"
+
+class PrescriptionChangeLog(models.Model):
+    """Model to track all changes to prescriptions"""
+    ACTION_CHOICES = [
+        ('create', 'Create'),
+        ('update', 'Update'),
+        ('delete', 'Delete'),
+        ('status_change', 'Status Change'),
+    ]
+    
+    patient = models.ForeignKey(PatientSnapshot, on_delete=models.CASCADE, related_name='prescription_changes')
+    prescription_date = models.DateField()
+    action = models.CharField(max_length=20, choices=ACTION_CHOICES)
+    changed_by = models.ForeignKey('authentication.CustomUser', on_delete=models.CASCADE, related_name='prescription_changes_made')
+    before_values = models.JSONField(blank=True, null=True)
+    after_values = models.JSONField(blank=True, null=True)
+    timestamp = models.DateTimeField(auto_now_add=True)
+    description = models.TextField(blank=True, null=True)
+    
+    class Meta:
+        verbose_name = 'Prescription Change Log'
+        verbose_name_plural = 'Prescription Change Logs'
+        ordering = ['-timestamp']
+    
+    def __str__(self):
+        return f"{self.patient.pat_name} - {self.action} - {self.timestamp}"
+
+class PrescriptionItem(models.Model):
+    """Model to store individual prescription items"""
+    prescription_scheduling = models.ForeignKey(PrescriptionScheduling, on_delete=models.CASCADE, related_name='items')
+    item_name = models.CharField(max_length=200)
+    dose = models.CharField(max_length=100)
+    quantity = models.IntegerField()
+    time = models.CharField(max_length=50)  # M, ABF, BL, AL, E, AD, BT, PRN
+    notes = models.TextField(blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'Prescription Item'
+        verbose_name_plural = 'Prescription Items'
+
+    def __str__(self):
+        return f"{self.item_name} - {self.dose} x{self.quantity}"
+
+class PrescriptionDispatch(models.Model):
+    """Model to track prescription dispatch to procurement departments"""
+    prescription_scheduling = models.ForeignKey(PrescriptionScheduling, on_delete=models.CASCADE, related_name='dispatches')
+    department = models.CharField(max_length=100)  # IP Pharmacy, Kashaya Room, etc.
+    dispatched_at = models.DateTimeField(auto_now_add=True)
+    dispatched_by = models.ForeignKey('authentication.CustomUser', on_delete=models.CASCADE, related_name='dispatched_prescriptions')
+    notes = models.TextField(blank=True, null=True)
+    
+    class Meta:
+        verbose_name = 'Prescription Dispatch'
+        verbose_name_plural = 'Prescription Dispatches'
+    
+    def __str__(self):
+        return f"{self.prescription_scheduling.patient.pat_name} - {self.department} - {self.dispatched_at}"
