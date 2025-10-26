@@ -55,6 +55,15 @@ class CustomUser(AbstractUser):
     custom_role = models.ForeignKey(Role, on_delete=models.SET_NULL, null=True, blank=True, 
                                    help_text="Custom role with specific module permissions")
     mobile = models.CharField(max_length=15, null=True, blank=True)
+    
+    GENDER_CHOICES = [
+        ('male', 'Male'),
+        ('female', 'Female'),
+        ('other', 'Other'),
+    ]
+    gender = models.CharField(max_length=10, choices=GENDER_CHOICES, default='male', 
+                             help_text="User's gender")
+    
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     

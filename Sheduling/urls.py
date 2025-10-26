@@ -1,5 +1,5 @@
 from django.urls import path
-from . import views, prescription_views, procurement_views
+from . import views, prescription_views, procurement_views, patient_views, therapist_views, availability_views
 
 urlpatterns = [
    
@@ -26,4 +26,20 @@ urlpatterns = [
     path('procurement/api/mark-dispatched/', procurement_views.mark_as_dispatched_api, name='mark_as_dispatched_api'),
     path('procurement/api/prescription-details/', procurement_views.get_prescription_details_api, name='get_procurement_prescription_details_api'),
     path('procurement/api/prescription-items/', procurement_views.get_prescription_details_api, name='get_procurement_prescription_items_api'),
+    
+    # Patient Dashboard URLs
+    path('patient/', patient_views.patient_dashboard, name='patient_dashboard'),
+    path('patient/api/patient-data/', patient_views.get_patient_data_api, name='get_patient_data_api'),
+    path('patient/api/prescriptions/', patient_views.get_patient_prescriptions_api, name='get_patient_prescriptions_api'),
+    
+    # Therapist Dashboard URLs
+    path('therapist/', therapist_views.therapist_dashboard, name='therapist_dashboard'),
+    path('therapist/api/therapist-data/', therapist_views.get_therapist_data_api, name='get_therapist_data_api'),
+    path('therapist/api/sessions-by-date/', therapist_views.get_therapist_sessions_by_date_api, name='get_therapist_sessions_by_date_api'),
+    
+    # Therapist Availability URLs
+    path('therapist-availability/', availability_views.therapist_availability_dashboard, name='therapist_availability_dashboard'),
+    path('therapist-availability/api/available-therapists/', availability_views.get_available_therapists_api, name='get_available_therapists_api'),
+    path('therapist-availability/api/therapists-on-leave/', availability_views.get_therapists_on_leave_api, name='get_therapists_on_leave_api'),
+    path('therapist-availability/api/time-slots/', availability_views.get_time_slots_api, name='get_time_slots_api'),
 ]

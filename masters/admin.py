@@ -113,14 +113,18 @@ class SlotMasterAdmin(admin.ModelAdmin):
 
 @admin.register(TherapistMaster)
 class TherapistMasterAdmin(admin.ModelAdmin):
-    list_display = ['therapist_code', 'therapist_name', 'therapist_grade', 'employee_code', 'is_bathing_therapist', 'is_active', 'created_at']
-    list_filter = ['is_active', 'is_bathing_therapist', 'therapist_grade', 'created_at']
+    list_display = ['therapist_code', 'therapist_name', 'therapist_grade', 'employee_code', 'get_gender', 'is_bathing_therapist', 'is_active', 'created_at']
+    list_filter = ['is_active', 'is_bathing_therapist', 'therapist_grade', 'user__gender', 'created_at']
     search_fields = ['therapist_code', 'therapist_name', 'employee_code']
     list_editable = ['is_active', 'is_bathing_therapist']
     ordering = ['therapist_name']
     fieldsets = (
         ('Basic Information', {
             'fields': ('therapist_code', 'therapist_name', 'therapist_grade', 'employee_code')
+        }),
+        ('User Information', {
+            'fields': ('user', 'therapist_profile'),
+            'description': 'Link to user account for gender and other user details'
         }),
         ('Therapist Details', {
             'fields': ('is_bathing_therapist',)
@@ -129,6 +133,14 @@ class TherapistMasterAdmin(admin.ModelAdmin):
             'fields': ('is_active',)
         }),
     )
+    
+    def get_gender(self, obj):
+        """Display gender from associated user"""
+        if obj.user:
+            return obj.user.gender
+        return 'No User'
+    get_gender.short_description = 'Gender'
+    get_gender.admin_order_field = 'user__gender'
 
 @admin.register(TherapistLeaveMaster)
 class TherapistLeaveMasterAdmin(admin.ModelAdmin):
