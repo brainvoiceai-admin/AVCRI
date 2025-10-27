@@ -7,4 +7,9 @@ sqlparse==0.5.3
 tzdata==2025.2
 whitenoise[brotli]==6.7.0
 mssql-django 
+pandas>=2.0
+prophet>=1.1
+cmdstanpy>=1.1
+djangorestframework>=3.14
+python-dotenv>=1.0
 pyodbc
