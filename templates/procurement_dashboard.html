@@ -719,6 +719,7 @@
         }
         
         function selectPatient(patient) {
+            console.log('Selecting patient:', patient);
             currentPatient = patient;
             
             // Show patient view
@@ -732,27 +733,40 @@
             document.getElementById('pv_therapy').textContent = 'Prescription';
             
             // Load patient medicines
+            console.log('Loading medicines for patient ID:', patient.patient_id, 'Date:', currentDate);
             loadPatientMedicines(patient.patient_id);
         }
         
         function loadPatientMedicines(patientId) {
-            showLoading();
+            console.log('loadPatientMedicines called with:', patientId, currentDate);
+            
+            // Show loading in the medicine panel, not the patient list
+            const pvContent = document.getElementById('pv_content');
+            pvContent.innerHTML = '<div class="loading">Loading medicine details...</div>';
+            
+            const apiUrl = `/sheduling/procurement/api/prescription-details/?patient_id=${patientId}&date=${currentDate}`;
+            console.log('Fetching from:', apiUrl);
             
             // Fetch patient medicine details from API
-            fetch(`/sheduling/procurement/api/prescription-details/?patient_id=${patientId}&date=${currentDate}`)
-                .then(response => response.json())
+            fetch(apiUrl)
+                .then(response => {
+                    console.log('API response status:', response.status);
+                    return response.json();
+                })
                 .then(data => {
-                    hideLoading();
+                    console.log('API response data:', data);
                     if (data.success) {
                         renderPatientMedicines(data.data);
                     } else {
+                        console.error('API error:', data.error);
                         showAlert('error', data.error || 'Failed to load medicine details');
+                        pvContent.innerHTML = '<p>Failed to load medicine details.</p>';
                     }
                 })
                 .catch(error => {
-                    hideLoading();
                     console.error('Error loading medicine details:', error);
                     showAlert('error', 'Error loading medicine details');
+                    pvContent.innerHTML = '<p>Error loading medicine details.</p>';
                 });
         }
         
@@ -1023,15 +1037,15 @@
         }
         
         function showLoading() {
-            // Show loading indicator
+            // Show loading indicator in patient list
             const patientsList = document.getElementById('patientsList');
             if (patientsList) {
-                patientsList.innerHTML = '<div class="loading">Loading...</div>';
+                patientsList.innerHTML = '<div class="loading">Loading patients...</div>';
             }
         }
         
         function hideLoading() {
-            // Hide loading indicator
+            // Hide loading indicator - this is handled by renderPatients()
         }
         
         function showAlert(type, message) {

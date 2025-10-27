@@ -248,6 +248,19 @@
               </div>
               <div class="col-md-6">
                 <div class="mb-3">
+                  <label for="gender" class="form-label">Gender *</label>
+                  <select class="form-select" id="gender" name="gender" required>
+                    <option value="male" selected>Male</option>
+                    <option value="female">Female</option>
+                    <option value="other">Other</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+            
+            <div class="row">
+              <div class="col-md-6">
+                <div class="mb-3">
                   <label for="password" class="form-label">Password *</label>
                   <input type="password" class="form-control" id="password" name="password" required>
                 </div>
@@ -373,6 +386,19 @@
                          name="mobile" value="{{ user.mobile }}">
                 </div>
               </div>
+              <div class="col-md-6">
+                <div class="mb-3">
+                  <label for="edit_gender{{ user.id }}" class="form-label">Gender *</label>
+                  <select class="form-select" id="edit_gender{{ user.id }}" name="gender" required>
+                    <option value="male" {% if user.gender == 'male' %}selected{% endif %}>Male</option>
+                    <option value="female" {% if user.gender == 'female' %}selected{% endif %}>Female</option>
+                    <option value="other" {% if user.gender == 'other' %}selected{% endif %}>Other</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+            
+            <div class="row">
               <div class="col-md-6">
                 <div class="mb-3">
                   <div class="form-check">

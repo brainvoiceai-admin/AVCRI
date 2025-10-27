@@ -409,6 +409,8 @@ def Manage_user(request):
                         messages.error(request, f'Therapist code "{therapist_code}" already exists.')
                         return redirect('Manage_user')
                 
+                gender = request.POST.get('gender', 'male')  # Default to male if not provided
+                
                 user = CustomUser.objects.create_user(
                     username=username,
                     email=email,
@@ -416,7 +418,8 @@ def Manage_user(request):
                     first_name=first_name,
                     last_name=last_name,
                     role=role,
-                    mobile=mobile if mobile else None
+                    mobile=mobile if mobile else None,
+                    gender=gender
                 )
                 
                 # Assign custom role if selected
@@ -508,6 +511,7 @@ def Manage_user(request):
             user.role = request.POST.get('role')
             mobile = request.POST.get('mobile')
             user.mobile = mobile if mobile else None
+            user.gender = request.POST.get('gender', 'male')  # Default to male if not provided
             user.is_active = request.POST.get('is_active') == 'on'
             
             # Update role-specific fields

@@ -9,6 +9,7 @@ from django.contrib.auth.admin import UserAdmin
 class CustomUserAdmin(UserAdmin):
     fieldsets = UserAdmin.fieldsets + (
         ('Role Info', {'fields': ('role',)}),
+        ('Gender Info', {'fields': ('gender',)}),
     )
 
 admin.site.register(CustomUser, CustomUserAdmin)
