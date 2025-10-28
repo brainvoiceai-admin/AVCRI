@@ -228,3 +228,44 @@ class TherapistLeaveMaster(models.Model):
         verbose_name_plural = "Therapist Leaves"
         ordering = ["therapist__therapist_name", "leave_day"]
         unique_together = ['therapist', 'leave_day']
+
+
+
+class EmergencyLeave(models.Model):
+    """
+    Stores emergency leave records fetched from HRMS (or webhook events).
+    Linked to TherapistMaster via employee_code -> therapist.
+    """
+    # HRMS identifiers
+    leave_id = models.CharField(max_length=128, unique=True, null=True, blank=True)
+    # keep employee_code so we can map/update even if FK missing
+    employee_code = models.CharField(max_length=50, db_index=True)
+
+    # resolved link to our TherapistMaster (nullable if mapping missing)
+    therapist = models.ForeignKey(
+        "TherapistMaster",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="emergency_leaves"
+    )
+
+    # leave window
+    from_date = models.DateField()
+    to_date = models.DateField()
+
+    # meta / status
+    leave_type = models.CharField(max_length=100, blank=True, null=True)
+    status = models.CharField(max_length=50, default="new", help_text="eg: new, processed, resolved")
+    raw_payload = models.JSONField(null=True, blank=True)  # store original HRMS payload
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-from_date"]
+        indexes = [
+            models.Index(fields=["employee_code", "from_date", "to_date"]),
+        ]
+
+    def __str__(self):
+        return f"{self.employee_code} ({self.from_date} → {self.to_date})"

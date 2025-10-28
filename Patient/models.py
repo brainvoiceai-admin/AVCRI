@@ -135,11 +135,11 @@ class BookingManager(models.Manager):
         if time_slot is not None:
             qs = qs.filter(time_slot=time_slot)
         return qs
-
+from masters.models import TherapistMaster,SlotMaster
 class RoomBooking(models.Model):
     room = models.ForeignKey(TreatmentRoom, on_delete=models.CASCADE)
     date = models.DateField()
-    time_slot = models.ForeignKey(TimeSlot, on_delete=models.CASCADE)
+    time_slot = models.ForeignKey(SlotMaster, on_delete=models.CASCADE)
     therapy_name = models.CharField(max_length=255, null=True, blank=True)
     patient_id = models.BigIntegerField(null=True, blank=True)
 
@@ -149,8 +149,8 @@ class RoomBooking(models.Model):
         ("COMPLETED", "Completed"),
     ]
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="BOOKED")
-    visit = models.ForeignKey('MySql_Data_pull.Visit', null=True, blank=True, on_delete=models.SET_NULL, related_name='room_bookings')
-    therapy = models.ForeignKey('MySql_Data_pull.store_Therapy', null=True, blank=True, on_delete=models.SET_NULL, related_name='room_bookings')
+    visit = models.ForeignKey('Sheduling.Booking', null=True, blank=True, on_delete=models.SET_NULL, related_name='room_bookings')
+    therapy = models.ForeignKey('Sheduling.TherapyAllocation', null=True, blank=True, on_delete=models.SET_NULL, related_name='room_bookings')
 
     # timestamps
     created_at = models.DateTimeField(auto_now_add=True,null=True,)
@@ -228,10 +228,12 @@ class RoomBooking(models.Model):
                 ).update(status='cancelled', cancelled_at=now)
 
 
+from Sheduling.models import TherapyAllocation
+from masters.models import TherapyMaster
 class TherapistBooking(models.Model):
-    therapist = models.ForeignKey(Therapist, on_delete=models.CASCADE)
+    therapist = models.ForeignKey(TherapistMaster, on_delete=models.CASCADE)
     date = models.DateField()
-    time_slot = models.ForeignKey(TimeSlot, on_delete=models.CASCADE)
+    time_slot = models.ForeignKey(SlotMaster, on_delete=models.CASCADE)
     therapy_name = models.CharField(max_length=255, null=True, blank=True)
     patient_id = models.BigIntegerField(null=True, blank=True)
 
@@ -241,9 +243,9 @@ class TherapistBooking(models.Model):
         ("COMPLETED", "Completed"),
     ]
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="BOOKED")
-    visit = models.ForeignKey('MySql_Data_pull.Visit', null=True, blank=True, on_delete=models.SET_NULL, related_name='therapist_bookings')
-    therapy = models.ForeignKey('MySql_Data_pull.store_Therapy', null=True, blank=True, on_delete=models.SET_NULL, related_name='therapist_bookings')
-
+    visit = models.ForeignKey('Sheduling.TherapyAllocation', null=True, blank=True, on_delete=models.SET_NULL, related_name='therapist_bookings')
+    therapy = models.ForeignKey('masters.TherapyMaster', null=True, blank=True, on_delete=models.SET_NULL, related_name='therapist_bookings')
+    is_bathing = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True,null=True,)
     updated_at = models.DateTimeField(auto_now=True,null=True,)
 

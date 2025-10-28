@@ -1998,7 +1998,7 @@ def schedule_therapies_api(request):
             return JsonResponse({'error': 'Date is required'}, status=400)
         
         # Import the scheduling algorithm
-        from final_allocation import expand_therapies_for_visit
+        from allocation_logic import expand_therapies_for_visit
         
         # Get draft allocations to process
         from .models import TherapyAllocation
