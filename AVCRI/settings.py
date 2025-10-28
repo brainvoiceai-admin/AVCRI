@@ -185,13 +185,28 @@ STATICFILES_DIRS = [
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 AUTH_USER_MODEL = "authentication.CustomUser"
 
+# REST Framework Configuration
+REST_FRAMEWORK = {
+    'DEFAULT_AUTHENTICATION_CLASSES': [
+        'rest_framework.authentication.SessionAuthentication',
+    ],
+    'DEFAULT_PERMISSION_CLASSES': [
+        'rest_framework.permissions.IsAuthenticated',
+    ],
+    'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
+    'PAGE_SIZE': 50,
+    'DEFAULT_RENDERER_CLASSES': [
+        'rest_framework.renderers.JSONRenderer',
+    ],
+}
+
 CRONJOBS = [
-    # Run daily at midnight
-    ('0 0 * * *', 'Patient.cron.run_daily_forecast'),
-
-    # Run weekly every Sunday at midnight
-    ('0 0 * * 0', 'Patient.cron.run_weekly_forecast'),
-
-    # Run monthly last day (simulate with 28th → check in code if last day)
-    ('0 0 28 * *', 'Patient.cron.run_monthly_forecast'),
+    # Run daily forecast at midnight
+    ('0 0 * * *', 'predictor.management.commands.run_automated_forecast', '--run-type=daily'),
+    
+    # Run weekly forecast every Sunday at midnight
+    ('0 0 * * 0', 'predictor.management.commands.run_automated_forecast', '--run-type=weekly'),
+    
+    # Run monthly forecast on the 1st of each month at midnight
+    ('0 0 1 * *', 'predictor.management.commands.run_automated_forecast', '--run-type=monthly'),
 ]

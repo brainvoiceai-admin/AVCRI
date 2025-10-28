@@ -1,134 +1,936 @@
+{% load static %}
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <title>Prediction Dashboard</title>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Patient Forecasts — Advanced Dashboard</title>
   <style>
+    :root {
+      --primary: #3498db;
+      --primary-dark: #2980b9;
+      --secondary: #2c3e50;
+      --light: #ecf0f1;
+      --dark: #34495e;
+      --success: #27ae60;
+      --warning: #f39c12;
+      --danger: #e74c3c;
+      --gray: #95a5a6;
+      --light-gray: #f8f9fa;
+      --border-radius: 8px;
+      --shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    }
+
+    * {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    }
+
     body {
-      font-family: Arial, sans-serif;
-      background: #f4fdf6;
-      margin: 20px;
-      color: #1b4332;
-    }
-    h1 {
-      text-align: center;
-      margin-bottom: 20px;
-      color: #2d6a4f;
-    }
-    .tabs {
+      background: #f5f7fa;
       display: flex;
-      justify-content: center;
-      margin-bottom: 20px;
+      min-height: 100vh;
+      margin: 0;
+      padding: 0;
+      color: var(--dark);
     }
-    .tab {
-      padding: 10px 20px;
-      margin: 0 5px;
-      background: #95d5b2;
-      border-radius: 5px;
+
+    /* Main Content Styles */
+    .main-content {
+      flex: 1;
+      padding: 30px;
+      margin-left: 250px; /* Align with existing side nav */
+      overflow-y: auto;
+    }
+
+    .container {
+      max-width: 1400px;
+      margin: 0 auto;
+    }
+
+    /* Header Styles */
+    .page-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 25px;
+      padding-bottom: 15px;
+      border-bottom: 1px solid #e0e0e0;
+    }
+
+    .page-title {
+      font-size: 1.8rem;
+      font-weight: 600;
+      color: var(--secondary);
+      margin: 0;
+    }
+
+    /* Control Styles */
+    .controls {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .btn {
+      padding: 10px 16px;
+      border-radius: var(--border-radius);
+      border: none;
       cursor: pointer;
-      font-weight: bold;
-      transition: background 0.3s;
+      font-weight: 500;
+      transition: all 0.3s ease;
+      text-decoration: none;
+      display: inline-block;
+      text-align: center;
+      font-size: 0.9rem;
     }
-    .tab.active {
-      background: #2d6a4f;
+
+    .btn-primary {
+      background: var(--primary);
       color: white;
     }
+
+    .btn-primary:hover:not(:disabled) {
+      background: var(--primary-dark);
+      transform: translateY(-1px);
+    }
+
+    .btn-success {
+      background: var(--success);
+      color: white;
+    }
+
+    .btn-success:hover:not(:disabled) {
+      background: #229954;
+      transform: translateY(-1px);
+    }
+
+    .btn-outline {
+      background: transparent;
+      border: 1px solid var(--primary);
+      color: var(--primary);
+    }
+
+    .btn-outline:hover:not(:disabled) {
+      background: var(--primary);
+      color: white;
+    }
+
+    .btn:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+      transform: none !important;
+    }
+
+    .btn-group {
+      display: flex;
+      gap: 5px;
+    }
+
+    .btn-group .btn {
+      border-radius: 0;
+    }
+
+    .btn-group .btn:first-child {
+      border-radius: var(--border-radius) 0 0 var(--border-radius);
+    }
+
+    .btn-group .btn:last-child {
+      border-radius: 0 var(--border-radius) var(--border-radius) 0;
+    }
+
+    .btn.active {
+      background: var(--primary);
+      color: white;
+      box-shadow: var(--shadow);
+    }
+
+    /* Card Styles */
+    .card {
+      background: white;
+      border-radius: var(--border-radius);
+      box-shadow: var(--shadow);
+      margin-bottom: 25px;
+      overflow: hidden;
+    }
+
+    .card-body {
+      padding: 25px;
+    }
+
+    .card-header {
+      background: var(--light-gray);
+      padding: 15px 25px;
+      border-bottom: 1px solid #e0e0e0;
+      font-weight: 600;
+      color: var(--secondary);
+    }
+
+    /* Filter Styles */
+    .filters {
+      display: flex;
+      gap: 15px;
+      align-items: center;
+      margin-bottom: 20px;
+      flex-wrap: wrap;
+    }
+
+    .filter-group {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .filter-label {
+      font-weight: 500;
+      color: var(--dark);
+      font-size: 0.9rem;
+    }
+
+    .form-control {
+      border-radius: 6px;
+      border: 1px solid #dee2e6;
+      padding: 8px 12px;
+      transition: all 0.3s ease;
+      font-size: 0.9rem;
+    }
+
+    .form-control:focus {
+      border-color: var(--primary);
+      box-shadow: 0 0 0 0.2rem rgba(52, 152, 219, 0.25);
+      outline: none;
+    }
+
+    /* Summary Styles */
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 15px;
+      margin-bottom: 25px;
+    }
+
+    .summary-card {
+      background: white;
+      border-radius: var(--border-radius);
+      padding: 20px;
+      box-shadow: var(--shadow);
+      text-align: center;
+      border-left: 4px solid var(--primary);
+    }
+
+    .summary-value {
+      font-size: 2rem;
+      font-weight: 600;
+      color: var(--secondary);
+      margin: 10px 0;
+    }
+
+    .summary-label {
+      color: var(--gray);
+      font-size: 0.9rem;
+      font-weight: 500;
+    }
+
+    /* Chart Styles */
     .chart-container {
-      width: 90%;
-      max-width: 900px;
-      margin: auto;
+      position: relative;
+      height: 400px;
+      width: 100%;
+    }
+
+    .chart-meta {
+      margin-top: 15px;
+      color: var(--gray);
+      font-size: 0.9rem;
+      text-align: center;
+    }
+
+    .range-label {
+      background: var(--light-gray);
+      padding: 10px 15px;
+      border-radius: var(--border-radius);
+      margin-bottom: 15px;
+      font-size: 0.9rem;
+      color: var(--dark);
+    }
+
+    /* Progress Styles */
+    .progress-container {
+      background: white;
+      border-radius: var(--border-radius);
+      padding: 20px;
+      margin-bottom: 20px;
+      box-shadow: var(--shadow);
       display: none;
     }
-    .chart-container.active {
-      display: block;
+
+    .progress-bar {
+      width: 100%;
+      height: 8px;
+      background: #e0e0e0;
+      border-radius: 4px;
+      overflow: hidden;
+      margin-bottom: 10px;
+    }
+
+    .progress-fill {
+      height: 100%;
+      background: var(--primary);
+      width: 0%;
+      transition: width 0.3s ease;
+    }
+
+    .progress-text {
+      font-size: 0.9rem;
+      color: var(--dark);
+      text-align: center;
+    }
+
+    /* Forecast Run History */
+    .forecast-history {
+      max-height: 300px;
+      overflow-y: auto;
+    }
+
+    .forecast-run-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px 15px;
+      border-bottom: 1px solid #e0e0e0;
+      font-size: 0.9rem;
+    }
+
+    .forecast-run-item:last-child {
+      border-bottom: none;
+    }
+
+    .run-status {
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 0.8rem;
+      font-weight: 500;
+    }
+
+    .status-pending { background: #fff3cd; color: #856404; }
+    .status-running { background: #d1ecf1; color: #0c5460; }
+    .status-completed { background: #d4edda; color: #155724; }
+    .status-failed { background: #f8d7da; color: #721c24; }
+
+    /* Alert Styles */
+    .alert {
+      padding: 15px;
+      border-radius: var(--border-radius);
+      margin-bottom: 20px;
+      border-left: 4px solid;
+    }
+
+    .alert-success {
+      background: #d4edda;
+      color: #155724;
+      border-left-color: var(--success);
+    }
+
+    .alert-danger {
+      background: #f8d7da;
+      color: #721c24;
+      border-left-color: var(--danger);
+    }
+
+    .alert-warning {
+      background: #fff3cd;
+      color: #856404;
+      border-left-color: var(--warning);
+    }
+
+    /* Responsive Styles */
+    @media (max-width: 1024px) {
+      .main-content {
+        margin-left: 0;
+        padding: 20px 15px;
+      }
+    }
+
+    @media (max-width: 768px) {
+      .page-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 15px;
+      }
+      
+      .controls {
+        width: 100%;
+        justify-content: space-between;
+      }
+      
+      .filters {
+        flex-direction: column;
+        align-items: flex-start;
+      }
+      
+      .filter-group {
+        width: 100%;
+      }
+      
+      .form-control {
+        flex: 1;
+      }
+      
+      .summary {
+        grid-template-columns: 1fr;
+      }
+      
+      .chart-container {
+        height: 300px;
+      }
     }
   </style>
 </head>
 <body>
-  <h1>📊 Patient Forecast Dashboard</h1>
+  <!-- Include existing navbar -->
+  {% include 'dashboards/nav.html' %}
 
-  <div class="tabs">
-    <div class="tab active" onclick="showChart('daily')">Daily</div>
-    <div class="tab" onclick="showChart('weekly')">Weekly</div>
-    <div class="tab" onclick="showChart('monthly')">Monthly</div>
+  <!-- Main Content -->
+  <main class="main-content">
+    <div class="container">
+      <div class="page-header">
+        <h1 class="page-title">Patient Forecast Dashboard</h1>
+        <div class="controls">
+          <div class="btn-group">
+            <button class="btn active" data-type="daily">Daily</button>
+            <button class="btn" data-type="weekly">Weekly</button>
+            <button class="btn" data-type="monthly">Monthly</button>
+          </div>
+          <button id="run-forecast" class="btn btn-success">Run Forecast</button>
+          <button id="export-csv" class="btn btn-outline">Export CSV</button>
+          <button id="refresh" class="btn btn-outline">Refresh</button>
+        </div>
+      </div>
+
+      <!-- Progress Container -->
+      <div id="progress-container" class="progress-container">
+        <div class="progress-bar">
+          <div id="progress-fill" class="progress-fill"></div>
+        </div>
+        <div id="progress-text" class="progress-text">Preparing forecast...</div>
+      </div>
+
+      <!-- Alert Container -->
+      <div id="alert-container"></div>
+
+      <!-- Date Filters -->
+      <div class="card">
+        <div class="card-body">
+          <div class="filters">
+            <div class="filter-group">
+              <span class="filter-label">From:</span>
+              <input type="date" id="start-date" class="form-control">
+            </div>
+            <div class="filter-group">
+              <span class="filter-label">To:</span>
+              <input type="date" id="end-date" class="form-control">
+            </div>
+            <button id="apply" class="btn btn-primary">Apply</button>
+            <button id="clear" class="btn btn-outline">Clear</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Summary Cards -->
+      <div class="summary">
+        <div class="summary-card">
+          <div class="summary-value" id="next-day">–</div>
+          <div class="summary-label" id="next-day-label">Tomorrow</div>
+        </div>
+        <div class="summary-card">
+          <div class="summary-value" id="next-week">–</div>
+          <div class="summary-label">Next 7 Days</div>
+        </div>
+        <div class="summary-card">
+          <div class="summary-value" id="next-month">–</div>
+          <div class="summary-label">Next 30 Days</div>
+        </div>
+        <div class="summary-card">
+          <div class="summary-value" id="total-predictions">–</div>
+          <div class="summary-label">Total Predictions</div>
+        </div>
   </div>
 
-  <div id="daily" class="chart-container active">
-    <canvas id="dailyChart"></canvas>
+      <!-- Chart Container -->
+      <div class="card">
+        <div class="card-body">
+          <div class="range-label" id="range-label"></div>
+          <div class="chart-container">
+            <canvas id="predChart"></canvas>
   </div>
-  <div id="weekly" class="chart-container">
-    <canvas id="weeklyChart"></canvas>
+          <div class="chart-meta" id="meta"></div>
   </div>
-  <div id="monthly" class="chart-container">
-    <canvas id="monthlyChart"></canvas>
   </div>
+
+      <!-- Forecast Run History -->
+      <div class="card">
+        <div class="card-header">Recent Forecast Runs</div>
+        <div class="card-body">
+          <div id="forecast-history" class="forecast-history">
+            <div class="forecast-run-item">
+              <span>Loading forecast history...</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
 
   <script>
-    async function loadPredictions(type, chartId, label) {
+  (function(){
+    const API_ROOT = "/predictor/api/v1/";
+    const LEGACY_API_ROOT = "/predictor/api/predictions/?type=";
+    const chartEl = document.getElementById("predChart");
+    const metaEl = document.getElementById("meta");
+    const rangeLabel = document.getElementById("range-label");
+    const buttons = document.querySelectorAll(".btn[data-type]");
+    const refreshBtn = document.getElementById("refresh");
+    const runForecastBtn = document.getElementById("run-forecast");
+    const exportCsvBtn = document.getElementById("export-csv");
+    const startInput = document.getElementById("start-date");
+    const endInput = document.getElementById("end-date");
+    const applyBtn = document.getElementById("apply");
+    const clearBtn = document.getElementById("clear");
+    const nextDayEl = document.getElementById("next-day");
+    const nextDayLabel = document.getElementById("next-day-label");
+    const nextWeekEl = document.getElementById("next-week");
+    const nextMonthEl = document.getElementById("next-month");
+    const totalPredictionsEl = document.getElementById("total-predictions");
+    const progressContainer = document.getElementById("progress-container");
+    const progressFill = document.getElementById("progress-fill");
+    const progressText = document.getElementById("progress-text");
+    const alertContainer = document.getElementById("alert-container");
+    const forecastHistoryEl = document.getElementById("forecast-history");
+    
+    let active = "daily";
+    let chart = null;
+    let currentForecastRun = null;
+
+    const toNum = v => (v === null || v === undefined) ? null : Number(v);
+    const median = arr => { if(!arr.length) return 0; const s = arr.slice().sort((a,b)=>a-b); const m = Math.floor(s.length/2); return s.length%2 ? s[m] : (s[m-1]+s[m])/2; };
+
+    function showAlert(message, type = 'success') {
+      const alertDiv = document.createElement('div');
+      alertDiv.className = `alert alert-${type}`;
+      alertDiv.textContent = message;
+      alertContainer.appendChild(alertDiv);
+      
+      setTimeout(() => {
+        alertDiv.remove();
+      }, 5000);
+    }
+
+    function showProgress(show = true) {
+      progressContainer.style.display = show ? 'block' : 'none';
+    }
+
+    function updateProgress(percent, text) {
+      progressFill.style.width = `${percent}%`;
+      progressText.textContent = text;
+    }
+
+    async function fetchPred(type, start, end) {
+      let url = API_ROOT + "predictions/?type=" + encodeURIComponent(type);
+      const params = [];
+      if (start) params.push("start_date=" + start);
+      if (end) params.push("end_date=" + end);
+      if (params.length) url += "&" + params.join("&");
+      else url += "&upcoming=1";
+      
+      const r = await fetch(url);
+      if (!r.ok) throw new Error("API " + r.status);
+      const data = await r.json();
+      
+      // Handle paginated response - return results array directly
+      return data.results || data;
+    }
+
+    async function fetchSummary(type) {
+      const url = API_ROOT + "predictions/summary/?type=" + encodeURIComponent(type);
+      const r = await fetch(url);
+      if (!r.ok) throw new Error("Summary API " + r.status);
+      return await r.json();
+    }
+
+    async function fetchForecastHistory() {
+      const url = API_ROOT + "forecast-runs/?limit=10";
+      const r = await fetch(url);
+      if (!r.ok) throw new Error("History API " + r.status);
+      const data = await r.json();
+      
+      // Handle paginated response - return results array directly
+      return data.results || data;
+    }
+
+    function prepare(rows) {
+      rows.sort((a,b) => new Date(a.date) - new Date(b.date));
+      const labels = [], forecast = [], lower = [], upper = [], actual = [];
+      for (const r of rows) {
+        labels.push(r.date);
+        forecast.push(toNum(r.predicted_value));
+        lower.push(toNum(r.yhat_lower));
+        upper.push(toNum(r.yhat_upper));
+        actual.push(toNum(r.actual_value));
+      }
+      return { labels, forecast, lower, upper, actual };
+    }
+
+    function updateSummary(prep, summary = null) {
+      const { labels, forecast } = prep;
+      const today = new Date();
+      const nextDay = new Date(today); nextDay.setDate(today.getDate() + 1);
+      const next7 = new Date(today); next7.setDate(today.getDate() + 7);
+      const next30 = new Date(today); next30.setDate(today.getDate() + 30);
+      
+      let tomorrowVal = null, weekSum = 0, monthSum = 0;
+      for (let i = 0; i < labels.length; i++) {
+        const d = new Date(labels[i]);
+        const val = forecast[i] || 0;
+        if (d.toDateString() === nextDay.toDateString()) tomorrowVal = val;
+        if (d > today && d <= next7) weekSum += val;
+        if (d > today && d <= next30) monthSum += val;
+      }
+      
+      nextDayEl.textContent = tomorrowVal !== null ? Math.round(tomorrowVal) : "–";
+      nextWeekEl.textContent = weekSum ? Math.round(weekSum) : "–";
+      nextMonthEl.textContent = monthSum ? Math.round(monthSum) : "–";
+      
+      if (summary) {
+        totalPredictionsEl.textContent = summary.total_predictions || "–";
+      }
+      
+      const tStr = nextDay.toLocaleDateString('en-GB', {day:'2-digit', month:'short', year:'numeric'});
+      nextDayLabel.textContent = `Tomorrow (${tStr})`;
+    }
+
+    function sparseLabels(labels, maxTicks = 7) {
+      const n = labels.length;
+      if (n <= maxTicks) return labels.map((l,i) => ({label:l, show:true}));
+      const step = Math.ceil(n/maxTicks);
+      return labels.map((l,i) => ({label:l, show:(i%step)===0}));
+    }
+
+    function buildDatasets(prep) {
+      const { labels, forecast, lower, upper, actual } = prep;
+      const numericForecast = forecast.filter(v => v !== null && !isNaN(v));
+      const med = median(numericForecast);
+      const maxVal = numericForecast.length ? Math.max(...numericForecast) : null;
+      const hasOutlier = med > 0 && maxVal && (maxVal/med > 10);
+      const suggestedMax = hasOutlier ? Math.max(med*2, numericForecast[Math.floor(numericForecast.length*0.95)]*1.25) : undefined;
+
+      const datasets = [];
+      if (actual.some(v => v !== null)) {
+        datasets.push({
+          label: 'Actual',
+          data: actual,
+          borderColor: '#3498db',
+          backgroundColor: 'rgba(52, 152, 219, 0.1)',
+          tension: 0.2, 
+          pointRadius: 3, 
+          fill: false,
+          borderWidth: 2
+        });
+      }
+      datasets.push({
+        label: 'Forecast',
+        data: forecast,
+        borderColor: '#27ae60',
+        backgroundColor: 'rgba(39, 174, 96, 0.15)',
+        tension: 0.25, 
+        pointRadius: 4, 
+        fill: true,
+        borderWidth: 2
+      });
+      const hasCI = lower.some(x => x !== null) && upper.some(x => x !== null);
+      if (hasCI) {
+        datasets.push({
+          label: 'Confidence Range',
+          data: upper,
+          borderColor: 'rgba(39, 174, 96, 0)',
+          backgroundColor: 'rgba(39, 174, 96, 0.18)',
+          fill: '-1', 
+          pointRadius: 0, 
+          tension: 0.25
+        });
+      }
+      return { datasets, suggestedMax, hasOutlier };
+    }
+
+    function renderForecastHistory(history) {
+      if (!history || !history.length) {
+        forecastHistoryEl.innerHTML = '<div class="forecast-run-item">No forecast runs found</div>';
+        return;
+      }
+
+      forecastHistoryEl.innerHTML = history.map(run => `
+        <div class="forecast-run-item">
+          <div>
+            <strong>${run.run_type.charAt(0).toUpperCase() + run.run_type.slice(1)} Forecast</strong>
+            <br>
+            <small>Started: ${new Date(run.started_at).toLocaleString()}</small>
+            ${run.completed_at ? `<br><small>Duration: ${run.duration_display || 'N/A'}</small>` : ''}
+          </div>
+          <div>
+            <span class="run-status status-${run.status}">${run.status.charAt(0).toUpperCase() + run.status.slice(1)}</span>
+            ${run.predictions_created > 0 ? `<br><small>${run.predictions_created} predictions</small>` : ''}
+          </div>
+        </div>
+      `).join('');
+    }
+
+    async function render(type) {
+      metaEl.textContent = 'Loading…';
+      const start = startInput.value || null;
+      const end = endInput.value || null;
+      
       try {
-        const res = await fetch(`/predictor/api/predictions/?type=${type}`);
-        if (!res.ok) {
-          console.error("Failed fetch", res.status);
+        const [rows, summary] = await Promise.all([
+          fetchPred(type, start, end),
+          fetchSummary(type)
+        ]);
+        
+        
+        if (!rows || !rows.length) {
+          metaEl.textContent = 'No predictions available for selected range.';
+          if (chart) { chart.destroy(); chart = null; }
+          rangeLabel.textContent = '';
           return;
         }
-        const data = await res.json();
-        const labels = data.map(x => x.date);
-        const values = data.map(x => Number(x.predicted_value));
 
-        const ctx = document.getElementById(chartId).getContext("2d");
-        new Chart(ctx, {
-          type: "line",
-          data: {
-            labels: labels,
-            datasets: [{
-              label: label,
-              data: values,
-              borderColor: "#2d6a4f",
-              backgroundColor: "rgba(173, 232, 208, 0.5)",
-              tension: 0.3,
-              fill: true,
-              pointBackgroundColor: "#1b4332",
-              pointRadius: 5,
-              pointHoverRadius: 7
-            }]
-          },
+        const prep = prepare(rows);
+        updateSummary(prep, summary);
+
+        // Auto-fill start/end fields + display visible range
+        const firstDate = prep.labels[0];
+        const lastDate = prep.labels[prep.labels.length - 1];
+        if (!startInput.value) startInput.value = firstDate;
+        if (!endInput.value) endInput.value = lastDate;
+        rangeLabel.textContent = `📅 Showing predictions from ${firstDate} to ${lastDate}`;
+
+        const { labels } = prep;
+        const sparse = sparseLabels(labels, 7);
+        const displayLabels = sparse.map(s => s.show ? s.label : '');
+        const { datasets, suggestedMax, hasOutlier } = buildDatasets(prep);
+        
+        if (chart) chart.destroy();
+
+        try {
+          chart = new Chart(chartEl, {
+            type: 'line',
+            data: { labels: displayLabels, datasets },
           options: {
             responsive: true,
+              maintainAspectRatio: false,
+              interaction: { mode: 'nearest', intersect: false },
             plugins: {
               legend: {
+                  position: 'top', 
                 labels: {
-                  color: "#1b4332"
-                }
+                    color: '#34495e',
+                    font: { size: 12 }
+                  } 
+                },
+                tooltip: {
+                  enabled: true,
+                  intersect: false,
+                  callbacks: {
+                    title: ctx => `Date: ${ctx[0].label}`,
+                    label: ctx => {
+                      const v = ctx.raw;
+                      return `${ctx.dataset.label}: ${Number(v).toLocaleString(undefined, {maximumFractionDigits:0})}`;
+                    }
+                  }
+                },
+                zoom: {
+                  pan: { enabled: true, mode: 'x', modifierKey: 'ctrl' },
+                  zoom: { wheel: {enabled: true}, pinch: {enabled: true}, mode: 'x' }
               }
             },
             scales: {
               x: {
-                ticks: { color: "#1b4332" }
+                  ticks: { 
+                    color: '#34495e', 
+                    maxRotation: 0, 
+                    autoSkip: false 
+                  }, 
+                  grid: { 
+                    color: 'rgba(52, 73, 94, 0.1)' 
+                  } 
               },
               y: {
-                ticks: { color: "#1b4332" },
-                beginAtZero: true
-              }
+                  ticks: { 
+                    color: '#34495e' 
+                  }, 
+                  beginAtZero: true, 
+                  suggestedMax,
+                  grid: {
+                    color: 'rgba(52, 73, 94, 0.1)'
+                  }
+                }
+              },
+              animation: { duration: 400 }
             }
-          }
-        });
-      } catch (err) {
-        console.error("Error loading predictions:", err);
+          });
+          
+          console.log('Chart created successfully');
+          metaEl.textContent = `${labels.length} data points loaded${hasOutlier ? ' • outliers detected' : ''}`;
+        } catch (chartError) {
+          console.error('Chart creation error:', chartError);
+          metaEl.textContent = `Chart error: ${chartError.message}`;
+          showAlert(`Chart creation failed: ${chartError.message}`, 'danger');
+        }
+      } catch (error) {
+        metaEl.textContent = `Error loading data: ${error.message}`;
+        showAlert(`Error loading predictions: ${error.message}`, 'danger');
       }
     }
 
-    function showChart(type) {
-      document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
-      document.querySelectorAll(".chart-container").forEach(c => c.classList.remove("active"));
-      document.querySelector(`.tab[onclick="showChart('${type}')"]`).classList.add("active");
-      document.getElementById(type).classList.add("active");
+    async function runForecast() {
+      if (runForecastBtn.disabled) return;
+      
+      runForecastBtn.disabled = true;
+      runForecastBtn.textContent = 'Running...';
+      showProgress(true);
+      updateProgress(10, 'Starting forecast...');
+      
+      try {
+        const response = await fetch(API_ROOT + 'forecast-runs/trigger/', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]')?.value || ''
+          },
+          body: JSON.stringify({
+            run_type: active,
+            periods: 30
+          })
+        });
+        
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        
+        currentForecastRun = await response.json();
+        updateProgress(30, 'Forecast started, monitoring progress...');
+        
+        // Poll for completion
+        const pollInterval = setInterval(async () => {
+          try {
+            const statusResponse = await fetch(API_ROOT + `forecast-runs/${currentForecastRun.id}/`);
+            const statusData = await statusResponse.json();
+            
+            if (statusData.status === 'completed') {
+              clearInterval(pollInterval);
+              updateProgress(100, 'Forecast completed successfully!');
+              showAlert(`Forecast completed! Created ${statusData.predictions_created} predictions.`, 'success');
+              setTimeout(() => {
+                showProgress(false);
+                runForecastBtn.disabled = false;
+                runForecastBtn.textContent = 'Run Forecast';
+                render(active);
+                loadForecastHistory();
+              }, 2000);
+            } else if (statusData.status === 'failed') {
+              clearInterval(pollInterval);
+              updateProgress(100, 'Forecast failed');
+              showAlert(`Forecast failed: ${statusData.error_message || 'Unknown error'}`, 'danger');
+              setTimeout(() => {
+                showProgress(false);
+                runForecastBtn.disabled = false;
+                runForecastBtn.textContent = 'Run Forecast';
+              }, 2000);
+            } else {
+              updateProgress(50, 'Forecast in progress...');
+            }
+          } catch (error) {
+            clearInterval(pollInterval);
+            updateProgress(100, 'Error monitoring forecast');
+            showAlert(`Error monitoring forecast: ${error.message}`, 'danger');
+            setTimeout(() => {
+              showProgress(false);
+              runForecastBtn.disabled = false;
+              runForecastBtn.textContent = 'Run Forecast';
+            }, 2000);
+          }
+        }, 2000);
+        
+      } catch (error) {
+        showProgress(false);
+        runForecastBtn.disabled = false;
+        runForecastBtn.textContent = 'Run Forecast';
+        showAlert(`Failed to start forecast: ${error.message}`, 'danger');
+      }
     }
 
-    // Load charts
-    loadPredictions("daily", "dailyChart", "Daily Patient Forecast");
-    loadPredictions("weekly", "weeklyChart", "Weekly Patient Forecast");
-    loadPredictions("monthly", "monthlyChart", "Monthly Patient Forecast");
+    async function exportCsv() {
+      try {
+        const start = startInput.value || null;
+        const end = endInput.value || null;
+        
+        let url = API_ROOT + `predictions/export/?type=${encodeURIComponent(active)}`;
+        if (start) url += `&start_date=${start}`;
+        if (end) url += `&end_date=${end}`;
+        
+        const response = await fetch(url);
+        if (!response.ok) throw new Error(`Export failed: ${response.statusText}`);
+        
+        const blob = await response.blob();
+        const downloadUrl = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = downloadUrl;
+        a.download = `predictions_${active}_${new Date().toISOString().split('T')[0]}.csv`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(downloadUrl);
+        
+        showAlert('CSV export completed successfully!', 'success');
+      } catch (error) {
+        showAlert(`Export failed: ${error.message}`, 'danger');
+      }
+    }
+
+    async function loadForecastHistory() {
+      try {
+        const history = await fetchForecastHistory();
+        renderForecastHistory(history);
+      } catch (error) {
+        console.error('Failed to load forecast history:', error);
+      }
+    }
+
+    // Event Listeners
+    buttons.forEach(b => {
+      b.addEventListener('click', e => {
+        buttons.forEach(x => x.classList.remove('active'));
+        e.currentTarget.classList.add('active');
+        active = e.currentTarget.dataset.type;
+        render(active);
+      });
+    });
+    
+    refreshBtn.addEventListener('click', () => render(active));
+    runForecastBtn.addEventListener('click', runForecast);
+    exportCsvBtn.addEventListener('click', exportCsv);
+    applyBtn.addEventListener('click', () => render(active));
+    clearBtn.addEventListener('click', () => {
+      startInput.value = '';
+      endInput.value = '';
+      render(active);
+    });
+
+    // Initialize
+    render(active);
+    loadForecastHistory();
+  })();
   </script>
 </body>
 </html>
