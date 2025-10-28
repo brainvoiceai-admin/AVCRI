@@ -1,231 +1,695 @@
-import os
-import django
-from datetime import timedelta, datetime
+# allocation_logic.py
+from datetime import datetime, timedelta
+from types import SimpleNamespace
+from django.db import transaction, IntegrityError
 
-# ---------------- SETUP DJANGO ----------------
-os.environ.setdefault("DJANGO_SETTINGS_MODULE", "AVCRI.settings")
-django.setup()
-
-# ---------------- IMPORT MODELS ----------------
-from MySql_Data_pull.models import Visit
-from Patient.models import TherapyDetails, PatientHistory, TreatmentRoom, RoomBooking
-from Patient.models import Therapist, TherapistLeave, TherapistBooking, TimeSlot
-
-# ---------------- HELPERS ----------------
+# -----------------------
+# Helper: date range
+# -----------------------
 def daterange(start_date, end_date):
     d = start_date
     while d <= end_date:
         yield d
         d += timedelta(days=1)
 
-# ---------------- CACHING THERAPY DETAILS ----------------
+# -----------------------
+# Therapy master cache
+# -----------------------
 therapy_cache = {}
 def get_therapy_details(therapy_name):
-    name = therapy_name.strip().lower()
+    """
+    Return TherapyMaster row (or None). caches by lowercased name.
+    """
+    from masters.models import TherapyMaster
+    name = (therapy_name or "").strip().lower()
+    if not name:
+        return None
     if name in therapy_cache:
         return therapy_cache[name]
     try:
-        details = TherapyDetails.objects.get(therapy_name__iexact=therapy_name)
+        details = TherapyMaster.objects.get(therapy_name__iexact=therapy_name)
         therapy_cache[name] = details
         return details
-    except TherapyDetails.DoesNotExist:
+    except TherapyMaster.DoesNotExist:
         therapy_cache[name] = None
         return None
 
-# ---------------- THERAPY ATTRIBUTE HELPERS ----------------
-def therapy_needs_room(therapy_obj):
-    details = get_therapy_details(therapy_obj.therapy_name)
-    return details and details.treatment_room_required and details.treatment_room_required.lower() == "yes"
+# -----------------------
+# Therapy attribute helpers
+# -----------------------
+def therapy_needs_room(allocation_or_booking):
+    """
+    Determine from allocation or therapy name whether a room is required.
+    """
+    th_name = getattr(allocation_or_booking, 'therapy_name', None) or getattr(allocation_or_booking, 'therapy', None)
+    details = get_therapy_details(th_name) if th_name else None
+    return bool(details and str(getattr(details, 'treatment_room_required', '')).lower() == 'yes')
 
-def therapy_needs_bath(therapy_obj):
-    details = get_therapy_details(therapy_obj.therapy_name)
-    return details and details.bathing_required and details.bathing_required.lower() == "yes"
+def therapy_needs_bath(allocation_or_booking):
+    th_name = getattr(allocation_or_booking, 'therapy_name', None) or getattr(allocation_or_booking, 'therapy', None)
+    details = get_therapy_details(th_name) if th_name else None
+    return bool(details and str(getattr(details, 'bathing_required', '')).lower() == 'yes')
 
-def therapist_requirements(therapy_obj):
-    details = get_therapy_details(therapy_obj.therapy_name)
+def therapist_requirements(allocation_or_therapy_obj):
+    """
+    Return dict with role counts and total from TherapyMaster for a therapy name.
+    Accepts a TherapyAllocation instance or object with .therapy_name.
+    """
+    name = getattr(allocation_or_therapy_obj, 'therapy_name', None)
+    details = get_therapy_details(name) if name else None
     if not details:
-        return {"super_senior":0, "senior":0, "junior":0, "trainee":0, "total":0,
-                "therapy_code": None, "therapy_category": None}
+        return {"super_senior":0, "senior":0, "junior":0, "trainee":0, "total":0, "therapy_code": None, "therapy_category": None}
     return {
-        "super_senior": details.no_of_super_senior_therapist,
-        "senior": details.no_of_senior_therapist,
-        "junior": details.no_of_junior_therapist,
-        "trainee": details.no_of_trainee_therapist,
-        "total": details.total_no_of_therapist,
-        "therapy_code": details.therapy_code,
-        "therapy_category": details.therapy_category
+        "super_senior": int(getattr(details, 'no_of_super_senior_therapist', 0) or 0),
+        "senior": int(getattr(details, 'no_of_senior_therapist', 0) or 0),
+        "junior": int(getattr(details, 'no_of_junior_therapist', 0) or 0),
+        "trainee": int(getattr(details, 'no_of_trainee_therapist', 0) or 0),
+        "total": int(getattr(details, 'total_no_of_therapist', 0) or 0),
+        "therapy_code": getattr(details, 'therapy_code', None),
+        "therapy_category": getattr(details, 'therapy_category', None)
     }
 
-# ---------------- PATIENT HISTORY HELPER ----------------
-def get_last_patient_allocation(preg_no):
-    last_history = PatientHistory.objects.filter(preg_no=preg_no).order_by('-date')
-    if not last_history.exists():
-        return {"last_therapist_codes": [], "last_t_room": None}
-    last_record = last_history.first()
-    therapist_codes = [code.strip() for code in last_record.therapist_code.split(",")] if last_record.therapist_code else []
-    return {
-        "last_therapist_codes": therapist_codes,
-        "last_t_room": last_record.t_room
-    }
+# -----------------------
+# Slot mapping helper
+# -----------------------
+def map_to_canonical_slot(slot_like):
+    """
+    Map Booking.timeslot (masters.SlotMaster instance) to the canonical slot model used by TherapistBooking.time_slot FK.
+    Matching is done on start_time attribute.
+    If slot_like already is instance of canonical model, return it.
+    """
+    if slot_like is None:
+        return None
+    # Try to detect canonical slot model from TherapistBooking
+    try:
+        from Patient.models import TherapistBooking as TBModel
+        slot_field = TBModel._meta.get_field('time_slot')
+        canonical_model = slot_field.related_model
+        # If same class, return slot_like
+        if isinstance(slot_like, canonical_model):
+            return slot_like
+        start = getattr(slot_like, 'start_time', None)
+        if start is None:
+            return None
+        return canonical_model.objects.filter(start_time=start).first()
+    except Exception:
+        # If anything fails, fallback to returning slot_like
+        return slot_like
 
-# ---------------- ROOM ALLOCATION ----------------
+# -----------------------
+# Safe booking creation helpers
+# -----------------------
+def create_room_booking_safe(room, date, time_slot, therapy_name, patient_id, visit):
+    """
+    Create RoomBooking safely (handles concurrent creation).
+    Returns (room_booking_instance, created_bool)
+    """
+    from Patient.models import RoomBooking
+    try:
+        with transaction.atomic():
+            rb, created = RoomBooking.objects.get_or_create(
+                room=room,
+                date=date,
+                time_slot=time_slot,
+                status='BOOKED',
+                defaults={
+                    'therapy_name': therapy_name,
+                    'patient_id': patient_id,
+                    'visit': visit
+                }
+            )
+            if not created and rb.visit is None and visit is not None:
+                rb.visit = visit
+                rb.save(update_fields=['visit'])
+            return rb, created
+    except IntegrityError:
+        rb = RoomBooking.objects.filter(room=room, date=date, time_slot=time_slot, status='BOOKED').first()
+        return rb, False
+
+def create_therapist_booking_safe(therapist, date, time_slot, therapy_name, patient_id, visit):
+    """
+    Create TherapistBooking safely (handles concurrent creation).
+    Returns (therapist_booking_instance, created_bool)
+    """
+    from Patient.models import TherapistBooking
+    try:
+        with transaction.atomic():
+            tb, created = TherapistBooking.objects.get_or_create(
+                therapist=therapist,
+                date=date,
+                time_slot=time_slot,
+                status='BOOKED',
+                defaults={
+                    'therapy_name': therapy_name,
+                    'patient_id': patient_id,
+                    'visit': visit
+                }
+            )
+            if not created and tb.visit is None and visit is not None:
+                tb.visit = visit
+                tb.save(update_fields=['visit'])
+            return tb, created
+    except IntegrityError:
+        tb = TherapistBooking.objects.filter(therapist=therapist, date=date, time_slot=time_slot, status='BOOKED').first()
+        return tb, False
+
+# -----------------------
+# Room allocation helper
+# -----------------------
 def allocate_treatment_room(date, time_slot, last_room=None):
-    # Try last room first
+    """
+    Try to return a TreatmentRoom instance that is free (no RoomBooking with status='BOOKED' at date+slot).
+    Preference: last_room -> same floor -> any available.
+    """
+    from Patient.models import RoomBooking
+    from Patient.models import TreatmentRoom
+    # prefer last_room
     if last_room:
-        if not RoomBooking.objects.filter(room__room_no=last_room, date=date, time_slot=time_slot).exists():
-            return TreatmentRoom.objects.get(room_no=last_room)
-    # Same floor fallback
+        try:
+            if not RoomBooking.objects.filter(room__room_no=last_room, date=date, time_slot=time_slot, status='BOOKED').exists():
+                return TreatmentRoom.objects.get(room_no=last_room)
+        except TreatmentRoom.DoesNotExist:
+            pass
+    # same floor fallback
     if last_room:
         try:
             last_room_obj = TreatmentRoom.objects.get(room_no=last_room)
-            same_floor_rooms = TreatmentRoom.objects.filter(floor=last_room_obj.floor)
-            for room in same_floor_rooms:
-                if not RoomBooking.objects.filter(room=room, date=date, time_slot=time_slot).exists():
-                    return room
+            same_floor = TreatmentRoom.objects.filter(floor=last_room_obj.floor)
+            for r in same_floor:
+                if not RoomBooking.objects.filter(room=r, date=date, time_slot=time_slot, status='BOOKED').exists():
+                    return r
         except TreatmentRoom.DoesNotExist:
             pass
-    # Any available room
-    for room in TreatmentRoom.objects.all():
-        if not RoomBooking.objects.filter(room=room, date=date, time_slot=time_slot).exists():
-            return room
+    # any available room
+    for r in TreatmentRoom.objects.all():
+        if not RoomBooking.objects.filter(room=r, date=date, time_slot=time_slot, status='BOOKED').exists():
+            return r
     return None
 
-# ---------------- SLOT ALLOCATION ----------------
+# -----------------------
+# Slot allocation (unused in strict preferred-only but kept)
+# -----------------------
 def allocate_treatment_slot(patient_type, therapy_category, used_slots=None):
     general_slots = ["06:30","08:30","10:00","11:30","14:30","16:00","17:30"]
-    if patient_type.upper() == "OP":
+    if patient_type and str(patient_type).upper() == "OP":
         allowed_slots = ["11:30","17:30"]
-    elif patient_type.upper() == "IP":
+    elif patient_type and str(patient_type).upper() == "IP":
         allowed_slots = ["06:30","08:30","10:00","14:30","16:00"]
     else:
         allowed_slots = general_slots
-    if therapy_category and therapy_category.lower() in ["hard","special"]:
+    if therapy_category and str(therapy_category).lower() in ["hard","special"]:
         allowed_slots = [s for s in general_slots if s not in ["11:30","17:30"]]
-
-    # Remove used slots for the patient
     if used_slots:
-        used_slot_strs = [s.start_time.strftime("%H:%M") for s in used_slots]
+        used_slot_strs = [getattr(s, 'start_time').strftime("%H:%M") for s in used_slots if getattr(s, 'start_time', None)]
         allowed_slots = [s for s in allowed_slots if s not in used_slot_strs]
+    return allowed_slots[0] if allowed_slots else None
 
-    if not allowed_slots:
-        return None
-    return allowed_slots[0]
-
-# ---------------- THERAPIST ALLOCATION ----------------
+# -----------------------
+# Therapist allocation
+# -----------------------
 def allocate_therapists(date, time_slot, therapy_requirements, last_therapists=None, needs_bathing=False):
+    """
+    Return list of TherapistMaster instances fulfilling therapy_requirements for given date+time_slot.
+
+    This version treats a therapist as 'on leave' if either:
+      - TherapistLeaveMaster indicates leave for the weekday (recurring leaves), OR
+      - EmergencyLeave contains a row covering the date (from_date <= date <= to_date) that either:
+          * has therapist FK pointing to the therapist, or
+          * has employee_code matching TherapistMaster.employee_code (if that field exists)
+    Blocking: TherapistBooking with status='BOOKED' blocks.
+    """
+    from masters.models import TherapistMaster, TherapistLeaveMaster, EmergencyLeave
+    from Patient.models import TherapistBooking
+
     day_of_week = date.weekday()
     allocated = []
+
+    # Build grade_map expected by allocator
     grade_map = {
-        "Super Senior Therapist": therapy_requirements.get("super_senior",0),
-        "Senior Therapist": therapy_requirements.get("senior",0),
-        "Junior Therapist": therapy_requirements.get("junior",0),
-        "Trainee Therapist": therapy_requirements.get("trainee",0)
+        "Super Senior Therapist": therapy_requirements.get("super_senior", 0),
+        "Senior Therapist": therapy_requirements.get("senior", 0),
+        "Junior Therapist": therapy_requirements.get("junior", 0),
+        "Trainee Therapist": therapy_requirements.get("trainee", 0)
     }
-    # Use last therapists
+
+    # Preload emergency leaves overlapping the date to avoid per-therapist queries
+    # We'll build two quick lookup sets:
+    #  - emergency_leave_therapist_ids: therapist FK ids present in EmergencyLeave covering date
+    #  - emergency_leave_employee_codes: employee_code values present in EmergencyLeave covering date
+    try:
+        em_leaves_qs = EmergencyLeave.objects.filter(from_date__lte=date, to_date__gte=date)
+        emergency_leave_therapist_ids = set(em_leaves_qs.exclude(therapist__isnull=True).values_list('therapist_id', flat=True))
+        emergency_leave_employee_codes = set(em_leaves_qs.exclude(employee_code__isnull=True).values_list('employee_code', flat=True))
+    except Exception:
+        # If EmergencyLeave model or query fails, fall back to empty sets
+        emergency_leave_therapist_ids = set()
+        emergency_leave_employee_codes = set()
+
+    # Helper to decide if a therapist is on leave (recurring or emergency)
+    def therapist_on_leave(t: TherapistMaster):
+        # 1) recurring leave (weekday)
+        if TherapistLeaveMaster.objects.filter(therapist=t, leave_day=day_of_week).exists():
+            return True
+        # 2) emergency leave via FK
+        if getattr(t, 'id', None) in emergency_leave_therapist_ids:
+            return True
+        # 3) emergency leave via employee_code mapping (if TherapistMaster has employee_code)
+        emp_code = getattr(t, 'employee_code', None)
+        if emp_code and emp_code in emergency_leave_employee_codes:
+            return True
+        return False
+
+    # Use last therapists first (preserve your existing logic)
     if last_therapists:
         for code in last_therapists:
             try:
-                t = Therapist.objects.get(therapist_code=code)
-                if grade_map.get(t.therapist_grade,0) > 0 and not TherapistLeave.objects.filter(therapist=t, leave_day=day_of_week).exists():
-                    if not TherapistBooking.objects.filter(therapist=t,date=date,time_slot=time_slot).exists():
-                        allocated.append(t)
-                        grade_map[t.therapist_grade]-=1
-            except Therapist.DoesNotExist:
+                t = TherapistMaster.objects.get(therapist_code=code)
+            except TherapistMaster.DoesNotExist:
                 continue
-    # Allocate new therapists
-    for grade,count in grade_map.items():
-        if count<=0: continue
-        candidates = Therapist.objects.filter(therapist_grade=grade)
-        if needs_bathing:
-            candidates = candidates.filter(is_bathing_therapist=True)
-        candidates = [t for t in candidates if t not in allocated and not TherapistLeave.objects.filter(therapist=t, leave_day=day_of_week).exists()]
-        for t in candidates:
-            if not TherapistBooking.objects.filter(therapist=t,date=date,time_slot=time_slot).exists():
+
+            # grade must still be required
+            if grade_map.get(t.therapist_grade, 0) > 0:
+                # skip if on leave (recurring or emergency)
+                if therapist_on_leave(t):
+                    continue
+                # skip if booked at this date+slot
+                if TherapistBooking.objects.filter(therapist=t, date=date, time_slot=time_slot, status='BOOKED').exists():
+                    continue
                 allocated.append(t)
-                count-=1
-            if count<=0:
+                grade_map[t.therapist_grade] -= 1
+
+    # Allocate new therapists per-grade
+    for grade, needed in list(grade_map.items()):
+        if needed <= 0:
+            continue
+        # base queryset for grade
+        candidates_qs = TherapistMaster.objects.filter(therapist_grade=grade)
+        if needs_bathing:
+            candidates_qs = candidates_qs.filter(is_bathing_therapist=True)
+
+        # iterate candidates avoiding DB hits inside loop (we still query leave/bookings per therapist, but leave checks are fast due to prefetch)
+        for t in candidates_qs:
+            if t in allocated:
+                continue
+            if therapist_on_leave(t):
+                continue
+            # check booked (BOOKED blocks)
+            if TherapistBooking.objects.filter(therapist=t, date=date, time_slot=time_slot, status='BOOKED').exists():
+                continue
+            # accept therapist
+            allocated.append(t)
+            needed -= 1
+            if needed <= 0:
                 break
+
     return allocated
 
-# ---------------- MAIN FUNCTION ----------------
-def expand_therapies_for_visit(visit_id):
-    try:
-        visit = Visit.objects.get(pk=visit_id)
-    except Visit.DoesNotExist:
-        return {"error": f"Visit id {visit_id} not found."}
+# -----------------------
+# Main: strict preferred-slot-only allocation
+# -----------------------
+def allocate_for_allocation_date_preferred_only(therapy_allocation_id, target_date, create_bookings=True):
+    """
+    Strict preferred-slot-only allocation using Booking rows.
+    Returns list of task dicts (one per Booking processed).
+    """
+    # normalize target_date
+    if isinstance(target_date, str):
+        try:
+            target_date = datetime.strptime(target_date, "%Y-%m-%d").date()
+        except Exception:
+            return {"error": f"Invalid date format: {target_date}. Use YYYY-MM-DD."}
 
-    patient_id = visit.patient_id
-    last_allocation = {}
-    if visit.repeated_status and visit.repeated_status.lower()=="yes":
-        last_allocation = get_last_patient_allocation(visit.patient_id)
+    # Defensive imports (model names per your schema)
+    from Sheduling.models import TherapyAllocation, Booking
+    from Patient.models import TherapistBooking, RoomBooking, AllocationAttempt
+    # Slot model used by Booking is masters.SlotMaster
+    from masters.models import SlotMaster
 
-    used_slots_per_date = {}  # Track used slots per patient per date
-    tasks=[]
+    allocation = TherapyAllocation.objects.filter(pk=therapy_allocation_id).first()
+    if not allocation:
+        return {"error": f"TherapyAllocation id {therapy_allocation_id} not found."}
 
-    for therapy in visit.therapies.all():
-        for dt in daterange(therapy.from_date, therapy.to_date):
-            therapy_req = therapist_requirements(therapy)
+    bookings_qs = Booking.objects.filter(allocation_id=therapy_allocation_id, date=target_date)
+    if not bookings_qs.exists():
+        return {"error": f"No Booking rows found for allocation {therapy_allocation_id} on {target_date.isoformat()}."}
 
-            # Get already used slots for this patient/date
-            used_slots = used_slots_per_date.get(dt, [])
+    tasks = []
+    used_slots = []   # canonical slot instances used in this run
+    any_success = False
+    patient_id = getattr(allocation.patient, 'id', None)
 
-            # Allocate a slot avoiding conflicts
-            assigned_slot_str = allocate_treatment_slot(visit.is_ip_or_op, therapy_req["therapy_category"], used_slots)
-            if not assigned_slot_str:
-                print(f"No available slot for patient {patient_id} on {dt}")
-                continue
+    for booking in bookings_qs:
+        booking_id = booking.pk
+        therapy_name = allocation.therapy_name
 
-            assigned_time = datetime.strptime(assigned_slot_str, "%H:%M").time()
-            time_slot, _ = TimeSlot.objects.get_or_create(start_time=assigned_time)
+        # Preferred slot (strict)
+        pref_slot = getattr(booking, 'timeslot', None) or getattr(allocation, 'timeslot', None)
+        requested_slot_value = None
+        if pref_slot:
+            st = getattr(pref_slot, 'start_time', None)
+            if st:
+                try:
+                    requested_slot_value = st.strftime("%H:%M")
+                except Exception:
+                    requested_slot_value = None
 
-            # Room allocation
-            room_obj = None
-            if therapy_needs_room(therapy):
-                room_obj = allocate_treatment_room(dt, time_slot, last_allocation.get("last_t_room"))
-
-            # Therapist allocation
-            therapists = allocate_therapists(dt, time_slot, therapy_req, last_allocation.get("last_therapist_codes"), therapy_needs_bath(therapy))
-
-            # Save RoomBooking
-            if room_obj:
-                RoomBooking.objects.get_or_create(room=room_obj, date=dt, time_slot=time_slot, therapy_name=therapy.therapy_name, patient_id=patient_id)
-
-            # Save TherapistBooking
-            for t in therapists:
-                TherapistBooking.objects.get_or_create(therapist=t, date=dt, time_slot=time_slot, therapy_name=therapy.therapy_name, patient_id=patient_id)
-
-            # Save PatientHistory
-            # PatientHistory.objects.create(
-            #     preg_no=visit.patient_id,
-            #     pat_name=getattr(visit,"patient_name",str(visit.patient_name)),
-            #     date=dt,
-            #     therapist_name=", ".join([t.therapist_name for t in therapists]),
-            #     therapist_code=", ".join([t.therapist_code for t in therapists]),
-            #     room_no=room_obj.room_no if room_obj else None,
-            #     treatment=therapy.therapy_name,
-            #     t_room=room_obj.room_no if room_obj else None
-            # )
-
-            # Mark this slot as used for the patient
-            used_slots.append(time_slot)
-            used_slots_per_date[dt] = used_slots
-
+        if not pref_slot:
+            # fail: no preferred slot present
+            reason = "no_preferred_slot"
+            if AllocationAttempt:
+                try:
+                    AllocationAttempt.objects.create(
+                        visit=None,
+                        therapy=None,
+                        date=target_date,
+                        requested_time_slot=None,
+                        requested_time_slot_value='',
+                        status='FAILED',
+                        reason=reason,
+                        extra={"booking_id": booking_id}
+                    )
+                except Exception:
+                    pass
             tasks.append({
-                "date": dt.isoformat(),
-                "therapy_name": therapy.therapy_name,
-                "slot": assigned_slot_str,
-                "room_no": room_obj.room_no if room_obj else None,
-                "therapists": [t.therapist_code for t in therapists]
+                "booking_id": booking_id,
+                "allocation_id": therapy_allocation_id,
+                "date": target_date.isoformat(),
+                "therapy_name": therapy_name,
+                "slot": None,
+                "status": "FAILED",
+                "reason": reason,
+                "room_no": getattr(booking.room, 'room_no', None) if getattr(booking, 'room', None) else None,
+                "therapists": []
             })
+            continue
+
+        # Map to canonical slot expected by TherapistBooking (matching by start_time)
+        canonical_slot = map_to_canonical_slot(pref_slot) or pref_slot
+
+        # 1) patient already booked check (RoomBooking/TherapistBooking)
+        patient_already_booked = False
+        try:
+            patient_already_booked = (
+                RoomBooking.objects.filter(patient_id=patient_id, date=target_date, time_slot=canonical_slot, status__in=['BOOKED','scheduled']).exclude(pk=booking.pk).exists()
+                or TherapistBooking.objects.filter(patient_id=patient_id, date=target_date, time_slot=canonical_slot, status='BOOKED').exclude(pk=booking.pk).exists()
+            )
+        except Exception:
+            # fallback: match on start_time
+            try:
+                slot_start = getattr(pref_slot, 'start_time', None)
+                if slot_start:
+                    patient_already_booked = (
+                        RoomBooking.objects.filter(patient_id=patient_id, date=target_date, time_slot__start_time=slot_start, status__in=['BOOKED','scheduled']).exclude(pk=booking.pk).exists()
+                        or TherapistBooking.objects.filter(patient_id=patient_id, date=target_date, time_slot__start_time=slot_start, status='BOOKED').exclude(pk=booking.pk).exists()
+                    )
+            except Exception:
+                patient_already_booked = False
+
+        if patient_already_booked:
+            reason = "patient_already_has_booking"
+            if AllocationAttempt:
+                try:
+                    AllocationAttempt.objects.create(
+                        visit=None,
+                        therapy=None,
+                        date=target_date,
+                        requested_time_slot=canonical_slot,
+                        requested_time_slot_value=requested_slot_value or '',
+                        status='FAILED',
+                        reason=reason,
+                        extra={"booking_id": booking_id}
+                    )
+                except Exception:
+                    pass
+            tasks.append({
+                "booking_id": booking_id,
+                "allocation_id": therapy_allocation_id,
+                "date": target_date.isoformat(),
+                "therapy_name": therapy_name,
+                "slot": requested_slot_value,
+                "status": "FAILED",
+                "reason": reason,
+                "room_no": getattr(booking.room, 'room_no', None) if getattr(booking, 'room', None) else None,
+                "therapists": []
+            })
+            continue
+
+        # 2) in-run used slot check
+        if any(getattr(s, 'start_time', None) == getattr(canonical_slot, 'start_time', None) for s in used_slots):
+            reason = "slot_already_used_in_run"
+            if AllocationAttempt:
+                try:
+                    AllocationAttempt.objects.create(
+                        visit=None,
+                        therapy=None,
+                        date=target_date,
+                        requested_time_slot=canonical_slot,
+                        requested_time_slot_value=requested_slot_value or '',
+                        status='FAILED',
+                        reason=reason,
+                        extra={"booking_id": booking_id}
+                    )
+                except Exception:
+                    pass
+            tasks.append({
+                "booking_id": booking_id,
+                "allocation_id": therapy_allocation_id,
+                "date": target_date.isoformat(),
+                "therapy_name": therapy_name,
+                "slot": requested_slot_value,
+                "status": "FAILED",
+                "reason": reason,
+                "room_no": getattr(booking.room, 'room_no', None) if getattr(booking, 'room', None) else None,
+                "therapists": []
+            })
+            continue
+
+        # 3) therapist requirements and flags
+        try:
+            therapy_req = therapist_requirements(allocation)
+        except Exception:
+            therapy_req = {"total": 1, "therapy_category": None}
+
+        needs_room_flag = therapy_needs_room(allocation) if therapy_needs_room else bool(getattr(booking, 'room', None))
+        needs_bath_flag = therapy_needs_bath(allocation) if therapy_needs_bath else False
+
+        # 4) allocate therapists for this canonical slot only
+        try:
+            candidate_therapists = allocate_therapists(target_date, canonical_slot, therapy_req, None, needs_bath_flag)
+        except Exception:
+            candidate_therapists = []
+
+        req_total = int(therapy_req.get("total", 1) or 1)
+        if len(candidate_therapists) < req_total:
+            reason = "insufficient_therapists_available"
+            if AllocationAttempt:
+                try:
+                    AllocationAttempt.objects.create(
+                        visit=None,
+                        therapy=None,
+                        date=target_date,
+                        requested_time_slot=canonical_slot,
+                        requested_time_slot_value=requested_slot_value or '',
+                        status='FAILED',
+                        reason=reason,
+                        extra={"required": req_total, "found": len(candidate_therapists), "booking_id": booking_id}
+                    )
+                except Exception:
+                    pass
+            tasks.append({
+                "booking_id": booking_id,
+                "allocation_id": therapy_allocation_id,
+                "date": target_date.isoformat(),
+                "therapy_name": therapy_name,
+                "slot": requested_slot_value,
+                "status": "FAILED",
+                "reason": reason,
+                "room_no": getattr(booking.room, 'room_no', None) if getattr(booking, 'room', None) else None,
+                "therapists": [getattr(t,'therapist_code',str(t)) for t in candidate_therapists]
+            })
+            continue
+
+        # 5) room allocation if needed
+        room_candidate = getattr(booking, 'room', None)
+        if needs_room_flag and not room_candidate:
+            try:
+                room_candidate = allocate_treatment_room(target_date, canonical_slot, None)
+            except Exception:
+                room_candidate = None
+
+        if needs_room_flag and not room_candidate:
+            reason = "no_room_available"
+            if AllocationAttempt:
+                try:
+                    AllocationAttempt.objects.create(
+                        visit=None,
+                        therapy=None,
+                        date=target_date,
+                        requested_time_slot=canonical_slot,
+                        requested_time_slot_value=requested_slot_value or '',
+                        status='FAILED',
+                        reason=reason,
+                        extra={"booking_id": booking_id}
+                    )
+                except Exception:
+                    pass
+            tasks.append({
+                "booking_id": booking_id,
+                "allocation_id": therapy_allocation_id,
+                "date": target_date.isoformat(),
+                "therapy_name": therapy_name,
+                "slot": requested_slot_value,
+                "status": "FAILED",
+                "reason": reason,
+                "room_no": None,
+                "therapists": [getattr(t,'therapist_code',str(t)) for t in candidate_therapists]
+            })
+            continue
+
+        # 6) create bookings atomically
+        try:
+            with transaction.atomic():
+                rb_obj = None
+                if needs_room_flag and create_bookings:
+                    rb_obj, rb_created = create_room_booking_safe(room_candidate, target_date, canonical_slot, therapy_name, patient_id, None)
+                    if not rb_created:
+                        raise RuntimeError("room_already_booked")
+                elif needs_room_flag:
+                    rb_obj = booking if getattr(booking, 'room', None) else None
+
+                tb_objs = []
+                for t in candidate_therapists[:req_total]:
+                    if create_bookings:
+                        tb_obj, tb_created = create_therapist_booking_safe(t, target_date, canonical_slot, therapy_name, patient_id, None)
+                        if not tb_created:
+                            raise RuntimeError(f"therapist_already_booked:{getattr(t,'therapist_code',str(t))}")
+                        tb_objs.append(tb_obj)
+                    else:
+                        tb_objs.append(SimpleNamespace(therapist_code=getattr(t, 'therapist_code', str(t))))
+
+                # success audit
+                if AllocationAttempt:
+                    try:
+                        AllocationAttempt.objects.create(
+                            visit=None,
+                            therapy=None,
+                            date=target_date,
+                            requested_time_slot=canonical_slot,
+                            requested_time_slot_value=requested_slot_value or '',
+                            status='SUCCESS',
+                            reason='preferred_slot_booked',
+                            extra={
+                                "room_no": getattr(room_candidate, 'room_no', None) if room_candidate else None,
+                                "therapists": [getattr(t,'therapist_code',str(t)) for t in candidate_therapists[:req_total]],
+                                "booking_id": booking_id
+                            }
+                        )
+                    except Exception:
+                        pass
+
+                # mark used slot for in-run check
+                used_slots.append(canonical_slot)
+
+                # update Booking record
+                try:
+                    # preserve booking.timeslot if it existed; otherwise set canonical_slot
+                    booking.timeslot = getattr(booking, 'timeslot', None) or canonical_slot
+                    booking.room = room_candidate or booking.room
+                    booking.status = 'scheduled'
+                    booking.save(update_fields=['timeslot','room','status','updated_at'])
+                except Exception:
+                    pass
+
+                tasks.append({
+                    "booking_id": booking_id,
+                    "allocation_id": therapy_allocation_id,
+                    "date": target_date.isoformat(),
+                    "therapy_name": therapy_name,
+                    "slot": requested_slot_value,
+                    "status": "BOOKED",
+                    "reason": None,
+                    "room_no": getattr(room_candidate, "room_no", None) if room_candidate else getattr(booking.room, "room_no", None) if getattr(booking, "room", None) else None,
+                    "therapists": [getattr(t,'therapist_code',str(t)) for t in candidate_therapists[:req_total]]
+                })
+                any_success = True
+
+        except RuntimeError as rte:
+            reason = str(rte)
+            if AllocationAttempt:
+                try:
+                    AllocationAttempt.objects.create(
+                        visit=None,
+                        therapy=None,
+                        date=target_date,
+                        requested_time_slot=canonical_slot,
+                        requested_time_slot_value=requested_slot_value or '',
+                        status='FAILED',
+                        reason=reason,
+                        extra={"booking_id": booking_id}
+                    )
+                except Exception:
+                    pass
+            tasks.append({
+                "booking_id": booking_id,
+                "allocation_id": therapy_allocation_id,
+                "date": target_date.isoformat(),
+                "therapy_name": therapy_name,
+                "slot": requested_slot_value,
+                "status": "FAILED",
+                "reason": reason,
+                "room_no": getattr(room_candidate, "room_no", None) if room_candidate else None,
+                "therapists": [getattr(t,'therapist_code',str(t)) for t in candidate_therapists]
+            })
+            continue
+
+        except Exception as exc:
+            reason = f"exception:{str(exc)}"
+            if AllocationAttempt:
+                try:
+                    AllocationAttempt.objects.create(
+                        visit=None,
+                        therapy=None,
+                        date=target_date,
+                        requested_time_slot=canonical_slot,
+                        requested_time_slot_value=requested_slot_value or '',
+                        status='FAILED',
+                        reason=reason,
+                        extra={"booking_id": booking_id}
+                    )
+                except Exception:
+                    pass
+            tasks.append({
+                "booking_id": booking_id,
+                "allocation_id": therapy_allocation_id,
+                "date": target_date.isoformat(),
+                "therapy_name": therapy_name,
+                "slot": requested_slot_value,
+                "status": "FAILED",
+                "reason": reason,
+                "room_no": getattr(room_candidate, "room_no", None) if room_candidate else None,
+                "therapists": []
+            })
+            continue
+
+    # update allocation header status
+    try:
+        allocation.status = 'allocated' if any_success else 'failed'
+        allocation.save(update_fields=['status'])
+    except Exception:
+        pass
+
     return tasks
 
-# ---------------- DEMO ----------------
-if __name__=="__main__":
-    visit_id = int(input("Enter visit id: "))
-    tasks = expand_therapies_for_visit(visit_id)
-    if "error" in tasks:
-        print(tasks["error"])
-    else:
-        print(f"\nExpanded {len(tasks)} tasks:\n")
-        for t in tasks:
-            print(f"Date: {t['date']} | Therapy: {t['therapy_name']} | Slot: {t['slot']} | Room: {t['room_no']} | Therapists: {', '.join(t['therapists'])}")
+# -----------------------
+# Optional quick runner
+# -----------------------
+if __name__ == "__main__":
+    # Quick CLI runner when executed directly (ensure DJANGO_SETTINGS_MODULE is set)
+    import os
+    allocation_id = input("TherapyAllocation id: ").strip()
+    date_str = input("Date (YYYY-MM-DD): ").strip()
+    try:
+        res = allocate_for_allocation_date_preferred_only(int(allocation_id), date_str, create_bookings=True)
+        print(res)
+    except Exception as e:
+        print("Error:", e)

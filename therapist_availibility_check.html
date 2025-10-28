@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Therapist Availability Dashboard</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <style>
+    :root {
+      --primary: #4361ee;
+      --primary-light: #4895ef;
+      --secondary: #3f37c9;
+      --success: #4cc9f0;
+      --light: #f8f9fa;
+      --dark: #212529;
+      --gray: #6c757d;
+      --light-gray: #e9ecef;
+      --border-radius: 12px;
+      --box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+      --transition: all 0.3s ease;
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      line-height: 1.6;
+      color: var(--dark);
+      background: linear-gradient(135deg, #f5f7fa 0%, #e4edf5 100%);
+      min-height: 100vh;
+      padding: 20px;
+    }
+
+    .container {
+      max-width: 1000px;
+      margin: 0 auto;
+    }
+
+    header {
+      text-align: center;
+      margin-bottom: 30px;
+      padding: 20px;
+    }
+
+    .logo {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 15px;
+      margin-bottom: 10px;
+    }
+
+    .logo i {
+      font-size: 2.5rem;
+      color: var(--primary);
+    }
+
+    h1 {
+      font-size: 2.5rem;
+      color: var(--dark);
+      margin-bottom: 10px;
+    }
+
+    .subtitle {
+      font-size: 1.1rem;
+      color: var(--gray);
+      max-width: 600px;
+      margin: 0 auto;
+    }
+
+    .dashboard {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 30px;
+    }
+
+    @media (max-width: 768px) {
+      .dashboard {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .card {
+      background: white;
+      border-radius: var(--border-radius);
+      box-shadow: var(--box-shadow);
+      overflow: hidden;
+      transition: var(--transition);
+    }
+
+    .card:hover {
+      transform: translateY(-5px);
+      box-shadow: 0 8px 20px rgba(0, 0, 0, 0.12);
+    }
+
+    .card-header {
+      background: var(--primary);
+      color: white;
+      padding: 20px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .card-header i {
+      font-size: 1.5rem;
+    }
+
+    .card-body {
+      padding: 25px;
+    }
+
+    .form-group {
+      margin-bottom: 20px;
+    }
+
+    label {
+      display: block;
+      margin-bottom: 8px;
+      font-weight: 600;
+      color: var(--dark);
+    }
+
+    .form-control {
+      width: 100%;
+      padding: 12px 15px;
+      border: 1px solid var(--light-gray);
+      border-radius: 8px;
+      font-size: 1rem;
+      transition: var(--transition);
+    }
+
+    .form-control:focus {
+      outline: none;
+      border-color: var(--primary-light);
+      box-shadow: 0 0 0 3px rgba(67, 97, 238, 0.2);
+    }
+
+    .btn {
+      display: inline-block;
+      background: var(--primary);
+      color: white;
+      border: none;
+      padding: 12px 24px;
+      border-radius: 8px;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: var(--transition);
+      text-align: center;
+    }
+
+    .btn:hover {
+      background: var(--secondary);
+      transform: translateY(-2px);
+    }
+
+    .btn i {
+      margin-right: 8px;
+    }
+
+    .result {
+      margin-top: 25px;
+      padding: 20px;
+      border-radius: 8px;
+      background: var(--light);
+      border-left: 4px solid var(--primary);
+    }
+
+    .result h3 {
+      margin-bottom: 15px;
+      color: var(--dark);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .therapist-list {
+      list-style: none;
+    }
+
+    .therapist-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 15px;
+      margin-bottom: 10px;
+      background: white;
+      border-radius: 8px;
+      box-shadow: 0 2px 5px rgba(0, 0, 0, 0.05);
+      transition: var(--transition);
+    }
+
+    .therapist-item:hover {
+      transform: translateX(5px);
+    }
+
+    .therapist-avatar {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      font-weight: bold;
+    }
+
+    .male {
+      background: var(--primary);
+    }
+
+    .female {
+      background: #e91e63;
+    }
+
+    .no-result {
+      text-align: center;
+      padding: 20px;
+      color: var(--gray);
+      font-style: italic;
+    }
+
+    .no-result i {
+      font-size: 2rem;
+      margin-bottom: 10px;
+      display: block;
+      color: var(--light-gray);
+    }
+
+    footer {
+      text-align: center;
+      margin-top: 50px;
+      padding: 20px;
+      color: var(--gray);
+      font-size: 0.9rem;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="logo">
+        <i class="fas fa-user-md"></i>
+        <h1>Therapist Availability Dashboard</h1>
+      </div>
+      <p class="subtitle">Find available therapists and check leave schedules</p>
+    </header>
+
+    <div class="dashboard">
+      <!-- Session 1: Therapist Availability -->
+      <div class="card">
+        <div class="card-header">
+          <i class="fas fa-search"></i>
+          <h2>Find Available Therapists</h2>
+        </div>
+        <div class="card-body">
+          <form id="availabilityForm">
+            <div class="form-group">
+              <label for="date"><i class="far fa-calendar-alt"></i> Date</label>
+              <input type="date" id="date" class="form-control" required>
+            </div>
+            
+            <div class="form-group">
+              <label for="time"><i class="far fa-clock"></i> Time Slot</label>
+              <select id="time" class="form-control" required>
+                <option value="">-- Select Time Slot --</option>
+                <option value="09:00">09:00 AM</option>
+                <option value="10:00">10:00 AM</option>
+                <option value="14:00">02:00 PM</option>
+                <option value="15:00">03:00 PM</option>
+              </select>
+            </div>
+            
+            <div class="form-group">
+              <label for="gender"><i class="fas fa-venus-mars"></i> Gender Preference</label>
+              <select id="gender" class="form-control" required>
+                <option value="">-- Select Gender --</option>
+                <option value="all">All Genders</option>
+                <option value="male">Male</option>
+                <option value="female">Female</option>
+              </select>
+            </div>
+            
+            <button type="button" class="btn" onclick="findAvailability()">
+              <i class="fas fa-search"></i> Check Availability
+            </button>
+          </form>
+          
+          <div class="result" id="availableTherapists">
+            <h3><i class="fas fa-list"></i> Available Therapists</h3>
+            <p class="no-result"><i class="far fa-smile"></i> Select filters and click "Check Availability" to see results</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Session 2: Therapist on Leave -->
+      <div class="card">
+        <div class="card-header">
+          <i class="fas fa-umbrella-beach"></i>
+          <h2>Therapists on Leave</h2>
+        </div>
+        <div class="card-body">
+          <form id="leaveForm">
+            <div class="form-group">
+              <label for="leaveDate"><i class="far fa-calendar-alt"></i> Date</label>
+              <input type="date" id="leaveDate" class="form-control" required>
+            </div>
+            
+            <div class="form-group">
+              <label for="leaveGender"><i class="fas fa-venus-mars"></i> Gender</label>
+              <select id="leaveGender" class="form-control" required>
+                <option value="">-- Select Gender --</option>
+                <option value="all">All Genders</option>
+                <option value="male">Male</option>
+                <option value="female">Female</option>
+              </select>
+            </div>
+            
+            <button type="button" class="btn" onclick="checkLeaves()">
+              <i class="fas fa-search"></i> Check Leaves
+            </button>
+          </form>
+          
+          <div class="result" id="therapistLeaves">
+            <h3><i class="fas fa-list"></i> Therapists on Leave</h3>
+            <p class="no-result"><i class="far fa-smile"></i> Select a date to check who is on leave</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <footer>
+      <p>Therapist Availability Dashboard &copy; 2023 | Designed for Better Patient Care</p>
+    </footer>
+  </div>
+
+  <script>
+    const therapists = [
+      { name: 'Dr. Asha Rao', gender: 'female', available: { '2025-10-25': ['09:00', '14:00'] }, leaves: ['2025-10-30'] },
+      { name: 'Mr. Raj Singh', gender: 'male', available: { '2025-10-25': ['09:00', '13:00'] }, leaves: ['2025-10-26'] },
+      { name: 'Ms. Nina Kapoor', gender: 'female', available: { '2025-10-26': ['09:00', '10:00'] }, leaves: [] },
+      { name: 'Mr. Sameer Patel', gender: 'male', available: { '2025-10-25': ['15:00'] }, leaves: ['2025-10-25'] }
+    ];
+
+    function findAvailability() {
+      const date = document.getElementById('date').value;
+      const time = document.getElementById('time').value;
+      const gender = document.getElementById('gender').value;
+      const resultDiv = document.getElementById('availableTherapists');
+
+      if (!date || !time || !gender) {
+        alert('Please fill all filters');
+        return;
+      }
+
+      const available = therapists.filter(t => 
+        (gender === 'all' || t.gender === gender) && 
+        t.available[date]?.includes(time) &&
+        !t.leaves.includes(date)
+      );
+
+      if (available.length) {
+        resultDiv.innerHTML = `
+          <h3><i class="fas fa-list"></i> Available Therapists</h3>
+          <ul class="therapist-list">
+            ${available.map(t => `
+              <li class="therapist-item">
+                <div class="therapist-avatar ${t.gender}">
+                  ${t.gender === 'male' ? 'M' : 'F'}
+                </div>
+                <div>
+                  <strong>${t.name}</strong><br>
+                  <small>${t.gender === 'male' ? 'Male Therapist' : 'Female Therapist'}</small>
+                </div>
+              </li>
+            `).join('')}
+          </ul>
+        `;
+      } else {
+        resultDiv.innerHTML = `
+          <div class="no-result">
+            <i class="far fa-frown"></i>
+            <p>No therapists available for selected filters.</p>
+          </div>
+        `;
+      }
+    }
+
+    function checkLeaves() {
+      const date = document.getElementById('leaveDate').value;
+      const gender = document.getElementById('leaveGender').value;
+      const resultDiv = document.getElementById('therapistLeaves');
+
+      if (!date || !gender) {
+        alert('Please select both filters');
+        return;
+      }
+
+      const leaves = therapists.filter(t => 
+        (gender === 'all' || t.gender === gender) && 
+        t.leaves.includes(date)
+      );
+
+      if (leaves.length) {
+        resultDiv.innerHTML = `
+          <h3><i class="fas fa-list"></i> Therapists on Leave</h3>
+          <ul class="therapist-list">
+            ${leaves.map(t => `
+              <li class="therapist-item">
+                <div class="therapist-avatar ${t.gender}">
+                  ${t.gender === 'male' ? 'M' : 'F'}
+                </div>
+                <div>
+                  <strong>${t.name}</strong><br>
+                  <small>${t.gender === 'male' ? 'Male Therapist' : 'Female Therapist'}</small>
+                </div>
+              </li>
+            `).join('')}
+          </ul>
+        `;
+      } else {
+        resultDiv.innerHTML = `
+          <div class="no-result">
+            <i class="far fa-smile"></i>
+            <p>No therapists on leave for selected date.</p>
+          </div>
+        `;
+      }
+    }
+
+    // Set default date to today
+    const today = new Date().toISOString().split('T')[0];
+    document.getElementById('date').value = today;
+    document.getElementById('leaveDate').value = today;
+  </script>
+</body>
+</html>

@@ -1,122 +1,85 @@
+#!/usr/bin/env python3
+"""
+data_push_slots.py
+
+Deletes all existing SlotMaster rows and recreates them
+using fixed time slots (24-hour format, as per your screenshot).
+
+Usage:
+    python data_push_slots.py
+"""
 import os
-import django
-from datetime import timedelta
+import sys
+from pathlib import Path
+from datetime import time
 
-# ---------------- SETUP DJANGO ----------------
-os.environ.setdefault("DJANGO_SETTINGS_MODULE", "AVCRI.settings")  # change to your project
-django.setup()
+# --- Django setup ---
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
 
-# ---------------- IMPORT MODELS ----------------
-from MySql_Data_pull.models import Visit, store_Therapy
-from Patient.models import TherapyDetails  # update app name
+if not os.environ.get('DJANGO_SETTINGS_MODULE'):
+    # auto-detect project folder with settings.py
+    for item in HERE.iterdir():
+        if item.is_dir() and (item / "settings.py").exists():
+            os.environ.setdefault("DJANGO_SETTINGS_MODULE", f"{item.name}.settings")
+            break
 
-# ---------------- HELPERS ----------------
-def daterange(start_date, end_date):
-    """Yield each date from start_date to end_date inclusive."""
-    d = start_date
-    while d <= end_date:
-        yield d
-        d += timedelta(days=1)
+os.environ.setdefault("DJANGO_ALLOW_ASYNC_UNSAFE", "true")
 
-# ---------------- CACHING THERAPY DETAILS ----------------
-therapy_cache = {}
-def get_therapy_details(therapy_name):
-    name = therapy_name.strip().lower()
-    if name in therapy_cache:
-        return therapy_cache[name]
-    try:
-        details = TherapyDetails.objects.get(therapy_name__iexact=therapy_name)
-        therapy_cache[name] = details
-        return details
-    except TherapyDetails.DoesNotExist:
-        therapy_cache[name] = None
-        return None
+try:
+    import django
+    django.setup()
+    from django.apps import apps
+except Exception as e:
+    print("❌ Django setup failed. Make sure this file is next to manage.py and virtualenv is active.")
+    raise
 
-# ---------------- THERAPY ATTRIBUTE HELPERS ----------------
-def therapy_needs_room(therapy_obj):
-    details = get_therapy_details(therapy_obj.therapy_name)
-    return details and details.treatment_room_required and details.treatment_room_required.lower() == "yes"
+# --- Locate model ---
+SlotMaster = None
+for model in apps.get_models():
+    if model.__name__ == "SlotMaster":
+        SlotMaster = model
+        break
 
-def therapy_needs_bath(therapy_obj):
-    details = get_therapy_details(therapy_obj.therapy_name)
-    return details and details.bathing_required and details.bathing_required.lower() == "yes"
+if not SlotMaster:
+    raise RuntimeError("Could not find SlotMaster model. Check your model name and app registration.")
 
-def therapist_requirements(therapy_obj):
-    details = get_therapy_details(therapy_obj.therapy_name)
-    if not details:
-        return {
-            "super_senior": 0,
-            "senior": 0,
-            "junior": 0,
-            "trainee": 0,
-            "total": 0,
-            "therapy_code": None,
-            "therapy_category": None  # added
-        }
-    return {
-        "super_senior": details.no_of_super_senior_therapist,
-        "senior": details.no_of_senior_therapist,
-        "junior": details.no_of_junior_therapist,
-        "trainee": details.no_of_trainee_therapist,
-        "total": details.total_no_of_therapist,
-        "therapy_code": details.therapy_code,
-        "therapy_category": details.therapy_category  # added
-    }
+print("✅ Using model:", SlotMaster)
 
-# ---------------- CORE FUNCTION ----------------
-def expand_therapies_for_visit(visit_id):
-    try:
-        visit = Visit.objects.get(pk=visit_id)
-    except Visit.DoesNotExist:
-        return {"error": f"Visit id {visit_id} not found."}
+# --- Define slot data (24-hour format) ---
+SLOTS = [
+    (1, time(6, 30, 0),  time(8, 0, 0)),   # 06:30–08:00
+    (2, time(8, 30, 0),  time(10, 0, 0)),  # 08:30–10:00
+    (3, time(10, 0, 0),  time(11, 30, 0)), # 10:00–11:30
+    (4, time(11, 30, 0), time(13, 0, 0)),  # 11:30–13:00
+    (5, time(14, 30, 0), time(16, 0, 0)),  # 14:30–16:00
+    (6, time(16, 0, 0),  time(17, 30, 0)), # 16:00–17:30
+    (7, time(17, 30, 0), time(19, 0, 0)),  # 17:30–19:00
+]
 
-    patient_id = visit.patient_id
-    patient_common = {
-        "is_ip_or_op": visit.is_ip_or_op,
-        "is_vip": visit.is_vip,
-        "repeated_status": visit.repeated_status
-    }
+# --- Main logic ---
+def main():
+    print("\n⚙️  Deleting existing slots...")
+    count = SlotMaster.objects.count()
+    SlotMaster.objects.all().delete()
+    print(f"🗑️  Deleted {count} existing SlotMaster records.\n")
 
-    tasks = []
-    therapies = list(visit.therapies.all())  # assuming related_name='therapies'
-    if not therapies:
-        return {"error": "No therapies found for visit."}
+    created = []
+    for num, start, end in SLOTS:
+        obj = SlotMaster.objects.create(
+            slot_number=num,
+            start_time=start,
+            end_time=end,
+            slot_name=f"Slot {num}",
+            is_active=True
+        )
+        created.append(obj)
 
-    for therapy in therapies:
-        if not therapy.from_date or not therapy.to_date:
-            continue  # skip invalid ranges
+    print(f"✅ Inserted {len(created)} new slots:\n")
+    for s in created:
+        print(f"  • Slot {s.slot_number}: {s.start_time} - {s.end_time}")
 
-        for dt in daterange(therapy.from_date, therapy.to_date):
-            req = therapist_requirements(therapy)
-            tasks.append({
-    "visit_id": visit.id,
-    "patient_id": patient_id,
-    **patient_common,
-    "therapy_id": therapy.id,
-    "therapy_name": therapy.therapy_name,
-    "therapy_code": req["therapy_code"],
-    "therapy_category": req["therapy_category"],  # added
-    "date": dt.isoformat(),
-    "needs_room": therapy_needs_room(therapy),
-    "needs_bath": therapy_needs_bath(therapy),
-    "therapist_requirements": {
-        "super_senior": req["super_senior"],
-        "senior": req["senior"],
-        "junior": req["junior"],
-        "trainee": req["trainee"],
-        "total": req["total"],
-    }
-})
+    print("\n🎯 SlotMaster table successfully updated.")
 
-    return tasks
-
-# ---------------- DEMO ----------------
 if __name__ == "__main__":
-    visit_id = int(input("Enter visit id: "))
-    tasks = expand_therapies_for_visit(visit_id)
-    if "error" in tasks:
-        print(tasks["error"])
-    else:
-        print(f"Expanded {len(tasks)} tasks:")
-        for t in tasks[:20]:  # show first 20
-            print(t)
+    main()
