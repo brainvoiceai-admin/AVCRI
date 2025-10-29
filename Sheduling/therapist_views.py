@@ -65,7 +65,27 @@ def get_therapist_data_api(request):
                 
                 # Format therapy name with bathing indicator if needed
                 therapy_name = allocation.therapy_name
-                if 'bathing' in therapy_name.lower() or 'bath' in therapy_name.lower():
+                
+                # Check if this therapist is assigned as bathing therapist for this therapy
+                is_bathing_assignment = False
+                try:
+                    from masters.models import TherapyMaster
+                    therapy_details = TherapyMaster.objects.filter(therapy_name__iexact=allocation.therapy_name).first()
+                    if therapy_details and str(therapy_details.bathing_required).lower() == 'yes':
+                        # Check if this therapist is the bathing therapist for this booking
+                        from Patient.models import TherapistBooking
+                        therapist_booking = TherapistBooking.objects.filter(
+                            therapist=therapist,
+                            date=booking.booking_date,
+                            time_slot=booking.time_slot,
+                            is_bathing=True
+                        ).first()
+                        if therapist_booking:
+                            is_bathing_assignment = True
+                except Exception as e:
+                    print(f"Error checking bathing assignment: {e}")
+                
+                if is_bathing_assignment:
                     therapy_name = f"{therapy_name} (bathing)"
                 
                 session_data = {

@@ -63,6 +63,23 @@ def try_enable_django(settings_module: str | None) -> bool:
         DJANGO_AVAILABLE = False
         return False
 
+def enable_django_for_scheduling():
+    """
+    Enable Django specifically for scheduling operations.
+    This function should be called from Django views.
+    """
+    global DJANGO_AVAILABLE, EmergencyLeave, TherapistMaster
+    
+    if not DJANGO_AVAILABLE:
+        try:
+            from masters.models import EmergencyLeave, TherapistMaster
+            DJANGO_AVAILABLE = True
+            return True
+        except Exception as e:
+            print(f"Failed to import Django models: {e}")
+            return False
+    return True
+
 # --- HRMS helpers ---
 def _extract_employee_code(rec: dict) -> str | None:
     if not isinstance(rec, dict):

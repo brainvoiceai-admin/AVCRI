@@ -2,6 +2,7 @@ from django.conf import settings
 from django.db import models
 from django.utils import timezone
 from Patient.models import TimeSlot,TreatmentRoom,Therapist
+from django.utils.translation import gettext_lazy as _
 # -------------------------
 # Local patient snapshot
 # -------------------------
@@ -538,3 +539,27 @@ class PrescriptionDispatch(models.Model):
     
     def __str__(self):
         return f"{self.prescription_scheduling.patient.pat_name} - {self.department} - {self.dispatched_at}"
+
+
+# -----------------------------------------------------------------------------
+# Final Schedule Run marker (per-date)
+# -----------------------------------------------------------------------------
+class FinalScheduleRun(models.Model):
+    class Status(models.TextChoices):
+        SUCCESS = "success", _("Success")
+        FAILED = "failed", _("Failed")
+
+    run_date = models.DateField(unique=True, db_index=True)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.SUCCESS)
+    ran_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL)
+    ran_at = models.DateTimeField(auto_now_add=True)
+    message = models.TextField(blank=True)
+    stats = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ["-run_date"]
+        verbose_name = "Final Schedule Run"
+        verbose_name_plural = "Final Schedule Runs"
+
+    def __str__(self) -> str:
+        return f"FinalScheduleRun {self.run_date} ({self.status})"

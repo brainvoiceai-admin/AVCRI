@@ -6,6 +6,7 @@ from django.http import JsonResponse, HttpResponseBadRequest
 from django.apps import apps
 from django.db.models import Q
 from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.http import require_http_methods
 from django.utils.dateparse import parse_date
 from django.utils import timezone
 from django.db import transaction, IntegrityError
@@ -542,6 +543,39 @@ def therapy_entry(request):
                             a = BookingAssignment.objects.create(booking=b, booking_item=None, therapist=t, role=getattr(t,'therapist_grade',''), assigned_for='booking', status='assigned')
                             assigns.append(getattr(t,'therapist_code',''))
                         bookings_created.append({'date': single_date.isoformat(), 'booking_id': b.pk, 'items_count': len(created_items), 'therapists': assigns})
+
+                    # Auto-schedule for any dates within the range that already had Final Schedule run
+                    try:
+                        from .models import FinalScheduleRun
+                        from final_allocation import expand_therapies_for_visit
+
+                        any_succeeded = False
+                        for d in daterange(fdate, tdate):
+                            if FinalScheduleRun.objects.filter(run_date=d).exists():
+                                try:
+                                    tasks = expand_therapies_for_visit(
+                                        alloc.id,
+                                        d.strftime('%Y-%m-%d'),
+                                        create_bookings=True
+                                    )
+                                    if isinstance(tasks, list) and any(t.get('status') == 'BOOKED' for t in tasks):
+                                        any_succeeded = True
+                                        # Update booking status for this date
+                                        Booking.objects.filter(allocation=alloc, date=d).update(status='scheduled')
+                                        # Update booking items status for this date
+                                        BookingItem.objects.filter(booking__allocation=alloc, booking__date=d).update(status='scheduled')
+                                except Exception as _e:
+                                    # continue to next date
+                                    pass
+
+                        if any_succeeded:
+                            alloc.status = 'allocated'
+                            alloc.save(update_fields=['status'])
+                    except Exception as e:
+                        # Keep as draft if auto-scheduling fails
+                        alloc.status = 'draft'
+                        alloc.save(update_fields=['status'])
+                        print(f"Automatic scheduling check failed for allocation {alloc.id}: {e}")
 
                     # Log comprehensive audit event
                     log_therapy_audit(
@@ -1807,6 +1841,33 @@ def allocate_therapy(request):
                 notes=payload.get("notes","")
             )
 
+            # Auto-schedule for any dates within the range that already had Final Schedule run
+            try:
+                from .models import FinalScheduleRun
+                from final_allocation import expand_therapies_for_visit
+
+                any_succeeded = False
+                for d in daterange(from_date, to_date):
+                    if FinalScheduleRun.objects.filter(run_date=d).exists():
+                        try:
+                            tasks = expand_therapies_for_visit(
+                                allocation.id,
+                                d.strftime('%Y-%m-%d'),
+                                create_bookings=True
+                            )
+                            if isinstance(tasks, list) and any(t.get('status') == 'BOOKED' for t in tasks):
+                                any_succeeded = True
+                        except Exception as _e:
+                            # continue to next date
+                            pass
+
+                allocation.status = 'allocated' if any_succeeded else 'draft'
+                allocation.save(update_fields=['status'])
+            except Exception as e:
+                allocation.status = 'draft'
+                allocation.save(update_fields=['status'])
+                print(f"Automatic scheduling check failed for allocation {allocation.id}: {e}")
+
             created_bookings = []
             notifications_to_enqueue = []
 
@@ -1979,6 +2040,137 @@ def scheduling_dashboard(request):
     
     return render(request, 'scheduling.html', context)
 
+
+@require_http_methods(["GET"])
+def final_schedule_status_api(request):
+    """Return whether Final Schedule has been run for a given date.
+    Query param: ?date=YYYY-MM-DD
+    """
+    date_str = request.GET.get('date')
+    if not date_str:
+        return JsonResponse({'error': 'date required'}, status=400)
+    try:
+        from datetime import datetime
+        target_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+    except ValueError:
+        return JsonResponse({'error': 'invalid date'}, status=400)
+
+    from .models import FinalScheduleRun
+    already = FinalScheduleRun.objects.filter(run_date=target_date).exists()
+    run = FinalScheduleRun.objects.filter(run_date=target_date).first()
+    return JsonResponse({
+        'date': date_str,
+        'already_run': bool(already),
+        'status': getattr(run, 'status', None),
+        'ran_at': getattr(run, 'ran_at', None),
+    })
+
+@csrf_exempt
+@api_access_required
+def final_schedule_api(request):
+    """
+    Final Schedule API endpoint that:
+    1. Updates emergency leave data via api.py
+    2. Triggers final allocation algorithm via final_allocation.py
+    """
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST method required'}, status=405)
+    
+    try:
+        data = json.loads(request.body)
+        date_filter = data.get('date')
+        
+        if not date_filter:
+            return JsonResponse({'error': 'Date is required'}, status=400)
+        
+        # Check if Final Schedule has already been run for this date
+        from .models import FinalScheduleRun
+        from datetime import datetime
+        
+        try:
+            target_date = datetime.strptime(date_filter, '%Y-%m-%d').date()
+            
+            # Check marker table
+            if FinalScheduleRun.objects.filter(run_date=target_date).exists():
+                return JsonResponse({
+                    'error': 'Final Schedule has already been run for this date. New therapies will be automatically scheduled when added.',
+                    'already_run': True,
+                    'date': date_filter
+                }, status=400)
+        except ValueError:
+            return JsonResponse({'error': 'Invalid date format'}, status=400)
+        
+        # Step 1: Update emergency leave data via api.py
+        try:
+            import api
+            api.enable_django_for_scheduling()
+            
+            # Update emergency leave for the selected date
+            employees_on_leave = api.get_employees_on_leave_and_save(
+                target_date=date_filter, 
+                save_to_db=True
+            )
+            
+            leave_update_result = {
+                'success': True,
+                'employees_on_leave': employees_on_leave,
+                'count': len(employees_on_leave)
+            }
+        except Exception as e:
+            leave_update_result = {
+                'success': False,
+                'error': str(e)
+            }
+        
+        # Step 2: Trigger final allocation algorithm
+        try:
+            # Import final allocation functions
+            from final_allocation import bulk_allocate_for_date
+            
+            # Run the final allocation algorithm
+            allocation_result = bulk_allocate_for_date(date_filter)
+            
+            allocation_update_result = {
+                'success': True,
+                'result': allocation_result
+            }
+        except Exception as e:
+            allocation_update_result = {
+                'success': False,
+                'error': str(e)
+            }
+        
+        # Persist run marker when complete (store status and stats)
+        try:
+            from .models import FinalScheduleRun
+            run_status = 'success' if (leave_update_result.get('success') and allocation_update_result.get('success')) else 'failed'
+            FinalScheduleRun.objects.update_or_create(
+                run_date=target_date,
+                defaults={
+                    'status': run_status,
+                    'ran_by': request.user if getattr(request, 'user', None) and request.user.is_authenticated else None,
+                    'message': (allocation_update_result.get('error') or leave_update_result.get('error') or '')[:1000],
+                    'stats': {
+                        'leave': leave_update_result,
+                        'allocation': allocation_update_result,
+                    }
+                }
+            )
+        except Exception:
+            pass
+
+        # Return combined results
+        return JsonResponse({
+            'success': True,
+            'message': 'Final schedule completed',
+            'date': date_filter,
+            'leave_update': leave_update_result,
+            'allocation_update': allocation_update_result,
+            'overall_success': leave_update_result['success'] and allocation_update_result['success']
+        })
+        
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)
 
 @csrf_exempt
 @api_access_required

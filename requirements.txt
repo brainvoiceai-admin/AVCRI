@@ -12,3 +12,4 @@ pandas>=2.0
 prophet>=1.1
 cmdstanpy>=1.1
 djangorestframework>=3.14
+requests>=2.31.0
