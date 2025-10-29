@@ -260,6 +260,19 @@ def therapy_entry(request):
                 )
                 cancelled_count = cancelled_bookings.count()
                 cancelled_bookings.update(status='cancelled')
+                # Release therapist assignments and free Patient booking resources
+                try:
+                    # mark assignments as released
+                    BookingAssignment.objects.filter(booking__in=cancelled_bookings).update(status='released')
+                except Exception:
+                    pass
+                try:
+                    # also free underlying Patient TherapistBooking/RoomBooking
+                    from Patient.models import TherapistBooking as TB, RoomBooking as RB
+                    TB.objects.filter(date__gte=parse_date(cancel_from), date__lte=parse_date(cancel_to), patient_id=allocation.patient.id).update(status='CANCELLED')
+                    RB.objects.filter(date__gte=parse_date(cancel_from), date__lte=parse_date(cancel_to), patient_id=allocation.patient.id).update(status='CANCELLED')
+                except Exception:
+                    pass
                 
                 # Log audit event
                 log_therapy_audit(
@@ -309,7 +322,44 @@ def therapy_entry(request):
                     date__lte=parse_date(resume_to)
                 )
                 resumed_count = resumed_bookings.count()
-                resumed_bookings.update(status='scheduled')
+                # default set to draft; will selectively schedule if final run exists
+                resumed_bookings.update(status='draft')
+                
+                # re-allocate only for dates where FinalScheduleRun exists
+                failed_reasons = []
+                any_success = False
+                try:
+                    from .models import FinalScheduleRun
+                    from final_allocation import expand_therapies_for_visit
+                    for d in daterange(parse_date(resume_from), parse_date(resume_to)):
+                        if FinalScheduleRun.objects.filter(run_date=d).exists():
+                            try:
+                                tasks = expand_therapies_for_visit(allocation.id, d.strftime('%Y-%m-%d'), create_bookings=True)
+                                if isinstance(tasks, list) and any(t.get('status') == 'BOOKED' for t in tasks):
+                                    any_success = True
+                                    Booking.objects.filter(allocation=allocation, date=d).update(status='scheduled')
+                                    BookingItem.objects.filter(booking__allocation=allocation, booking__date=d).update(status='scheduled')
+                                else:
+                                    reason = None
+                                    if isinstance(tasks, list):
+                                        fails = [t for t in tasks if t.get('status') == 'FAILED']
+                                        reason = fails[0].get('reason') if fails else 'allocation_failed'
+                                    elif isinstance(tasks, dict):
+                                        reason = tasks.get('error')
+                                    failed_reasons.append({'date': d.isoformat(), 'reason': reason or 'unknown'})
+                            except Exception as _e:
+                                failed_reasons.append({'date': d.isoformat(), 'reason': str(_e)})
+                except Exception:
+                    pass
+                
+                # set overall status after resume
+                if any_success:
+                    allocation.status = 'allocated'
+                elif failed_reasons:
+                    allocation.status = 'failed'
+                else:
+                    allocation.status = 'draft'
+                allocation.save(update_fields=['status'])
                 
                 # Log audit event
                 log_therapy_audit(
@@ -340,7 +390,29 @@ def therapy_entry(request):
             
             try:
                 allocation = TherapyAllocation.objects.get(id=allocation_id)
-                
+
+                # capture old state
+                old_name = allocation.therapy_name
+                old_slot_id = getattr(allocation.timeslot, 'id', None)
+                old_to_date = allocation.to_date
+
+                # optional timeslot update ("HH:MM" or slot_number)
+                new_timeslot = None
+                ts_val = payload.get('timeslot') or payload.get('slot')
+                if ts_val:
+                    try:
+                        parts = str(ts_val).split(':')
+                        if len(parts) == 2:
+                            hh = int(parts[0]); mm = int(parts[1])
+                            from_time = datetime.strptime(f"{hh:02d}:{mm:02d}", "%H:%M").time()
+                            if SlotMaster is not None:
+                                new_timeslot = SlotMaster.objects.filter(start_time=from_time, is_active=True).first()
+                        else:
+                            if SlotMaster is not None:
+                                new_timeslot = SlotMaster.objects.filter(slot_number=int(ts_val), is_active=True).first()
+                    except Exception:
+                        new_timeslot = None
+
                 # Update therapy details
                 if 'therapy_name' in payload:
                     allocation.therapy_name = payload['therapy_name']
@@ -354,8 +426,85 @@ def therapy_entry(request):
                     allocation.procured_from = payload['procured_from']
                 if 'notes' in payload:
                     allocation.notes = payload['notes']
-                
+                if new_timeslot is not None:
+                    allocation.timeslot = new_timeslot
+
+                # date extension (only create draft bookings for new dates)
+                extend_to = parse_date(payload.get('to_date') or '') if payload.get('to_date') else None
+                if extend_to and extend_to > allocation.to_date:
+                    allocation.to_date = extend_to
+                    allocation.days = (allocation.to_date - allocation.from_date).days + 1
+
                 allocation.save()
+
+                # dynamic re-scheduling if name/slot changed for FinalScheduleRun dates
+                try:
+                    from .models import FinalScheduleRun
+                    from final_allocation import expand_therapies_for_visit
+                except Exception:
+                    FinalScheduleRun = None
+                    expand_therapies_for_visit = None
+
+                name_changed = ('therapy_name' in payload) and (allocation.therapy_name != old_name)
+                slot_changed = (new_timeslot is not None) and (getattr(new_timeslot, 'id', None) != old_slot_id)
+
+                failed_reasons = []
+                any_success = False
+
+                if (name_changed or slot_changed) and FinalScheduleRun and expand_therapies_for_visit:
+                    for d in daterange(allocation.from_date, min(allocation.to_date, old_to_date)):
+                        # If final schedule not run for this date: keep draft and skip immediate allocation
+                        if not FinalScheduleRun.objects.filter(run_date=d).exists():
+                            try:
+                                Booking.objects.filter(allocation=allocation, date=d).update(status='draft')
+                                BookingItem.objects.filter(booking__allocation=allocation, booking__date=d).update(status='draft')
+                            except Exception:
+                                pass
+                            continue
+
+                        # Release previous assignments/resources for this date to avoid conflicts
+                        try:
+                            day_bookings = Booking.objects.filter(allocation=allocation, date=d)
+                            BookingAssignment.objects.filter(booking__in=day_bookings).update(status='released')
+                            from Patient.models import TherapistBooking as TB, RoomBooking as RB
+                            TB.objects.filter(date=d, patient_id=allocation.patient.id, status__in=['BOOKED','scheduled']).update(status='CANCELLED')
+                            RB.objects.filter(date=d, patient_id=allocation.patient.id, status__in=['BOOKED','scheduled']).update(status='CANCELLED')
+                            # set booking rows to draft prior to re-allocation and ensure timeslot reflects new one
+                            day_bookings.update(status='draft', timeslot=allocation.timeslot)
+                            BookingItem.objects.filter(booking__in=day_bookings).update(status='draft')
+                        except Exception:
+                            pass
+
+                        # Attempt re-allocation for this date
+                        try:
+                            tasks = expand_therapies_for_visit(allocation.id, d.strftime('%Y-%m-%d'), create_bookings=True)
+                            if isinstance(tasks, list) and any(t.get('status') == 'BOOKED' for t in tasks):
+                                any_success = True
+                                Booking.objects.filter(allocation=allocation, date=d).update(status='scheduled')
+                                BookingItem.objects.filter(booking__allocation=allocation, booking__date=d).update(status='scheduled')
+                            else:
+                                reason = None
+                                if isinstance(tasks, list):
+                                    fails = [t for t in tasks if t.get('status') == 'FAILED']
+                                    reason = fails[0].get('reason') if fails else 'allocation_failed'
+                                elif isinstance(tasks, dict):
+                                    reason = tasks.get('error')
+                                failed_reasons.append({'date': d.isoformat(), 'reason': reason or 'unknown'})
+                        except Exception as _e:
+                            failed_reasons.append({'date': d.isoformat(), 'reason': str(_e)})
+
+                    if any_success:
+                        allocation.status = 'allocated'
+                    elif failed_reasons:
+                        allocation.status = 'failed'
+                    allocation.save(update_fields=['status'])
+
+                # create draft bookings for extended dates (no auto-scheduling)
+                if extend_to and extend_to > old_to_date:
+                    new_start = old_to_date + timedelta(days=1)
+                    for d in daterange(new_start, extend_to):
+                        if not Booking.objects.filter(allocation=allocation, date=d).exists():
+                            Booking.objects.create(allocation=allocation, date=d, timeslot=allocation.timeslot, room=allocation.room, status='draft')
                 
                 # Log audit event
                 log_therapy_audit(
@@ -370,7 +519,10 @@ def therapy_entry(request):
                     request=request
                 )
                 
-                return JsonResponse({'status': 'ok', 'message': 'Therapy updated successfully'})
+                resp = {'status': 'ok', 'message': 'Therapy updated successfully'}
+                if failed_reasons:
+                    resp.update({'failed': failed_reasons})
+                return JsonResponse(resp)
             except TherapyAllocation.DoesNotExist:
                 return JsonResponse({'error': 'allocation_not_found'}, status=404)
             except Exception as e:
@@ -2373,7 +2525,7 @@ def get_therapy_data_api(request):
 @api_access_required
 def reschedule_therapy_api(request):
     """
-    API endpoint to reschedule a single failed therapy.
+    API endpoint to reschedule a single failed therapy using the rescheduling algorithm.
     """
     if request.method != 'POST':
         return JsonResponse({'error': 'POST method required'}, status=405)
@@ -2386,19 +2538,84 @@ def reschedule_therapy_api(request):
         if not allocation_id or not date:
             return JsonResponse({'error': 'allocation_id and date are required'}, status=400)
         
-        from .models import TherapyAllocation
+        from .models import TherapyAllocation, Booking
+        from reshedule import expand_therapies_for_visit
         
         try:
             allocation = TherapyAllocation.objects.get(id=allocation_id, status='failed')
-            allocation.status = 'draft'
-            allocation.save()
             
-            return JsonResponse({
-                'success': True,
-                'message': 'Therapy moved back to draft for rescheduling'
-            })
+            # Parse date
+            target_date = parse_date(date)
+            if not target_date:
+                return JsonResponse({'error': 'Invalid date format. Use YYYY-MM-DD.'}, status=400)
+            
+            # Ensure booking exists for this date
+            booking = Booking.objects.filter(allocation=allocation, date=target_date).first()
+            if not booking:
+                # Create booking if it doesn't exist
+                booking = Booking.objects.create(
+                    allocation=allocation,
+                    date=target_date,
+                    timeslot=allocation.timeslot,
+                    room=allocation.room,
+                    status='draft'
+                )
+            
+            # Call rescheduling algorithm
+            try:
+                tasks = expand_therapies_for_visit(
+                    allocation.id,
+                    date,
+                    create_bookings=True
+                )
+                
+                if isinstance(tasks, dict) and "error" in tasks:
+                    # Algorithm returned an error
+                    return JsonResponse({
+                        'success': False,
+                        'error': tasks['error']
+                    }, status=400)
+                
+                # Process results
+                if isinstance(tasks, list):
+                    success_tasks = [t for t in tasks if t.get('status') == 'BOOKED']
+                    failed_tasks = [t for t in tasks if t.get('status') == 'FAILED']
+                    
+                    if success_tasks:
+                        allocation.status = 'allocated'
+                        allocation.save(update_fields=['status'])
+                        return JsonResponse({
+                            'success': True,
+                                        'message': 'Therapy successfully rescheduled',
+                                        'tasks': success_tasks,
+                                        'failed_tasks': failed_tasks
+                                    })
+                    else:
+                        # All tasks failed
+                        allocation.status = 'failed'
+                        allocation.save(update_fields=['status'])
+                        reason = failed_tasks[0].get('reason', 'Unknown error') if failed_tasks else 'No available slots'
+                        return JsonResponse({
+                            'success': False,
+                            'error': f'Rescheduling failed: {reason}',
+                            'tasks': failed_tasks
+                        })
+                else:
+                    return JsonResponse({
+                        'success': False,
+                        'error': 'Unexpected response from scheduling algorithm'
+                    }, status=500)
+                    
+            except Exception as e:
+                allocation.status = 'failed'
+                allocation.save(update_fields=['status'])
+                return JsonResponse({
+                    'success': False,
+                    'error': f'Error during rescheduling: {str(e)}'
+                }, status=500)
+                
         except TherapyAllocation.DoesNotExist:
-            return JsonResponse({'error': 'Therapy allocation not found'}, status=404)
+            return JsonResponse({'error': 'Therapy allocation not found or not in failed status'}, status=404)
             
     except json.JSONDecodeError:
         return JsonResponse({'error': 'Invalid JSON'}, status=400)
@@ -2410,7 +2627,8 @@ def reschedule_therapy_api(request):
 @api_access_required
 def reschedule_all_failed_api(request):
     """
-    API endpoint to reschedule all failed therapies for a date.
+    API endpoint to reschedule all failed therapies for a specific date using the rescheduling algorithm.
+    Filters failed schedules day-wise and reschedules each one.
     """
     if request.method != 'POST':
         return JsonResponse({'error': 'POST method required'}, status=405)
@@ -2422,27 +2640,112 @@ def reschedule_all_failed_api(request):
         if not date:
             return JsonResponse({'error': 'date is required'}, status=400)
         
-        from .models import TherapyAllocation
+        from .models import TherapyAllocation, Booking
+        from reshedule import expand_therapies_for_visit
         
         filter_date = parse_date(date)
         if not filter_date:
-            return JsonResponse({'error': 'Invalid date format'}, status=400)
+            return JsonResponse({'error': 'Invalid date format. Use YYYY-MM-DD.'}, status=400)
         
-        # Get all failed allocations (regardless of date range for rescheduling)
-        failed_allocations = TherapyAllocation.objects.filter(status='failed')
+        # Get failed allocations that overlap with the target date (day-wise filter)
+        failed_allocations = TherapyAllocation.objects.filter(
+            status='failed',
+            from_date__lte=filter_date,
+            to_date__gte=filter_date
+        )
         
         if not failed_allocations.exists():
             return JsonResponse({
                 'success': True,
-                'message': 'No failed therapies found to reschedule. You can create new therapy allocations first.'
+                'message': f'No failed therapies found for {date} to reschedule.',
+                'results': [],
+                'stats': {
+                    'total': 0,
+                    'successful': 0,
+                    'failed': 0
+                }
             })
         
-        # Move them back to draft
-        updated_count = failed_allocations.update(status='draft')
+        results = []
+        success_count = 0
+        failed_count = 0
+        
+        # Process each failed allocation
+        for allocation in failed_allocations:
+            try:
+                # Ensure booking exists for this date
+                booking = Booking.objects.filter(allocation=allocation, date=filter_date).first()
+                if not booking:
+                    # Create booking if it doesn't exist
+                    booking = Booking.objects.create(
+                        allocation=allocation,
+                        date=filter_date,
+                        timeslot=allocation.timeslot,
+                        room=allocation.room,
+                        status='draft'
+                    )
+                
+                # Call rescheduling algorithm
+                tasks = expand_therapies_for_visit(
+                    allocation.id,
+                    date,
+                    create_bookings=True
+                )
+                
+                if isinstance(tasks, dict) and "error" in tasks:
+                    # Algorithm returned an error
+                    allocation.status = 'failed'
+                    allocation.save(update_fields=['status'])
+                    results.append({
+                        'allocation_id': allocation.id,
+                        'status': 'failed',
+                        'reason': tasks['error']
+                    })
+                    failed_count += 1
+                else:
+                    # Process algorithm results
+                    success_tasks = [t for t in tasks if t.get('status') == 'BOOKED']
+                    failed_tasks = [t for t in tasks if t.get('status') == 'FAILED']
+                    
+                    if success_tasks:
+                        allocation.status = 'allocated'
+                        allocation.save(update_fields=['status'])
+                        success_count += 1
+                        results.append({
+                            'allocation_id': allocation.id,
+                            'status': 'success',
+                            'tasks': success_tasks
+                        })
+                    else:
+                        allocation.status = 'failed'
+                        allocation.save(update_fields=['status'])
+                        failed_count += 1
+                        reason = failed_tasks[0].get('reason', 'Unknown error') if failed_tasks else 'No available slots'
+                        results.append({
+                            'allocation_id': allocation.id,
+                            'status': 'failed',
+                            'reason': reason
+                        })
+                        
+            except Exception as e:
+                allocation.status = 'failed'
+                allocation.save(update_fields=['status'])
+                results.append({
+                    'allocation_id': allocation.id,
+                    'status': 'failed',
+                    'reason': str(e)
+                })
+                failed_count += 1
         
         return JsonResponse({
             'success': True,
-            'message': f'{updated_count} failed therapies moved back to draft for rescheduling'
+            'message': f'Rescheduled {len(failed_allocations)} failed therapies for {date}: {success_count} successful, {failed_count} failed',
+            'results': results,
+            'stats': {
+                'total': len(failed_allocations),
+                'successful': success_count,
+                'failed': failed_count
+            }
         })
         
     except json.JSONDecodeError:

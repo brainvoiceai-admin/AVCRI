@@ -561,6 +561,10 @@
                         </button>
                     </div>
                     
+                    <div class="loading" id="failed-loading">
+                        <div>Processing rescheduling algorithm...</div>
+                    </div>
+                    
                     <div class="table-container">
                         <table id="failed-table">
                             <thead>
@@ -751,13 +755,8 @@
             
             // Modal event listeners
             document.getElementById('confirmScheduleBtn').addEventListener('click', confirmSchedule);
-            document.getElementById('confirmRescheduleBtn').addEventListener('click', function() {
-                if (currentRescheduleId === null) {
-                    confirmRescheduleAll();
-                } else {
-                    confirmReschedule();
-                }
-            });
+            // Reschedule no longer uses modal - it uses the date filter directly
+            // document.getElementById('confirmRescheduleBtn') is kept for potential future use
             
             // Date filters - show therapies scheduled for the selected date
             document.getElementById('draft-date').addEventListener('change', function() {
@@ -1033,34 +1032,19 @@
             document.getElementById('scheduleModal').style.display = 'block';
         }
 
-        let currentRescheduleId = null;
-        
         function rescheduleSingleFailed(id) {
-            currentRescheduleId = id;
-            document.getElementById('rescheduleDate').value = '';
-            document.getElementById('rescheduleModalMessage').textContent = 'Select the date for rescheduling this therapy.';
-            document.getElementById('rescheduleModal').style.display = 'block';
-        }
-        
-        function confirmReschedule() {
-            const targetDate = document.getElementById('rescheduleDate').value;
+            // Get the selected date from the date filter
+            const targetDate = document.getElementById('failed-date').value;
             
             if (!targetDate) {
-                alert('Please select a date');
+                alert('Please select a date using the date filter first');
                 return;
             }
             
-            if (!currentRescheduleId) {
-                alert('No therapy selected for rescheduling');
-                return;
-            }
+            showLoading('failed');
             
-            const rescheduleId = currentRescheduleId; // Store the ID before closing modal
-            closeRescheduleModal();
-            
-            // For now, just move it back to draft status
             const requestData = {
-                allocation_id: rescheduleId,
+                allocation_id: id,
                 date: targetDate
             };
             
@@ -1075,42 +1059,49 @@
             })
             .then(response => response.json())
             .then(data => {
+                hideLoading('failed');
                 if (data.success) {
-                    showAlert('success', 'Therapy moved back to draft for rescheduling');
+                    let message = data.message || 'Therapy successfully rescheduled';
+                    if (data.tasks && data.tasks.length > 0) {
+                        message += ` (${data.tasks.length} booking(s) created)`;
+                    }
+                    showAlert('success', message);
+                    // Reload all data to show updated status
                     loadTherapyData('failed', targetDate);
                     loadTherapyData('draft', targetDate);
+                    loadTherapyData('allocated', targetDate);
                 } else {
                     showAlert('error', data.error || 'Rescheduling failed');
+                    // Reload failed data to show updated status
+                    loadTherapyData('failed', targetDate);
                 }
             })
             .catch(error => {
+                hideLoading('failed');
                 showAlert('error', 'Error rescheduling therapy: ' + error.message);
             });
         }
 
         function rescheduleAllFailed() {
-            currentRescheduleId = null; // null means reschedule all
-            document.getElementById('rescheduleDate').value = '';
-            document.getElementById('rescheduleModalMessage').textContent = 'Select the date for rescheduling all failed therapies.';
-            document.getElementById('rescheduleModal').style.display = 'block';
-        }
-        
-        function confirmRescheduleAll() {
-            const targetDate = document.getElementById('rescheduleDate').value;
+            // Get the selected date from the date filter
+            const targetDate = document.getElementById('failed-date').value;
             
             if (!targetDate) {
-                alert('Please select a date');
+                alert('Please select a date using the date filter first');
                 return;
             }
             
-            closeRescheduleModal();
+            if (!confirm(`Are you sure you want to reschedule all failed therapies for ${targetDate}?`)) {
+                return;
+            }
             
-            // For now, just move all failed back to draft status
+            showLoading('failed');
+            
             const requestData = {
                 date: targetDate
             };
             
-            console.log('Rescheduling all failed therapies:', requestData);
+            console.log('Rescheduling all failed therapies for date:', targetDate);
             
             fetch('/sheduling/scheduling/api/reschedule-all-failed/', {
                 method: 'POST',
@@ -1121,15 +1112,25 @@
             })
             .then(response => response.json())
             .then(data => {
+                hideLoading('failed');
                 if (data.success) {
-                    showAlert('success', 'All failed therapies moved back to draft for rescheduling');
+                    let message = data.message || 'Rescheduling completed';
+                    if (data.stats) {
+                        message += ` - ${data.stats.successful} successful, ${data.stats.failed} failed out of ${data.stats.total} total`;
+                    }
+                    showAlert('success', message);
+                    // Reload all data to show updated status
                     loadTherapyData('failed', targetDate);
                     loadTherapyData('draft', targetDate);
+                    loadTherapyData('allocated', targetDate);
                 } else {
                     showAlert('error', data.error || 'Rescheduling failed');
+                    // Reload failed data
+                    loadTherapyData('failed', targetDate);
                 }
             })
             .catch(error => {
+                hideLoading('failed');
                 showAlert('error', 'Error rescheduling therapies: ' + error.message);
             });
         }

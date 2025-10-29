@@ -13,3 +13,5 @@ prophet>=1.1
 cmdstanpy>=1.1
 djangorestframework>=3.14
 requests>=2.31.0
+celery>=5.3
+redis>=5.0
