@@ -565,6 +565,124 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
 
     return tasks
 
+def bulk_allocate_for_date(target_date_str):
+    """
+    Bulk allocate all draft therapies for a specific date.
+    This function is called by the Final Schedule button.
+    
+    Args:
+        target_date_str: Date string in YYYY-MM-DD format
+        
+    Returns:
+        dict: Summary of allocation results
+    """
+    from datetime import datetime
+    from Sheduling.models import TherapyAllocation
+    
+    try:
+        target_date = datetime.strptime(target_date_str, '%Y-%m-%d').date()
+    except ValueError:
+        return {
+            'success': False,
+            'error': f'Invalid date format: {target_date_str}. Expected YYYY-MM-DD'
+        }
+    
+    # Get all draft allocations for the target date
+    draft_allocations = TherapyAllocation.objects.filter(
+        status='draft',
+        from_date__lte=target_date,
+        to_date__gte=target_date
+    )
+    
+    if not draft_allocations.exists():
+        return {
+            'success': True,
+            'message': 'No draft therapies found for the selected date',
+            'total_processed': 0,
+            'successful': 0,
+            'failed': 0,
+            'results': []
+        }
+    
+    results = []
+    successful_count = 0
+    failed_count = 0
+    
+    # Process each draft allocation
+    for allocation in draft_allocations:
+        try:
+            # Run the allocation algorithm for this allocation
+            tasks = expand_therapies_for_visit(
+                allocation.id, 
+                target_date_str, 
+                create_bookings=True
+            )
+            
+            # Analyze results
+            if isinstance(tasks, dict) and "error" in tasks:
+                # Algorithm returned an error
+                allocation.status = 'failed'
+                allocation.save()
+                results.append({
+                    'allocation_id': allocation.id,
+                    'patient_name': str(allocation.patient),
+                    'therapy_name': allocation.therapy_name,
+                    'status': 'failed',
+                    'reason': tasks['error']
+                })
+                failed_count += 1
+            else:
+                # Process algorithm results
+                success_tasks = [t for t in tasks if t.get('status') == 'BOOKED']
+                failed_tasks = [t for t in tasks if t.get('status') == 'FAILED']
+                
+                if success_tasks:
+                    allocation.status = 'allocated'
+                    allocation.save()
+                    successful_count += 1
+                    results.append({
+                        'allocation_id': allocation.id,
+                        'patient_name': str(allocation.patient),
+                        'therapy_name': allocation.therapy_name,
+                        'status': 'success',
+                        'booked_tasks': len(success_tasks),
+                        'failed_tasks': len(failed_tasks)
+                    })
+                else:
+                    allocation.status = 'failed'
+                    allocation.save()
+                    failed_count += 1
+                    reason = failed_tasks[0].get('reason', 'No available slots') if failed_tasks else 'Unknown error'
+                    results.append({
+                        'allocation_id': allocation.id,
+                        'patient_name': str(allocation.patient),
+                        'therapy_name': allocation.therapy_name,
+                        'status': 'failed',
+                        'reason': reason
+                    })
+                    
+        except Exception as e:
+            allocation.status = 'failed'
+            allocation.save()
+            failed_count += 1
+            results.append({
+                'allocation_id': allocation.id,
+                'patient_name': str(allocation.patient),
+                'therapy_name': allocation.therapy_name,
+                'status': 'failed',
+                'reason': f'Exception: {str(e)}'
+            })
+    
+    return {
+        'success': True,
+        'message': f'Bulk allocation completed for {target_date_str}',
+        'date': target_date_str,
+        'total_processed': len(draft_allocations),
+        'successful': successful_count,
+        'failed': failed_count,
+        'results': results
+    }
+
 # -----------------------
 # CLI quick-run
 # -----------------------

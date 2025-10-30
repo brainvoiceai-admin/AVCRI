@@ -37,6 +37,22 @@ def super_admin_required(view_func):
         return view_func(request, *args, **kwargs)
     return wrapper
 
+def admin_required(view_func):
+    """
+    Decorator to check if user is admin or super admin
+    """
+    @wraps(view_func)
+    def wrapper(request, *args, **kwargs):
+        if not request.user.is_authenticated:
+            return redirect('login')
+        
+        if request.user.role not in ['admin', 'super_admin']:
+            messages.error(request, 'You must be an admin to access this page.')
+            return HttpResponseForbidden("Access Denied: Admin privileges required.")
+        
+        return view_func(request, *args, **kwargs)
+    return wrapper
+
 def role_required(allowed_roles):
     """
     Decorator to check if user has one of the allowed roles

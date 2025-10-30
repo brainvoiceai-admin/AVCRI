@@ -733,19 +733,19 @@ $(function(){
     }
   });
 
-  // Edit therapy (lock therapy & slot & dates)
+  // Edit therapy (allow editing therapy, slot, and dates per dynamic re-scheduling rules)
   $therapiesTableBody.on('click', '.edit-therapy', function(){ const i=$(this).data('i'); loadTherapyForEdit(i); });
   function loadTherapyForEdit(index){
     const t = addedTherapies[index]; if(!t) return;
     editTherapyIndex = index;
-    $('#form-title').text('Edit Therapy (slot & therapy locked)');
+    $('#form-title').text('Edit Therapy');
     const opt = new Option(t.therapy_name, t.therapy_code, true, true);
     $therapySelect.append(opt).val(t.therapy_code).trigger('change');
-    $therapySelect.prop('disabled', true);
-    $slotSelect.val(t.slot||'').prop('disabled', true);
+    $therapySelect.prop('disabled', false);
+    $slotSelect.val(t.slot||'').prop('disabled', false);
     $('#ext-int-select').val(t.ext_int||'');
-    $fromDate.val(t.from_date||'').prop('disabled', true);
-    $toDate.val(t.to_date||'').prop('disabled', true);
+    $fromDate.val(t.from_date||'').prop('disabled', false);
+    $toDate.val(t.to_date||'').prop('disabled', false);
     $daysInput.val(t.days||'');
     $usageSelect.val(t.usage||''); $oilClassSelect.val(t.oil_class||''); $procuredSelect.val(t.procured||'');
     itemGroups = (t.items_groups||[]).map(g=>({ id: Math.random().toString(36).slice(2,9), items: g.items||[], dosage: g.dosage||'', uno: g.uno||'' }));
@@ -758,6 +758,15 @@ $(function(){
     
     // Update local data
     t.ext_int = $('#ext-int-select').val();
+    // reflect potential edits
+    const selTherapy = $therapySelect.select2('data')[0];
+    if (selTherapy && selTherapy.id) {
+      t.therapy_code = selTherapy.id;
+      t.therapy_name = selTherapy.text;
+    }
+    t.slot = $slotSelect.val() || '';
+    t.from_date = $fromDate.val() || t.from_date;
+    t.to_date = $toDate.val() || t.to_date;
     t.usage = $usageSelect.val()||''; 
     t.oil_class = $oilClassSelect.val()||''; 
     t.procured = $procuredSelect.val()||'';
@@ -768,6 +777,9 @@ $(function(){
       const updatePayload = {
         allocation_id: t.allocation_id,
         therapy_name: t.therapy_name,
+        slot: t.slot,
+        from_date: t.from_date,
+        to_date: t.to_date,
         ext_int: t.ext_int,
         items_groups: t.items_groups,
         oil_class: t.oil_class,

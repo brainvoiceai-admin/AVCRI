@@ -488,7 +488,10 @@
                             <label class="filter-label">Filter by Date</label>
                             <input type="date" id="draft-date" value="{{ date_filter }}">
                         </div>
-                        <button class="btn btn-primary" id="schedule-all">
+                        <button class="btn btn-primary" id="final-schedule-btn">
+                            <span>🎯</span> Final Schedule
+                        </button>
+                        <button class="btn btn-secondary" id="schedule-all" style="display: none;">
                             <span>📅</span> Schedule All Drafts
                         </button>
                     </div>
@@ -556,6 +559,10 @@
                         <button class="btn btn-secondary" id="reschedule-all">
                             <span>🔄</span> Reschedule All Failed
                         </button>
+                    </div>
+                    
+                    <div class="loading" id="failed-loading">
+                        <div>Processing rescheduling algorithm...</div>
                     </div>
                     
                     <div class="table-container">
@@ -737,7 +744,10 @@
                 });
             });
             
-            // Schedule all drafts
+            // Final Schedule button
+            document.getElementById('final-schedule-btn').addEventListener('click', triggerFinalSchedule);
+            
+            // Schedule all drafts (hidden by default)
             document.getElementById('schedule-all').addEventListener('click', scheduleAllDrafts);
             
             // Reschedule all failed
@@ -745,21 +755,18 @@
             
             // Modal event listeners
             document.getElementById('confirmScheduleBtn').addEventListener('click', confirmSchedule);
-            document.getElementById('confirmRescheduleBtn').addEventListener('click', function() {
-                if (currentRescheduleId === null) {
-                    confirmRescheduleAll();
-                } else {
-                    confirmReschedule();
-                }
-            });
+            // Reschedule no longer uses modal - it uses the date filter directly
+            // document.getElementById('confirmRescheduleBtn') is kept for potential future use
             
             // Date filters - show therapies scheduled for the selected date
             document.getElementById('draft-date').addEventListener('change', function() {
                 if (this.value) {
                     loadTherapyData('draft', this.value);
+                    checkFinalScheduleStatus(this.value);
                 } else {
                     // If no date selected, show all draft therapies
                     loadTherapyData('draft', '');
+                    resetFinalScheduleButton();
                 }
             });
             document.getElementById('failed-date').addEventListener('change', function() {
@@ -779,12 +786,8 @@
                 }
             });
             
-            // Individual schedule buttons
+            // Individual reschedule buttons (schedule buttons removed)
             document.addEventListener('click', function(e) {
-                if (e.target.classList.contains('schedule-single')) {
-                    const id = parseInt(e.target.dataset.id);
-                    scheduleSingleDraft(id);
-                }
                 if (e.target.classList.contains('reschedule-single')) {
                     const id = parseInt(e.target.dataset.id);
                     rescheduleSingleFailed(id);
@@ -854,9 +857,7 @@
                         <td>${item.room_no || '—'}</td>
                         <td>${item.therapists ? item.therapists.length : 1} therapist${item.therapists && item.therapists.length > 1 ? 's' : ''}</td>
                         <td>
-                            <button class="btn btn-outline btn-small schedule-single" data-id="${item.id}">
-                                Schedule
-                            </button>
+                            <span class="muted">Use Final Schedule</span>
                         </td>
                     `;
                 } else if (status === 'failed') {
@@ -955,6 +956,75 @@
             });
         }
 
+        function triggerFinalSchedule() {
+            const selectedDate = document.getElementById('draft-date').value;
+            
+            if (!selectedDate) {
+                alert('Please select a date first using the date filter');
+                return;
+            }
+            
+            if (!confirm(`Are you sure you want to run Final Schedule for ${selectedDate}? This will update emergency leave data and allocate all draft therapies for this date.`)) {
+                return;
+            }
+            
+            showLoading('draft');
+            
+            fetch('/sheduling/scheduling/api/final-schedule/', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    date: selectedDate
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                hideLoading('draft');
+                if (data.success) {
+                    let message = `Final Schedule completed for ${selectedDate}\n\n`;
+                    
+                    if (data.leave_update && data.leave_update.success) {
+                        message += `Emergency Leave Update: ${data.leave_update.count} employees on leave\n`;
+                    } else if (data.leave_update && !data.leave_update.success) {
+                        message += `Emergency Leave Update: Failed - ${data.leave_update.error}\n`;
+                    }
+                    
+                    if (data.allocation_update && data.allocation_update.success) {
+                        const result = data.allocation_update.result;
+                        message += `Allocation Results: ${result.successful} successful, ${result.failed} failed out of ${result.total_processed} total`;
+                    } else if (data.allocation_update && !data.allocation_update.success) {
+                        message += `Allocation Update: Failed - ${data.allocation_update.error}`;
+                    }
+                    
+                    showAlert('success', message);
+                    
+                    // Reload all data
+                    loadTherapyData('draft', selectedDate);
+                    loadTherapyData('failed', selectedDate);
+                    loadTherapyData('allocated', selectedDate);
+                } else {
+                    // Check if it's the "already run" error
+                    if (data.already_run) {
+                        showAlert('warning', data.error);
+                        // Disable the Final Schedule button for this date
+                        const finalScheduleBtn = document.getElementById('final-schedule-btn');
+                        finalScheduleBtn.disabled = true;
+                        finalScheduleBtn.textContent = 'Final Schedule (Already Run)';
+                        finalScheduleBtn.classList.remove('btn-primary');
+                        finalScheduleBtn.classList.add('btn-secondary');
+                    } else {
+                        showAlert('error', data.error || 'Final Schedule failed');
+                    }
+                }
+            })
+            .catch(error => {
+                hideLoading('draft');
+                showAlert('error', 'Error running Final Schedule: ' + error.message);
+            });
+        }
+
         function scheduleAllDrafts() {
             currentScheduleId = null; // null means schedule all
             document.getElementById('scheduleDate').value = '';
@@ -962,34 +1032,19 @@
             document.getElementById('scheduleModal').style.display = 'block';
         }
 
-        let currentRescheduleId = null;
-        
         function rescheduleSingleFailed(id) {
-            currentRescheduleId = id;
-            document.getElementById('rescheduleDate').value = '';
-            document.getElementById('rescheduleModalMessage').textContent = 'Select the date for rescheduling this therapy.';
-            document.getElementById('rescheduleModal').style.display = 'block';
-        }
-        
-        function confirmReschedule() {
-            const targetDate = document.getElementById('rescheduleDate').value;
+            // Get the selected date from the date filter
+            const targetDate = document.getElementById('failed-date').value;
             
             if (!targetDate) {
-                alert('Please select a date');
+                alert('Please select a date using the date filter first');
                 return;
             }
             
-            if (!currentRescheduleId) {
-                alert('No therapy selected for rescheduling');
-                return;
-            }
+            showLoading('failed');
             
-            const rescheduleId = currentRescheduleId; // Store the ID before closing modal
-            closeRescheduleModal();
-            
-            // For now, just move it back to draft status
             const requestData = {
-                allocation_id: rescheduleId,
+                allocation_id: id,
                 date: targetDate
             };
             
@@ -1004,42 +1059,49 @@
             })
             .then(response => response.json())
             .then(data => {
+                hideLoading('failed');
                 if (data.success) {
-                    showAlert('success', 'Therapy moved back to draft for rescheduling');
+                    let message = data.message || 'Therapy successfully rescheduled';
+                    if (data.tasks && data.tasks.length > 0) {
+                        message += ` (${data.tasks.length} booking(s) created)`;
+                    }
+                    showAlert('success', message);
+                    // Reload all data to show updated status
                     loadTherapyData('failed', targetDate);
                     loadTherapyData('draft', targetDate);
+                    loadTherapyData('allocated', targetDate);
                 } else {
                     showAlert('error', data.error || 'Rescheduling failed');
+                    // Reload failed data to show updated status
+                    loadTherapyData('failed', targetDate);
                 }
             })
             .catch(error => {
+                hideLoading('failed');
                 showAlert('error', 'Error rescheduling therapy: ' + error.message);
             });
         }
 
         function rescheduleAllFailed() {
-            currentRescheduleId = null; // null means reschedule all
-            document.getElementById('rescheduleDate').value = '';
-            document.getElementById('rescheduleModalMessage').textContent = 'Select the date for rescheduling all failed therapies.';
-            document.getElementById('rescheduleModal').style.display = 'block';
-        }
-        
-        function confirmRescheduleAll() {
-            const targetDate = document.getElementById('rescheduleDate').value;
+            // Get the selected date from the date filter
+            const targetDate = document.getElementById('failed-date').value;
             
             if (!targetDate) {
-                alert('Please select a date');
+                alert('Please select a date using the date filter first');
                 return;
             }
             
-            closeRescheduleModal();
+            if (!confirm(`Are you sure you want to reschedule all failed therapies for ${targetDate}?`)) {
+                return;
+            }
             
-            // For now, just move all failed back to draft status
+            showLoading('failed');
+            
             const requestData = {
                 date: targetDate
             };
             
-            console.log('Rescheduling all failed therapies:', requestData);
+            console.log('Rescheduling all failed therapies for date:', targetDate);
             
             fetch('/sheduling/scheduling/api/reschedule-all-failed/', {
                 method: 'POST',
@@ -1050,15 +1112,25 @@
             })
             .then(response => response.json())
             .then(data => {
+                hideLoading('failed');
                 if (data.success) {
-                    showAlert('success', 'All failed therapies moved back to draft for rescheduling');
+                    let message = data.message || 'Rescheduling completed';
+                    if (data.stats) {
+                        message += ` - ${data.stats.successful} successful, ${data.stats.failed} failed out of ${data.stats.total} total`;
+                    }
+                    showAlert('success', message);
+                    // Reload all data to show updated status
                     loadTherapyData('failed', targetDate);
                     loadTherapyData('draft', targetDate);
+                    loadTherapyData('allocated', targetDate);
                 } else {
                     showAlert('error', data.error || 'Rescheduling failed');
+                    // Reload failed data
+                    loadTherapyData('failed', targetDate);
                 }
             })
             .catch(error => {
+                hideLoading('failed');
                 showAlert('error', 'Error rescheduling therapies: ' + error.message);
             });
         }
@@ -1112,6 +1184,38 @@
             currentRescheduleId = null;
         }
         
+        function checkFinalScheduleStatus(selectedDate) {
+            // Check if Final Schedule has already been run for this date (GET, read-only)
+            fetch(`/sheduling/scheduling/api/final-schedule/status/?date=${encodeURIComponent(selectedDate)}`)
+            .then(response => response.json())
+            .then(data => {
+                if (data.already_run) {
+                    // Final Schedule already run for this date
+                    const finalScheduleBtn = document.getElementById('final-schedule-btn');
+                    finalScheduleBtn.disabled = true;
+                    finalScheduleBtn.textContent = 'Final Schedule (Already Run)';
+                    finalScheduleBtn.classList.remove('btn-primary');
+                    finalScheduleBtn.classList.add('btn-secondary');
+                } else {
+                    // Final Schedule not run yet, enable button
+                    resetFinalScheduleButton();
+                }
+            })
+            .catch(error => {
+                console.error('Error checking Final Schedule status:', error);
+                // On error, assume it's available
+                resetFinalScheduleButton();
+            });
+        }
+
+        function resetFinalScheduleButton() {
+            const finalScheduleBtn = document.getElementById('final-schedule-btn');
+            finalScheduleBtn.disabled = false;
+            finalScheduleBtn.innerHTML = '<span>🎯</span> Final Schedule';
+            finalScheduleBtn.classList.remove('btn-secondary');
+            finalScheduleBtn.classList.add('btn-primary');
+        }
+
         // Close modals when clicking outside
         window.onclick = function(event) {
             const scheduleModal = document.getElementById('scheduleModal');

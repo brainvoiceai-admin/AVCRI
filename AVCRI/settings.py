@@ -14,6 +14,7 @@ from pathlib import Path
 # In settings.py
 import os
 from dotenv import load_dotenv
+from celery.schedules import crontab
 
 load_dotenv() # This line reads the .env file
 
@@ -50,7 +51,6 @@ INSTALLED_APPS = [
     'MySql_Data_pull',
     "rest_framework",
     "predictor",
-    "django_crontab",
     "Sheduling",
     "masters",
 ]
@@ -185,13 +185,65 @@ STATICFILES_DIRS = [
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 AUTH_USER_MODEL = "authentication.CustomUser"
 
+# REST Framework Configuration
+REST_FRAMEWORK = {
+    'DEFAULT_AUTHENTICATION_CLASSES': [
+        'rest_framework.authentication.SessionAuthentication',
+    ],
+    'DEFAULT_PERMISSION_CLASSES': [
+        'rest_framework.permissions.IsAuthenticated',
+    ],
+    'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
+    'PAGE_SIZE': 50,
+    'DEFAULT_RENDERER_CLASSES': [
+        'rest_framework.renderers.JSONRenderer',
+    ],
+}
+
 CRONJOBS = [
-    # Run daily at midnight
-    ('0 0 * * *', 'Patient.cron.run_daily_forecast'),
-
-    # Run weekly every Sunday at midnight
-    ('0 0 * * 0', 'Patient.cron.run_weekly_forecast'),
-
-    # Run monthly last day (simulate with 28th → check in code if last day)
-    ('0 0 28 * *', 'Patient.cron.run_monthly_forecast'),
+    # Run daily forecast at midnight
+    ('0 0 * * *', 'predictor.management.commands.run_automated_forecast', '--run-type=daily'),
+    
+    # Run weekly forecast every Sunday at midnight
+    ('0 0 * * 0', 'predictor.management.commands.run_automated_forecast', '--run-type=weekly'),
+    
+    # Run monthly forecast on the 1st of each month at midnight
+    ('0 0 1 * *', 'predictor.management.commands.run_automated_forecast', '--run-type=monthly'),
 ]
+
+# Celery configuration
+CELERY_BROKER_URL = os.getenv('CELERY_BROKER_URL', 'redis://localhost:6379/0')
+CELERY_RESULT_BACKEND = os.getenv('CELERY_RESULT_BACKEND', 'redis://localhost:6379/1')
+CELERY_TIMEZONE = TIME_ZONE
+CELERY_ENABLE_UTC = USE_TZ
+
+# Celery Beat schedule (runs in celery beat process)
+CELERY_BEAT_SCHEDULE = {
+    # Morning reschedule at 05:30 every day (today's date)
+    'morning-reschedule': {
+        'task': 'Sheduling.tasks.task_reschedule_morning',
+        'schedule': crontab(hour=5, minute=30),
+        'options': {'queue': 'default'},
+    },
+    # Night reschedule at 20:00 every day (tomorrow's date)
+    'night-reschedule': {
+        'task': 'Sheduling.tasks.task_reschedule_night',
+        'schedule': crontab(hour=20, minute=0),
+        'options': {'queue': 'default'},
+    },
+    # Predictor daily forecast at 06:00
+    'predictor-daily': {
+        'task': 'predictor.tasks.task_predictor_daily',
+        'schedule': crontab(hour=6, minute=0),
+    },
+    # Predictor weekly forecast at 06:10 every Monday
+    'predictor-weekly': {
+        'task': 'predictor.tasks.task_predictor_weekly',
+        'schedule': crontab(hour=6, minute=10, day_of_week='mon'),
+    },
+    # Predictor monthly forecast at 06:20 on the 1st
+    'predictor-monthly': {
+        'task': 'predictor.tasks.task_predictor_monthly',
+        'schedule': crontab(hour=6, minute=20, day_of_month='1'),
+    },
+}
