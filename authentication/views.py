@@ -10,6 +10,7 @@ from .decorators import super_admin_required, role_required
 from django.core.paginator import Paginator
 from django.utils import timezone
 from django.db import transaction, models
+from django.core.exceptions import ValidationError
 import json
 
 def log_audit_event(user, action, description, status='success', object_type='', object_id='', additional_data=None, request=None):
@@ -270,26 +271,11 @@ def login_view(request):
     return render(request, 'login.html', {'form': form})
 
 def get_dashboard_redirect_url(user):
-    """Get the appropriate dashboard URL based on user role"""
-    role_dashboard_mapping = {
-        'super_admin': 'superadmindash',
-        'admin': 'gmdash',  # Admin uses GM/HR dashboard
-        'doctor': 'doctordash',
-        'scheduling_staff': 'therapistadmindash',  # Scheduling staff dashboard
-        'therapist': 'therapistdash',
-        'nurse': 'nurse_dash',
-        'patient': 'patientdash',
-        'ip_pharmacy_staff': 'ip_pharmacy',
-        'imu_staff': 'therapistadmindash',  # IMU staff uses scheduling dashboard
-        'finance_staff': 'gmdash',  # Finance uses GM dashboard for reports
-        'hr': 'gmdash',
-        'housekeeping_staff': 'housekeepingdash',
-    }
-    
-    # Get the dashboard URL for the user's role
-    dashboard_name = role_dashboard_mapping.get(user.role, 'patientdash')  # Default to patient dashboard
-    
-    return dashboard_name
+    """Get the appropriate dashboard URL after login.
+
+    Per current requirement, always redirect to the User Profile Dashboard.
+    """
+    return 'user_profile'
 
 def logout_view(request):
     """Logout view"""
@@ -923,6 +909,40 @@ def prescription_dash(request):
 def patient_profile(request):
     """Patient profile"""
     return render(request, 'dashboards/patient/patient_profile.html')
+
+@login_required
+def user_profile(request):
+    """User Profile Dashboard: view and edit basic profile details"""
+    user = request.user
+    if request.method == 'POST':
+        first_name = request.POST.get('first_name', '').strip()
+        last_name = request.POST.get('last_name', '').strip()
+        email = request.POST.get('email', '').strip()
+        mobile = request.POST.get('mobile', '').strip() or None
+
+        # Basic validations
+        if not email:
+            messages.error(request, 'Email is required.')
+        else:
+            # Assign and save with model-level validation for unique mobile
+            user.first_name = first_name
+            user.last_name = last_name
+            user.email = email
+            user.mobile = mobile
+            try:
+                user.full_clean()
+                user.save()
+                messages.success(request, 'Profile updated successfully.')
+            except ValidationError as e:
+                # Show first error per field
+                for field, errors in e.message_dict.items():
+                    for err in errors:
+                        messages.error(request, f"{field.capitalize()}: {err}")
+
+    context = {
+        'user_obj': user,
+    }
+    return render(request, 'dashboards/account/user_profile.html', context)
 
 @login_required
 @role_required(['doctor', 'scheduling_staff'])

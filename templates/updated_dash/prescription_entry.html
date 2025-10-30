@@ -74,14 +74,13 @@
     <h3 id="form-title">Add Prescription</h3>
 
     <div class="form-row">
-      <div class="form-group" style="flex:2">
-        <label for="prescription-name-input">Prescription Name</label>
-        <input type="text" id="prescription-name-input" placeholder="Enter prescription name">
-      </div>
-
       <div class="form-group">
         <label for="procured-from-select">Procured From</label>
         <select id="procured-from-select"><option value="">--</option></select>
+      </div>
+      <div class="form-group small">
+        <label for="scope-select">Ext/Int</label>
+        <select id="scope-select"><option value="">--</option></select>
       </div>
     </div>
 
@@ -106,6 +105,14 @@
         </div>
         <div class="form-group small">
           <label for="item-builder-dosage">Dosage</label><input id="item-builder-dosage" type="text" placeholder="e.g. 2 tsp">
+        </div>
+        <div class="form-group small">
+          <label for="item-builder-usage">Usage</label>
+          <select id="item-builder-usage"><option value="">Select Usage</option></select>
+        </div>
+        <div class="form-group small">
+          <label for="item-builder-time">Time</label>
+          <select id="item-builder-time"><option value="">Select Time</option></select>
         </div>
         <div class="form-group small">
           <label for="item-builder-uno">UNO</label>
@@ -205,8 +212,9 @@ $(function(){
   // --- DOM refs ---
   const $patientSelect = $('#header-patient-select');
   const $hdrName = $('#hdr-pat-name'), $hdrMeta = $('#hdr-pat-meta'), $hdrVip = $('#hdr-pat-vip'), $hdrIp = $('#hdr-pat-ip'), $hdrUnique = $('#hdr-pat-unique'), $hdrType = $('#hdr-pat-type');
-  const $prescriptionName = $('#prescription-name-input'), $fromDate = $('#from-date-input'), $toDate = $('#to-date-input'), $daysInput = $('#days-input');
+  const $fromDate = $('#from-date-input'), $toDate = $('#to-date-input'), $daysInput = $('#days-input');
   const $procuredSelect = $('#procured-from-select');
+  const $scopeSelect = $('#scope-select');
   const $itemBuilder = $('#item-builder-select'), $itemGroupsList = $('#item-groups-list');
   const $allocateBtn = $('#allocate-prescription-btn'), $updateBtn = $('#update-prescription-btn'), $clearBtn = $('#clear-form');
   const $prescriptionsTableBody = $('#prescriptions-table-body');
@@ -383,6 +391,9 @@ $(function(){
   // populate masters with fallback
   function populateMasters(){
     ajax({action:'masters', type:'procured'}).then(list => { $procuredSelect.empty().append('<option value="">--</option>'); (list||FALLBACK_PROCURED).forEach(p => $procuredSelect.append(new Option(p.name, p.name))); }).catch(()=>{ $procuredSelect.empty().append('<option value="">--</option>'); FALLBACK_PROCURED.forEach(p => $procuredSelect.append(new Option(p.name, p.name))); });
+    ajax({action:'masters', type:'prescriptionscope'}).then(list => { $scopeSelect.empty().append('<option value="">--</option>'); (list||[]).forEach(x => $scopeSelect.append(new Option(x.name, x.name))); }).catch(()=>{ $scopeSelect.empty().append('<option value="">--</option>'); });
+    ajax({action:'masters', type:'usagetype'}).then(list => { const $u=$('#item-builder-usage'); $u.empty().append('<option value="">Select Usage</option>'); (list||[]).forEach(x => $u.append(new Option(x.name, x.name))); }).catch(()=>{});
+    ajax({action:'masters', type:'prescriptiontime'}).then(list => { const $t=$('#item-builder-time'); $t.empty().append('<option value="">Select Time</option>'); (list||[]).forEach(x => $t.append(new Option(x.name, x.name))); }).catch(()=>{});
   }
   populateMasters();
 
@@ -391,12 +402,16 @@ $(function(){
     const selected = $itemBuilder.select2('data') || [];
     if (!selected.length){ alert('Select or type items before adding a group.'); return; }
     const dosage = $('#item-builder-dosage').val().trim();
+    const usage = $('#item-builder-usage').val().trim();
+    const time = $('#item-builder-time').val().trim();
     const uno = $('#item-builder-uno').val().trim();
     const items = selected.map(s => ({ item_code: s.id, item_name: s.text || s.id }));
-    const grp = { id: Math.random().toString(36).slice(2,9), items, dosage, uno };
+    const grp = { id: Math.random().toString(36).slice(2,9), items, dosage, usage, time, uno };
     itemGroups.push(grp);
     $itemBuilder.val(null).trigger('change');
     $('#item-builder-dosage').val('');
+    $('#item-builder-usage').val('');
+    $('#item-builder-time').val('');
     $('#item-builder-uno').val('');
     renderItemGroups();
   });
@@ -411,7 +426,7 @@ $(function(){
           <div>
             <div style="font-weight:600">Group ${i+1}</div>
             <div>${itemsHtml}</div>
-            <div class="muted-small">Dosage: ${esc(g.dosage||'—')} • UNO: ${esc(g.uno||'—')}</div>
+            <div class="muted-small">Dosage: ${esc(g.dosage||'—')} • Usage: ${esc(g.usage||'—')} • Time: ${esc(g.time||'—')} • UNO: ${esc(g.uno||'—')}</div>
             </div>
           <div>
               <button class="edit-group action-btn" data-id="${g.id}">Edit</button>
@@ -424,7 +439,7 @@ $(function(){
   }
 
   $itemGroupsList.on('click', '.remove-group', function(){ const id = $(this).data('id'); itemGroups = itemGroups.filter(g=>g.id!==id); renderItemGroups(); });
-  $itemGroupsList.on('click', '.edit-group', function(){ const id = $(this).data('id'); const g = itemGroups.find(x=>x.id===id); if(!g) return; $itemBuilder.val(null).trigger('change'); g.items.forEach(it=>{ const opt = new Option(it.item_name, it.item_code, true, true); $itemBuilder.append(opt); }); $itemBuilder.trigger('change'); $('#item-builder-dosage').val(g.dosage||''); $('#item-builder-uno').val(g.uno||''); itemGroups = itemGroups.filter(x=>x.id!==id); renderItemGroups(); });
+  $itemGroupsList.on('click', '.edit-group', function(){ const id = $(this).data('id'); const g = itemGroups.find(x=>x.id===id); if(!g) return; $itemBuilder.val(null).trigger('change'); g.items.forEach(it=>{ const opt = new Option(it.item_name, it.item_code, true, true); $itemBuilder.append(opt); }); $itemBuilder.trigger('change'); $('#item-builder-dosage').val(g.dosage||''); $('#item-builder-usage').val(g.usage||''); $('#item-builder-time').val(g.time||''); $('#item-builder-uno').val(g.uno||''); itemGroups = itemGroups.filter(x=>x.id!==id); renderItemGroups(); });
 
   // days calc
   function calcDays(){ const f = $fromDate.val(), t = $toDate.val(); if(!f||!t){ $daysInput.val(''); return; } const fd=new Date(f), td=new Date(t); if(fd<=td) $daysInput.val(Math.ceil((td.getTime()-fd.getTime())/(1000*60*60*24))+1); else $daysInput.val(''); }
@@ -437,8 +452,6 @@ $(function(){
       return;
     }
     
-    const prescriptionName = $prescriptionName.val().trim();
-    if (!prescriptionName){ alert('Enter prescription name'); return; }
     if (!itemGroups.length){ alert('Add at least one item group'); return; }
     const from = $fromDate.val(), to = $toDate.val();
     if (!from || !to){ alert('Please set From and To dates'); return; }
@@ -446,12 +459,12 @@ $(function(){
 
     // Prepare prescription data
     const prescriptionData = {
-      prescription_name: prescriptionName,
       from_date: from,
       to_date: to,
       days: Math.ceil((new Date(to).getTime() - new Date(from).getTime()) / (1000 * 60 * 60 * 24)) + 1,
       procured_from: $procuredSelect.val()||'',
-      items_groups: itemGroups.map(g => ({ items: g.items, dosage: g.dosage, uno: g.uno })),
+      scope: $scopeSelect.val()||'',
+      items_groups: itemGroups.map(g => ({ items: g.items, dosage: g.dosage, usage: g.usage, time: g.time, uno: g.uno })),
       notes: ''
     };
 
@@ -482,7 +495,7 @@ $(function(){
         
         // Reset form
         itemGroups = []; renderItemGroups();
-        $prescriptionName.val(''); $fromDate.val(''); $toDate.val(''); $daysInput.val(''); $procuredSelect.val('');
+        $fromDate.val(''); $toDate.val(''); $daysInput.val(''); $procuredSelect.val(''); $scopeSelect.val('');
         
     renderAll();
         alert('Prescription saved to server as Draft.');
@@ -503,7 +516,7 @@ $(function(){
     $prescriptionsTableBody.empty();
     if (!addedPrescriptions.length){ $prescriptionsTableBody.append('<tr><td colspan="8" class="muted">No prescriptions</td></tr>'); return; }
     addedPrescriptions.forEach((p,i) => {
-      const groupsHtml = (p.items_groups||[]).map(g => (g.items||[]).map(it => `<span class="tag">${esc(it.item_name)}</span>`).join(' ') + `<div class="muted-small">Dosage:${esc(g.dosage||'—')} • UNO:${esc(g.uno||'—')}</div>`).join('<hr/>');
+      const groupsHtml = (p.items_groups||[]).map(g => (g.items||[]).map(it => `<span class="tag">${esc(it.item_name)}</span>`).join(' ') + `<div class="muted-small">Dosage:${esc(g.dosage||'—')} • Usage:${esc(g.usage||'—')} • Time:${esc(g.time||'—')} • UNO:${esc(g.uno||'—')}</div>`).join('<hr/>');
       
       // Status logic
       let statusHtml = '';
@@ -527,7 +540,7 @@ $(function(){
       
       const row = `<tr class="${statusClass}">
         <td>${i+1}</td>
-        <td>${esc(p.prescription_name)}</td>
+        <td>${esc(p.scope || 'Prescription')}</td>
         <td>${groupsHtml}</td>
         <td>${esc(p.from_date||'')}</td>
         <td>${esc(p.to_date||'')}</td>
@@ -554,12 +567,12 @@ $(function(){
     const p = addedPrescriptions[index]; if(!p) return;
     editPrescriptionIndex = index;
     $('#form-title').text('Edit Prescription');
-    $prescriptionName.val(p.prescription_name);
     $fromDate.val(p.from_date||'');
     $toDate.val(p.to_date||'');
     $daysInput.val(p.days||'');
     $procuredSelect.val(p.procured_from||'');
-    itemGroups = (p.items_groups||[]).map(g=>({ id: Math.random().toString(36).slice(2,9), items: g.items||[], dosage: g.dosage||'', uno: g.uno||'' }));
+    $scopeSelect.val(p.scope||'');
+    itemGroups = (p.items_groups||[]).map(g=>({ id: Math.random().toString(36).slice(2,9), items: g.items||[], dosage: g.dosage||'', usage: g.usage||'', time: g.time||'', uno: g.uno||'' }));
     renderItemGroups();
     $allocateBtn.hide(); $updateBtn.show(); window.scrollTo({top:0, behavior:'smooth'});
   }
@@ -568,17 +581,17 @@ $(function(){
     const p = addedPrescriptions[editPrescriptionIndex]; if(!p) return;
     
     // Update local data
-    p.prescription_name = $prescriptionName.val();
     p.procured_from = $procuredSelect.val()||'';
-    p.items_groups = itemGroups.map(g=>({items:g.items, dosage:g.dosage, uno:g.uno}));
+    p.scope = $scopeSelect.val()||'';
+    p.items_groups = itemGroups.map(g=>({items:g.items, dosage:g.dosage, usage:g.usage, time:g.time, uno:g.uno}));
     
     // Send update to server if prescription has allocation_id
     if (p.allocation_id) {
       const updatePayload = {
         allocation_id: p.allocation_id,
-        prescription_name: p.prescription_name,
         items_groups: p.items_groups,
         procured_from: p.procured_from,
+        scope: p.scope,
         notes: p.notes || ''
       };
       
@@ -609,8 +622,8 @@ $(function(){
 
   function resetFormState(){
     editPrescriptionIndex = null; $('#form-title').text('Add Prescription');
-    $prescriptionName.val(''); $fromDate.val(''); $toDate.val(''); $daysInput.val('');
-    $procuredSelect.val('');
+    $fromDate.val(''); $toDate.val(''); $daysInput.val('');
+    $procuredSelect.val(''); $scopeSelect.val('');
     itemGroups = []; renderItemGroups();
     $allocateBtn.show(); $updateBtn.hide();
   }

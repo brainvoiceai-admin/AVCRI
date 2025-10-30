@@ -1283,22 +1283,36 @@ def prescription_entry_page(request):
         if master_type == 'procured':
             if Procured is not None:
                 try:
-                    for p in Procured.objects.filter(is_active=True)[:20]:
+                    for p in Procured.objects.filter(is_active=True).order_by('name')[:200]:
                         results.append({'name': getattr(p, 'name', '')})
                 except Exception:
                     pass
         elif master_type == 'oil':
             if OilClass is not None:
                 try:
-                    for o in OilClass.objects.filter(is_active=True)[:20]:
+                    for o in OilClass.objects.filter(is_active=True).order_by('name')[:200]:
                         results.append({'name': getattr(o, 'name', '')})
                 except Exception:
                     pass
         elif master_type == 'usage':
             if UsageType is not None:
-                try:
-                    for u in UsageType.objects.filter(is_active=True)[:20]:
+                try:    
+                    for u in UsageType.objects.filter(is_active=True).order_by('name')[:200]:
                         results.append({'name': getattr(u, 'name', '')})
+                except Exception:
+                    pass
+        elif master_type in ('prescriptiontime', 'ptime'):
+            if PrescriptionTime is not None:
+                try:
+                    for t in PrescriptionTime.objects.filter(is_active=True).order_by('name')[:200]:
+                        results.append({'name': getattr(t, 'name', '')})
+                except Exception:
+                    pass
+        elif master_type in ('prescriptionscope', 'scope'):
+            if PrescriptionScope is not None:
+                try:
+                    for s in PrescriptionScope.objects.filter(is_active=True).order_by('name')[:200]:
+                        results.append({'name': getattr(s, 'name', '')})
                 except Exception:
                     pass
         
@@ -1654,14 +1668,27 @@ def prescription_entry_page(request):
                         results.append({'name': getattr(o, 'name', '')})
                 except Exception:
                     pass
-        elif master_type == 'usage':
+        elif master_type in ('usage', 'usagetype'):
             if UsageType is not None:
                 try:
-                    for u in UsageType.objects.filter(is_active=True)[:20]:
+                    for u in UsageType.objects.filter(is_active=True).order_by('name')[:200]:
                         results.append({'name': getattr(u, 'name', '')})
                 except Exception:
                     pass
-        
+        elif master_type in ('prescriptiontime', 'ptime'):
+            if PrescriptionTime is not None:
+                try:
+                    for t in PrescriptionTime.objects.filter(is_active=True)[:20]:
+                        results.append({'name': getattr(t, 'name', '')})
+                except Exception:
+                    pass
+        elif master_type in ('prescriptionscope', 'scope'):
+            if PrescriptionScope is not None:
+                try:
+                    for s in PrescriptionScope.objects.filter(is_active=True)[:20]:
+                        results.append({'name': getattr(s, 'name', '')})
+                except Exception:
+                    pass
         return JsonResponse(results, safe=False)
     
     # patient prescriptions
