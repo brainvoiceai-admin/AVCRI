@@ -483,8 +483,17 @@ $(function(){
       method:'POST',
       headers: {'Content-Type':'application/json', 'X-Requested-With':'XMLHttpRequest'},
       body: JSON.stringify(payload)
-    }).then(r => r.json()).then(j => {
-      if (r.ok && j.allocation_id) {
+    }).then(response => {
+      if (!response.ok) {
+        return response.json().then(j => {
+          throw new Error(j.error || 'Failed to save prescription');
+        }).catch(() => {
+          throw new Error(`Server error: ${response.status}`);
+        });
+      }
+      return response.json();
+    }).then(j => {
+      if (j.allocation_id || j.status === 'ok') {
         // Add to local list with server data
         const newPrescription = {
           ...prescriptionData,
@@ -497,14 +506,14 @@ $(function(){
         itemGroups = []; renderItemGroups();
         $fromDate.val(''); $toDate.val(''); $daysInput.val(''); $procuredSelect.val(''); $scopeSelect.val('');
         
-    renderAll();
+        renderAll();
         alert('Prescription saved to server as Draft.');
       } else {
         alert('Failed to save prescription: ' + (j.error || 'Unknown error'));
       }
     }).catch(e => {
       console.error('Network error saving prescription:', e);
-      alert('Network error. Please try again.');
+      alert('Network error: ' + (e.message || 'Please try again.'));
     }).finally(() => {
       // Reset button state
       $allocateBtn.prop('disabled', false).text('Add Prescription');
@@ -599,16 +608,25 @@ $(function(){
         method:'POST',
         headers: {'Content-Type':'application/json'},
         body: JSON.stringify(updatePayload)
-      }).then(r => r.json()).then(j => {
+      }).then(response => {
+        if (!response.ok) {
+          return response.json().then(j => {
+            throw new Error(j.error || 'Failed to update prescription');
+          }).catch(() => {
+            throw new Error(`Server error: ${response.status}`);
+          });
+        }
+        return response.json();
+      }).then(j => {
         if (j.status === 'ok') {
           alert('Prescription updated successfully on server.');
           resetFormState(); 
           renderAll();
         } else {
-          alert('Failed to update prescription: ' + JSON.stringify(j));
+          alert('Failed to update prescription: ' + (j.error || JSON.stringify(j)));
         }
-      }).catch(() => {
-        alert('Network error. Prescription updated locally only.');
+      }).catch(e => {
+        alert('Network error: ' + (e.message || 'Prescription updated locally only.'));
         resetFormState(); 
         renderAll();
       });
@@ -658,7 +676,16 @@ $(function(){
         method:'POST',
         headers: {'Content-Type':'application/json'},
         body: JSON.stringify({ allocation_id: p.allocation_id, cancel_from: cfrom, cancel_to: cto, reason: reason })
-      }).then(r => r.json()).then(j => {
+      }).then(response => {
+        if (!response.ok) {
+          return response.json().then(j => {
+            throw new Error(j.error || 'Failed to cancel prescription');
+          }).catch(() => {
+            throw new Error(`Server error: ${response.status}`);
+          });
+        }
+        return response.json();
+      }).then(j => {
         if (j.status === 'ok') {
           p.status = 'cancelled';
           p.cancelled_date_from = cfrom;
@@ -668,9 +695,11 @@ $(function(){
           $cancelModal.hide();
           renderAll();
         } else {
-          alert('Failed: ' + JSON.stringify(j));
+          alert('Failed: ' + (j.error || JSON.stringify(j)));
         }
-      }).catch(()=>alert('Network error'));
+      }).catch(e => {
+        alert('Network error: ' + (e.message || 'Please try again.'));
+      });
     } else {
       // Local cancellation
       p.status = 'cancelled';
@@ -725,7 +754,16 @@ $(function(){
         method:'POST',
         headers: {'Content-Type':'application/json'},
         body: JSON.stringify({ allocation_id: prescription.allocation_id, resume_from: from, resume_to: to })
-      }).then(r => r.json()).then(j => {
+      }).then(response => {
+        if (!response.ok) {
+          return response.json().then(j => {
+            throw new Error(j.error || 'Failed to resume prescription');
+          }).catch(() => {
+            throw new Error(`Server error: ${response.status}`);
+          });
+        }
+        return response.json();
+      }).then(j => {
         if (j.status === 'ok') {
           prescription.status = 'draft';
           prescription.cancelled_date_from = null;
@@ -736,9 +774,11 @@ $(function(){
           resumingPrescriptionIndex = null;
           renderAll();
         } else {
-          alert('Failed: ' + JSON.stringify(j));
+          alert('Failed: ' + (j.error || JSON.stringify(j)));
         }
-      }).catch(()=>alert('Network error'));
+      }).catch(e => {
+        alert('Network error: ' + (e.message || 'Please try again.'));
+      });
     } else {
       // Local resume
       prescription.status = 'draft';
