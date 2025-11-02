@@ -70,8 +70,8 @@ def log_therapy_audit(user, action, therapy_allocation=None, description="", add
                 data=audit_data
             )
             
-            # Create therapy notification
-            create_therapy_notification(therapy_allocation, action, user, additional_data)
+            # Create therapy notification - COMMENTED OUT DUE TO WEBSOCKET ERRORS
+            # create_therapy_notification(therapy_allocation, action, user, additional_data)
             
     except Exception as e:
         # Don't let audit logging break the main functionality
@@ -152,8 +152,8 @@ def create_therapy_notification(therapy_allocation, action, user, additional_dat
         else:
             target_roles = ['admin', 'super_admin']
         
-        # Send notification to target roles
-        notification.send_to_roles(target_roles)
+        # Send notification to target roles - COMMENTED OUT DUE TO WEBSOCKET ERRORS
+        # notification.send_to_roles(target_roles)
         
     except Exception as e:
         print(f"Notification creation error: {e}")
@@ -751,12 +751,13 @@ def therapy_entry(request):
                         request=request
                     )
 
-                    try:
-                        if NotificationQueue is not None and (payload.get('procured') or payload.get('procured_from')):
-                            # queue a procurement notification aggregated for the allocation
-                            NotificationQueue.objects.create(target_type='procurement', target_identifier=payload.get('procured') or payload.get('procured_from'), channel='internal', payload={'allocation_id': alloc.pk}, status='queued')
-                    except Exception:
-                        pass
+                    # COMMENTED OUT DUE TO WEBSOCKET ERRORS
+                    # try:
+                    #     if NotificationQueue is not None and (payload.get('procured') or payload.get('procured_from')):
+                    #         # queue a procurement notification aggregated for the allocation
+                    #         NotificationQueue.objects.create(target_type='procurement', target_identifier=payload.get('procured') or payload.get('procured_from'), channel='internal', payload={'allocation_id': alloc.pk}, status='queued')
+                    # except Exception:
+                    #     pass
 
                     return JsonResponse({'status': 'ok', 'allocation_id': alloc.pk, 'bookings_created': len(bookings_created)}, status=201)
 
@@ -1102,10 +1103,10 @@ def prescription_entry_page(request):
                     status='draft'  # Default to draft
                 )
                 
-                # Create notification
-                create_prescription_notification(allocation, 'prescription_allocated', request.user, {
-                    'bookings_created': (to_date - from_date).days + 1
-                })
+                # Create notification - COMMENTED OUT TEMPORARILY DUE TO NETWORK ERRORS
+                # create_prescription_notification(allocation, 'prescription_allocated', request.user, {
+                #     'bookings_created': (to_date - from_date).days + 1
+                # })
                 
                 # Log audit
                 log_prescription_audit(request.user, 'allocate_prescription', 'PrescriptionAllocation', str(allocation.id), {
@@ -1140,12 +1141,12 @@ def prescription_entry_page(request):
                 allocation.cancellation_reason = reason
                 allocation.save()
                 
-                # Create notification
-                create_prescription_notification(allocation, 'prescription_cancelled', request.user, {
-                    'cancel_from': cancel_from,
-                    'cancel_to': cancel_to,
-                    'reason': reason
-                })
+                # Create notification - COMMENTED OUT TEMPORARILY DUE TO NETWORK ERRORS
+                # create_prescription_notification(allocation, 'prescription_cancelled', request.user, {
+                #     'cancel_from': cancel_from,
+                #     'cancel_to': cancel_to,
+                #     'reason': reason
+                # })
                 
                 # Log audit
                 log_prescription_audit(request.user, 'cancel_prescription', 'PrescriptionAllocation', str(allocation.id), {
@@ -1179,11 +1180,11 @@ def prescription_entry_page(request):
                 allocation.cancellation_reason = ''
                 allocation.save()
                 
-                # Create notification
-                create_prescription_notification(allocation, 'prescription_resumed', request.user, {
-                    'resume_from': resume_from,
-                    'resume_to': resume_to
-                })
+                # Create notification - COMMENTED OUT TEMPORARILY DUE TO NETWORK ERRORS
+                # create_prescription_notification(allocation, 'prescription_resumed', request.user, {
+                #     'resume_from': resume_from,
+                #     'resume_to': resume_to
+                # })
                 
                 # Log audit
                 log_prescription_audit(request.user, 'resume_prescription', 'PrescriptionAllocation', str(allocation.id), {
@@ -1229,10 +1230,10 @@ def prescription_entry_page(request):
                 
                 allocation.save()
                 
-                # Create notification
-                create_prescription_notification(allocation, 'prescription_updated', request.user, {
-                    'changes': 'Prescription details updated'
-                })
+                # Create notification - COMMENTED OUT TEMPORARILY DUE TO NETWORK ERRORS
+                # create_prescription_notification(allocation, 'prescription_updated', request.user, {
+                #     'changes': 'Prescription details updated'
+                # })
                 
                 # Log audit
                 log_prescription_audit(request.user, 'update_prescription', 'PrescriptionAllocation', str(allocation.id), {
@@ -1386,8 +1387,8 @@ def create_prescription_notification(prescription_allocation, action, user, addi
         else:
             target_roles = ['admin', 'super_admin']
         
-        # Send notification to target roles
-        notification.send_to_roles(target_roles)
+        # Send notification to target roles - COMMENTED OUT DUE TO WEBSOCKET ERRORS
+        # notification.send_to_roles(target_roles)
         
     except Exception as e:
         print(f"Prescription notification creation error: {e}")
@@ -1485,8 +1486,8 @@ def prescription_entry_page(request):
                 ps.last_prescription_date = allocation.from_date
                 ps.save()
                 
-                # Create notification
-                create_prescription_notification(allocation, 'prescription_allocated', request.user)
+                # Create notification - COMMENTED OUT DUE TO WEBSOCKET ERRORS
+                # create_prescription_notification(allocation, 'prescription_allocated', request.user)
                 
                 # Log audit
                 log_prescription_audit(request.user, 'allocate_prescription', 'PrescriptionAllocation', str(allocation.id), {
@@ -1520,12 +1521,12 @@ def prescription_entry_page(request):
                 allocation.cancellation_reason = reason
                 allocation.save()
                 
-                # Create notification
-                create_prescription_notification(allocation, 'prescription_cancelled', request.user, {
-                    'cancel_from': cancel_from,
-                    'cancel_to': cancel_to,
-                    'reason': reason
-                })
+                # Create notification - COMMENTED OUT DUE TO WEBSOCKET ERRORS
+                # create_prescription_notification(allocation, 'prescription_cancelled', request.user, {
+                #     'cancel_from': cancel_from,
+                #     'cancel_to': cancel_to,
+                #     'reason': reason
+                # })
                 
                 # Log audit
                 log_prescription_audit(request.user, 'cancel_prescription', 'PrescriptionAllocation', str(allocation.id), {
@@ -1559,11 +1560,11 @@ def prescription_entry_page(request):
                 allocation.cancellation_reason = ''
                 allocation.save()
                 
-                # Create notification
-                create_prescription_notification(allocation, 'prescription_resumed', request.user, {
-                    'resume_from': resume_from,
-                    'resume_to': resume_to
-                })
+                # Create notification - COMMENTED OUT TEMPORARILY DUE TO NETWORK ERRORS
+                # create_prescription_notification(allocation, 'prescription_resumed', request.user, {
+                #     'resume_from': resume_from,
+                #     'resume_to': resume_to
+                # })
                 
                 # Log audit
                 log_prescription_audit(request.user, 'resume_prescription', 'PrescriptionAllocation', str(allocation.id), {
@@ -1609,8 +1610,8 @@ def prescription_entry_page(request):
                 
                 allocation.save()
                 
-                # Create notification
-                create_prescription_notification(allocation, 'prescription_updated', request.user)
+                # Create notification - COMMENTED OUT TEMPORARILY DUE TO NETWORK ERRORS
+                # create_prescription_notification(allocation, 'prescription_updated', request.user)
                 
                 # Log audit
                 log_prescription_audit(request.user, 'update_prescription', 'PrescriptionAllocation', str(allocation.id), {
@@ -1792,8 +1793,8 @@ def create_prescription_notification(prescription_allocation, action, user, addi
         else:
             target_roles = ['admin', 'super_admin']
         
-        # Send notification to target roles
-        notification.send_to_roles(target_roles)
+        # Send notification to target roles - COMMENTED OUT DUE TO WEBSOCKET ERRORS
+        # notification.send_to_roles(target_roles)
         
     except Exception as e:
         print(f"Prescription notification creation error: {e}")
@@ -2118,15 +2119,15 @@ def allocate_therapy(request):
                         }
                     })
 
-            # create notification rows
-            for n in notifications_to_enqueue:
-                NotificationQueue.objects.create(
-                    target_type=n["target_type"],
-                    target_identifier=n.get("target_identifier",""),
-                    channel=n.get("channel","webhook"),
-                    payload=n["payload"],
-                    status="queued"
-                )
+            # create notification rows - COMMENTED OUT DUE TO WEBSOCKET ERRORS
+            # for n in notifications_to_enqueue:
+            #     NotificationQueue.objects.create(
+            #         target_type=n["target_type"],
+            #         target_identifier=n.get("target_identifier",""),
+            #         channel=n.get("channel","webhook"),
+            #         payload=n["payload"],
+            #         status="queued"
+            #     )
 
             # audit + allocation change
             AuditLog.objects.create(
@@ -2300,7 +2301,7 @@ def final_schedule_api(request):
                 'success': False,
                 'error': str(e)
             }
-        
+        print(leave_update_result)
         # Step 2: Trigger final allocation algorithm
         try:
             # Import final allocation functions
@@ -2347,6 +2348,7 @@ def final_schedule_api(request):
             'allocation_update': allocation_update_result,
             'overall_success': leave_update_result['success'] and allocation_update_result['success']
         })
+        print(allocation_update_result)
         
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=500)

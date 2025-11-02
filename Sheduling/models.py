@@ -160,7 +160,7 @@ class BookingAssignment(models.Model):
 
     # denormalized snapshot of booking's date/timeslot for uniqueness checks
     booking_date = models.DateField(db_index=True, null=True, blank=True)
-    booking_timeslot = models.ForeignKey(TimeSlot, null=True, blank=True, on_delete=models.SET_NULL, related_name='booking_assignments')
+    booking_timeslot = models.ForeignKey('masters.SlotMaster', null=True, blank=True, on_delete=models.SET_NULL, related_name='booking_assignments')
 
     class Meta:
         constraints = [
@@ -284,12 +284,14 @@ class TherapyNotification(models.Model):
         self.save()
     
     def send_to_roles(self, roles):
-        """Send notification to users with specific roles"""
-        from authentication.models import CustomUser
-        target_users = CustomUser.objects.filter(role__in=roles)
-        self.target_users.set(target_users)
-        self.target_roles = roles
-        self.save()
+        """Send notification to users with specific roles - COMMENTED OUT DUE TO WEBSOCKET ERRORS"""
+        # COMMENTED OUT DUE TO WEBSOCKET ERRORS
+        # from authentication.models import CustomUser
+        # target_users = CustomUser.objects.filter(role__in=roles)
+        # self.target_users.set(target_users)
+        # self.target_roles = roles
+        # self.save()
+        pass
 
 
 class AuditLog(models.Model):
@@ -427,12 +429,14 @@ class PrescriptionNotification(models.Model):
         self.save()
     
     def send_to_roles(self, roles):
-        """Send notification to users with specific roles"""
-        from authentication.models import CustomUser
-        target_users = CustomUser.objects.filter(role__in=roles)
-        self.target_users.set(target_users)
-        self.target_roles = roles
-        self.save()
+        """Send notification to users with specific roles - COMMENTED OUT DUE TO WEBSOCKET ERRORS"""
+        # COMMENTED OUT DUE TO WEBSOCKET ERRORS
+        # from authentication.models import CustomUser
+        # target_users = CustomUser.objects.filter(role__in=roles)
+        # self.target_users.set(target_users)
+        # self.target_roles = roles
+        # self.save()
+        pass
 
 
 class PrescriptionChange(models.Model):

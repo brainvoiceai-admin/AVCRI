@@ -16,6 +16,12 @@ Including another URLconf
 """
 from django.contrib import admin
 from django.urls import path, include
+from django.http import JsonResponse
+
+# Temporary handler for WebSocket notifications endpoint (disabled)
+def ws_notifications_disabled(request):
+    """Handler for /ws/notifications/ endpoint - notifications are temporarily disabled"""
+    return JsonResponse({'status': 'disabled', 'message': 'Notifications are temporarily disabled'}, status=200)
 
 urlpatterns = [
     path('admin/', admin.site.urls),
@@ -25,5 +31,7 @@ urlpatterns = [
       path("predictor/", include("predictor.urls")),
       path("sheduling/", include("Sheduling.urls")),
       path("Masters/", include("masters.urls")),
+      # Temporary route to handle WebSocket notification requests (disabled)
+      path('ws/notifications/', ws_notifications_disabled, name='ws_notifications_disabled'),
 ]
 
