@@ -404,7 +404,7 @@ $(function(){
     $('#hdr-pat-name').text(patient.pat_name || 'Unknown');
     $('#hdr-pat-meta').text('Registration: ' + (patient.pat_reg_no || patient.pat_op_reg_no ) + ' • Age/Gender: ' + ((patient.pat_age || '—') + ' / ' + (patient.pat_sex || '—')));
     $('#hdr-pat-vip').text('VIP: ' + (patient.vip_status || 'No') + ' • Room: ' + (patient.pat_room_no || '—'));
-    $('#hdr-pat-ip').text('IP No: ' + (patient.pat_op_reg_no || '—'));
+    $('#hdr-pat-ip').text('IP No: ' + (patient.pat_reg_no || patient.pat_op_reg_no ));
     $('#hdr-pat-unique').text('Unique ID: ' + (patient.pat_ref_id || '—'));
     $('#hdr-pat-type').text('Patient Type: IP');
     
@@ -440,12 +440,39 @@ $(function(){
     $('#search-results').hide();
   });
 
+  // Helper function to convert 24-hour time to 12-hour format
+  function format12Hour(time24) {
+    if (!time24) return '';
+    const parts = String(time24).split(':');
+    if (parts.length !== 2) return time24;
+    let hours = parseInt(parts[0], 10);
+    const minutes = parts[1];
+    const period = hours >= 12 ? 'PM' : 'AM';
+    hours = hours % 12;
+    hours = hours ? hours : 12; // 0 should be 12
+    return `${hours}:${minutes} ${period}`;
+  }
+
   // populate masters & slots with fallback
   function populateMasters(){
     ajax({action:'masters', type:'usage'}).then(list => { $usageSelect.empty().append('<option value="">--</option>'); (list||FALLBACK_USAGE).forEach(u => $usageSelect.append(new Option(u.name, u.name))); }).catch(()=>{ $usageSelect.empty().append('<option value="">--</option>'); FALLBACK_USAGE.forEach(u => $usageSelect.append(new Option(u.name, u.name))); });
     ajax({action:'masters', type:'procured'}).then(list => { $procuredSelect.empty().append('<option value="">--</option>'); (list||FALLBACK_PROCURED).forEach(p => $procuredSelect.append(new Option(p.name, p.name))); }).catch(()=>{ $procuredSelect.empty().append('<option value="">--</option>'); FALLBACK_PROCURED.forEach(p => $procuredSelect.append(new Option(p.name, p.name))); });
     ajax({action:'masters', type:'oil'}).then(list => { $oilClassSelect.empty().append('<option value="">--</option>'); (list||FALLBACK_OIL).forEach(o => $oilClassSelect.append(new Option(o.name, o.name))); }).catch(()=>{ $oilClassSelect.empty().append('<option value="">--</option>'); FALLBACK_OIL.forEach(o => $oilClassSelect.append(new Option(o.name, o.name))); });
-    ajax({action:'slots'}).then(resp => { const slots = (resp && resp.slots) || resp || FALLBACK_SLOTS; $slotSelect.find('option').not(':first').remove(); (slots||FALLBACK_SLOTS).forEach(s => { const st = s.start_time || s; $slotSelect.append(`<option value="${st}">${st}</option>`); }); }).catch(()=>{ $slotSelect.find('option').not(':first').remove(); FALLBACK_SLOTS.forEach(s => $slotSelect.append(`<option value="${s.start_time}">${s.start_time}</option>`)); });
+    ajax({action:'slots'}).then(resp => { 
+      const slots = (resp && resp.slots) || resp || FALLBACK_SLOTS; 
+      $slotSelect.find('option').not(':first').remove(); 
+      (slots||FALLBACK_SLOTS).forEach(s => { 
+        const st = s.start_time || s;
+        const displayText = format12Hour(st);
+        $slotSelect.append(`<option value="${st}">${displayText}</option>`);
+      }); 
+    }).catch(()=>{ 
+      $slotSelect.find('option').not(':first').remove(); 
+      FALLBACK_SLOTS.forEach(s => {
+        const displayText = format12Hour(s.start_time);
+        $slotSelect.append(`<option value="${s.start_time}">${displayText}</option>`);
+      }); 
+    });
   }
   populateMasters();
 
@@ -591,7 +618,7 @@ $(function(){
         <td>${i+1}</td>
         <td>${esc(t.therapy_name)}</td>
         <td>${esc(t.ext_int||'')}</td>
-        <td>${esc(t.slot||'')}</td>
+        <td>${esc(format12Hour(t.slot||''))}</td>
         <td>${groupsHtml}</td>
         <td>${esc(t.from_date||'')}</td>
         <td>${esc(t.to_date||'')}</td>
@@ -632,7 +659,7 @@ $(function(){
           <div class="date-row" data-id="${b.id}">
             <div style="display:flex;gap:12px;align-items:center;min-width:760px;">
               <div style="width:140px">${b.date}</div>
-              <div style="width:120px">${esc(b.slot||'')}</div>
+              <div style="width:120px">${esc(format12Hour(b.slot||''))}</div>
               <div style="width:200px">${esc(b.room||'—')}</div>
               <div style="width:200px">${esc(b.therapist||'—')}</div>
               <div style="width:140px"><span class="status-pill ${pillClass}">${statusText}</span></div>
@@ -657,7 +684,7 @@ $(function(){
           <div class="date-row" data-id="${b.booking_id}">
             <div style="display:flex;gap:12px;align-items:center;min-width:760px;">
               <div style="width:140px">${b.date}</div>
-              <div style="width:120px">${esc(b.slot||'')}</div>
+              <div style="width:120px">${esc(format12Hour(b.slot||''))}</div>
               <div style="width:200px">${esc(b.room||'')}</div>
               <div style="width:200px">${esc((b.therapists||[]).join(', ')||'—')}</div>
               <div style="width:140px"><span class="status-pill ${pillClass}">${statusText}</span></div>

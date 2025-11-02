@@ -2301,7 +2301,7 @@ def final_schedule_api(request):
                 'success': False,
                 'error': str(e)
             }
-        
+        print(leave_update_result)
         # Step 2: Trigger final allocation algorithm
         try:
             # Import final allocation functions
@@ -2348,6 +2348,7 @@ def final_schedule_api(request):
             'allocation_update': allocation_update_result,
             'overall_success': leave_update_result['success'] and allocation_update_result['success']
         })
+        print(allocation_update_result)
         
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=500)

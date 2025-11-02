@@ -337,7 +337,6 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
             continue
 
         canonical_slot = map_to_canonical_slot(pref_slot) or pref_slot
-
         # patient already booked check
         patient_already_booked = False
         try:
@@ -392,7 +391,6 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                 "room_no": getattr(booking.room, 'room_no', None) if getattr(booking, 'room', None) else None, "therapists": []
             })
             continue
-
         # therapist reqs and flags
         try:
             therapy_req = therapist_requirements(allocation)
@@ -401,7 +399,6 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
 
         needs_room_flag = therapy_needs_room(allocation) if therapy_needs_room else bool(getattr(booking, 'room', None))
         needs_bath_flag = therapy_needs_bath(allocation) if therapy_needs_bath else False
-
         # allocate therapists
         try:
             candidate_therapists = allocate_therapists(target_date, canonical_slot, therapy_req, None, needs_bath_flag)
@@ -436,10 +433,8 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
             bath_assigned = next((t for t in assigned_therapists if getattr(t, 'is_bathing_therapist', False)), None)
             if not bath_assigned:
                 bath_assigned = assigned_therapists[0]
-
         # build therapist audit list
         therapists_for_audit = [therapist_entry(t, is_bath=(t == bath_assigned)) for t in assigned_therapists]
-
         # room allocation
         room_candidate = getattr(booking, 'room', None)
         if needs_room_flag and not room_candidate:
@@ -447,7 +442,6 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                 room_candidate = allocate_treatment_room(target_date, canonical_slot, None)
             except Exception:
                 room_candidate = None
-
         if needs_room_flag and not room_candidate:
             reason = "no_room_available"
             if AllocationAttempt:
@@ -465,7 +459,6 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                 "room_no": None, "therapists": therapists_for_audit
             })
             continue
-
         # create bookings atomically and persist is_bathing on therapist bookings
         try:
             with transaction.atomic():
@@ -476,7 +469,6 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                         raise RuntimeError("room_already_booked")
                 elif needs_room_flag:
                     rb_obj = booking if getattr(booking, 'room', None) else None
-
                 tb_objs = []
                 for t in assigned_therapists:
                     is_bath_for_t = (t == bath_assigned)
@@ -487,7 +479,46 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                         tb_objs.append(tb_obj)
                     else:
                         tb_objs.append(SimpleNamespace(therapist_code=getattr(t,'therapist_code',str(t)), is_bathing=is_bath_for_t))
-
+                # create BookingAssignment records to link therapists to Booking (Sheduling app)
+                from Sheduling.models import BookingAssignment
+                from Patient.models import Therapist
+                for t in assigned_therapists:
+                    try:
+                        # Get or create Therapist object from Patient app (therapist_code is PK)
+                        therapist_obj, _ = Therapist.objects.get_or_create(
+                            therapist_code=t.therapist_code,
+                            defaults={
+                                'therapist_name': getattr(t, 'therapist_name', t.therapist_code),
+                                'therapist_grade': getattr(t, 'therapist_grade', ''),
+                                'is_bathing_therapist': getattr(t, 'is_bathing_therapist', False)
+                            }
+                        )
+                        # Check if assignment already exists
+                        existing = BookingAssignment.objects.filter(booking=booking, therapist=therapist_obj).first()
+                        if existing:
+                            ba_obj = existing
+                            ba_created = False
+                        else:
+                            # Create BookingAssignment to link therapist to booking
+                            # Note: booking_timeslot now uses SlotMaster (same as Booking.timeslot)
+                            # It will be auto-populated from booking.timeslot in save() if not provided
+                            ba_obj = BookingAssignment.objects.create(
+                                booking=booking,
+                                therapist=therapist_obj,
+                                booking_item=None,
+                                booking_date=target_date,
+                                booking_timeslot=canonical_slot,  # SlotMaster instance (same as Booking.timeslot)
+                                role=getattr(t, 'therapist_grade', ''),
+                                assigned_for='booking',
+                                status='assigned'
+                            )
+                            ba_created = True
+                    except Exception as e:
+                        print(f"Error creating BookingAssignment for {getattr(t, 'therapist_code', 'unknown')}: {e}")
+                        import traceback
+                        traceback.print_exc()
+                        pass
+                booking.refresh_from_db()  # Refresh to clear any cached relations
                 # success audit
                 if AllocationAttempt:
                     try:
@@ -500,9 +531,7 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                         )
                     except Exception:
                         pass
-
                 used_slots.append(canonical_slot)
-
                 # update booking row
                 try:
                     booking.timeslot = getattr(booking, 'timeslot', None) or canonical_slot
@@ -511,7 +540,6 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                     booking.save(update_fields=['timeslot','room','status','updated_at'])
                 except Exception:
                     pass
-
                 tasks.append({
                     "booking_id": booking_id, "allocation_id": therapy_allocation_id, "date": target_date.isoformat(),
                     "therapy_name": therapy_name, "slot": requested_slot_value, "status": "BOOKED", "reason": None,

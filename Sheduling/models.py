@@ -160,7 +160,7 @@ class BookingAssignment(models.Model):
 
     # denormalized snapshot of booking's date/timeslot for uniqueness checks
     booking_date = models.DateField(db_index=True, null=True, blank=True)
-    booking_timeslot = models.ForeignKey(TimeSlot, null=True, blank=True, on_delete=models.SET_NULL, related_name='booking_assignments')
+    booking_timeslot = models.ForeignKey('masters.SlotMaster', null=True, blank=True, on_delete=models.SET_NULL, related_name='booking_assignments')
 
     class Meta:
         constraints = [
