@@ -36,6 +36,7 @@
     .status-cancelreq { background:#fff4e6; color:#b36b00; border:1px solid #ffebd1; }
     .status-cancelled { background:#fdecea; color:#b02a2a; border:1px solid #f8d7da; }
     .status-completed { background:#e9f9ec; color:#19692a; border:1px solid #d7f1d9; }
+    .status-mixed { background:#fff9e6; color:#856404; border:1px solid #ffeaa7; }
     .small-muted { font-size:0.9em; color:#666; margin-top:6px; }
     .date-row { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:8px 6px; border-bottom:1px solid #f1f1f1; }
     .date-left { display:flex; align-items:center; gap:12px; min-width:260px; }
@@ -409,7 +410,9 @@ $(function(){
     $('#hdr-pat-type').text('Patient Type: IP');
     
     // Load patient therapies
-    ajax({action:'patient_therapies', patient_reg_no: patient.pat_op_reg_no || patient.pat_reg_no}).then(list => {
+    // Use pat_reg_no consistently (or pat_op_reg_no if pat_reg_no doesn't exist)
+    const patientRegNo = patient.pat_reg_no || patient.pat_op_reg_no;
+    ajax({action:'patient_therapies', patient_reg_no: patientRegNo}).then(list => {
       addedTherapies = list || [];
       bookings = [];
       addedTherapies.forEach((t, idx) => {
@@ -535,8 +538,16 @@ $(function(){
     if (from > to){ alert('From must be <= To'); return; }
 
     // Prepare therapy data for server
+    // Use pat_reg_no consistently for IP patients (or pat_op_reg_no if pat_reg_no doesn't exist)
+    const patientRegNo = selectedPatient.pat_reg_no || selectedPatient.pat_op_reg_no;
+    
     const therapyData = {
-      patient_reg_no: selectedPatient.pat_reg_no,
+      patient_reg_no: patientRegNo,
+      patient_name: selectedPatient.pat_name || '',
+      patient_age: selectedPatient.pat_age || '',
+      patient_sex: selectedPatient.pat_sex || '',
+      patient_room_no: selectedPatient.pat_room_no || '',
+      pat_ref_id: selectedPatient.pat_ref_id || '',
       therapy_code: therapy.id,
       therapy_name: therapy.text,
       ext_int: $('#ext-int-select').val(),
@@ -564,7 +575,10 @@ $(function(){
         const newTherapy = {
           ...therapyData,
           allocation_id: data.allocation_id,
-          status: 'draft' // Server saves as draft
+          status: data.overall_status || 'draft', // Use overall status from server
+          status_counts: data.status_counts || {},
+          status_summary: data.status_summary || {},
+          date_status_map: data.date_status_map || {}
         };
         addedTherapies.push(newTherapy);
         
@@ -573,6 +587,21 @@ $(function(){
         $therapySelect.val(null).trigger('change'); $('#ext-int-select').val(''); $slotSelect.val(''); $fromDate.val(''); $toDate.val(''); $daysInput.val(''); $usageSelect.val(''); $oilClassSelect.val(''); $procuredSelect.val('');
         
         renderAll();
+        
+        // Reload patient therapies from server
+        // Use the same registration number that was used for saving
+        if (selectedPatient) {
+          const patientRegNo = selectedPatient.pat_reg_no || selectedPatient.pat_op_reg_no;
+          ajax({action:'patient_therapies', patient_reg_no: patientRegNo}).then(list => {
+            addedTherapies = list || [];
+            bookings = [];
+            addedTherapies.forEach((t, idx) => {
+              if (t.from_date && t.to_date) getDateRange(t.from_date, t.to_date).forEach(d => bookings.push({ id: Math.random().toString(36).slice(2,9), allocation_id: t.allocation_id || t.allocation_id || t.allocation_id, therapyIndex: idx, date:d, slot: t.slot||'', room: t.room||'', therapist: t.therapist||'', status: 'scheduled' }));
+            });
+            renderAll();
+          }).catch(()=>{ renderAll(); });
+        }
+        
         alert('Therapy added and saved to server as Draft.');
       } else {
         alert('Error: ' + (data.error || 'Failed to save therapy'));
@@ -591,27 +620,52 @@ $(function(){
     addedTherapies.forEach((t,i) => {
       const groupsHtml = (t.items_groups||[]).map(g => (g.items||[]).map(it => `<span class="tag">${esc(it.item_name)}</span>`).join(' ') + `<div class="muted-small">Dosage:${esc(g.dosage||'—')} • UNO:${esc(g.uno||'—')}</div>`).join('<hr/>');
       
-      // Status logic
+      // Status logic - show counts if available
       let statusHtml = '';
       let statusClass = 'status-scheduled';
       console.log('Therapy status:', t.status); // Debug log
       
-      if (t.status === 'draft') {
-        statusHtml = '<span class="status-pill status-draft">Draft</span>';
-        statusClass = 'status-draft';
-      } else if (t.status === 'cancelled') {
-        statusHtml = '<span class="status-pill status-cancelled">Cancelled</span>';
-        statusClass = 'status-cancelled';
-      } else if (t.status === 'allocated') {
-        statusHtml = '<span class="status-pill status-scheduled">Allocated</span>';
-        statusClass = 'status-scheduled';
-      } else if (t.status === 'failed') {
-        statusHtml = '<span class="status-pill status-cancelled">Failed</span>';
-        statusClass = 'status-cancelled';
+      // Build status display with counts - format: "2 Draft / 3 Allocated"
+      const statusSummary = t.status_summary || {};
+      const statusParts = [];
+      
+      // Order: Draft, Allocated, Failed, Cancelled
+      if (statusSummary.draft) {
+        statusParts.push(`${statusSummary.draft} Draft`);
+      }
+      if (statusSummary.allocated) {
+        statusParts.push(`${statusSummary.allocated} Allocated`);
+      }
+      if (statusSummary.failed) {
+        statusParts.push(`${statusSummary.failed} Failed`);
+      }
+      if (statusSummary.cancelled) {
+        statusParts.push(`${statusSummary.cancelled} Cancelled`);
+      }
+      
+      // If we have detailed counts, show them with slashes
+      if (statusParts.length > 0) {
+        statusHtml = `<span class="status-pill status-mixed">${statusParts.join(' / ')}</span>`;
+        statusClass = 'status-mixed';
       } else {
-        // Default to draft for any unknown status
-        statusHtml = '<span class="status-pill status-draft">Draft</span>';
-        statusClass = 'status-draft';
+        // Fallback to overall status if no counts available
+        if (t.status === 'draft') {
+          statusHtml = '<span class="status-pill status-draft">Draft</span>';
+          statusClass = 'status-draft';
+        } else if (t.status === 'cancelled') {
+          statusHtml = '<span class="status-pill status-cancelled">Cancelled</span>';
+          statusClass = 'status-cancelled';
+        } else if (t.status === 'allocated') {
+          statusHtml = '<span class="status-pill status-scheduled">Allocated</span>';
+          statusClass = 'status-scheduled';
+        } else if (t.status === 'failed') {
+          statusHtml = '<span class="status-pill status-cancelled">Failed</span>';
+          statusClass = 'status-cancelled';
+        } else {
+          // Default to draft for any unknown status
+          statusHtml = '<span class="status-pill status-draft">Draft</span>';
+          statusClass = 'status-draft';
+        }
       }
       
       const row = `<tr class="${statusClass}">
@@ -675,25 +729,56 @@ $(function(){
 
     // fetch server allocation_status
     ajax({action:'allocation_status', allocation_id: t.allocation_id}).then(data => {
-      $statusModalInfo.text(`Therapy: ${data.therapy_name} — ${data.from_date} → ${data.to_date}`);
+      // Show status summary at top
+      const statusSummary = data.status_summary || {};
+      const summaryParts = [];
+      if (statusSummary.allocated) summaryParts.push(`${statusSummary.allocated} Allocated`);
+      if (statusSummary.failed) summaryParts.push(`${statusSummary.failed} Failed`);
+      if (statusSummary.cancelled) summaryParts.push(`${statusSummary.cancelled} Cancelled`);
+      if (statusSummary.draft) summaryParts.push(`${statusSummary.draft} Draft`);
+      
+      $statusModalInfo.html(`
+        <strong>Therapy: ${esc(data.therapy_name)}</strong> — ${data.from_date} → ${data.to_date}<br/>
+        <small style="color:#6c757d;margin-top:4px;display:block;">${summaryParts.length > 0 ? summaryParts.join(', ') : 'Status: ' + (data.overall_status || 'Unknown')}</small>
+      `);
       $statusDatesList.empty();
+      
+      // Group bookings by status for better visibility
+      const bookingsByStatus = {};
       (data.bookings||[]).forEach(b => {
-        const pillClass = ({scheduled:'status-scheduled', draft:'status-draft', pending:'status-draft', cancel_requested:'status-cancelreq', cancelled:'status-cancelled', completed:'status-completed'})[b.status] || 'status-scheduled';
-        const statusText = ({scheduled:'Scheduled', draft:'Draft', pending:'Pending', cancel_requested:'Cancel Requested', cancelled:'Cancelled', completed:'Completed'})[b.status] || b.status;
-        const $row = $(`
-          <div class="date-row" data-id="${b.booking_id}">
-            <div style="display:flex;gap:12px;align-items:center;min-width:760px;">
-              <div style="width:140px">${b.date}</div>
-              <div style="width:120px">${esc(format12Hour(b.slot||''))}</div>
-              <div style="width:200px">${esc(b.room||'')}</div>
-              <div style="width:200px">${esc((b.therapists||[]).join(', ')||'—')}</div>
-              <div style="width:140px"><span class="status-pill ${pillClass}">${statusText}</span></div>
-            </div>
-            <div>
-            </div>
-          </div>`);
-        $statusDatesList.append($row);
+        const displayStatus = b.display_status || b.status || 'draft';
+        if (!bookingsByStatus[displayStatus]) {
+          bookingsByStatus[displayStatus] = [];
+        }
+        bookingsByStatus[displayStatus].push(b);
       });
+      
+      // Show status sections
+      const statusOrder = ['allocated', 'failed', 'draft', 'cancelled'];
+      statusOrder.forEach(status => {
+        if (bookingsByStatus[status] && bookingsByStatus[status].length > 0) {
+          const statusLabel = status.charAt(0).toUpperCase() + status.slice(1);
+          const $section = $(`<div style="margin-bottom:16px;"><h4 style="margin:0 0 8px 0;font-size:14px;color:#495057;">${statusLabel} Dates (${bookingsByStatus[status].length}):</h4></div>`);
+          $statusDatesList.append($section);
+          
+          bookingsByStatus[status].forEach(b => {
+            const pillClass = ({scheduled:'status-scheduled', allocated:'status-scheduled', draft:'status-draft', pending:'status-draft', failed:'status-cancelled', cancel_requested:'status-cancelreq', cancelled:'status-cancelled', completed:'status-completed'})[b.status] || 'status-scheduled';
+            const statusText = ({scheduled:'Scheduled', allocated:'Allocated', draft:'Draft', failed:'Failed', pending:'Pending', cancel_requested:'Cancel Requested', cancelled:'Cancelled', completed:'Completed'})[b.display_status || b.status] || b.status;
+            const $row = $(`
+              <div class="date-row" data-id="${b.booking_id}" style="margin-bottom:8px;">
+                <div style="display:flex;gap:12px;align-items:center;min-width:760px;">
+                  <div style="width:140px"><strong>${b.date}</strong></div>
+                  <div style="width:120px">${esc(format12Hour(b.slot||''))}</div>
+                  <div style="width:200px">${esc(b.room||'—')}</div>
+                  <div style="width:200px">${esc((b.therapists||[]).join(', ')||'—')}</div>
+                  <div style="width:140px"><span class="status-pill ${pillClass}">${statusText}</span></div>
+                </div>
+              </div>`);
+            $statusDatesList.append($row);
+          });
+        }
+      });
+      
       $statusModal.show();
     }).catch(()=>{ alert('Could not load allocation status'); });
   }

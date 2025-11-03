@@ -486,6 +486,27 @@
 
   <script>
   (function(){
+    // Helper function to get CSRF token from cookies
+    function getCookie(name) {
+      let cookieValue = null;
+      if (document.cookie && document.cookie !== '') {
+        const cookies = document.cookie.split(';');
+        for (let i = 0; i < cookies.length; i++) {
+          const cookie = cookies[i].trim();
+          if (cookie.substring(0, name.length + 1) === (name + '=')) {
+            cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+            break;
+          }
+        }
+      }
+      return cookieValue;
+    }
+    
+    // Get CSRF token from cookie
+    function getCsrfToken() {
+      return getCookie('csrftoken');
+    }
+    
     const API_ROOT = "/predictor/api/v1/";
     const LEGACY_API_ROOT = "/predictor/api/predictions/?type=";
     const chartEl = document.getElementById("predChart");
@@ -802,11 +823,16 @@
       updateProgress(10, 'Starting forecast...');
       
       try {
+        const csrfToken = getCsrfToken();
+        if (!csrfToken) {
+          throw new Error('CSRF token not found. Please refresh the page and try again.');
+        }
+        
         const response = await fetch(API_ROOT + 'forecast-runs/trigger/', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]')?.value || ''
+            'X-CSRFToken': csrfToken
           },
           body: JSON.stringify({
             run_type: active,
@@ -815,7 +841,16 @@
         });
         
         if (!response.ok) {
-          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+           let errorMessage = `HTTP ${response.status}: ${response.statusText}`;
+          try {
+            const errorData = await response.json();
+            if (errorData.error || errorData.detail) {
+              errorMessage = errorData.error || errorData.detail || errorMessage;
+            }
+          } catch (e) {
+            // If error response is not JSON, use status text
+          }
+          throw new Error(errorMessage);
         }
         
         currentForecastRun = await response.json();

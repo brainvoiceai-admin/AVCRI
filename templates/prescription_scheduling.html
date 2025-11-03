@@ -656,9 +656,6 @@
             loadPrescriptionData('draft', today);
             loadPrescriptionData('scheduled', today);
             loadPrescriptionData('dispatched', today);
-            
-            // Initialize stats display
-            updateStatsDisplay();
         });
         
         function setupEventListeners() {
@@ -797,8 +794,14 @@
             // Update the global stats for this specific status
             globalStats[status] = data.length;
             
-            // Update the display with current global stats
-            updateStatsDisplay();
+            // Update the display immediately
+            if (status === 'draft') {
+                document.getElementById('draft-count').textContent = data.length;
+            } else if (status === 'scheduled') {
+                document.getElementById('scheduled-count').textContent = data.length;
+            } else if (status === 'dispatched') {
+                document.getElementById('dispatched-count').textContent = data.length;
+            }
         }
         
         function updateStatsDisplay() {

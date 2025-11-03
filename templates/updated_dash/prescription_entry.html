@@ -35,6 +35,7 @@
     .status-active { background:#e9f9ec;color:#19692a;border:1px solid #d7f1d9; }
     .status-cancelled { background:#fdecea;color:#b02a2a;border:1px solid #f8d7da; }
     .status-failed { background:#fdecea;color:#b02a2a;border:1px solid #f8d7da; }
+    .status-mixed { background:#e7f3ff;color:#004085;border:1px solid #b8daff; }
     .small-muted { font-size:0.9em; color:#666; margin-top:6px; }
     .date-row { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:8px 6px; border-bottom:1px solid #f1f1f1; }
     .date-left { display:flex; align-items:center; gap:12px; min-width:260px; }
@@ -472,6 +473,9 @@ $(function(){
     const payload = {
       patient_reg_no: selectedPatient.pat_op_reg_no || selectedPatient.pat_reg_no,
       patient_name: selectedPatient.pat_name,
+      patient_age: selectedPatient.pat_age || '',
+      patient_sex: selectedPatient.pat_sex || '',
+      patient_room_no: selectedPatient.pat_room_no || '',
       pat_ref_id: selectedPatient.pat_ref_id || '',
       ...prescriptionData
     };
@@ -494,19 +498,21 @@ $(function(){
       return response.json();
     }).then(j => {
       if (j.allocation_id || j.status === 'ok') {
-        // Add to local list with server data
-        const newPrescription = {
-          ...prescriptionData,
-          allocation_id: j.allocation_id,
-          status: 'draft' // Server saves as draft by default
-        };
-        addedPrescriptions.push(newPrescription);
-        
         // Reset form
         itemGroups = []; renderItemGroups();
         $fromDate.val(''); $toDate.val(''); $daysInput.val(''); $procuredSelect.val(''); $scopeSelect.val('');
         
         renderAll();
+        
+        // Reload patient prescriptions from server to get status counts
+        if (selectedPatient) {
+          const patientRegNo = selectedPatient.pat_reg_no || selectedPatient.pat_op_reg_no;
+          ajax({action:'patient_prescriptions', patient_reg_no: patientRegNo}).then(list => {
+            addedPrescriptions = list || [];
+            renderAll();
+          }).catch(()=>{ renderAll(); });
+        }
+        
         alert('Prescription saved to server as Draft.');
       } else {
         alert('Failed to save prescription: ' + (j.error || 'Unknown error'));
@@ -527,24 +533,56 @@ $(function(){
     addedPrescriptions.forEach((p,i) => {
       const groupsHtml = (p.items_groups||[]).map(g => (g.items||[]).map(it => `<span class="tag">${esc(it.item_name)}</span>`).join(' ') + `<div class="muted-small">Dosage:${esc(g.dosage||'—')} • Usage:${esc(g.usage||'—')} • Time:${esc(g.time||'—')} • UNO:${esc(g.uno||'—')}</div>`).join('<hr/>');
       
-      // Status logic
+      // Status logic - show counts if available, format: "2 Draft / 3 Active"
       let statusHtml = '';
       let statusClass = 'status-active';
-      if (p.status === 'cancelled') {
-        statusHtml = '<span class="status-pill status-cancelled">Cancelled</span>';
-        statusClass = 'status-cancelled';
-      } else if (p.status === 'draft') {
-        statusHtml = '<span class="status-pill status-draft">Draft</span>';
-        statusClass = 'status-draft';
-      } else if (p.status === 'active') {
-        statusHtml = '<span class="status-pill status-active">Active</span>';
-        statusClass = 'status-active';
-      } else if (p.status === 'failed') {
-        statusHtml = '<span class="status-pill status-failed">Failed</span>';
-        statusClass = 'status-failed';
+      
+      // Build status display with counts - format: "2 Draft / 3 Active / 1 Scheduled"
+      const statusSummary = p.status_summary || {};
+      const statusParts = [];
+      
+      // Order: Draft, Active, Scheduled, Dispatched, Failed, Cancelled
+      if (statusSummary.draft) {
+        statusParts.push(`${statusSummary.draft} Draft`);
+      }
+      if (statusSummary.active) {
+        statusParts.push(`${statusSummary.active} Active`);
+      }
+      if (statusSummary.scheduled) {
+        statusParts.push(`${statusSummary.scheduled} Scheduled`);
+      }
+      if (statusSummary.dispatched) {
+        statusParts.push(`${statusSummary.dispatched} Dispatched`);
+      }
+      if (statusSummary.failed) {
+        statusParts.push(`${statusSummary.failed} Failed`);
+      }
+      if (statusSummary.cancelled) {
+        statusParts.push(`${statusSummary.cancelled} Cancelled`);
+      }
+      
+      // If we have detailed counts, show them with slashes
+      if (statusParts.length > 0) {
+        statusHtml = `<span class="status-pill status-mixed">${statusParts.join(' / ')}</span>`;
+        statusClass = 'status-mixed';
       } else {
-        statusHtml = '<span class="status-pill status-draft">Draft</span>';
-        statusClass = 'status-draft';
+        // Fallback to overall status if no counts available
+        if (p.status === 'cancelled') {
+          statusHtml = '<span class="status-pill status-cancelled">Cancelled</span>';
+          statusClass = 'status-cancelled';
+        } else if (p.status === 'draft') {
+          statusHtml = '<span class="status-pill status-draft">Draft</span>';
+          statusClass = 'status-draft';
+        } else if (p.status === 'active') {
+          statusHtml = '<span class="status-pill status-active">Active</span>';
+          statusClass = 'status-active';
+        } else if (p.status === 'failed') {
+          statusHtml = '<span class="status-pill status-failed">Failed</span>';
+          statusClass = 'status-failed';
+        } else {
+          statusHtml = '<span class="status-pill status-draft">Draft</span>';
+          statusClass = 'status-draft';
+        }
       }
       
       const row = `<tr class="${statusClass}">

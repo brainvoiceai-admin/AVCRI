@@ -628,7 +628,8 @@ def therapy_entry(request):
                 'pat_name': payload.get('patient_name') or '',
                 'pat_age': payload.get('patient_age') or '',
                 'pat_sex': payload.get('patient_sex') or '',
-                'pat_ref_id': payload.get('pat_ref_id') or ''
+                'pat_room_no': payload.get('patient_room_no') or '',
+                'pat_ref_id': payload.get('pat_ref_id') or payload.get('pat_ref_id') or ''
             }
             if PatientSnapshot is None:
                 return JsonResponse({'error': 'PatientSnapshot model not found'}, status=500)
@@ -640,10 +641,12 @@ def therapy_entry(request):
                 ps.pat_age = ps_defaults['pat_age']; changed = True
             if ps_defaults['pat_sex'] and getattr(ps, 'pat_sex', '') != ps_defaults['pat_sex']:
                 ps.pat_sex = ps_defaults['pat_sex']; changed = True
+            if ps_defaults['pat_room_no'] and getattr(ps, 'pat_room_no', '') != ps_defaults['pat_room_no']:
+                ps.pat_room_no = ps_defaults['pat_room_no']; changed = True
             if ps_defaults['pat_ref_id'] and getattr(ps, 'pat_ref_id', '') != ps_defaults['pat_ref_id']:
                 ps.pat_ref_id = ps_defaults['pat_ref_id']; changed = True
             if changed:
-                ps.save()
+                ps.save(update_fields=['pat_name', 'pat_age', 'pat_sex', 'pat_room_no', 'pat_ref_id', 'updated_at'])
 
             # create allocation and per-date bookings atomically (all-or-nothing)
             try:
@@ -671,10 +674,19 @@ def therapy_entry(request):
                     )
 
                     bookings_created = []
+                    # Track status counts for response
+                    status_counts = {
+                        'allocated': 0,
+                        'failed': 0,
+                        'draft': 0,
+                        'cancelled': 0
+                    }
+                    date_status_map = {}  # Maps date to status for detailed breakdown
+                    
                     for i in range((tdate - fdate).days + 1):
                         single_date = fdate + timedelta(days=i)
-                        # Set booking status based on therapy status
-                        booking_status = 'scheduled' if alloc.status == 'allocated' else 'draft'
+                        # Initially set all as draft
+                        booking_status = 'draft'
                         b = Booking.objects.create(allocation=alloc, date=single_date, timeslot=timeslot_obj, room=room_obj, status=booking_status)
                         created_items = []
                         for grp in payload.get('items_groups', []):
@@ -695,33 +707,74 @@ def therapy_entry(request):
                             a = BookingAssignment.objects.create(booking=b, booking_item=None, therapist=t, role=getattr(t,'therapist_grade',''), assigned_for='booking', status='assigned')
                             assigns.append(getattr(t,'therapist_code',''))
                         bookings_created.append({'date': single_date.isoformat(), 'booking_id': b.pk, 'items_count': len(created_items), 'therapists': assigns})
+                        date_status_map[single_date.isoformat()] = 'draft'
+                        status_counts['draft'] += 1
 
-                    # Auto-schedule for any dates within the range that already had Final Schedule run
+                    # Check which dates have Final Schedule run - run algorithm for those dates immediately
+                    # Other dates will remain in draft and can be scheduled via Final Schedule button in dashboard
                     try:
                         from .models import FinalScheduleRun
                         from final_allocation import expand_therapies_for_visit
 
                         any_succeeded = False
+                        any_failed = False
+                        
+                        # Process each date in the range
                         for d in daterange(fdate, tdate):
-                            if FinalScheduleRun.objects.filter(run_date=d).exists():
+                            # Check if Final Schedule has been run for this date
+                            # If yes, run the algorithm immediately for this date
+                            final_schedule_run = FinalScheduleRun.objects.filter(run_date=d).exists()
+                            
+                            # If Final Schedule run exists, run algorithm immediately
+                            if final_schedule_run:
                                 try:
                                     tasks = expand_therapies_for_visit(
                                         alloc.id,
                                         d.strftime('%Y-%m-%d'),
                                         create_bookings=True
                                     )
-                                    if isinstance(tasks, list) and any(t.get('status') == 'BOOKED' for t in tasks):
-                                        any_succeeded = True
-                                        # Update booking status for this date
-                                        Booking.objects.filter(allocation=alloc, date=d).update(status='scheduled')
-                                        # Update booking items status for this date
-                                        BookingItem.objects.filter(booking__allocation=alloc, booking__date=d).update(status='scheduled')
+                                    if isinstance(tasks, list):
+                                        booked_tasks = [t for t in tasks if t.get('status') == 'BOOKED']
+                                        failed_tasks = [t for t in tasks if t.get('status') == 'FAILED']
+                                        
+                                        if booked_tasks:
+                                            any_succeeded = True
+                                            # Update booking status for this date
+                                            Booking.objects.filter(allocation=alloc, date=d).update(status='scheduled')
+                                            # Update booking items status for this date
+                                            BookingItem.objects.filter(booking__allocation=alloc, booking__date=d).update(status='scheduled')
+                                            status_counts['draft'] -= 1
+                                            status_counts['allocated'] += 1
+                                            date_status_map[d.isoformat()] = 'allocated'
+                                        elif failed_tasks:
+                                            any_failed = True
+                                            Booking.objects.filter(allocation=alloc, date=d).update(status='failed')
+                                            BookingItem.objects.filter(booking__allocation=alloc, booking__date=d).update(status='failed')
+                                            status_counts['draft'] -= 1
+                                            status_counts['failed'] += 1
+                                            date_status_map[d.isoformat()] = 'failed'
+                                    elif isinstance(tasks, dict) and 'error' in tasks:
+                                        # Algorithm returned an error
+                                        any_failed = True
+                                        Booking.objects.filter(allocation=alloc, date=d).update(status='failed')
+                                        BookingItem.objects.filter(booking__allocation=alloc, booking__date=d).update(status='failed')
+                                        status_counts['draft'] -= 1
+                                        status_counts['failed'] += 1
+                                        date_status_map[d.isoformat()] = 'failed'
                                 except Exception as _e:
-                                    # continue to next date
+                                    # Continue to next date on error
+                                    print(f"Error processing date {d.isoformat()} for allocation {alloc.id}: {_e}")
                                     pass
 
+                        # Update overall allocation status based on results
                         if any_succeeded:
                             alloc.status = 'allocated'
+                            alloc.save(update_fields=['status'])
+                        elif any_failed and not any_succeeded:
+                            alloc.status = 'failed'
+                            alloc.save(update_fields=['status'])
+                        else:
+                            alloc.status = 'draft'
                             alloc.save(update_fields=['status'])
                     except Exception as e:
                         # Keep as draft if auto-scheduling fails
@@ -759,7 +812,26 @@ def therapy_entry(request):
                     # except Exception:
                     #     pass
 
-                    return JsonResponse({'status': 'ok', 'allocation_id': alloc.pk, 'bookings_created': len(bookings_created)}, status=201)
+                    # Build status summary for response
+                    status_summary = {}
+                    if status_counts['allocated'] > 0:
+                        status_summary['allocated'] = status_counts['allocated']
+                    if status_counts['failed'] > 0:
+                        status_summary['failed'] = status_counts['failed']
+                    if status_counts['cancelled'] > 0:
+                        status_summary['cancelled'] = status_counts['cancelled']
+                    if status_counts['draft'] > 0:
+                        status_summary['draft'] = status_counts['draft']
+                    
+                    return JsonResponse({
+                        'status': 'ok', 
+                        'allocation_id': alloc.pk, 
+                        'bookings_created': len(bookings_created),
+                        'status_counts': status_counts,
+                        'status_summary': status_summary,
+                        'date_status_map': date_status_map,
+                        'overall_status': alloc.status
+                    }, status=201)
 
             except IntegrityError as e:
                 return JsonResponse({'error': 'conflict', 'details': str(e)}, status=409)
@@ -890,15 +962,38 @@ def therapy_entry(request):
             alloc = TherapyAllocation.objects.prefetch_related('bookings__items', 'bookings__assignments').select_related('timeslot', 'room', 'patient').get(pk=alloc_id)
         except TherapyAllocation.DoesNotExist:
             return JsonResponse({'error': 'not_found'}, status=404)
+        
+        # Calculate status counts
+        status_counts = {
+            'allocated': 0,
+            'failed': 0,
+            'draft': 0,
+            'cancelled': 0,
+            'scheduled': 0
+        }
+        
         out = {
             'allocation_id': alloc.pk,
             'therapy_name': alloc.therapy_name,
             'from_date': alloc.from_date.isoformat(),
             'to_date': alloc.to_date.isoformat(),
-            'bookings': []
+            'overall_status': alloc.status,
+            'bookings': [],
+            'status_counts': status_counts,
+            'date_status_map': {}
         }
+        
         # iterate booking objects if present (field names may vary; using related_name 'bookings' expected)
         for b in alloc.bookings.all().order_by('date'):
+            booking_status = getattr(b, 'status', 'draft')
+            
+            # Count statuses (map 'scheduled' to 'allocated' for consistency)
+            if booking_status == 'scheduled':
+                status_counts['allocated'] += 1
+                status_counts['scheduled'] += 1
+            elif booking_status in status_counts:
+                status_counts[booking_status] += 1
+            
             items = []
             try:
                 for it in b.items.all():
@@ -916,15 +1011,34 @@ def therapy_entry(request):
                 slot_s = b.timeslot.start_time.strftime('%H:%M') if getattr(b, 'timeslot', None) and getattr(b.timeslot, 'start_time', None) else ''
             except Exception:
                 slot_s = ''
+            
+            # Map scheduled to allocated for display consistency
+            display_status = 'allocated' if booking_status == 'scheduled' else booking_status
+            out['date_status_map'][b.date.isoformat()] = display_status
+            
             out['bookings'].append({
                 'booking_id': b.pk,
                 'date': b.date.isoformat(),
                 'slot': slot_s,
                 'room': getattr(b.room, 'room_no', None),
                 'therapists': therapists,
-                'status': getattr(b, 'status', ''),
+                'status': booking_status,
+                'display_status': display_status,
                 'items': items
             })
+        
+        # Build status summary (only include non-zero counts)
+        status_summary = {}
+        if status_counts['allocated'] > 0 or status_counts['scheduled'] > 0:
+            status_summary['allocated'] = status_counts['allocated'] + status_counts['scheduled']
+        if status_counts['failed'] > 0:
+            status_summary['failed'] = status_counts['failed']
+        if status_counts['cancelled'] > 0:
+            status_summary['cancelled'] = status_counts['cancelled']
+        if status_counts['draft'] > 0:
+            status_summary['draft'] = status_counts['draft']
+        
+        out['status_summary'] = status_summary
         return JsonResponse(out, safe=False)
 
     # patient_therapies: prefer new TherapyAllocation model
@@ -936,6 +1050,33 @@ def therapy_entry(request):
             qs = TherapyAllocation.objects.filter(patient__pat_reg_no=str(reg)).select_related('timeslot','room').prefetch_related('bookings')
             out = []
             for a in qs:
+                # Calculate status counts from bookings
+                status_counts = {
+                    'allocated': 0,
+                    'scheduled': 0,
+                    'failed': 0,
+                    'draft': 0,
+                    'cancelled': 0
+                }
+                for b in a.bookings.all():
+                    booking_status = getattr(b, 'status', 'draft')
+                    if booking_status == 'scheduled':
+                        status_counts['allocated'] += 1
+                        status_counts['scheduled'] += 1
+                    elif booking_status in status_counts:
+                        status_counts[booking_status] += 1
+                
+                # Build status summary (only include non-zero counts)
+                status_summary = {}
+                if status_counts['allocated'] > 0 or status_counts['scheduled'] > 0:
+                    status_summary['allocated'] = status_counts['allocated'] + status_counts['scheduled']
+                if status_counts['failed'] > 0:
+                    status_summary['failed'] = status_counts['failed']
+                if status_counts['cancelled'] > 0:
+                    status_summary['cancelled'] = status_counts['cancelled']
+                if status_counts['draft'] > 0:
+                    status_summary['draft'] = status_counts['draft']
+                
                 out.append({
                     'allocation_id': a.pk,
                     'therapy_code': a.therapy_code,
@@ -949,7 +1090,9 @@ def therapy_entry(request):
                     'to_date': a.to_date.isoformat(),
                     'days': a.days,
                     'items_groups': a.items_groups or [],
-                    'status': a.status
+                    'status': a.status,
+                    'status_counts': status_counts,
+                    'status_summary': status_summary
                 })
             return JsonResponse(out, safe=False)
 
@@ -1083,6 +1226,8 @@ def prescription_entry_page(request):
                     ps.pat_age = payload.get('patient_age'); changed = True
                 if payload.get('patient_sex') and ps.pat_sex != payload.get('patient_sex'):
                     ps.pat_sex = payload.get('patient_sex'); changed = True
+                if payload.get('patient_room_no') and ps.pat_room_no != payload.get('patient_room_no'):
+                    ps.pat_room_no = payload.get('patient_room_no'); changed = True
                 if payload.get('patient_ref_id') and ps.pat_ref_id != payload.get('patient_ref_id'):
                     ps.pat_ref_id = payload.get('patient_ref_id'); changed = True
                 
@@ -1102,6 +1247,23 @@ def prescription_entry_page(request):
                     notes=notes,
                     status='draft'  # Default to draft
                 )
+                
+                # Create PrescriptionScheduling records for each date in the range (similar to Booking for therapies)
+                from .models import PrescriptionScheduling
+                from datetime import timedelta
+                
+                current_date = from_date
+                while current_date <= to_date:
+                    # Get or create PrescriptionScheduling for this date
+                    PrescriptionScheduling.objects.get_or_create(
+                        patient=ps,
+                        prescription_date=current_date,
+                        defaults={
+                            'doctor': request.user if request.user.is_authenticated else None,
+                            'status': 'draft'
+                        }
+                    )
+                    current_date += timedelta(days=1)
                 
                 # Create notification - COMMENTED OUT TEMPORARILY DUE TO NETWORK ERRORS
                 # create_prescription_notification(allocation, 'prescription_allocated', request.user, {
@@ -1469,17 +1631,37 @@ def prescription_entry_page(request):
                 if changed: ps.save()
                 
                 # Create prescription allocation
+                from_date_parsed = parse_date(from_date)
+                to_date_parsed = parse_date(to_date)
+                
                 allocation = PrescriptionAllocation.objects.create(
                     patient=ps,
                     prescription_name=prescription_name,
                     items_groups=json.dumps(items_groups),
                     procured_from=procured_from,
-                    from_date=parse_date(from_date),
-                    to_date=parse_date(to_date),
+                    from_date=from_date_parsed,
+                    to_date=to_date_parsed,
                     days=days,
                     allocated_by=request.user if request.user.is_authenticated else None,
                     status='draft'  # Default status
                 )
+                
+                # Create PrescriptionScheduling records for each date in the range (similar to Booking for therapies)
+                from .models import PrescriptionScheduling
+                from datetime import timedelta
+                
+                current_date = from_date_parsed
+                while current_date <= to_date_parsed:
+                    # Get or create PrescriptionScheduling for this date
+                    PrescriptionScheduling.objects.get_or_create(
+                        patient=ps,
+                        prescription_date=current_date,
+                        defaults={
+                            'doctor': request.user if request.user.is_authenticated else None,
+                            'status': 'draft'
+                        }
+                    )
+                    current_date += timedelta(days=1)
                 
                 # Update patient snapshot
                 ps.prescription_count = PrescriptionAllocation.objects.filter(patient=ps).count()
@@ -1702,17 +1884,66 @@ def prescription_entry_page(request):
             patient = PatientSnapshot.objects.get(pat_reg_no=patient_reg_no)
             prescriptions = PrescriptionAllocation.objects.filter(patient=patient).order_by('-created_at')
             
+            # Import PrescriptionScheduling to calculate status counts
+            from .models import PrescriptionScheduling
+            
             results = []
             for p in prescriptions:
+                # Calculate status counts from PrescriptionScheduling for dates within this allocation's range
+                status_counts = {
+                    'draft': 0,
+                    'scheduled': 0,
+                    'dispatched': 0,
+                    'active': 0,
+                    'cancelled': 0,
+                    'failed': 0
+                }
+                
+                if p.from_date and p.to_date:
+                    # Get PrescriptionScheduling records for this patient within the allocation date range
+                    from datetime import timedelta
+                    scheduling_records = PrescriptionScheduling.objects.filter(
+                        patient=patient,
+                        prescription_date__gte=p.from_date,
+                        prescription_date__lte=p.to_date
+                    )
+                    
+                    for ps in scheduling_records:
+                        if ps.status in status_counts:
+                            status_counts[ps.status] += 1
+                    
+                    # Also count the allocation status itself
+                    if p.status in ['active', 'cancelled', 'failed']:
+                        status_counts[p.status] += 1
+                
+                # Build status summary (only include non-zero counts)
+                status_summary = {}
+                if status_counts['draft'] > 0:
+                    status_summary['draft'] = status_counts['draft']
+                if status_counts['active'] > 0:
+                    status_summary['active'] = status_counts['active']
+                if status_counts['scheduled'] > 0:
+                    status_summary['scheduled'] = status_counts['scheduled']
+                if status_counts['dispatched'] > 0:
+                    status_summary['dispatched'] = status_counts['dispatched']
+                if status_counts['failed'] > 0:
+                    status_summary['failed'] = status_counts['failed']
+                if status_counts['cancelled'] > 0:
+                    status_summary['cancelled'] = status_counts['cancelled']
+                
                 results.append({
                     'id': p.id,
+                    'allocation_id': p.id,
                     'prescription_name': p.prescription_name,
                     'items_groups': p.items_groups if isinstance(p.items_groups, (list, dict)) else (json.loads(p.items_groups) if p.items_groups else []),
                     'procured_from': p.procured_from,
+                    'scope': getattr(p, 'scope', ''),
                     'from_date': p.from_date.isoformat() if p.from_date else None,
                     'to_date': p.to_date.isoformat() if p.to_date else None,
                     'days': p.days,
                     'status': p.status,
+                    'status_counts': status_counts,
+                    'status_summary': status_summary,
                     'allocated_by': p.allocated_by.username if p.allocated_by else None,
                     'cancelled_by': p.cancelled_by.username if p.cancelled_by else None,
                     'cancelled_at': p.cancelled_at.isoformat() if p.cancelled_at else None,
@@ -2194,27 +2425,83 @@ def scheduling_dashboard(request):
     else:
         filter_date = None
     
-    # Fetch therapy allocations based on status
-    draft_allocations = TherapyAllocation.objects.filter(status='draft')
-    failed_allocations = TherapyAllocation.objects.filter(status='failed')
-    scheduled_allocations = TherapyAllocation.objects.filter(status='allocated')
-    
-    # Apply date filter if provided
+    # Fetch bookings based on status for the specific date (if filter provided)
+    # This ensures each date is treated separately
     if filter_date:
-        draft_allocations = draft_allocations.filter(from_date__lte=filter_date, to_date__gte=filter_date)
-        failed_allocations = failed_allocations.filter(from_date__lte=filter_date, to_date__gte=filter_date)
-        scheduled_allocations = scheduled_allocations.filter(from_date__lte=filter_date, to_date__gte=filter_date)
+        # Draft: show allocations that have draft bookings for this specific date (regardless of overall allocation status)
+        draft_allocations = TherapyAllocation.objects.filter(
+            from_date__lte=filter_date,
+            to_date__gte=filter_date,
+            bookings__date=filter_date,
+            bookings__status='draft'
+        ).distinct().select_related('patient', 'room', 'timeslot').prefetch_related('bookings__assignments__therapist')
+        
+        # Failed: show allocations that have failed bookings for this date
+        failed_allocations = TherapyAllocation.objects.filter(
+            from_date__lte=filter_date,
+            to_date__gte=filter_date,
+            bookings__date=filter_date,
+            bookings__status='failed'
+        ).distinct().select_related('patient', 'room', 'timeslot').prefetch_related('bookings__assignments__therapist')
+        
+        # Scheduled: show allocations that have scheduled bookings for this date
+        scheduled_allocations = TherapyAllocation.objects.filter(
+            from_date__lte=filter_date,
+            to_date__gte=filter_date,
+            bookings__date=filter_date,
+            bookings__status='scheduled'
+        ).distinct()
+    else:
+        # If no date filter, show allocations based on Booking status (not allocation status)
+        # This ensures we check actual booking objects, not the allocation header status
+        draft_allocations = TherapyAllocation.objects.filter(
+            bookings__status='draft'
+        ).distinct().select_related('patient', 'room', 'timeslot').prefetch_related('bookings__assignments__therapist')
+        
+        failed_allocations = TherapyAllocation.objects.filter(
+            bookings__status='failed'
+        ).distinct().select_related('patient', 'room', 'timeslot').prefetch_related('bookings__assignments__therapist')
+        
+        scheduled_allocations = TherapyAllocation.objects.filter(
+            bookings__status='scheduled'
+        ).distinct()
     
-    # Prepare context data
+    # Prepare context data with proper prefetching for RoomBooking
+    scheduled_allocations_with_bookings = scheduled_allocations.select_related('patient', 'room', 'timeslot').prefetch_related(
+        'bookings__assignments__therapist',
+        'bookings__timeslot',
+        'bookings__room'
+    )
+    
+    # Get draft and scheduled bookings for the filter date to pass to template (per-date display)
+    draft_bookings = []
+    scheduled_bookings = []
+    if filter_date:
+        draft_bookings = Booking.objects.filter(
+            date=filter_date,
+            status='draft'
+        ).select_related('allocation__patient', 'allocation', 'timeslot', 'room').prefetch_related('assignments__therapist')
+        
+        scheduled_bookings = Booking.objects.filter(
+            date=filter_date,
+            status='scheduled'
+        ).select_related('allocation__patient', 'allocation', 'timeslot', 'room').prefetch_related(
+            'assignments__therapist',
+            'assignments__therapist__therapist_code',
+            'room_bookings__room'  # Prefetch RoomBooking for room lookup
+        )
+    
     context = {
-        'draft_allocations': draft_allocations.select_related('patient', 'room', 'timeslot').prefetch_related('bookings__assignments__therapist'),
-        'failed_allocations': failed_allocations.select_related('patient', 'room', 'timeslot').prefetch_related('bookings__assignments__therapist'),
-        'scheduled_allocations': scheduled_allocations.select_related('patient', 'room', 'timeslot').prefetch_related('bookings__assignments__therapist'),
+        'draft_allocations': draft_allocations,
+        'draft_bookings': draft_bookings,  # Pass bookings separately for per-date display
+        'scheduled_allocations': scheduled_allocations_with_bookings,
+        'scheduled_bookings': scheduled_bookings,  # Pass scheduled bookings per date
+        'failed_allocations': failed_allocations,
         'date_filter': date_filter or '',
         'stats': {
-            'draft_count': draft_allocations.count(),
+            'draft_count': draft_bookings.count() if filter_date else draft_allocations.count(),
             'failed_count': failed_allocations.count(),
-            'scheduled_count': scheduled_allocations.count(),
+            'scheduled_count': scheduled_bookings.count() if filter_date else scheduled_allocations.count(),
         }
     }
     
@@ -2481,64 +2768,165 @@ def schedule_therapies_api(request):
 def get_therapy_data_api(request):
     """
     API endpoint to fetch therapy data for the scheduling dashboard.
+    Returns bookings per date when date filter is provided, otherwise allocations.
     """
     if request.method != 'GET':
         return JsonResponse({'error': 'GET method required'}, status=405)
     
     try:
-        from .models import TherapyAllocation
+        from .models import TherapyAllocation, Booking
         from Patient.models import Therapist, TreatmentRoom, TimeSlot
         
         # Get filters
         date_filter = request.GET.get('date')
         status_filter = request.GET.get('status', 'all')
         
-        # Build query
-        query = {}
+        data = []
+        
+        # If date filter is provided, return bookings for that date (per-date processing)
         if date_filter:
             filter_date = parse_date(date_filter)
             if filter_date:
-                query['from_date__lte'] = filter_date
-                query['to_date__gte'] = filter_date
-        
-        if status_filter != 'all':
-            query['status'] = status_filter
-        
-        # Fetch allocations
-        allocations = TherapyAllocation.objects.filter(**query).select_related(
-            'patient', 'room', 'timeslot'
-        ).prefetch_related(
-            'bookings__assignments__therapist'
-        )
-        
-        # Convert to JSON format
-        data = []
-        for allocation in allocations:
-            # Get assigned therapists
-            therapists = []
-            for booking in allocation.bookings.all():
-                for assignment in booking.assignments.all():
-                    therapists.append({
-                        'code': assignment.therapist.therapist_code,
-                        'name': assignment.therapist.therapist_name,
-                        'grade': assignment.therapist.therapist_grade
+                # Filter bookings by date and status
+                booking_query = {'date': filter_date}
+                
+                if status_filter == 'draft':
+                    booking_query['status'] = 'draft'
+                elif status_filter == 'allocated' or status_filter == 'scheduled':
+                    booking_query['status'] = 'scheduled'
+                elif status_filter == 'failed':
+                    booking_query['status'] = 'failed'
+                # If status_filter is 'all', we'll get all statuses
+                
+                bookings = Booking.objects.filter(**booking_query).select_related(
+                    'allocation__patient', 'allocation', 'timeslot', 'room'
+                ).prefetch_related(
+                    'assignments__therapist'
+                )
+                
+                # Convert bookings to JSON format
+                for booking in bookings:
+                    # Get assigned therapists for this booking
+                    therapists = []
+                    for assignment in booking.assignments.all():
+                        therapists.append({
+                            'code': assignment.therapist.therapist_code,
+                            'name': assignment.therapist.therapist_name,
+                            'grade': assignment.therapist.therapist_grade
+                        })
+                    
+                    # Get room from booking, RoomBooking, allocation, or PatientSnapshot
+                    room_no = None
+                    if booking.room:
+                        room_no = booking.room.room_no
+                    elif booking.allocation.room:
+                        # Use allocation's preferred room if booking doesn't have one
+                        room_no = booking.allocation.room.room_no
+                    else:
+                        # Try to get from RoomBooking - first try via visit field, then by matching date/slot/patient
+                        try:
+                            from Patient.models import RoomBooking
+                            # Try via visit field (if RoomBooking is linked to Booking)
+                            rb = booking.room_bookings.filter(
+                                date=booking.date,
+                                time_slot=booking.timeslot,
+                                status='BOOKED'
+                            ).first()
+                            
+                            # If not found, try by patient_id, date, and time_slot
+                            if not rb:
+                                rb = RoomBooking.objects.filter(
+                                    date=booking.date,
+                                    time_slot=booking.timeslot,
+                                    patient_id=booking.allocation.patient.id,
+                                    status='BOOKED'
+                                ).first()
+                            
+                            if rb:
+                                room_no = rb.room.room_no
+                        except Exception as e:
+                            print(f"Error getting room from RoomBooking: {e}")
+                            pass
+                    
+                    # Fallback to PatientSnapshot pat_room_no if still no room found
+                    if not room_no and booking.allocation.patient.pat_room_no:
+                        room_no = booking.allocation.patient.pat_room_no
+                    
+                    data.append({
+                        'id': booking.allocation.id,
+                        'booking_id': booking.id,
+                        'patient_name': booking.allocation.patient.pat_name,
+                        'patient_reg_no': booking.allocation.patient.pat_reg_no,
+                        'therapy_name': booking.allocation.therapy_name,
+                        'therapy_code': booking.allocation.therapy_code,
+                        'date': booking.date.isoformat(),
+                        'from_date': booking.allocation.from_date.isoformat(),
+                        'to_date': booking.allocation.to_date.isoformat(),
+                        'status': booking.status,
+                        'booking_status': booking.status,
+                        'room_no': room_no,
+                        'timeslot': booking.timeslot.start_time.strftime('%H:%M') if booking.timeslot else None,
+                        'therapists': therapists,
+                        'created_at': booking.allocation.created_at.isoformat(),
+                        'allocated_by': booking.allocation.allocated_by.username if booking.allocation.allocated_by else None
                     })
+        else:
+            # No date filter - return allocations based on Booking status (not allocation status)
+            # This ensures we check actual booking objects, matching the dashboard behavior
+            query = {}
+            if status_filter == 'draft':
+                # Get allocations that have draft bookings
+                allocations = TherapyAllocation.objects.filter(
+                    bookings__status='draft'
+                ).distinct()
+            elif status_filter == 'allocated' or status_filter == 'scheduled':
+                # Get allocations that have scheduled bookings
+                allocations = TherapyAllocation.objects.filter(
+                    bookings__status='scheduled'
+                ).distinct()
+            elif status_filter == 'failed':
+                # Get allocations that have failed bookings
+                allocations = TherapyAllocation.objects.filter(
+                    bookings__status='failed'
+                ).distinct()
+            else:
+                # All statuses - return all allocations
+                allocations = TherapyAllocation.objects.all()
             
-            data.append({
-                'id': allocation.id,
-                'patient_name': allocation.patient.pat_name,
-                'patient_reg_no': allocation.patient.pat_reg_no,
-                'therapy_name': allocation.therapy_name,
-                'therapy_code': allocation.therapy_code,
-                'from_date': allocation.from_date.isoformat(),
-                'to_date': allocation.to_date.isoformat(),
-                'status': allocation.status,
-                'room_no': allocation.room.room_no if allocation.room else None,
-                'timeslot': allocation.timeslot.start_time.strftime('%H:%M') if allocation.timeslot else None,
-                'therapists': therapists,
-                'created_at': allocation.created_at.isoformat(),
-                'allocated_by': allocation.allocated_by.username if allocation.allocated_by else None
-            })
+            # Apply select/prefetch optimizations
+            allocations = allocations.select_related(
+                'patient', 'room', 'timeslot'
+            ).prefetch_related(
+                'bookings__assignments__therapist'
+            )
+            
+            # Convert to JSON format
+            for allocation in allocations:
+                # Get assigned therapists from all bookings
+                therapists = []
+                for booking in allocation.bookings.all():
+                    for assignment in booking.assignments.all():
+                        therapists.append({
+                            'code': assignment.therapist.therapist_code,
+                            'name': assignment.therapist.therapist_name,
+                            'grade': assignment.therapist.therapist_grade
+                        })
+                
+                data.append({
+                    'id': allocation.id,
+                    'patient_name': allocation.patient.pat_name,
+                    'patient_reg_no': allocation.patient.pat_reg_no,
+                    'therapy_name': allocation.therapy_name,
+                    'therapy_code': allocation.therapy_code,
+                    'from_date': allocation.from_date.isoformat(),
+                    'to_date': allocation.to_date.isoformat(),
+                    'status': allocation.status,  # Keep allocation status but filter was based on booking
+                    'room_no': allocation.room.room_no if allocation.room else None,
+                    'timeslot': allocation.timeslot.start_time.strftime('%H:%M') if allocation.timeslot else None,
+                    'therapists': therapists,
+                    'created_at': allocation.created_at.isoformat(),
+                    'allocated_by': allocation.allocated_by.username if allocation.allocated_by else None
+                })
         
         return JsonResponse({
             'success': True,
@@ -2547,6 +2935,8 @@ def get_therapy_data_api(request):
         })
         
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         return JsonResponse({'error': str(e)}, status=500)
 
 

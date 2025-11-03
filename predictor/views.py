@@ -264,6 +264,7 @@ class ForecastRunDetailAPIView(generics.RetrieveAPIView):
     permission_classes = [IsAuthenticated]
 
 
+@method_decorator(csrf_exempt, name='dispatch')
 class TriggerForecastAPIView(APIView):
     """API endpoint to trigger a forecast run"""
     permission_classes = [IsAuthenticated]
