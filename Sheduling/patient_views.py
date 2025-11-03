@@ -33,127 +33,153 @@ def get_patient_data_api(request):
         # Get the current user (assuming they are a patient)
         user = request.user
         
-        # Find the patient snapshot for this user
-        # This assumes the user has a patient_id or we can match by name/email
+        # Find the patient snapshot for this user via PatientProfile
         patient = None
         try:
-            # Try to find patient by user ID or name
-            patient = PatientSnapshot.objects.filter(
-                Q(pat_name__icontains=user.get_full_name()) |
-                Q(pat_reg_no__icontains=str(user.id))
-            ).first()
+            # Check if user has a PatientProfile
+            if hasattr(user, 'patient_profile'):
+                patient_reg_no = user.patient_profile.patient_reg_no
+                # Find patient by pat_reg_no
+                patient = PatientSnapshot.objects.filter(
+                    pat_reg_no=patient_reg_no
+                ).first()
+            
+            # If still not found, try matching by name as fallback
+            if not patient:
+                patient = PatientSnapshot.objects.filter(
+                    Q(pat_name__icontains=user.get_full_name() or user.username)
+                ).first()
             
             if not patient:
-                # Create a sample patient if none found
-                patient = PatientSnapshot.objects.create(
-                    pat_name=user.get_full_name() or user.username,
-                    pat_reg_no=f"PT-{user.id:04d}",
-                    pat_age=30,
-                    pat_sex='M',
-                    pat_room_no='Room-101'
-                )
+                return JsonResponse({'error': 'Patient not found. Please contact administrator.'}, status=404)
         except Exception as e:
             print(f"Error finding patient: {e}")
-            return JsonResponse({'error': 'Patient not found'}, status=404)
+            return JsonResponse({'error': f'Error finding patient: {str(e)}'}, status=404)
         
         # Get therapy sessions for this patient
         sessions = []
         try:
-            # Get therapy allocations
-            allocations = TherapyAllocation.objects.filter(patient=patient)
+            # Get therapy allocations for this patient
+            allocations = TherapyAllocation.objects.filter(patient=patient).select_related('patient')
             
             for allocation in allocations:
-                # Get booking details
-                bookings = Booking.objects.filter(allocation=allocation)
+                # Get booking details - use date field, not booking_date
+                bookings = Booking.objects.filter(allocation=allocation).select_related(
+                    'timeslot', 'room', 'allocation'
+                ).prefetch_related('assignments__therapist')
                 
                 for booking in bookings:
                     # Get assigned therapists
-                    assignments = BookingAssignment.objects.filter(booking=booking)
-                    therapists = [assignment.therapist.name for assignment in assignments]
+                    assignments = BookingAssignment.objects.filter(booking=booking).select_related('therapist')
+                    therapists = [assignment.therapist.therapist_name for assignment in assignments]
                     
-                    # Get time slot and room info
-                    time_slot = booking.time_slot
-                    room = booking.room
+                    # Get time slot - use timeslot (no underscore) based on model
+                    time_slot = booking.timeslot
+                    slot_hour = time_slot.start_time.hour if time_slot and hasattr(time_slot, 'start_time') else 9
+                    
+                    # Get room - check booking.room first, then RoomBooking via visit
+                    room_no = None
+                    if booking.room:
+                        room_no = booking.room.room_no  # TreatmentRoom uses room_no
+                    else:
+                        # Try to get from RoomBooking
+                        try:
+                            from Patient.models import RoomBooking
+                            room_booking = RoomBooking.objects.filter(visit=booking).first()
+                            if room_booking and room_booking.room:
+                                room_no = room_booking.room.room_no
+                        except Exception as e:
+                            print(f"Error getting room from RoomBooking: {e}")
+                    
+                    # If still no room, check patient snapshot
+                    if not room_no:
+                        room_no = patient.pat_room_no or 'TBD'
+                    
+                    # Map booking status to display status
+                    status_map = {
+                        'draft': 'Draft',
+                        'scheduled': 'Scheduled',
+                        'completed': 'Completed',
+                        'failed': 'Failed',
+                        'cancelled': 'Cancelled'
+                    }
+                    display_status = status_map.get(booking.status, booking.status.title() if booking.status else 'Unknown')
                     
                     session_data = {
                         'id': booking.id,
-                        'date': booking.booking_date.strftime('%Y-%m-%d'),
-                        'slot': time_slot.start_time.hour if time_slot else 9,
+                        'date': booking.date.strftime('%Y-%m-%d') if booking.date else '',
+                        'slot': slot_hour,
                         'therapy': allocation.therapy_name,
-                        'room_id': room.room_number if room else 'TBD',
+                        'room_id': room_no,
                         'therapists': therapists,
-                        'status': 'Scheduled' if booking.status == 'confirmed' else booking.status.title(),
-                        'remarks': booking.notes or ''
+                        'status': display_status,
+                        'remarks': booking.therapist_note or ''
                     }
                     sessions.append(session_data)
         except Exception as e:
             print(f"Error getting sessions: {e}")
-            # Create sample data if no real data found
-            sessions = [
-                {
-                    'id': 1,
-                    'date': '2025-10-20',
-                    'slot': 9,
-                    'therapy': 'Dhara & Abhyangam',
-                    'room_id': 'TRC-13',
-                    'therapists': ['Dr. Meera Nair', 'Dr. Priya Menon'],
-                    'status': 'Completed',
-                    'remarks': 'Relaxation observed'
-                },
-                {
-                    'id': 2,
-                    'date': '2025-10-22',
-                    'slot': 10,
-                    'therapy': 'Dhara & Pizhichil',
-                    'room_id': 'TRC-13',
-                    'therapists': ['Dr. Rajesh Kumar', 'Dr. Meera Nair', 'Dr. Sunita Rao'],
-                    'status': 'Scheduled',
-                    'remarks': ''
-                }
-            ]
+            import traceback
+            traceback.print_exc()
+            sessions = []
         
         # Get prescriptions for this patient
         prescriptions = []
         try:
-            prescription_schedules = PrescriptionScheduling.objects.filter(patient=patient)
+            prescription_schedules = PrescriptionScheduling.objects.filter(
+                patient=patient
+            ).select_related('patient', 'doctor').prefetch_related('items')
             
             for schedule in prescription_schedules:
-                items = PrescriptionItem.objects.filter(prescription_scheduling=schedule)
+                # Try to get items from PrescriptionItem first (if they exist)
+                items = schedule.items.all()
                 
-                for item in items:
-                    prescription_data = {
-                        'id': item.id,
-                        'date': schedule.prescription_date.strftime('%Y-%m-%d'),
-                        'item_name': item.item_name,
-                        'dose': item.dose,
-                        'quantity': item.quantity,
-                        'time': item.time,
-                        'notes': item.notes or ''
-                    }
-                    prescriptions.append(prescription_data)
+                if items.exists():
+                    # Use PrescriptionItem records
+                    for item in items:
+                        prescription_data = {
+                            'id': item.id,
+                            'date': schedule.prescription_date.strftime('%Y-%m-%d') if schedule.prescription_date else '',
+                            'item_name': item.item_name or '',
+                            'dose': item.dose or '',
+                            'quantity': item.quantity or '',
+                            'time': item.time or '',
+                            'notes': item.notes or ''
+                        }
+                        prescriptions.append(prescription_data)
+                else:
+                    # Fallback: Try to get items from PrescriptionAllocation by matching date range
+                    try:
+                        from .models import PrescriptionAllocation
+                        allocation = PrescriptionAllocation.objects.filter(
+                            patient=patient,
+                            from_date__lte=schedule.prescription_date,
+                            to_date__gte=schedule.prescription_date
+                        ).first()
+                        
+                        if allocation and allocation.items_groups:
+                            import json
+                            items_data = json.loads(allocation.items_groups) if isinstance(allocation.items_groups, str) else allocation.items_groups
+                            for item_group in items_data:
+                                if isinstance(item_group, dict) and 'items' in item_group:
+                                    for item in item_group['items']:
+                                        prescription_data = {
+                                            'id': item.get('id', schedule.id),
+                                            'date': schedule.prescription_date.strftime('%Y-%m-%d') if schedule.prescription_date else '',
+                                            'item_name': item.get('item_name', ''),
+                                            'dose': item.get('dose', ''),
+                                            'quantity': item.get('quantity', ''),
+                                            'time': item.get('time', ''),
+                                            'notes': item.get('notes', '')
+                                        }
+                                        prescriptions.append(prescription_data)
+                    except Exception as e:
+                        print(f"Error processing prescription schedule {schedule.id}: {e}")
+                        continue
         except Exception as e:
             print(f"Error getting prescriptions: {e}")
-            # Create sample prescription data
-            prescriptions = [
-                {
-                    'id': 1,
-                    'date': '2025-10-22',
-                    'item_name': 'Ashwagandha',
-                    'dose': '500mg',
-                    'quantity': 30,
-                    'time': 'M',
-                    'notes': 'Take with warm water'
-                },
-                {
-                    'id': 2,
-                    'date': '2025-10-22',
-                    'item_name': 'Triphala',
-                    'dose': '1g',
-                    'quantity': 15,
-                    'time': 'E',
-                    'notes': 'Before dinner'
-                }
-            ]
+            import traceback
+            traceback.print_exc()
+            prescriptions = []
         
         # Prepare patient info
         patient_info = {
@@ -194,13 +220,24 @@ def get_patient_prescriptions_api(request):
         
         # Get the current user's patient record
         user = request.user
-        patient = PatientSnapshot.objects.filter(
-            Q(pat_name__icontains=user.get_full_name()) |
-            Q(pat_reg_no__icontains=str(user.id))
-        ).first()
+        patient = None
+        
+        # Check if user has a PatientProfile
+        if hasattr(user, 'patient_profile'):
+            patient_reg_no = user.patient_profile.patient_reg_no
+            # Find patient by pat_reg_no
+            patient = PatientSnapshot.objects.filter(
+                pat_reg_no=patient_reg_no
+            ).first()
+        
+        # If still not found, try matching by name as fallback
+        if not patient:
+            patient = PatientSnapshot.objects.filter(
+                Q(pat_name__icontains=user.get_full_name() or user.username)
+            ).first()
         
         if not patient:
-            return JsonResponse({'error': 'Patient not found'}, status=404)
+            return JsonResponse({'error': 'Patient not found. Please contact administrator.'}, status=404)
         
         # Get prescriptions for the selected date
         prescriptions = []
@@ -208,43 +245,57 @@ def get_patient_prescriptions_api(request):
             prescription_schedules = PrescriptionScheduling.objects.filter(
                 patient=patient,
                 prescription_date=target_date
-            )
+            ).select_related('patient', 'doctor').prefetch_related('items')
             
             for schedule in prescription_schedules:
-                items = PrescriptionItem.objects.filter(prescription_scheduling=schedule)
+                # Try to get items from PrescriptionItem first (if they exist)
+                items = schedule.items.all()
                 
-                for item in items:
-                    prescription_data = {
-                        'id': item.id,
-                        'item_name': item.item_name,
-                        'dose': item.dose,
-                        'quantity': item.quantity,
-                        'time': item.time,
-                        'notes': item.notes or ''
-                    }
-                    prescriptions.append(prescription_data)
+                if items.exists():
+                    # Use PrescriptionItem records
+                    for item in items:
+                        prescription_data = {
+                            'id': item.id,
+                            'item_name': item.item_name or '',
+                            'dose': item.dose or '',
+                            'quantity': item.quantity or '',
+                            'time': item.time or '',
+                            'notes': item.notes or ''
+                        }
+                        prescriptions.append(prescription_data)
+                else:
+                    # Fallback: Try to get items from PrescriptionAllocation by matching date range
+                    try:
+                        from .models import PrescriptionAllocation
+                        allocation = PrescriptionAllocation.objects.filter(
+                            patient=patient,
+                            from_date__lte=target_date,
+                            to_date__gte=target_date
+                        ).first()
+                        
+                        if allocation and allocation.items_groups:
+                            import json
+                            items_data = json.loads(allocation.items_groups) if isinstance(allocation.items_groups, str) else allocation.items_groups
+                            for item_group in items_data:
+                                if isinstance(item_group, dict) and 'items' in item_group:
+                                    for item in item_group['items']:
+                                        prescription_data = {
+                                            'id': item.get('id', schedule.id),
+                                            'item_name': item.get('item_name', ''),
+                                            'dose': item.get('dose', ''),
+                                            'quantity': item.get('quantity', ''),
+                                            'time': item.get('time', ''),
+                                            'notes': item.get('notes', '')
+                                        }
+                                        prescriptions.append(prescription_data)
+                    except Exception as e:
+                        print(f"Error processing prescription schedule {schedule.id}: {e}")
+                        continue
         except Exception as e:
             print(f"Error getting prescriptions for date {selected_date}: {e}")
-            # Return sample data if no real data found
-            if target_date == date.today():
-                prescriptions = [
-                    {
-                        'id': 1,
-                        'item_name': 'Ashwagandha',
-                        'dose': '500mg',
-                        'quantity': 30,
-                        'time': 'M',
-                        'notes': 'Take with warm water'
-                    },
-                    {
-                        'id': 2,
-                        'item_name': 'Triphala',
-                        'dose': '1g',
-                        'quantity': 15,
-                        'time': 'E',
-                        'notes': 'Before dinner'
-                    }
-                ]
+            import traceback
+            traceback.print_exc()
+            prescriptions = []
         
         return JsonResponse({
             'success': True,

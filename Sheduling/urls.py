@@ -29,15 +29,15 @@ urlpatterns = [
     path('procurement/api/prescription-details/', procurement_views.get_prescription_details_api, name='get_procurement_prescription_details_api'),
     path('procurement/api/prescription-items/', procurement_views.get_prescription_details_api, name='get_procurement_prescription_items_api'),
     
-    # Patient Dashboard URLs
-    path('patient/', patient_views.patient_dashboard, name='patient_dashboard'),
+    # Patient Dashboard URLs (more specific patterns first)
     path('patient/api/patient-data/', patient_views.get_patient_data_api, name='get_patient_data_api'),
     path('patient/api/prescriptions/', patient_views.get_patient_prescriptions_api, name='get_patient_prescriptions_api'),
+    path('patient/', patient_views.patient_dashboard, name='patient_dashboard'),
     
-    # Therapist Dashboard URLs
-    path('therapist/', therapist_views.therapist_dashboard, name='therapist_dashboard'),
+    # Therapist Dashboard URLs (more specific patterns first)
     path('therapist/api/therapist-data/', therapist_views.get_therapist_data_api, name='get_therapist_data_api'),
     path('therapist/api/sessions-by-date/', therapist_views.get_therapist_sessions_by_date_api, name='get_therapist_sessions_by_date_api'),
+    path('therapist/', therapist_views.therapist_dashboard, name='therapist_dashboard'),
     
     # Therapist Availability URLs
     path('therapist-availability/', availability_views.therapist_availability_dashboard, name='therapist_availability_dashboard'),

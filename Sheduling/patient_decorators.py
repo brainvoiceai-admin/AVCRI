@@ -21,10 +21,20 @@ def patient_dashboard_access_required(view_func):
         module_names = [module.name for module in user_modules]
         
         if 'patient_dashboard' not in module_names:
-            if request.headers.get('Content-Type') == 'application/json':
+            # For API endpoints, always return JSON (check path or Accept header)
+            is_api_request = (
+                '/api/' in request.path or 
+                request.headers.get('Accept', '').startswith('application/json') or
+                request.headers.get('Content-Type') == 'application/json'
+            )
+            if is_api_request:
                 return JsonResponse({'error': 'Access denied to patient dashboard'}, status=403)
             messages.error(request, 'You do not have access to the patient dashboard.')
-            return redirect('patient:home')
+            # Try to redirect to home, but if that fails, return 403
+            try:
+                return redirect('patient:home')
+            except:
+                return JsonResponse({'error': 'Access denied to patient dashboard'}, status=403)
         
         return view_func(request, *args, **kwargs)
     return wrapper
@@ -38,7 +48,13 @@ def patient_data_access_required(view_func):
     def wrapper(request, *args, **kwargs):
         # Check if user is authenticated
         if not request.user.is_authenticated:
-            if request.headers.get('Content-Type') == 'application/json':
+            # For API endpoints, always return JSON (check path or Accept header)
+            is_api_request = (
+                '/api/' in request.path or 
+                request.headers.get('Accept', '').startswith('application/json') or
+                request.headers.get('Content-Type') == 'application/json'
+            )
+            if is_api_request:
                 return JsonResponse({'error': 'Authentication required'}, status=401)
             return redirect('authentication:login')
         
