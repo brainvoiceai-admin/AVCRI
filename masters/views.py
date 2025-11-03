@@ -724,7 +724,61 @@ class TherapistMasterCreateView(CreateView):
     success_url = reverse_lazy('therapist_master_manage')
     
     def form_valid(self, form):
-        messages.success(self.request, 'Therapist created successfully.')
+        """Create user account and profile when creating therapist master"""
+        therapist_code = form.cleaned_data['therapist_code']
+        therapist_name = form.cleaned_data['therapist_name']
+        therapist_grade = form.cleaned_data.get('therapist_grade', 'Junior')
+        employee_code = form.cleaned_data['employee_code']
+        is_bathing_therapist = form.cleaned_data.get('is_bathing_therapist', True)
+        
+        # Check if therapist already has a user
+        existing_therapist = TherapistMaster.objects.filter(therapist_code=therapist_code).first()
+        if existing_therapist and existing_therapist.user:
+            messages.warning(self.request, f'Therapist "{therapist_code}" already has a user account.')
+            return super().form_valid(form)
+        
+        # Generate username and email
+        username = therapist_code.lower().replace(' ', '_')
+        email = f"{username}@avcri.local"
+        
+        # Check if username exists
+        from authentication.models import CustomUser
+        if CustomUser.objects.filter(username=username).exists():
+            username = f"{username}_{therapist_code}"
+        
+        # Split name
+        name_parts = therapist_name.split(maxsplit=1)
+        first_name = name_parts[0] if name_parts else therapist_name
+        last_name = name_parts[1] if len(name_parts) > 1 else ''
+        
+        # Create user account
+        default_password = f"{therapist_code}@{employee_code}"
+        user = CustomUser.objects.create_user(
+            username=username,
+            email=email,
+            password=default_password,
+            first_name=first_name,
+            last_name=last_name,
+            role='therapist'
+        )
+        
+        # Create therapist profile
+        from authentication.models import TherapistProfile
+        therapist_profile = TherapistProfile.objects.create(
+            user=user,
+            therapist_code=therapist_code,
+            employee_code=employee_code,
+            therapist_grade=therapist_grade,
+            is_bathing_therapist=is_bathing_therapist
+        )
+        
+        # Link user and profile to the therapist master instance
+        instance = form.save(commit=False)
+        instance.user = user
+        instance.therapist_profile = therapist_profile
+        instance.save()
+        
+        messages.success(self.request, f'Therapist user account created successfully. Username: {username}, Default password: {default_password}')
         return super().form_valid(form)
 
 class TherapistMasterUpdateView(UpdateView):
@@ -789,22 +843,85 @@ class TherapistMasterDeleteView(DeleteView):
 @require_http_methods(["POST"])
 @csrf_exempt
 def create_therapist(request):
-    """API endpoint to create therapist (Super Admin only)"""
+    """API endpoint to create therapist (Super Admin only) - Creates user account and profile"""
     try:
         data = json.loads(request.body)
         
-        therapist = TherapistMaster.objects.create(
-            therapist_code=data['therapist_code'],
-            therapist_name=data['therapist_name'],
-            therapist_grade=data['therapist_grade'],
-            employee_code=data['employee_code'],
-            is_bathing_therapist=data.get('is_bathing_therapist', True),
-            is_active=data.get('is_active', True)
+        therapist_code = data['therapist_code']
+        therapist_name = data['therapist_name']
+        therapist_grade = data.get('therapist_grade', 'Junior')
+        employee_code = data['employee_code']
+        is_bathing_therapist = data.get('is_bathing_therapist', True)
+        is_active = data.get('is_active', True)
+        
+        # Check if therapist already exists
+        if TherapistMaster.objects.filter(therapist_code=therapist_code).exists():
+            return JsonResponse({'error': f'Therapist with code "{therapist_code}" already exists'}, status=400)
+        
+        # Generate username from therapist name or code
+        username = data.get('username') or therapist_code.lower().replace(' ', '_')
+        email = data.get('email') or f"{username}@avcri.local"
+        password = data.get('password') or f"{therapist_code}@{employee_code}"  # Default password
+        
+        # Create user account
+        from authentication.models import CustomUser, TherapistProfile
+        from django.contrib.auth import get_user_model
+        User = get_user_model()
+        
+        # Check if username already exists
+        if User.objects.filter(username=username).exists():
+            username = f"{username}_{therapist_code}"  # Append code if duplicate
+        
+        # Split name into first and last name
+        name_parts = therapist_name.split(maxsplit=1)
+        first_name = name_parts[0] if name_parts else therapist_name
+        last_name = name_parts[1] if len(name_parts) > 1 else ''
+        
+        user = User.objects.create_user(
+            username=username,
+            email=email,
+            password=password,
+            first_name=first_name,
+            last_name=last_name,
+            role='therapist',
+            mobile=data.get('mobile', ''),
+            gender=data.get('gender', 'male')
         )
         
-        return JsonResponse({'success': True, 'id': therapist.id})
+        # Create therapist profile
+        therapist_profile = TherapistProfile.objects.create(
+            user=user,
+            therapist_code=therapist_code,
+            employee_code=employee_code,
+            therapist_grade=therapist_grade,
+            is_bathing_therapist=is_bathing_therapist,
+            department=data.get('department', ''),
+            specialization=data.get('specialization', 'General Therapy')
+        )
+        
+        # Create therapist master record
+        therapist = TherapistMaster.objects.create(
+            user=user,
+            therapist_profile=therapist_profile,
+            therapist_code=therapist_code,
+            therapist_name=therapist_name,
+            therapist_grade=therapist_grade,
+            employee_code=employee_code,
+            is_bathing_therapist=is_bathing_therapist,
+            is_active=is_active
+        )
+        
+        return JsonResponse({
+            'success': True, 
+            'id': therapist.id,
+            'user_id': user.id,
+            'username': username,
+            'message': f'Therapist user account created. Default password: {password}'
+        })
         
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         return JsonResponse({'error': str(e)}, status=500)
 
 @login_required
