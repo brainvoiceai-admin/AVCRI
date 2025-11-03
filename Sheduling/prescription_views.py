@@ -143,8 +143,19 @@ def get_prescription_data_api(request):
                 ).first()
                 
                 if allocation:
-                    items_groups = allocation.items_groups if isinstance(allocation.items_groups, list) else []
-                    prescription_count = len(items_groups) if items_groups else 0
+                    # Normalize items_groups: handle JSON string and compute total item count
+                    raw_groups = allocation.items_groups
+                    try:
+                        import json as _json
+                        items_groups = _json.loads(raw_groups) if isinstance(raw_groups, str) else (raw_groups or [])
+                    except Exception:
+                        items_groups = raw_groups if isinstance(raw_groups, list) else []
+
+                    # Count total items across groups
+                    prescription_count = 0
+                    for grp in items_groups:
+                        if isinstance(grp, dict) and isinstance(grp.get('items'), list):
+                            prescription_count += len(grp['items'])
                     prescription_name = allocation.prescription_name
                 else:
                     prescription_count = 0
