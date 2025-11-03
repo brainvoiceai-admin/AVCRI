@@ -456,8 +456,12 @@ def therapy_entry(request):
                         # If final schedule not run for this date: keep draft and skip immediate allocation
                         if not FinalScheduleRun.objects.filter(run_date=d).exists():
                             try:
-                                Booking.objects.filter(allocation=allocation, date=d).update(status='draft')
-                                BookingItem.objects.filter(booking__allocation=allocation, booking__date=d).update(status='draft')
+                                day_bookings = Booking.objects.filter(allocation=allocation, date=d)
+                                # release therapist assignments for those bookings
+                                BookingAssignment.objects.filter(booking__in=day_bookings).update(status='released')
+                                # put bookings back to draft, clear room and update to new timeslot
+                                day_bookings.update(status='draft', timeslot=allocation.timeslot, room=None)
+                                BookingItem.objects.filter(booking__in=day_bookings).update(status='draft')
                             except Exception:
                                 pass
                             continue
@@ -469,8 +473,8 @@ def therapy_entry(request):
                             from Patient.models import TherapistBooking as TB, RoomBooking as RB
                             TB.objects.filter(date=d, patient_id=allocation.patient.id, status__in=['BOOKED','scheduled']).update(status='CANCELLED')
                             RB.objects.filter(date=d, patient_id=allocation.patient.id, status__in=['BOOKED','scheduled']).update(status='CANCELLED')
-                            # set booking rows to draft prior to re-allocation and ensure timeslot reflects new one
-                            day_bookings.update(status='draft', timeslot=allocation.timeslot)
+                            # set booking rows to draft prior to re-allocation and ensure timeslot reflects new one; clear room
+                            day_bookings.update(status='draft', timeslot=allocation.timeslot, room=None)
                             BookingItem.objects.filter(booking__in=day_bookings).update(status='draft')
                         except Exception:
                             pass
