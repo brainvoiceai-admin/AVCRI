@@ -15,17 +15,97 @@ from datetime import datetime
 @scheduling_access_required
 def prescription_scheduling_dashboard(request):
     """
-    Display the prescription scheduling dashboard.
+    Display the prescription scheduling dashboard with draft, scheduled, and dispatched prescriptions.
+    Similar to therapy scheduling dashboard but for prescriptions.
     """
-    return render(request, 'prescription_scheduling.html')
+    from .models import PrescriptionAllocation
+    from django.utils.dateparse import parse_date
+    
+    # Get date filter from request
+    date_filter = request.GET.get('date')
+    if date_filter:
+        try:
+            filter_date = parse_date(date_filter)
+        except:
+            filter_date = None
+    else:
+        filter_date = None
+    
+    # Use PrescriptionScheduling for per-date filtering (similar to Booking for therapies)
+    from .models import PrescriptionScheduling
+    
+    if filter_date:
+        # Get PrescriptionScheduling records for the specific date
+        draft_scheduling = PrescriptionScheduling.objects.filter(
+            prescription_date=filter_date,
+            status='draft'
+        ).select_related('patient', 'doctor')
+        
+        scheduled_scheduling = PrescriptionScheduling.objects.filter(
+            prescription_date=filter_date,
+            status='scheduled'
+        ).select_related('patient', 'doctor')
+        
+        dispatched_scheduling = PrescriptionScheduling.objects.filter(
+            prescription_date=filter_date,
+            status='dispatched'
+        ).select_related('patient', 'doctor')
+        
+        context = {
+            'draft_allocations': [],  # Not used when date filter is active
+            'scheduled_allocations': [],
+            'dispatched_allocations': [],
+            'draft_scheduling': draft_scheduling,
+            'scheduled_scheduling': scheduled_scheduling,
+            'dispatched_scheduling': dispatched_scheduling,
+            'date_filter': date_filter or '',
+            'stats': {
+                'draft_count': draft_scheduling.count(),
+                'scheduled_count': scheduled_scheduling.count(),
+                'dispatched_count': dispatched_scheduling.count(),
+            }
+        }
+    else:
+        # If no date filter, show all PrescriptionScheduling by status
+        draft_scheduling = PrescriptionScheduling.objects.filter(
+            status='draft'
+        ).select_related('patient', 'doctor')
+        
+        scheduled_scheduling = PrescriptionScheduling.objects.filter(
+            status='scheduled'
+        ).select_related('patient', 'doctor')
+        
+        dispatched_scheduling = PrescriptionScheduling.objects.filter(
+            status='dispatched'
+        ).select_related('patient', 'doctor')
+        
+        context = {
+            'draft_allocations': [],  # Legacy - not used
+            'scheduled_allocations': [],
+            'dispatched_allocations': [],
+            'draft_scheduling': draft_scheduling,
+            'scheduled_scheduling': scheduled_scheduling,
+            'dispatched_scheduling': dispatched_scheduling,
+            'date_filter': '',
+            'stats': {
+                'draft_count': draft_scheduling.count(),
+                'scheduled_count': scheduled_scheduling.count(),
+                'dispatched_count': dispatched_scheduling.count(),
+            }
+        }
+    
+    return render(request, 'prescription_scheduling.html', context)
 
 @csrf_exempt
 @require_http_methods(["GET"])
 def get_prescription_data_api(request):
     """
     API endpoint to fetch prescription data for the scheduling dashboard.
+    Works with PrescriptionAllocation similar to how therapy dashboard works with TherapyAllocation.
     """
     try:
+        from .models import PrescriptionAllocation
+        
         status = request.GET.get('status', 'draft')
         date = request.GET.get('date')
         
@@ -36,40 +116,57 @@ def get_prescription_data_api(request):
         if not filter_date:
             return JsonResponse({'error': 'Invalid date format'}, status=400)
         
-        # Get prescription scheduling data
+        # Get PrescriptionScheduling records for the specific date (per-date processing)
         prescriptions = PrescriptionScheduling.objects.filter(
             prescription_date=filter_date,
-            status=status
-        ).select_related('patient', 'doctor').prefetch_related('items')
+            status=status  # Use status directly (draft, scheduled, dispatched)
+        ).select_related('patient', 'doctor')
         
         data = []
-        for prescription in prescriptions:
+        for prescription_scheduling in prescriptions:
             try:
-                # Get prescription count
-                prescription_count = prescription.items.count()
-                
                 # Get patient details
-                patient = prescription.patient
-                doctor = prescription.doctor
+                patient = prescription_scheduling.patient
                 
                 # Handle potential None values
                 patient_name = patient.pat_name or 'Unknown'
-                doctor_name = doctor.get_full_name() if hasattr(doctor, 'get_full_name') else (doctor.username if doctor else 'Unknown')
+                doctor_name = prescription_scheduling.doctor.get_full_name() if prescription_scheduling.doctor and hasattr(prescription_scheduling.doctor, 'get_full_name') else (prescription_scheduling.doctor.username if prescription_scheduling.doctor else 'Unknown')
+                
+                # Get room_no - fallback to PatientSnapshot.pat_room_no
+                room_no = getattr(patient, 'pat_room_no', None)
+                
+                # Get prescription items count from associated PrescriptionAllocation
+                allocation = PrescriptionAllocation.objects.filter(
+                    patient=patient,
+                    from_date__lte=filter_date,
+                    to_date__gte=filter_date
+                ).first()
+                
+                if allocation:
+                    items_groups = allocation.items_groups if isinstance(allocation.items_groups, list) else []
+                    prescription_count = len(items_groups) if items_groups else 0
+                    prescription_name = allocation.prescription_name
+                else:
+                    prescription_count = 0
+                    prescription_name = 'Prescription'
                 
                 data.append({
                     'patient_id': patient.id,
+                    'scheduling_id': prescription_scheduling.id,
                     'patient_name': patient_name,
                     'patient_id_display': patient.pat_reg_no,
                     'registration_no': patient.pat_reg_no,
-                    'room_no': getattr(patient, 'pat_room_no', None),
+                    'room_no': room_no,
                     'doctor_name': doctor_name,
                     'prescription_count': prescription_count,
-                    'status': prescription.status,
-                    'sent_to': prescription.sent_to,
-                    'dispatched_from': prescription.dispatched_from,
-                    'dispatched_at': prescription.dispatched_at.isoformat() if prescription.dispatched_at else None,
-                    'created_at': prescription.created_at.isoformat(),
-                    'updated_at': prescription.updated_at.isoformat()
+                    'status': prescription_scheduling.status,
+                    'prescription_name': prescription_name,
+                    'prescription_date': prescription_scheduling.prescription_date.isoformat(),
+                    'sent_to': prescription_scheduling.sent_to,
+                    'dispatched_from': prescription_scheduling.dispatched_from,
+                    'dispatched_at': prescription_scheduling.dispatched_at.isoformat() if prescription_scheduling.dispatched_at else None,
+                    'created_at': prescription_scheduling.created_at.isoformat(),
+                    'updated_at': prescription_scheduling.updated_at.isoformat()
                 })
             except Exception as item_error:
                 continue
@@ -88,8 +185,11 @@ def get_prescription_data_api(request):
 def get_prescription_details_api(request):
     """
     API endpoint to get detailed prescription information for a patient.
+    Works with PrescriptionAllocation.
     """
     try:
+        from .models import PrescriptionAllocation
+        
         patient_id = request.GET.get('patient_id')
         date = request.GET.get('date')
         
@@ -100,33 +200,45 @@ def get_prescription_details_api(request):
         if not filter_date:
             return JsonResponse({'error': 'Invalid date format'}, status=400)
         
-        # Get prescription scheduling
-        prescription = PrescriptionScheduling.objects.filter(
+        # Get PrescriptionScheduling for the specific date
+        prescription_scheduling = PrescriptionScheduling.objects.filter(
             patient_id=patient_id,
             prescription_date=filter_date
-        ).select_related('patient', 'doctor').prefetch_related('items').first()
+        ).select_related('patient', 'doctor').first()
         
-        if not prescription:
+        if not prescription_scheduling:
             return JsonResponse({'error': 'Prescription not found'}, status=404)
         
-        # Get patient info
+        # Get patient info - fallback to PatientSnapshot.pat_room_no
+        room_no = getattr(prescription_scheduling.patient, 'pat_room_no', None)
+        doctor_name = prescription_scheduling.doctor.get_full_name() if prescription_scheduling.doctor and hasattr(prescription_scheduling.doctor, 'get_full_name') else (prescription_scheduling.doctor.username if prescription_scheduling.doctor else 'Unknown')
+        
         patient_info = {
-            'name': prescription.patient.pat_name,
-            'registration_no': prescription.patient.pat_reg_no,
-            'room_no': getattr(prescription.patient, 'room_no', None),
-            'doctor_name': prescription.doctor.get_full_name() or prescription.doctor.username
+            'name': prescription_scheduling.patient.pat_name,
+            'registration_no': prescription_scheduling.patient.pat_reg_no,
+            'room_no': room_no,
+            'doctor_name': doctor_name
         }
         
-        # Get prescription items
+        # Get prescription items from associated PrescriptionAllocation
+        allocation = PrescriptionAllocation.objects.filter(
+            patient_id=patient_id,
+            from_date__lte=filter_date,
+            to_date__gte=filter_date
+        ).first()
+        
         prescription_items = []
-        for item in prescription.items.all():
-            prescription_items.append({
-                'name': item.item_name,
-                'dose': item.dose,
-                'quantity': item.quantity,
-                'time': item.time,
-                'notes': item.notes or ''
-            })
+        if allocation:
+            items_groups = allocation.items_groups if isinstance(allocation.items_groups, list) else []
+            for group in items_groups:
+                for item in group.get('items', []):
+                    prescription_items.append({
+                        'name': item.get('item_name', ''),
+                        'dose': group.get('dosage', ''),
+                        'quantity': '',  # Not stored in items_groups format
+                        'time': group.get('time', ''),
+                        'notes': group.get('uno', '')
+                    })
         
         return JsonResponse({
             'success': True,
@@ -142,8 +254,11 @@ def get_prescription_details_api(request):
 def send_final_prescription_api(request):
     """
     API endpoint to send final prescriptions to procurement departments.
+    Works with PrescriptionAllocation - updates status from draft to active.
     """
     try:
+        from .models import PrescriptionAllocation
+        
         data = json.loads(request.body)
         date = data.get('date')
         
@@ -154,11 +269,11 @@ def send_final_prescription_api(request):
         if not filter_date:
             return JsonResponse({'error': 'Invalid date format'}, status=400)
         
-        # Get all draft prescriptions for the date
+        # Get all draft PrescriptionScheduling records for the specific date (per-date processing)
         draft_prescriptions = PrescriptionScheduling.objects.filter(
             prescription_date=filter_date,
             status='draft'
-        )
+        ).select_related('patient')
         
         if not draft_prescriptions.exists():
             return JsonResponse({'error': 'No draft prescriptions found for the selected date'}, status=400)
@@ -167,37 +282,38 @@ def send_final_prescription_api(request):
             updated_count = 0
             sent_to_departments = []
             
-            for prescription in draft_prescriptions:
-                # Determine which department to send to based on patient type or prescription content
-                department = determine_procurement_department(prescription)
+            for prescription_scheduling in draft_prescriptions:
+                # Get the associated PrescriptionAllocation to determine department
+                # Find allocation that covers this date
+                allocation = PrescriptionAllocation.objects.filter(
+                    patient=prescription_scheduling.patient,
+                    from_date__lte=filter_date,
+                    to_date__gte=filter_date
+                ).first()
                 
-                # Update status to scheduled
-                prescription.status = 'scheduled'
-                prescription.sent_to = department
-                prescription.save()
-                
-                # Create dispatch record
-                PrescriptionDispatch.objects.create(
-                    prescription_scheduling=prescription,
-                    department=department,
-                    dispatched_by=request.user,
-                    notes=f'Automatically dispatched to {department}'
-                )
-                
-                # Log the change
-                PrescriptionChangeLog.objects.create(
-                    patient=prescription.patient,
-                    prescription_date=prescription.prescription_date,
-                    action='status_change',
-                    changed_by=request.user,
-                    before_values={'status': 'draft'},
-                    after_values={'status': 'scheduled', 'sent_to': department},
-                    description=f'Prescription sent to {department}'
-                )
-                
-                updated_count += 1
-                if department not in sent_to_departments:
-                    sent_to_departments.append(department)
+                if allocation:
+                    # Determine which department to send to based on patient type or prescription content
+                    department = determine_procurement_department_from_allocation(allocation)
+                    
+                    # Update PrescriptionScheduling status to scheduled (only for this specific date)
+                    prescription_scheduling.status = 'scheduled'
+                    prescription_scheduling.sent_to = department
+                    prescription_scheduling.save()
+                    
+                    # Log the change
+                    PrescriptionChangeLog.objects.create(
+                        patient=prescription_scheduling.patient,
+                        prescription_date=filter_date,
+                        action='status_change',
+                        changed_by=request.user,
+                        before_values={'status': 'draft'},
+                        after_values={'status': 'scheduled', 'sent_to': department},
+                        description=f'Prescription sent to {department} for date {filter_date}'
+                    )
+                    
+                    updated_count += 1
+                    if department not in sent_to_departments:
+                        sent_to_departments.append(department)
         
         return JsonResponse({
             'success': True,
@@ -260,8 +376,11 @@ def get_change_log_api(request):
 def update_prescription_status_api(request):
     """
     API endpoint to update prescription status (called from procurement dashboards).
+    Works with PrescriptionAllocation.
     """
     try:
+        from .models import PrescriptionAllocation
+        
         data = json.loads(request.body)
         patient_id = data.get('patient_id')
         date = data.get('date')
@@ -275,34 +394,34 @@ def update_prescription_status_api(request):
         if not filter_date:
             return JsonResponse({'error': 'Invalid date format'}, status=400)
         
-        # Get prescription
-        prescription = PrescriptionScheduling.objects.filter(
+        # Get PrescriptionScheduling for the specific date (per-date processing)
+        prescription_scheduling = PrescriptionScheduling.objects.filter(
             patient_id=patient_id,
             prescription_date=filter_date
         ).first()
         
-        if not prescription:
+        if not prescription_scheduling:
             return JsonResponse({'error': 'Prescription not found'}, status=404)
         
-        old_status = prescription.status
+        old_status = prescription_scheduling.status
         
         with transaction.atomic():
-            # Update status
-            prescription.status = new_status
+            # Update PrescriptionScheduling status (only for this specific date)
+            prescription_scheduling.status = new_status
             if new_status == 'dispatched':
-                prescription.dispatched_from = department
-                prescription.dispatched_at = timezone.now()
-            prescription.save()
+                prescription_scheduling.dispatched_from = department
+                prescription_scheduling.dispatched_at = timezone.now()
+            prescription_scheduling.save()
             
             # Log the change
             PrescriptionChangeLog.objects.create(
-                patient=prescription.patient,
-                prescription_date=prescription.prescription_date,
+                patient=prescription_scheduling.patient,
+                prescription_date=filter_date,
                 action='status_change',
                 changed_by=request.user,
                 before_values={'status': old_status},
                 after_values={'status': new_status, 'dispatched_from': department},
-                description=f'Status changed from {old_status} to {new_status} by {department}'
+                description=f'Status changed from {old_status} to {new_status} by {department} for date {filter_date}'
             )
         
         return JsonResponse({
@@ -328,6 +447,26 @@ def determine_procurement_department(prescription):
     for item in prescription.items.all():
         if any(keyword in item.item_name.lower() for keyword in ['kashaya', 'kashayam', 'taila', 'oil']):
             return 'Kashaya Room'
+    
+    # Default to IP Pharmacy
+    return 'IP Pharmacy'
+
+def determine_procurement_department_from_allocation(allocation):
+    """
+    Determine which procurement department should handle the prescription allocation.
+    Works with PrescriptionAllocation instead of PrescriptionScheduling.
+    """
+    # Check if patient is IP (inpatient) - check pat_room_no
+    if hasattr(allocation.patient, 'pat_room_no') and allocation.patient.pat_room_no:
+        return 'IP Pharmacy'
+    
+    # Check prescription items_groups for kashaya/ayurvedic medicines
+    items_groups = allocation.items_groups if isinstance(allocation.items_groups, list) else []
+    for group in items_groups:
+        for item in group.get('items', []):
+            item_name = item.get('item_name', '').lower()
+            if any(keyword in item_name for keyword in ['kashaya', 'kashayam', 'taila', 'oil']):
+                return 'Kashaya Room'
     
     # Default to IP Pharmacy
     return 'IP Pharmacy'

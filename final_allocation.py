@@ -96,12 +96,23 @@ def create_room_booking_safe(room, date, time_slot, therapy_name, patient_id, vi
                     'visit': visit
                 }
             )
+            # Update visit if it's not set and we have a booking instance
             if not created and rb.visit is None and visit is not None:
+                rb.visit = visit
+                rb.save(update_fields=['visit'])
+            elif created and rb.visit != visit and visit is not None:
                 rb.visit = visit
                 rb.save(update_fields=['visit'])
             return rb, created
     except IntegrityError:
         rb = RoomBooking.objects.filter(room=room, date=date, time_slot=time_slot, status='BOOKED').first()
+        # Try to update visit if not set
+        if rb and rb.visit is None and visit is not None:
+            try:
+                rb.visit = visit
+                rb.save(update_fields=['visit'])
+            except Exception:
+                pass
         return rb, False
 
 def create_therapist_booking_safe(therapist, date, time_slot, therapy_name, patient_id, visit, is_bathing=False):
@@ -320,6 +331,13 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
 
         if not pref_slot:
             reason = "no_preferred_slot"
+            # Update booking status to failed
+            try:
+                booking.status = 'failed'
+                booking.save(update_fields=['status', 'updated_at'])
+            except Exception as e:
+                print(f"Error updating booking {booking_id} to failed: {e}")
+            
             if AllocationAttempt:
                 try:
                     AllocationAttempt.objects.create(
@@ -357,6 +375,13 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
 
         if patient_already_booked:
             reason = "patient_already_has_booking"
+            # Update booking status to failed
+            try:
+                booking.status = 'failed'
+                booking.save(update_fields=['status', 'updated_at'])
+            except Exception as e:
+                print(f"Error updating booking {booking_id} to failed: {e}")
+            
             if AllocationAttempt:
                 try:
                     AllocationAttempt.objects.create(
@@ -376,6 +401,13 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
         # in-run used slot check
         if any(getattr(s, 'start_time', None) == getattr(canonical_slot, 'start_time', None) for s in used_slots):
             reason = "slot_already_used_in_run"
+            # Update booking status to failed
+            try:
+                booking.status = 'failed'
+                booking.save(update_fields=['status', 'updated_at'])
+            except Exception as e:
+                print(f"Error updating booking {booking_id} to failed: {e}")
+            
             if AllocationAttempt:
                 try:
                     AllocationAttempt.objects.create(
@@ -409,6 +441,13 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
         if len(candidate_therapists) < req_total:
             reason = "insufficient_therapists_available"
             therapists_for_audit = [therapist_entry(t, False) for t in candidate_therapists]
+            # Update booking status to failed
+            try:
+                booking.status = 'failed'
+                booking.save(update_fields=['status', 'updated_at'])
+            except Exception as e:
+                print(f"Error updating booking {booking_id} to failed: {e}")
+            
             if AllocationAttempt:
                 try:
                     AllocationAttempt.objects.create(
@@ -444,6 +483,13 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                 room_candidate = None
         if needs_room_flag and not room_candidate:
             reason = "no_room_available"
+            # Update booking status to failed
+            try:
+                booking.status = 'failed'
+                booking.save(update_fields=['status', 'updated_at'])
+            except Exception as e:
+                print(f"Error updating booking {booking_id} to failed: {e}")
+            
             if AllocationAttempt:
                 try:
                     AllocationAttempt.objects.create(
@@ -464,7 +510,8 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
             with transaction.atomic():
                 rb_obj = None
                 if needs_room_flag and create_bookings:
-                    rb_obj, rb_created = create_room_booking_safe(room_candidate, target_date, canonical_slot, therapy_name, patient_id, None)
+                    # Pass the booking instance so RoomBooking can be linked via visit field
+                    rb_obj, rb_created = create_room_booking_safe(room_candidate, target_date, canonical_slot, therapy_name, patient_id, booking)
                     if not rb_created:
                         raise RuntimeError("room_already_booked")
                 elif needs_room_flag:
@@ -538,8 +585,16 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                     booking.room = room_candidate or booking.room
                     booking.status = 'scheduled'
                     booking.save(update_fields=['timeslot','room','status','updated_at'])
-                except Exception:
-                    pass
+                except Exception as e:
+                    print(f"Error updating booking {booking.id} to scheduled: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    # Still mark as failed if save doesn't work
+                    try:
+                        booking.status = 'failed'
+                        booking.save(update_fields=['status','updated_at'])
+                    except Exception:
+                        pass
                 tasks.append({
                     "booking_id": booking_id, "allocation_id": therapy_allocation_id, "date": target_date.isoformat(),
                     "therapy_name": therapy_name, "slot": requested_slot_value, "status": "BOOKED", "reason": None,
@@ -584,12 +639,13 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
             })
             continue
 
-    # update allocation header
-    try:
-        allocation.status = 'allocated' if any_success else 'failed'
-        allocation.save(update_fields=['status'])
-    except Exception:
-        pass
+    # DO NOT update allocation.status automatically
+    # Each booking date is processed independently
+    # The TherapyAllocation.status field remains unchanged to allow:
+    # - Mixed states: some dates scheduled, some dates draft (e.g., 23rd draft, 24th scheduled)
+    # - Per-date processing without affecting overall allocation status
+    # - Running Final Schedule for one date doesn't change allocation status
+    # Only individual Booking.status is updated per date during processing
 
     return tasks
 
@@ -615,12 +671,18 @@ def bulk_allocate_for_date(target_date_str):
             'error': f'Invalid date format: {target_date_str}. Expected YYYY-MM-DD'
         }
     
-    # Get all draft allocations for the target date
+    # Get all allocations that have draft bookings for the target date
+    # This ensures we process dates separately, regardless of overall allocation status
+    from Sheduling.models import Booking
+    draft_bookings = Booking.objects.filter(
+        date=target_date,
+        status='draft'
+    ).select_related('allocation')
+    
+    # Get unique allocations from these bookings
     draft_allocations = TherapyAllocation.objects.filter(
-        status='draft',
-        from_date__lte=target_date,
-        to_date__gte=target_date
-    )
+        bookings__in=draft_bookings
+    ).distinct()
     
     if not draft_allocations.exists():
         return {
@@ -636,21 +698,21 @@ def bulk_allocate_for_date(target_date_str):
     successful_count = 0
     failed_count = 0
     
-    # Process each draft allocation
+    # Process each draft allocation - only process bookings for the target date
+    # Don't change overall allocation status, only process bookings for this specific date
     for allocation in draft_allocations:
         try:
-            # Run the allocation algorithm for this allocation
+            # Run the allocation algorithm for this allocation and target date only
             tasks = expand_therapies_for_visit(
                 allocation.id, 
                 target_date_str, 
                 create_bookings=True
             )
             
-            # Analyze results
+            # Analyze results - only affect bookings for this date, not overall allocation status
             if isinstance(tasks, dict) and "error" in tasks:
-                # Algorithm returned an error
-                allocation.status = 'failed'
-                allocation.save()
+                # Algorithm returned an error for this date
+                failed_count += 1
                 results.append({
                     'allocation_id': allocation.id,
                     'patient_name': str(allocation.patient),
@@ -658,15 +720,30 @@ def bulk_allocate_for_date(target_date_str):
                     'status': 'failed',
                     'reason': tasks['error']
                 })
-                failed_count += 1
             else:
                 # Process algorithm results
                 success_tasks = [t for t in tasks if t.get('status') == 'BOOKED']
                 failed_tasks = [t for t in tasks if t.get('status') == 'FAILED']
                 
+                # Update booking statuses based on task results
+                from Sheduling.models import Booking
+                for task in tasks:
+                    booking_id = task.get('booking_id')
+                    if booking_id:
+                        try:
+                            booking = Booking.objects.get(id=booking_id, allocation=allocation, date=target_date)
+                            if task.get('status') == 'BOOKED':
+                                booking.status = 'scheduled'
+                                booking.save(update_fields=['status', 'updated_at'])
+                            elif task.get('status') == 'FAILED' and booking.status == 'draft':
+                                booking.status = 'failed'
+                                booking.save(update_fields=['status', 'updated_at'])
+                        except Booking.DoesNotExist:
+                            pass
+                        except Exception as e:
+                            print(f"Error updating booking {booking_id} status: {e}")
+                
                 if success_tasks:
-                    allocation.status = 'allocated'
-                    allocation.save()
                     successful_count += 1
                     results.append({
                         'allocation_id': allocation.id,
@@ -677,8 +754,6 @@ def bulk_allocate_for_date(target_date_str):
                         'failed_tasks': len(failed_tasks)
                     })
                 else:
-                    allocation.status = 'failed'
-                    allocation.save()
                     failed_count += 1
                     reason = failed_tasks[0].get('reason', 'No available slots') if failed_tasks else 'Unknown error'
                     results.append({
@@ -688,10 +763,17 @@ def bulk_allocate_for_date(target_date_str):
                         'status': 'failed',
                         'reason': reason
                     })
+                
+                # DO NOT update overall allocation status
+                # Each booking date is independent - one date can be scheduled while another remains draft
+                # The TherapyAllocation.status field is not automatically updated based on booking statuses
+                # This allows:
+                # - Date 23rd in draft, Date 24th scheduled → perfectly fine, both remain independent
+                # - Running Final Schedule for 23rd doesn't affect 24th's status
+                # - Running Final Schedule for 24th doesn't affect 23rd's status
+                # Only individual Booking.status is updated per date during Final Schedule
                     
         except Exception as e:
-            allocation.status = 'failed'
-            allocation.save()
             failed_count += 1
             results.append({
                 'allocation_id': allocation.id,
