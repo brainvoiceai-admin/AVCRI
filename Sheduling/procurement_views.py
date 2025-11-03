@@ -45,8 +45,52 @@ def get_procurement_prescriptions_api(request):
         
         data = []
         for prescription in prescriptions:
-            # Get prescription count
+            # Get prescription count and a small preview of items
             prescription_count = prescription.items.count()
+            items_preview = []
+            if prescription_count == 0:
+                try:
+                    from .models import PrescriptionAllocation
+                    allocation = PrescriptionAllocation.objects.filter(
+                        patient=prescription.patient,
+                        from_date__lte=filter_date,
+                        to_date__gte=filter_date
+                    ).first()
+                    if allocation and allocation.items_groups:
+                        raw_groups = allocation.items_groups
+                        groups = []
+                        if isinstance(raw_groups, str):
+                            try:
+                                groups = json.loads(raw_groups)
+                            except Exception:
+                                groups = []
+                        elif isinstance(raw_groups, list):
+                            groups = raw_groups
+                        elif isinstance(raw_groups, dict):
+                            groups = [raw_groups]
+                        for grp in groups:
+                            items = grp.get('items', []) if isinstance(grp, dict) else []
+                            for it in items:
+                                items_preview.append({
+                                    'item_name': it.get('item_name', ''),
+                                    'dose': grp.get('dosage', ''),
+                                    'quantity': it.get('quantity', ''),
+                                    'time': grp.get('time', ''),
+                                    'notes': grp.get('uno', '')
+                                })
+                        prescription_count = len(items_preview)
+                except Exception:
+                    pass
+            else:
+                # Build preview from PrescriptionItem rows
+                for it in prescription.items.all()[:10]:
+                    items_preview.append({
+                        'item_name': it.item_name,
+                        'dose': it.dose,
+                        'quantity': it.quantity,
+                        'time': it.time,
+                        'notes': it.notes or ''
+                    })
             
             # Get patient details
             patient = prescription.patient
@@ -64,6 +108,7 @@ def get_procurement_prescriptions_api(request):
                 'room_no': getattr(patient, 'pat_room_no', None),
                 'doctor_name': doctor_name,
                 'prescription_count': prescription_count,
+                'items_preview': items_preview[:5],
                 'status': prescription.status,
                 'sent_to': prescription.sent_to,
                 'dispatched_from': prescription.dispatched_from,
@@ -220,28 +265,33 @@ def get_prescription_details_api(request):
 
 
 def get_prescription_details_api(request):
-    """API to get detailed prescription items for a patient"""
+    """API to get detailed prescription items for a patient (procurement)."""
     try:
+        from .models import PrescriptionAllocation
         patient_id = request.GET.get('patient_id')
         date = request.GET.get('date')
         
         if not patient_id or not date:
             return JsonResponse({'error': 'patient_id and date are required'}, status=400)
         
-        # Get prescription scheduling record
+        # Parse date
+        filter_date = parse_date(date)
+        if not filter_date:
+            return JsonResponse({'error': 'Invalid date format'}, status=400)
+        
+        # Get prescription scheduling record for that day
         prescription = PrescriptionScheduling.objects.filter(
             patient_id=patient_id,
-            prescription_date=date
+            prescription_date=filter_date
         ).first()
         
         if not prescription:
             return JsonResponse({'success': True, 'data': []})
         
-        # Get prescription items
-        items = PrescriptionItem.objects.filter(prescription_scheduling=prescription)
-        
+        # Primary: items entered as PrescriptionItem
+        items_qs = PrescriptionItem.objects.filter(prescription_scheduling=prescription)
         prescription_items = []
-        for item in items:
+        for item in items_qs:
             prescription_items.append({
                 'id': item.id,
                 'item_name': item.item_name,
@@ -251,10 +301,39 @@ def get_prescription_details_api(request):
                 'notes': item.notes or ''
             })
         
-        return JsonResponse({
-            'success': True,
-            'data': prescription_items
-        })
+        # Fallback: derive from PrescriptionAllocation.items_groups when no rows exist
+        if not prescription_items:
+            allocation = PrescriptionAllocation.objects.filter(
+                patient_id=patient_id,
+                from_date__lte=filter_date,
+                to_date__gte=filter_date
+            ).first()
+            if allocation and allocation.items_groups:
+                raw_groups = allocation.items_groups
+                groups = []
+                if isinstance(raw_groups, str):
+                    try:
+                        groups = json.loads(raw_groups)
+                    except Exception:
+                        groups = []
+                elif isinstance(raw_groups, list):
+                    groups = raw_groups
+                elif isinstance(raw_groups, dict):
+                    groups = [raw_groups]
+                
+                for group in groups:
+                    items = group.get('items', []) if isinstance(group, dict) else []
+                    for it in items:
+                        prescription_items.append({
+                            'id': it.get('id'),
+                            'item_name': it.get('item_name', ''),
+                            'dose': group.get('dosage', ''),
+                            'quantity': it.get('quantity', ''),
+                            'time': group.get('time', ''),
+                            'notes': group.get('uno', '')
+                        })
         
+        return JsonResponse({'success': True, 'data': prescription_items})
+    
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=500)
