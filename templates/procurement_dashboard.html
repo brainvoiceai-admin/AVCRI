@@ -687,6 +687,11 @@
                         <span class="meds-count">${patient.prescription_count} medicines</span>
                         <span>${getPreparedCount(patient)}/${patient.prescription_count} prepared</span>
                     </div>
+                    ${Array.isArray(patient.items_preview) && patient.items_preview.length ? `
+                    <div class="patient-details" style="margin-top:6px; display:block;">
+                        ${patient.items_preview.slice(0,3).map(it => `<div>• ${escapeHtml(it.item_name)}${it.dose ? ` (${escapeHtml(it.dose)})` : ''}${it.time ? ` - ${escapeHtml(it.time)}` : ''}</div>`).join('')}
+                        ${patient.items_preview.length > 3 ? `<div class="small" style="color:#95aac9;">+${patient.items_preview.length-3} more…</div>` : ''}
+                    </div>` : ''}
                 `;
                 
                 patientCard.addEventListener('click', function() {

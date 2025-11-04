@@ -456,8 +456,12 @@ def therapy_entry(request):
                         # If final schedule not run for this date: keep draft and skip immediate allocation
                         if not FinalScheduleRun.objects.filter(run_date=d).exists():
                             try:
-                                Booking.objects.filter(allocation=allocation, date=d).update(status='draft')
-                                BookingItem.objects.filter(booking__allocation=allocation, booking__date=d).update(status='draft')
+                                day_bookings = Booking.objects.filter(allocation=allocation, date=d)
+                                # release therapist assignments for those bookings
+                                BookingAssignment.objects.filter(booking__in=day_bookings).update(status='released')
+                                # put bookings back to draft, clear room and update to new timeslot
+                                day_bookings.update(status='draft', timeslot=allocation.timeslot, room=None)
+                                BookingItem.objects.filter(booking__in=day_bookings).update(status='draft')
                             except Exception:
                                 pass
                             continue
@@ -465,13 +469,14 @@ def therapy_entry(request):
                         # Release previous assignments/resources for this date to avoid conflicts
                         try:
                             day_bookings = Booking.objects.filter(allocation=allocation, date=d)
+                            # release therapist assignments for those bookings
                             BookingAssignment.objects.filter(booking__in=day_bookings).update(status='released')
+                            # cancel external TherapistBooking/RoomBooking
                             from Patient.models import TherapistBooking as TB, RoomBooking as RB
                             TB.objects.filter(date=d, patient_id=allocation.patient.id, status__in=['BOOKED','scheduled']).update(status='CANCELLED')
                             RB.objects.filter(date=d, patient_id=allocation.patient.id, status__in=['BOOKED','scheduled']).update(status='CANCELLED')
-                            # set booking rows to draft prior to re-allocation and ensure timeslot reflects new one
-                            day_bookings.update(status='draft', timeslot=allocation.timeslot)
-                            BookingItem.objects.filter(booking__in=day_bookings).update(status='draft')
+                            # delete old bookings so they don't appear in scheduled section
+                            day_bookings.delete()
                         except Exception:
                             pass
 

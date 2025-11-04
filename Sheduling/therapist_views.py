@@ -73,12 +73,19 @@ def get_therapist_data_api(request):
                 # Format therapy name
                 therapy_name = allocation.therapy_name
                 
-                # Get time slot display
+                # Get time slot display and value expected by frontend slots
                 slot_display = '6:30 AM'
-                slot_value = '6-30'
+                slot_value = '6-30am'
                 if time_slot and hasattr(time_slot, 'start_time'):
                     slot_display = time_slot.start_time.strftime('%I:%M %p')
-                    slot_value = time_slot.start_time.strftime('%H-%M')
+                    # Format like '6-30am', '10-00am', '2-30pm'
+                    h_24 = int(time_slot.start_time.strftime('%H'))
+                    m = time_slot.start_time.strftime('%M')
+                    ampm = 'am' if h_24 < 12 else 'pm'
+                    h_12 = h_24 % 12
+                    if h_12 == 0:
+                        h_12 = 12
+                    slot_value = f"{h_12}-{m}{ampm}"
                 
                 # Get room number - check booking.room first, then RoomBooking via visit
                 room_no = None
@@ -207,10 +214,16 @@ def get_therapist_sessions_by_date_api(request):
                 # Get time slot display
                 time_slot = booking.timeslot
                 slot_display = '6:30 AM'
-                slot_value = '6-30'
+                slot_value = '6-30am'
                 if time_slot and hasattr(time_slot, 'start_time'):
                     slot_display = time_slot.start_time.strftime('%I:%M %p')
-                    slot_value = time_slot.start_time.strftime('%H-%M')
+                    h_24 = int(time_slot.start_time.strftime('%H'))
+                    m = time_slot.start_time.strftime('%M')
+                    ampm = 'am' if h_24 < 12 else 'pm'
+                    h_12 = h_24 % 12
+                    if h_12 == 0:
+                        h_12 = 12
+                    slot_value = f"{h_12}-{m}{ampm}"
                 
                 # Get room number
                 room_no = None

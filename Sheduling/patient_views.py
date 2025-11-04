@@ -166,10 +166,10 @@ def get_patient_data_api(request):
                                             'id': item.get('id', schedule.id),
                                             'date': schedule.prescription_date.strftime('%Y-%m-%d') if schedule.prescription_date else '',
                                             'item_name': item.get('item_name', ''),
-                                            'dose': item.get('dose', ''),
+                                            'dose': item_group.get('dosage', ''),
                                             'quantity': item.get('quantity', ''),
-                                            'time': item.get('time', ''),
-                                            'notes': item.get('notes', '')
+                                            'time': item_group.get('time', ''),
+                                            'notes': item_group.get('uno', '')
                                         }
                                         prescriptions.append(prescription_data)
                     except Exception as e:
@@ -282,10 +282,10 @@ def get_patient_prescriptions_api(request):
                                         prescription_data = {
                                             'id': item.get('id', schedule.id),
                                             'item_name': item.get('item_name', ''),
-                                            'dose': item.get('dose', ''),
+                                            'dose': item_group.get('dosage', ''),
                                             'quantity': item.get('quantity', ''),
-                                            'time': item.get('time', ''),
-                                            'notes': item.get('notes', '')
+                                            'time': item_group.get('time', ''),
+                                            'notes': item_group.get('uno', '')
                                         }
                                         prescriptions.append(prescription_data)
                     except Exception as e:
