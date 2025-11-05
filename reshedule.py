@@ -468,12 +468,52 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
 
             # update booking row
             try:
-                booking.timeslot = getattr(booking, 'timeslot', None) or canonical_slot
+                booking.timeslot = canonical_slot
                 booking.room = room_candidate or booking.room
                 booking.status = 'scheduled'
-                booking.save(update_fields=['timeslot','room','status','updated_at'])
+                booking.save()
             except Exception:
                 pass
+
+            # ensure UI-visible assignments are created for scheduled bookings
+            if create_bookings:
+                try:
+                    from Sheduling.models import BookingAssignment
+                    from Patient.models import Therapist as PatientTherapist
+                    for t in assigned_therapists:
+                        try:
+                            therapist_code = getattr(t, 'therapist_code', None) or str(t)
+                            # resolve to Patient.models.Therapist by code
+                            pt = PatientTherapist.objects.filter(pk=therapist_code).first()
+                            if not pt:
+                                # create minimal therapist record for display if missing
+                                pt = PatientTherapist.objects.create(
+                                    therapist_code=therapist_code,
+                                    therapist_name=getattr(t, 'therapist_name', therapist_code),
+                                    therapist_grade=getattr(t, 'therapist_grade', '') or '' ,
+                                    is_bathing_therapist=bool(getattr(t, 'is_bathing_therapist', False))
+                                )
+
+                            # avoid duplicates by checking therapist+date+slot
+                            existing = BookingAssignment.objects.filter(
+                                therapist=pt,
+                                booking_date=date,
+                                booking_timeslot=canonical_slot,
+                                booking=booking,
+                                status='assigned'
+                            ).first()
+                            if not existing:
+                                BookingAssignment.objects.create(
+                                    booking=booking,
+                                    therapist=pt,
+                                    assigned_for='booking',
+                                    status='assigned'
+                                )
+                        except Exception:
+                            continue
+                except Exception:
+                    # If BookingAssignment model isn't available or fails, continue; UI may fall back to related bookings
+                    pass
 
             task = {
                 "booking_id": booking_id,
@@ -653,9 +693,17 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                 pass
             continue
         else:
-            # preferred slot failed -> if reason is capacity/conflict attempt automatic slots as reschedule
-            # Only attempt fallback when failure is capacity or room/therapist conflict (not when patient already booked or slot used in run)
-            fallback_reasons = {"insufficient_therapists_available", "no_room_available", "room_already_booked", "therapist_already_booked"}
+            # preferred slot failed -> attempt automatic slots as reschedule when failure is due to
+            # capacity/conflict OR patient/slot conflicts. This enables trying alternate slots when
+            # the patient already has a booking at the preferred slot.
+            fallback_reasons = {
+                "insufficient_therapists_available",
+                "no_room_available",
+                "room_already_booked",
+                "therapist_already_booked",
+                "patient_already_has_booking",
+                "slot_already_used_in_run",
+            }
             if reason and any(r in str(reason) for r in fallback_reasons):
                 # attempt other allowed slots (OP/IP aware)
                 allowed_slot_values = get_allowed_slot_values(patient_type, therapy_req.get("therapy_category"), used_slots)
@@ -697,6 +745,15 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
         pass
 
     return tasks
+
+# -----------------------
+# Compatibility wrapper for external callers
+# -----------------------
+def allocate_therapy_for_visit(therapy_allocation_id, target_date, create_bookings=True):
+    """
+    Backwards-compatible wrapper expected by callers. Delegates to expand_therapies_for_visit.
+    """
+    return expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookings=create_bookings)
 
 # -----------------------
 # CLI quick-run
