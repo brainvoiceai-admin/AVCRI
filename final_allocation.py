@@ -83,80 +83,127 @@ def map_to_canonical_slot(slot_like):
 # -----------------------
 def create_room_booking_safe(room, date, time_slot, therapy_name, patient_id, visit):
     from Patient.models import RoomBooking
+    print(f"[DEBUG create_room_booking_safe] Called with: room={room} (pk={room.pk if room else None}), date={date}, time_slot={time_slot} (type={type(time_slot)}, pk={time_slot.pk if time_slot else None}), visit={visit} (type={type(visit)}, pk={visit.pk if visit else None})")
     try:
-        with transaction.atomic():
-            rb, created = RoomBooking.objects.get_or_create(
-                room=room,
-                date=date,
-                time_slot=time_slot,
-                status='BOOKED',
-                defaults={
-                    'therapy_name': therapy_name,
-                    'patient_id': patient_id,
-                    'visit': visit
-                }
-            )
-            # Update visit if it's not set and we have a booking instance
-            if not created and rb.visit is None and visit is not None:
-                rb.visit = visit
-                rb.save(update_fields=['visit'])
-            elif created and rb.visit != visit and visit is not None:
-                rb.visit = visit
-                rb.save(update_fields=['visit'])
-            return rb, created
-    except IntegrityError:
+        # Don't use nested transaction.atomic() - we're already in a transaction
+        rb, created = RoomBooking.objects.get_or_create(
+            room=room,
+            date=date,
+            time_slot=time_slot,
+            status='BOOKED',
+            defaults={
+                'therapy_name': therapy_name,
+                'patient_id': patient_id,
+                'visit': visit
+            }
+        )
+        print(f"[DEBUG create_room_booking_safe] get_or_create returned: rb={rb} (pk={rb.pk if rb else None}), created={created}")
+        # Update visit if it's not set and we have a booking instance
+        # CRITICAL: Use full save() instead of update_fields to ensure FK is properly set in SQLite
+        if not created and rb.visit is None and visit is not None:
+            print(f"[DEBUG create_room_booking_safe] Updating visit for existing RoomBooking: rb.visit = {visit}")
+            rb.visit = visit
+            rb.save()  # Full save to ensure FK is properly persisted
+            rb.refresh_from_db()
+            print(f"[DEBUG create_room_booking_safe] Visit updated successfully")
+        elif created and rb.visit != visit and visit is not None:
+            print(f"[DEBUG create_room_booking_safe] Updating visit for newly created RoomBooking: rb.visit = {visit}")
+            rb.visit = visit
+            rb.save()  # Full save to ensure FK is properly persisted
+            rb.refresh_from_db()
+            print(f"[DEBUG create_room_booking_safe] Visit updated successfully")
+        return rb, created
+    except IntegrityError as ie:
+        print(f"[DEBUG create_room_booking_safe] IntegrityError caught: {ie}")
+        import traceback
+        traceback.print_exc()
         rb = RoomBooking.objects.filter(room=room, date=date, time_slot=time_slot, status='BOOKED').first()
+        print(f"[DEBUG create_room_booking_safe] Found existing RoomBooking: {rb} (pk={rb.pk if rb else None})")
         # Try to update visit if not set
         if rb and rb.visit is None and visit is not None:
             try:
+                print(f"[DEBUG create_room_booking_safe] Attempting to update visit on existing RoomBooking")
                 rb.visit = visit
-                rb.save(update_fields=['visit'])
-            except Exception:
-                pass
+                rb.save()  # Full save to ensure FK is properly persisted
+                rb.refresh_from_db()
+                print(f"[DEBUG create_room_booking_safe] Visit updated on existing RoomBooking")
+            except Exception as e:
+                print(f"[DEBUG create_room_booking_safe] Error updating visit: {e}")
+                import traceback
+                traceback.print_exc()
         return rb, False
 
 def create_therapist_booking_safe(therapist, date, time_slot, therapy_name, patient_id, visit, is_bathing=False):
     """
     Create TherapistBooking safely and optionally set is_bathing if the model has that field.
     Returns (therapist_booking_instance, created_bool)
+    Note: Don't use nested transaction.atomic() - we're already in a transaction
     """
     from Patient.models import TherapistBooking
+    print(f"[DEBUG create_therapist_booking_safe] Called with: therapist={therapist} (pk={therapist.pk if therapist else None}), date={date}, time_slot={time_slot} (type={type(time_slot)}, pk={time_slot.pk if time_slot else None}), visit={visit} (type={type(visit)}, pk={visit.pk if visit else None})")
     try:
-        with transaction.atomic():
-            tb, created = TherapistBooking.objects.get_or_create(
-                therapist=therapist,
-                date=date,
-                time_slot=time_slot,
-                status='BOOKED',
-                defaults={
-                    'therapy_name': therapy_name,
-                    'patient_id': patient_id,
-                    'visit': visit
-                }
-            )
-            if not created and tb.visit is None and visit is not None:
-                tb.visit = visit
-                tb.save(update_fields=['visit'])
-            # persist is_bathing if model supports it and we either created or it's not set
-            try:
-                if is_bathing and hasattr(tb, 'is_bathing'):
-                    # save only if value differs to avoid unnecessary writes
-                    if getattr(tb, 'is_bathing', False) != bool(is_bathing):
-                        tb.is_bathing = bool(is_bathing)
-                        tb.save(update_fields=['is_bathing'])
-            except Exception:
-                pass
-            return tb, created
-    except IntegrityError:
+        # Don't use nested transaction.atomic() - we're already in a transaction
+        tb, created = TherapistBooking.objects.get_or_create(
+            therapist=therapist,
+            date=date,
+            time_slot=time_slot,
+            status='BOOKED',
+            defaults={
+                'therapy_name': therapy_name,
+                'patient_id': patient_id,
+                'visit': visit
+            }
+        )
+        print(f"[DEBUG create_therapist_booking_safe] get_or_create returned: tb={tb} (pk={tb.pk if tb else None}), created={created}")
+        # CRITICAL: Use full save() instead of update_fields to ensure FK is properly set in SQLite
+        if not created and tb.visit is None and visit is not None:
+            print(f"[DEBUG create_therapist_booking_safe] Updating visit for existing TherapistBooking: tb.visit = {visit}")
+            tb.visit = visit
+            tb.save()  # Full save to ensure FK is properly persisted
+            tb.refresh_from_db()
+            print(f"[DEBUG create_therapist_booking_safe] Visit updated successfully")
+        elif created and tb.visit != visit and visit is not None:
+            print(f"[DEBUG create_therapist_booking_safe] Updating visit for newly created TherapistBooking: tb.visit = {visit}")
+            tb.visit = visit
+            tb.save()  # Full save to ensure FK is properly persisted
+            tb.refresh_from_db()
+            print(f"[DEBUG create_therapist_booking_safe] Visit updated successfully")
+        # persist is_bathing if model supports it and we either created or it's not set
+        try:
+            if is_bathing and hasattr(tb, 'is_bathing'):
+                # save only if value differs to avoid unnecessary writes
+                if getattr(tb, 'is_bathing', False) != bool(is_bathing):
+                    tb.is_bathing = bool(is_bathing)
+                    tb.save()  # Full save to ensure FK is properly persisted
+                    tb.refresh_from_db()
+        except Exception as e:
+            print(f"[DEBUG create_therapist_booking_safe] Error setting is_bathing: {e}")
+        return tb, created
+    except IntegrityError as ie:
+        print(f"[DEBUG create_therapist_booking_safe] IntegrityError caught: {ie}")
+        import traceback
+        traceback.print_exc()
         tb = TherapistBooking.objects.filter(therapist=therapist, date=date, time_slot=time_slot, status='BOOKED').first()
+        print(f"[DEBUG create_therapist_booking_safe] Found existing TherapistBooking: {tb} (pk={tb.pk if tb else None})")
         # attempt to mark is_bathing if possible (best-effort, non-fatal)
         try:
             if tb and is_bathing and hasattr(tb, 'is_bathing'):
                 if not tb.is_bathing:
                     tb.is_bathing = True
                     tb.save(update_fields=['is_bathing'])
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[DEBUG create_therapist_booking_safe] Error updating is_bathing on existing: {e}")
+        # Try to update visit if not set
+        if tb and tb.visit is None and visit is not None:
+            try:
+                print(f"[DEBUG create_therapist_booking_safe] Attempting to update visit on existing TherapistBooking")
+                tb.visit = visit
+                tb.save(update_fields=['visit'])
+                print(f"[DEBUG create_therapist_booking_safe] Visit updated on existing TherapistBooking")
+            except Exception as e:
+                print(f"[DEBUG create_therapist_booking_safe] Error updating visit: {e}")
+                import traceback
+                traceback.print_exc()
         return tb, False
 
 # -----------------------
@@ -355,12 +402,33 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
             continue
 
         canonical_slot = map_to_canonical_slot(pref_slot) or pref_slot
+        
+        # Resolve slot_master early to ensure we always use SlotMaster instances for FK relationships
+        # This prevents FK constraint failures when canonical_slot is not a SlotMaster
+        slot_master = None
+        if canonical_slot:
+            if isinstance(canonical_slot, SlotMaster):
+                slot_master = canonical_slot
+            else:
+                # Try to find SlotMaster by start_time
+                start_time = getattr(canonical_slot, 'start_time', None)
+                if start_time:
+                    slot_master = SlotMaster.objects.filter(start_time=start_time, is_active=True).first()
+                if not slot_master:
+                    # Fallback: use existing booking timeslot if available
+                    slot_master = getattr(booking, 'timeslot', None)
+                    if not slot_master and pref_slot and isinstance(pref_slot, SlotMaster):
+                        slot_master = pref_slot
+        
+        # Use slot_master for queries if available, otherwise fall back to canonical_slot
+        query_slot = slot_master if slot_master else canonical_slot
+        
         # patient already booked check
         patient_already_booked = False
         try:
             patient_already_booked = (
-                RoomBooking.objects.filter(patient_id=patient_id, date=target_date, time_slot=canonical_slot, status__in=['BOOKED','scheduled']).exclude(pk=booking.pk).exists()
-                or TherapistBooking.objects.filter(patient_id=patient_id, date=target_date, time_slot=canonical_slot, status='BOOKED').exclude(pk=booking.pk).exists()
+                RoomBooking.objects.filter(patient_id=patient_id, date=target_date, time_slot=query_slot, status__in=['BOOKED','scheduled']).exclude(pk=booking.pk).exists()
+                or TherapistBooking.objects.filter(patient_id=patient_id, date=target_date, time_slot=query_slot, status='BOOKED').exclude(pk=booking.pk).exists()
             )
         except Exception:
             try:
@@ -399,7 +467,7 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
             continue
 
         # in-run used slot check
-        if any(getattr(s, 'start_time', None) == getattr(canonical_slot, 'start_time', None) for s in used_slots):
+        if any(getattr(s, 'start_time', None) == getattr(query_slot, 'start_time', None) for s in used_slots):
             reason = "slot_already_used_in_run"
             # Update booking status to failed
             try:
@@ -431,9 +499,10 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
 
         needs_room_flag = therapy_needs_room(allocation) if therapy_needs_room else bool(getattr(booking, 'room', None))
         needs_bath_flag = therapy_needs_bath(allocation) if therapy_needs_bath else False
-        # allocate therapists
+        # allocate therapists - use slot_master if available, otherwise canonical_slot
+        allocate_slot = slot_master if slot_master else canonical_slot
         try:
-            candidate_therapists = allocate_therapists(target_date, canonical_slot, therapy_req, None, needs_bath_flag)
+            candidate_therapists = allocate_therapists(target_date, allocate_slot, therapy_req, None, needs_bath_flag)
         except Exception:
             candidate_therapists = []
 
@@ -474,11 +543,19 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                 bath_assigned = assigned_therapists[0]
         # build therapist audit list
         therapists_for_audit = [therapist_entry(t, is_bath=(t == bath_assigned)) for t in assigned_therapists]
-        # room allocation
+        # room allocation - use slot_master if available, otherwise canonical_slot
+        if not slot_master:
+            # If we couldn't resolve slot_master earlier, try one more time before room allocation
+            if canonical_slot and not isinstance(canonical_slot, SlotMaster):
+                start_time = getattr(canonical_slot, 'start_time', None)
+                if start_time:
+                    slot_master = SlotMaster.objects.filter(start_time=start_time, is_active=True).first()
+        allocate_slot_for_room = slot_master if slot_master else canonical_slot
+        
         room_candidate = getattr(booking, 'room', None)
         if needs_room_flag and not room_candidate:
             try:
-                room_candidate = allocate_treatment_room(target_date, canonical_slot, None)
+                room_candidate = allocate_treatment_room(target_date, allocate_slot_for_room, None)
             except Exception:
                 room_candidate = None
         if needs_room_flag and not room_candidate:
@@ -506,95 +583,429 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
             })
             continue
         # create bookings atomically and persist is_bathing on therapist bookings
+        booking_saved_successfully = False
         try:
             with transaction.atomic():
-                rb_obj = None
-                if needs_room_flag and create_bookings:
-                    # Pass the booking instance so RoomBooking can be linked via visit field
-                    rb_obj, rb_created = create_room_booking_safe(room_candidate, target_date, canonical_slot, therapy_name, patient_id, booking)
-                    if not rb_created:
-                        raise RuntimeError("room_already_booked")
-                elif needs_room_flag:
-                    rb_obj = booking if getattr(booking, 'room', None) else None
-                tb_objs = []
-                for t in assigned_therapists:
-                    is_bath_for_t = (t == bath_assigned)
-                    if create_bookings:
-                        tb_obj, tb_created = create_therapist_booking_safe(t, target_date, canonical_slot, therapy_name, patient_id, None, is_bathing=is_bath_for_t)
-                        if not tb_created:
-                            raise RuntimeError(f"therapist_already_booked:{getattr(t,'therapist_code',str(t))}")
-                        tb_objs.append(tb_obj)
-                    else:
-                        tb_objs.append(SimpleNamespace(therapist_code=getattr(t,'therapist_code',str(t)), is_bathing=is_bath_for_t))
-                # create BookingAssignment records to link therapists to Booking (Sheduling app)
-                from Sheduling.models import BookingAssignment
-                from Patient.models import Therapist
-                for t in assigned_therapists:
-                    try:
-                        # Get or create Therapist object from Patient app (therapist_code is PK)
-                        therapist_obj, _ = Therapist.objects.get_or_create(
-                            therapist_code=t.therapist_code,
-                            defaults={
-                                'therapist_name': getattr(t, 'therapist_name', t.therapist_code),
-                                'therapist_grade': getattr(t, 'therapist_grade', ''),
-                                'is_bathing_therapist': getattr(t, 'is_bathing_therapist', False)
-                            }
-                        )
-                        # Check if assignment already exists
-                        existing = BookingAssignment.objects.filter(booking=booking, therapist=therapist_obj).first()
-                        if existing:
-                            ba_obj = existing
-                            ba_created = False
-                        else:
-                            # Create BookingAssignment to link therapist to booking
-                            # Note: booking_timeslot now uses SlotMaster (same as Booking.timeslot)
-                            # It will be auto-populated from booking.timeslot in save() if not provided
-                            ba_obj = BookingAssignment.objects.create(
-                                booking=booking,
-                                therapist=therapist_obj,
-                                booking_item=None,
-                                booking_date=target_date,
-                                booking_timeslot=canonical_slot,  # SlotMaster instance (same as Booking.timeslot)
-                                role=getattr(t, 'therapist_grade', ''),
-                                assigned_for='booking',
-                                status='assigned'
-                            )
-                            ba_created = True
-                    except Exception as e:
-                        print(f"Error creating BookingAssignment for {getattr(t, 'therapist_code', 'unknown')}: {e}")
-                        import traceback
-                        traceback.print_exc()
-                        pass
-                booking.refresh_from_db()  # Refresh to clear any cached relations
-                # success audit
-                if AllocationAttempt:
-                    try:
-                        AllocationAttempt.objects.create(
-                            visit=None, therapy=None, date=target_date,
-                            requested_time_slot=canonical_slot, requested_time_slot_value=requested_slot_value or '',
-                            status='SUCCESS', reason='preferred_slot_booked',
-                            extra={"room_no": getattr(room_candidate,'room_no',None) if room_candidate else None,
-                                   "therapists": therapists_for_audit, "booking_id": booking_id}
-                        )
-                    except Exception:
-                        pass
-                used_slots.append(canonical_slot)
-                # update booking row
+                # Catch IntegrityError during transaction operations
                 try:
-                    booking.timeslot = getattr(booking, 'timeslot', None) or canonical_slot
+                    # slot_master should already be resolved earlier, but validate it here
+                    # This ensures booking.timeslot is set correctly before any FK references are created
+                    from masters.models import SlotMaster
+                    print(f"[DEBUG] Validating slot_master in transaction. slot_master type: {type(slot_master)}, pk={slot_master.pk if slot_master else None}")
+                    
+                    # Validate slot_master exists before proceeding
+                    if not slot_master:
+                        raise RuntimeError(f"no_slot_master: Cannot proceed without SlotMaster - should have been resolved earlier")
+                    if not isinstance(slot_master, SlotMaster):
+                        raise RuntimeError(f"slot_master_wrong_type: slot_master is {type(slot_master)}, expected SlotMaster")
+                    if not SlotMaster.objects.filter(pk=slot_master.pk).exists():
+                        raise RuntimeError(f"slot_master_not_found: SlotMaster {slot_master.pk} does not exist in database")
+                    
+                    # CRITICAL: Check for room/date/timeslot conflicts BEFORE saving
+                    # The unique constraint prevents double-booking of the same room at the same time
+                    from Sheduling.models import Booking as BookingModel
+                    if room_candidate:
+                        existing_booking = BookingModel.objects.filter(
+                            room=room_candidate,
+                            date=target_date,
+                            timeslot=slot_master
+                        ).exclude(pk=booking_id).first()
+                        
+                        if existing_booking:
+                            print(f"[DEBUG] Room {room_candidate.room_no} already booked for {target_date} at {slot_master}, trying alternative room...")
+                            alternative_room = allocate_treatment_room(target_date, slot_master, getattr(room_candidate, 'room_no', None))
+                            if alternative_room and alternative_room != room_candidate:
+                                # Check if alternative room is also booked
+                                alt_conflict = BookingModel.objects.filter(
+                                    room=alternative_room,
+                                    date=target_date,
+                                    timeslot=slot_master
+                                ).exclude(pk=booking_id).first()
+                                if not alt_conflict:
+                                    room_candidate = alternative_room
+                                    print(f"[DEBUG] Using alternative room: {alternative_room.room_no}")
+                                else:
+                                    # Try any available room (last resort)
+                                    from Patient.models import TreatmentRoom
+                                    all_rooms = TreatmentRoom.objects.all()
+                                    found_room = None
+                                    for room in all_rooms:
+                                        if room == room_candidate or room == alternative_room:
+                                            continue
+                                        room_conflict = BookingModel.objects.filter(
+                                            room=room,
+                                            date=target_date,
+                                            timeslot=slot_master
+                                        ).exclude(pk=booking_id).first()
+                                        if not room_conflict:
+                                            found_room = room
+                                            print(f"[DEBUG] Using fallback room: {room.room_no}")
+                                            break
+                                    if found_room:
+                                        room_candidate = found_room
+                                    else:
+                                        raise RuntimeError(f"no_room_available: All rooms are booked for {target_date} at {slot_master}")
+                            else:
+                                raise RuntimeError(f"no_room_available: No alternative room available for {target_date} at {slot_master}")
+                    
+                    # CRITICAL: Set booking.timeslot and room FIRST, then save booking COMPLETELY
+                    # This ensures booking is fully persisted before any objects reference it
+                    print(f"[DEBUG] Setting booking.timeslot and room BEFORE creating any related objects")
+                    booking.timeslot = slot_master
                     booking.room = room_candidate or booking.room
                     booking.status = 'scheduled'
-                    booking.save(update_fields=['timeslot','room','status','updated_at'])
-                except Exception as e:
-                    print(f"Error updating booking {booking.id} to scheduled: {e}")
+                    # Save booking COMPLETELY before creating any FK references to it
+                    booking.save()
+                    # Refresh to ensure it's fully loaded
+                    booking.refresh_from_db()
+                    print(f"[DEBUG] Booking fully saved: pk={booking.pk}, timeslot_id={booking.timeslot_id}, room_id={booking.room_id}")
+                    
+                    rb_obj = None
+                    if needs_room_flag and create_bookings:
+                        # Now create RoomBooking - booking is fully saved and persisted
+                        # Use slot_master (resolved SlotMaster) instead of canonical_slot to ensure FK is valid
+                        print(f"[DEBUG] Creating RoomBooking: room={room_candidate} (pk={room_candidate.pk if room_candidate else None}), date={target_date}, slot_master={slot_master} (pk={slot_master.pk if slot_master else None}), booking={booking} (pk={booking.pk})")
+                        try:
+                            rb_obj, rb_created = create_room_booking_safe(room_candidate, target_date, slot_master, therapy_name, patient_id, booking)
+                            print(f"[DEBUG] RoomBooking created: {rb_obj}, created={rb_created}")
+                            # Refresh RoomBooking to get actual FK IDs
+                            if rb_obj:
+                                rb_obj.refresh_from_db()
+                                print(f"[DEBUG] RoomBooking FK IDs: room_id={rb_obj.room_id}, time_slot_id={rb_obj.time_slot_id}, visit_id={rb_obj.visit_id}")
+                        except Exception as rb_e:
+                            print(f"[DEBUG] ERROR creating RoomBooking: {rb_e}")
+                            import traceback
+                            traceback.print_exc()
+                            raise
+                        if not rb_created:
+                            # RoomBooking already exists, try alternative room
+                            alternative_room = allocate_treatment_room(target_date, slot_master, getattr(room_candidate, 'room_no', None))
+                            if alternative_room and alternative_room != room_candidate:
+                                # Update booking room first
+                                booking.room = alternative_room
+                                booking.save()
+                                booking.refresh_from_db()
+                                rb_obj, rb_created = create_room_booking_safe(alternative_room, target_date, slot_master, therapy_name, patient_id, booking)
+                                if rb_created:
+                                    room_candidate = alternative_room
+                                    if rb_obj:
+                                        rb_obj.refresh_from_db()
+                                else:
+                                    raise RuntimeError("room_already_booked")
+                            else:
+                                raise RuntimeError("room_already_booked")
+                    elif needs_room_flag:
+                        rb_obj = booking if getattr(booking, 'room', None) else None
+                    tb_objs = []
+                    for t in assigned_therapists:
+                        is_bath_for_t = (t == bath_assigned)
+                        if create_bookings:
+                            print(f"[DEBUG] Creating TherapistBooking: therapist={t.therapist_code}, date={target_date}, slot_master={slot_master} (pk={slot_master.pk if slot_master else None})")
+                            # Pass allocation (TherapyAllocation) instead of None for visit FK
+                            # Use slot_master (resolved SlotMaster) instead of canonical_slot to ensure FK is valid
+                            tb_obj, tb_created = create_therapist_booking_safe(t, target_date, slot_master, therapy_name, patient_id, allocation, is_bathing=is_bath_for_t)
+                            print(f"[DEBUG] TherapistBooking created: {tb_obj}, created={tb_created}")
+                            if not tb_created:
+                                raise RuntimeError(f"therapist_already_booked:{getattr(t,'therapist_code',str(t))}")
+                            # Refresh TherapistBooking to get actual FK IDs
+                            if tb_obj:
+                                tb_obj.refresh_from_db()
+                                print(f"[DEBUG] TherapistBooking FK IDs: therapist_id={tb_obj.therapist_id}, time_slot_id={tb_obj.time_slot_id}, visit_id={tb_obj.visit_id}")
+                            tb_objs.append(tb_obj)
+                        else:
+                            tb_objs.append(SimpleNamespace(therapist_code=getattr(t,'therapist_code',str(t)), is_bathing=is_bath_for_t))
+                    # slot_master and booking.timeslot are already set and saved above (before RoomBooking/TherapistBooking)
+                    # Now create BookingAssignment records
+                    
+                    # Refresh booking to ensure all foreign keys are properly loaded before creating BookingAssignment
+                    # CRITICAL: Refresh booking to get latest state including timeslot FK
+                    booking.refresh_from_db()
+                    print(f"[DEBUG] Booking refreshed: pk={booking.pk}, timeslot_id={booking.timeslot_id}, timeslot={booking.timeslot}")
+                    
+                    # Ensure booking.timeslot is set and saved before creating BookingAssignment
+                    # BookingAssignment.save() accesses booking.timeslot, so it must be valid
+                    if not booking.timeslot_id or booking.timeslot_id != slot_master.pk:
+                        print(f"[DEBUG] WARNING: booking.timeslot_id mismatch! Expected {slot_master.pk}, got {booking.timeslot_id}")
+                        booking.timeslot = slot_master
+                        booking.save()
+                        booking.refresh_from_db()
+                        print(f"[DEBUG] Booking.timeslot re-saved and refreshed")
+                    
+                    # create BookingAssignment records to link therapists to Booking (Sheduling app)
+                    from Sheduling.models import BookingAssignment
+                    from Patient.models import Therapist
+                    for t in assigned_therapists:
+                        try:
+                            # Get or create Therapist object from Patient app (therapist_code is PK)
+                            therapist_obj, _ = Therapist.objects.get_or_create(
+                                therapist_code=t.therapist_code,
+                                defaults={
+                                    'therapist_name': getattr(t, 'therapist_name', t.therapist_code),
+                                    'therapist_grade': getattr(t, 'therapist_grade', ''),
+                                    'is_bathing_therapist': getattr(t, 'is_bathing_therapist', False)
+                                }
+                            )
+                            # Verify therapist_obj exists and has valid PK
+                            if not therapist_obj.pk:
+                                raise RuntimeError(f"Therapist object has no PK: {therapist_obj}")
+                            print(f"[DEBUG] Therapist object verified: pk={therapist_obj.pk}, type={type(therapist_obj.pk)}")
+                            
+                            # Check if assignment already exists
+                            existing = BookingAssignment.objects.filter(booking=booking, therapist=therapist_obj).first()
+                            if existing:
+                                ba_obj = existing
+                                ba_created = False
+                                print(f"[DEBUG] BookingAssignment already exists: pk={ba_obj.pk}")
+                            else:
+                                # Create BookingAssignment to link therapist to booking
+                                # Explicitly set booking_timeslot to slot_master to avoid FK constraint issues
+                                # IMPORTANT: Ensure booking is fully saved and refreshed before creating BookingAssignment
+                                print(f"[DEBUG] Creating BookingAssignment:")
+                                print(f"[DEBUG]   - booking={booking} (pk={booking.pk}, timeslot_id={booking.timeslot_id})")
+                                print(f"[DEBUG]   - booking.timeslot={booking.timeslot} (pk={booking.timeslot.pk if booking.timeslot else None})")
+                                print(f"[DEBUG]   - slot_master={slot_master} (pk={slot_master.pk})")
+                                print(f"[DEBUG]   - therapist={therapist_obj} (pk={therapist_obj.pk}, type={type(therapist_obj.pk)})")
+                                print(f"[DEBUG]   - Explicitly setting booking_timeslot=slot_master to ensure FK is valid")
+                                
+                                # Create BookingAssignment - use create() then save() to ensure FK is set correctly
+                                ba_obj = BookingAssignment(
+                                    booking=booking,
+                                    therapist=therapist_obj,
+                                    booking_item=None,
+                                    booking_date=target_date,
+                                    booking_timeslot=slot_master,  # Explicitly set to avoid FK constraint issues
+                                    role=getattr(t, 'therapist_grade', ''),
+                                    assigned_for='booking',
+                                    status='assigned'
+                                )
+                                # Save explicitly to trigger any save() logic
+                                ba_obj.save()
+                                print(f"[DEBUG] BookingAssignment created successfully: {ba_obj.pk}, booking_timeslot={ba_obj.booking_timeslot} (pk={ba_obj.booking_timeslot.pk if ba_obj.booking_timeslot else None})")
+                                print(f"[DEBUG] BookingAssignment FK IDs: therapist_id={ba_obj.therapist_id}, booking_id={ba_obj.booking_id}, booking_timeslot_id={ba_obj.booking_timeslot_id}")
+                                ba_created = True
+                        except Exception as e:
+                            print(f"[DEBUG] Error creating BookingAssignment for {getattr(t, 'therapist_code', 'unknown')}: {e}")
+                            import traceback
+                            traceback.print_exc()
+                            pass
+                    booking.refresh_from_db()  # Refresh to clear any cached relations
+                    print(f"[DEBUG] Booking {booking_id} refreshed from DB")
+                    
+                    # Room conflict check is now done BEFORE saving booking (see above)
+                    # This section is no longer needed as we check earlier
+                    
+                    # Validate before saving to prevent FK constraint failures
+                    if not slot_master:
+                        raise RuntimeError(f"no_slot_master: Cannot save booking without SlotMaster")
+                    
+                    # Verify slot_master exists in database
+                    print(f"[DEBUG] Verifying slot_master exists: pk={slot_master.pk}")
+                    slot_master_exists = SlotMaster.objects.filter(pk=slot_master.pk).exists()
+                    print(f"[DEBUG] SlotMaster pk={slot_master.pk} exists: {slot_master_exists}")
+                    if not slot_master_exists:
+                        raise RuntimeError(f"slot_master_not_found: SlotMaster {slot_master.pk} does not exist")
+                    
+                    # Verify room exists if provided
+                    if room_candidate:
+                        from Patient.models import TreatmentRoom
+                        print(f"[DEBUG] Verifying room_candidate exists: pk={room_candidate.pk}")
+                        room_exists = TreatmentRoom.objects.filter(pk=room_candidate.pk).exists()
+                        print(f"[DEBUG] TreatmentRoom pk={room_candidate.pk} exists: {room_exists}")
+                        if not room_exists:
+                            raise RuntimeError(f"room_not_found: TreatmentRoom {room_candidate.pk} does not exist")
+                    
+                    # Booking should already be saved with room and status above
+                    # Just verify it's correct
+                    print(f"[DEBUG] Verifying booking state:")
+                    print(f"[DEBUG]   - booking.timeslot = {booking.timeslot} (pk={booking.timeslot.pk if booking.timeslot else None})")
+                    print(f"[DEBUG]   - booking.room = {booking.room} (pk={booking.room.pk if booking.room else None})")
+                    print(f"[DEBUG]   - booking.status = {booking.status}")
+                    # Ensure room is set correctly (in case alternative room was used)
+                    if room_candidate and booking.room != room_candidate:
+                        booking.room = room_candidate
+                        booking.save()
+                        booking.refresh_from_db()
+                    
+                    # Validate ALL foreign key relationships before saving to catch FK issues early
+                    print(f"[DEBUG] Validating all FK relationships before final save...")
+                    from Patient.models import TreatmentRoom
+                    from Sheduling.models import TherapyAllocation
+                    
+                    # Validate booking.allocation
+                    if booking.allocation_id:
+                        alloc_exists = TherapyAllocation.objects.filter(pk=booking.allocation_id).exists()
+                        print(f"[DEBUG]   - booking.allocation_id={booking.allocation_id}, exists={alloc_exists}")
+                        if not alloc_exists:
+                            raise RuntimeError(f"FK validation failed: booking.allocation_id={booking.allocation_id} does not exist")
+                    
+                    # Validate booking.timeslot
+                    if booking.timeslot_id:
+                        slot_exists = SlotMaster.objects.filter(pk=booking.timeslot_id).exists()
+                        print(f"[DEBUG]   - booking.timeslot_id={booking.timeslot_id}, exists={slot_exists}")
+                        if not slot_exists:
+                            raise RuntimeError(f"FK validation failed: booking.timeslot_id={booking.timeslot_id} does not exist")
+                    
+                    # Validate booking.room
+                    if booking.room_id:
+                        room_exists = TreatmentRoom.objects.filter(pk=booking.room_id).exists()
+                        print(f"[DEBUG]   - booking.room_id={booking.room_id}, exists={room_exists}")
+                        if not room_exists:
+                            raise RuntimeError(f"FK validation failed: booking.room_id={booking.room_id} does not exist")
+                    
+                    # Validate RoomBooking FKs
+                    if rb_obj:
+                        print(f"[DEBUG]   - Validating RoomBooking {rb_obj.pk} FKs:")
+                        rb_obj.refresh_from_db()  # Refresh to get actual FK IDs
+                        if rb_obj.room_id:
+                            rb_room_exists = TreatmentRoom.objects.filter(pk=rb_obj.room_id).exists()
+                            print(f"[DEBUG]     - rb.room_id={rb_obj.room_id}, exists={rb_room_exists}")
+                            if not rb_room_exists:
+                                raise RuntimeError(f"FK validation failed: RoomBooking.room_id={rb_obj.room_id} does not exist")
+                        if rb_obj.time_slot_id:
+                            rb_slot_exists = SlotMaster.objects.filter(pk=rb_obj.time_slot_id).exists()
+                            print(f"[DEBUG]     - rb.time_slot_id={rb_obj.time_slot_id}, exists={rb_slot_exists}")
+                            if not rb_slot_exists:
+                                raise RuntimeError(f"FK validation failed: RoomBooking.time_slot_id={rb_obj.time_slot_id} does not exist")
+                        if rb_obj.visit_id:
+                            rb_visit_exists = Booking.objects.filter(pk=rb_obj.visit_id).exists()
+                            print(f"[DEBUG]     - rb.visit_id={rb_obj.visit_id}, exists={rb_visit_exists}")
+                            if not rb_visit_exists:
+                                raise RuntimeError(f"FK validation failed: RoomBooking.visit_id={rb_obj.visit_id} does not exist")
+                    
+                    # Validate TherapistBooking FKs
+                    for tb_obj in tb_objs:
+                        if hasattr(tb_obj, 'pk') and tb_obj.pk:
+                            print(f"[DEBUG]   - Validating TherapistBooking {tb_obj.pk} FKs:")
+                            tb_obj.refresh_from_db()  # Refresh to get actual FK IDs
+                            if hasattr(tb_obj, 'therapist_id') and tb_obj.therapist_id:
+                                from masters.models import TherapistMaster
+                                tb_th_exists = TherapistMaster.objects.filter(pk=tb_obj.therapist_id).exists()
+                                print(f"[DEBUG]     - tb.therapist_id={tb_obj.therapist_id}, exists={tb_th_exists}")
+                                if not tb_th_exists:
+                                    raise RuntimeError(f"FK validation failed: TherapistBooking.therapist_id={tb_obj.therapist_id} does not exist")
+                            if hasattr(tb_obj, 'time_slot_id') and tb_obj.time_slot_id:
+                                tb_slot_exists = SlotMaster.objects.filter(pk=tb_obj.time_slot_id).exists()
+                                print(f"[DEBUG]     - tb.time_slot_id={tb_obj.time_slot_id}, exists={tb_slot_exists}")
+                                if not tb_slot_exists:
+                                    raise RuntimeError(f"FK validation failed: TherapistBooking.time_slot_id={tb_obj.time_slot_id} does not exist")
+                            if hasattr(tb_obj, 'visit_id') and tb_obj.visit_id:
+                                tb_visit_exists = TherapyAllocation.objects.filter(pk=tb_obj.visit_id).exists()
+                                print(f"[DEBUG]     - tb.visit_id={tb_obj.visit_id}, exists={tb_visit_exists}")
+                                if not tb_visit_exists:
+                                    raise RuntimeError(f"FK validation failed: TherapistBooking.visit_id={tb_obj.visit_id} does not exist")
+                    
+                    # Validate BookingAssignment FKs (we just created these, so refresh to get IDs)
+                    booking.refresh_from_db()
+                    for ba in BookingAssignment.objects.filter(booking=booking):
+                        print(f"[DEBUG]   - Validating BookingAssignment {ba.pk} FKs:")
+                        if ba.booking_id:
+                            ba_book_exists = Booking.objects.filter(pk=ba.booking_id).exists()
+                            print(f"[DEBUG]     - ba.booking_id={ba.booking_id}, exists={ba_book_exists}")
+                            if not ba_book_exists:
+                                raise RuntimeError(f"FK validation failed: BookingAssignment.booking_id={ba.booking_id} does not exist")
+                        if ba.therapist_id:
+                            ba_th_exists = Therapist.objects.filter(pk=ba.therapist_id).exists()
+                            print(f"[DEBUG]     - ba.therapist_id={ba.therapist_id}, exists={ba_th_exists}")
+                            if not ba_th_exists:
+                                raise RuntimeError(f"FK validation failed: BookingAssignment.therapist_id={ba.therapist_id} does not exist")
+                        if ba.booking_timeslot_id:
+                            ba_slot_exists = SlotMaster.objects.filter(pk=ba.booking_timeslot_id).exists()
+                            print(f"[DEBUG]     - ba.booking_timeslot_id={ba.booking_timeslot_id}, exists={ba_slot_exists}")
+                            if not ba_slot_exists:
+                                raise RuntimeError(f"FK validation failed: BookingAssignment.booking_timeslot_id={ba.booking_timeslot_id} does not exist")
+                    
+                    print(f"[DEBUG] All FK validations passed!")
+                    
+                    # Booking should already be saved with all fields above
+                    # Just do a final save to ensure everything is persisted
+                    print(f"[DEBUG] Final booking save (should already be saved)")
+                    try:
+                        booking.save()  # Full save to ensure FK constraints work properly
+                        booking.refresh_from_db()  # Refresh to get latest state
+                        print(f"[DEBUG] Booking.save() completed successfully")
+                    except IntegrityError as save_ie:
+                        print(f"[DEBUG] IntegrityError during booking.save(): {save_ie}")
+                        import traceback
+                        traceback.print_exc()
+                        raise
+                    
+                    # CRITICAL: Force SQLite to check FK constraints BEFORE commit
+                    # This will catch any FK issues early
+                    from django.db import connection
+                    cursor = connection.cursor()
+                    try:
+                        cursor.execute("PRAGMA foreign_key_check")
+                        fk_errors = cursor.fetchall()
+                        if fk_errors:
+                            error_msg = f"SQLite FK constraint violations found: {fk_errors}"
+                            print(f"[DEBUG] {error_msg}")
+                            # Try to get more details about the violation
+                            for error in fk_errors:
+                                table, rowid, ref_table, ref_rowid = error
+                                print(f"[DEBUG] FK violation: table={table}, rowid={rowid}, ref_table={ref_table}, ref_rowid={ref_rowid}")
+                                if table == 'Sheduling_bookingassignment':
+                                    ba = BookingAssignment.objects.filter(pk=rowid).first()
+                                    if ba:
+                                        print(f"[DEBUG]   BookingAssignment pk={ba.pk}: booking_timeslot_id={ba.booking_timeslot_id}, booking_id={ba.booking_id}, therapist_id={ba.therapist_id}")
+                            raise RuntimeError(error_msg)
+                        print(f"[DEBUG] SQLite FK check passed - no violations")
+                    except RuntimeError as fk_check_e:
+                        # Re-raise RuntimeError (our FK violations)
+                        raise
+                    except Exception as fk_check_e:
+                        print(f"[DEBUG] Error during FK check: {fk_check_e}")
+                        # Don't fail here, let commit handle it
+                        pass
+                    
+                    # DO NOT set booking_saved_successfully = True here
+                    # Wait until transaction commits successfully (after the except block)
+                    
+                    # success audit (inside transaction)
+                    if AllocationAttempt:
+                        try:
+                            AllocationAttempt.objects.create(
+                                visit=None, therapy=None, date=target_date,
+                                requested_time_slot=canonical_slot, requested_time_slot_value=requested_slot_value or '',
+                                status='SUCCESS', reason='preferred_slot_booked',
+                                extra={"room_no": getattr(room_candidate,'room_no',None) if room_candidate else None,
+                                       "therapists": therapists_for_audit, "booking_id": booking_id}
+                            )
+                        except Exception:
+                            pass
+                    used_slots.append(canonical_slot)
+                    print(f"[DEBUG] All operations completed successfully inside transaction block")
+                    print(f"[DEBUG] About to exit transaction.atomic() - this will trigger commit...")
+                except IntegrityError as ie:
+                    # IntegrityError during transaction - rollback will happen automatically
+                    print(f"[DEBUG] ========== IntegrityError CAUGHT ==========")
+                    print(f"[DEBUG] Error: {ie}")
+                    print(f"[DEBUG] Error type: {type(ie)}")
+                    print(f"[DEBUG] Error args: {ie.args}")
+                    print(f"[DEBUG] Booking ID: {booking_id}")
+                    print(f"[DEBUG] slot_master: {slot_master} (pk={slot_master.pk if slot_master else None}, type={type(slot_master) if slot_master else None})")
+                    print(f"[DEBUG] room_candidate: {room_candidate} (pk={room_candidate.pk if room_candidate else None}, type={type(room_candidate) if room_candidate else None})")
+                    print(f"[DEBUG] booking.timeslot before error: {getattr(booking, 'timeslot', None)}")
+                    print(f"[DEBUG] booking.room before error: {getattr(booking, 'room', None)}")
                     import traceback
+                    print(f"[DEBUG] Full traceback:")
                     traceback.print_exc()
-                    # Still mark as failed if save doesn't work
+                    print(f"[DEBUG] ============================================")
+                    # Mark booking as failed (outside transaction)
                     try:
                         booking.status = 'failed'
                         booking.save(update_fields=['status','updated_at'])
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        print(f"[DEBUG] Error marking booking as failed: {e}")
+                    # Re-raise to be caught by outer exception handler
+                    raise RuntimeError(f"booking_transaction_failed: {str(ie)}")
+            
+            print(f"[DEBUG] Transaction.atomic() block exited - checking for commit errors...")
+            # If we reach here, transaction committed successfully
+            print(f"[DEBUG] Transaction committed successfully for booking {booking_id}")
+            booking_saved_successfully = True
+            
+            # Only append BOOKED task if transaction committed successfully
+            if booking_saved_successfully:
                 tasks.append({
                     "booking_id": booking_id, "allocation_id": therapy_allocation_id, "date": target_date.isoformat(),
                     "therapy_name": therapy_name, "slot": requested_slot_value, "status": "BOOKED", "reason": None,
@@ -602,6 +1013,35 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                     "therapists": therapists_for_audit
                 })
                 any_success = True
+
+        except IntegrityError as outer_ie:
+            # IntegrityError might be raised during transaction commit (after atomic() block exits)
+            print(f"[DEBUG] ========== IntegrityError CAUGHT IN OUTER HANDLER ==========")
+            print(f"[DEBUG] This means the error occurred during transaction COMMIT, not during operations")
+            print(f"[DEBUG] Error: {outer_ie}")
+            print(f"[DEBUG] Error type: {type(outer_ie)}")
+            print(f"[DEBUG] Error args: {outer_ie.args}")
+            print(f"[DEBUG] Booking ID: {booking_id}")
+            import traceback
+            print(f"[DEBUG] Full traceback:")
+            traceback.print_exc()
+            print(f"[DEBUG] ============================================")
+            reason = f"exception:{str(outer_ie)}"
+            if AllocationAttempt:
+                try:
+                    AllocationAttempt.objects.create(
+                        visit=None, therapy=None, date=target_date,
+                        requested_time_slot=canonical_slot, requested_time_slot_value=requested_slot_value or '',
+                        status='FAILED', reason=reason, extra={"booking_id": booking_id, "therapists": therapists_for_audit}
+                    )
+                except Exception:
+                    pass
+            tasks.append({
+                "booking_id": booking_id, "allocation_id": therapy_allocation_id, "date": target_date.isoformat(),
+                "therapy_name": therapy_name, "slot": requested_slot_value, "status": "FAILED", "reason": reason,
+                "room_no": getattr(room_candidate,"room_no",None) if room_candidate else None, "therapists": therapists_for_audit
+            })
+            continue
 
         except RuntimeError as rte:
             reason = str(rte)

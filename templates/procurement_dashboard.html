@@ -282,9 +282,12 @@
             display: flex;
             justify-content: space-between;
             align-items: flex-start;
-            margin-bottom: 20px;
-            padding-bottom: 15px;
-            border-bottom: 1px solid var(--border);
+        }
+        
+        .header-actions {
+            display: flex;
+            gap: 10px;
+            align-items: center;
         }
         
         .patient-info h2 {
@@ -514,7 +517,20 @@
                             <div class="patient-meta" id="pv_meta">ID • Age • Sex</div>
                             <div class="patient-meta">Room: <span id="pv_room">-</span> • Therapy: <span id="pv_therapy">-</span></div>
                         </div>
-                        <button class="prepare-all-btn" id="prepareAllBtn">Mark All as Prepared</button>
+                        <div class="header-actions">
+                            <button class="btn btn-outline" id="viewChangeLogBtn">View Change Log</button>
+                            <button class="prepare-all-btn" id="prepareAllBtn">Mark All as Prepared</button>
+                        </div>
+                    </div>
+                    
+                    <div id="changeLogPanel" style="display: none; margin-bottom: 20px; padding: 15px; background: #f5f5f5; border-radius: 8px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                            <h3 style="margin: 0;">Change Log</h3>
+                            <button class="btn btn-outline" id="closeChangeLogBtn" style="padding: 5px 10px;">Close</button>
+                        </div>
+                        <div id="changeLogContent" style="max-height: 300px; overflow-y: auto;">
+                            <!-- Change log entries will be inserted here -->
+                        </div>
                     </div>
                     
                     <div id="pv_content">
@@ -596,6 +612,18 @@
                 if (currentPatient) {
                     saveChanges();
                 }
+            });
+            
+            // View change log button
+            document.getElementById('viewChangeLogBtn').addEventListener('click', function() {
+                if (currentPatient) {
+                    loadChangeLog(currentPatient.patient_id);
+                }
+            });
+            
+            // Close change log button
+            document.getElementById('closeChangeLogBtn').addEventListener('click', function() {
+                document.getElementById('changeLogPanel').style.display = 'none';
             });
             
             // Export CSV button
@@ -761,7 +789,16 @@
                 .then(data => {
                     console.log('API response data:', data);
                     if (data.success) {
-                        renderPatientMedicines(data.data);
+                        // Update patient info if available
+                        if (data.patient_info) {
+                            const info = data.patient_info;
+                            document.getElementById('pv_name').textContent = info.name || 'Unknown';
+                            document.getElementById('pv_meta').textContent = `${info.registration_no || ''} • Room ${info.room_no || '-'} • Dr. ${info.doctor_name || 'Unknown'}`;
+                            document.getElementById('pv_room').textContent = info.room_no || '-';
+                        }
+                        
+                        // Render medicines (includes both prescription and therapy items)
+                        renderPatientMedicines(data.items || data.data || []);
                     } else {
                         console.error('API error:', data.error);
                         showAlert('error', data.error || 'Failed to load medicine details');
@@ -782,71 +819,80 @@
             pvContent.innerHTML = '';
             
             if (!medicines || medicines.length === 0) {
-                pvContent.innerHTML = '<p>No medicines prescribed for selected date.</p>';
+                pvContent.innerHTML = '<p>No medicines or therapy items for selected date.</p>';
                 return;
             }
             
-            // Group medicines by time slot
-            const medicinesByTime = {};
+            // Separate prescription and therapy items
+            const prescriptionItems = medicines.filter(m => m.type === 'prescription' || !m.type);
+            const therapyItems = medicines.filter(m => m.type === 'therapy');
             
-            medicines.forEach(medicine => {
-                const timeSlot = medicine.time || 'M';
-                if (!medicinesByTime[timeSlot]) {
-                    medicinesByTime[timeSlot] = [];
-                }
-                medicinesByTime[timeSlot].push(medicine);
-            });
-            
-            // Define time slot order
-            const timeSlotOrder = ['M', 'ABF', 'BL', 'AL', 'E', 'AD', 'BT', 'PRN'];
-            const timeSlotLabels = {
-                'M': 'Morning',
-                'ABF': 'After Breakfast',
-                'BL': 'Before Lunch',
-                'AL': 'After Lunch',
-                'E': 'Evening',
-                'AD': 'After Dinner',
-                'BT': 'Bed Time',
-                'PRN': 'As Needed'
-            };
-            
-            // Render medicines by time slot
-            timeSlotOrder.forEach(timeSlot => {
-                if (medicinesByTime[timeSlot]) {
-                    const timeSlotDiv = document.createElement('div');
-                    timeSlotDiv.className = 'time-slots';
-                    
-                    const timeSlotTitle = document.createElement('div');
-                    timeSlotTitle.className = 'time-slot-title';
-                    timeSlotTitle.textContent = timeSlotLabels[timeSlot] || timeSlot;
-                    timeSlotDiv.appendChild(timeSlotTitle);
-                    
-                    medicinesByTime[timeSlot].forEach(medicine => {
-                        const medicineCard = document.createElement('div');
-                        medicineCard.className = 'medicine-card';
+            // Render prescription items section
+            if (prescriptionItems.length > 0) {
+                const prescriptionSection = document.createElement('div');
+                prescriptionSection.className = 'items-section';
+                prescriptionSection.innerHTML = '<h3 style="margin: 0 0 15px 0; color: #333;">Prescription Items</h3>';
+                
+                // Group prescription medicines by time slot
+                const medicinesByTime = {};
+                prescriptionItems.forEach(medicine => {
+                    const timeSlot = medicine.time || 'M';
+                    if (!medicinesByTime[timeSlot]) {
+                        medicinesByTime[timeSlot] = [];
+                    }
+                    medicinesByTime[timeSlot].push(medicine);
+                });
+                
+                // Define time slot order
+                const timeSlotOrder = ['M', 'ABF', 'BL', 'AL', 'E', 'AD', 'BT', 'PRN'];
+                const timeSlotLabels = {
+                    'M': 'Morning',
+                    'ABF': 'After Breakfast',
+                    'BL': 'Before Lunch',
+                    'AL': 'After Lunch',
+                    'E': 'Evening',
+                    'AD': 'After Dinner',
+                    'BT': 'Bed Time',
+                    'PRN': 'As Needed'
+                };
+                
+                // Render prescription medicines by time slot
+                timeSlotOrder.forEach(timeSlot => {
+                    if (medicinesByTime[timeSlot]) {
+                        const timeSlotDiv = document.createElement('div');
+                        timeSlotDiv.className = 'time-slots';
                         
-                        const medicineId = `${currentPatient.patient_id}_${medicine.id}_${currentDate}`;
-                        const isPrepared = preparedMedicines.has(medicineId);
+                        const timeSlotTitle = document.createElement('div');
+                        timeSlotTitle.className = 'time-slot-title';
+                        timeSlotTitle.textContent = timeSlotLabels[timeSlot] || timeSlot;
+                        timeSlotDiv.appendChild(timeSlotTitle);
                         
-                        if (isPrepared) {
-                            medicineCard.classList.add('prepared');
-                        }
-                        
-                        medicineCard.innerHTML = `
-                            <div class="medicine-checkbox">
-                                <input type="checkbox" id="med-${medicineId}" ${isPrepared ? 'checked' : ''}>
-                            </div>
-                            <div class="medicine-details">
-                                <div class="medicine-name">${escapeHtml(medicine.item_name)}</div>
-                                <div class="medicine-meta">
-                                    <span>Dose: ${escapeHtml(medicine.dose)}</span>
-                                    <span>Notes: ${escapeHtml(medicine.notes || 'None')}</span>
+                        medicinesByTime[timeSlot].forEach(medicine => {
+                            const medicineCard = document.createElement('div');
+                            medicineCard.className = 'medicine-card';
+                            
+                            const medicineId = `${currentPatient.patient_id}_${medicine.id}_${currentDate}`;
+                            const isPrepared = preparedMedicines.has(medicineId);
+                            
+                            if (isPrepared) {
+                                medicineCard.classList.add('prepared');
+                            }
+                            
+                            medicineCard.innerHTML = `
+                                <div class="medicine-checkbox">
+                                    <input type="checkbox" id="med-${medicineId}" ${isPrepared ? 'checked' : ''}>
                                 </div>
-                            </div>
-                            <div class="medicine-qty">Qty: ${medicine.quantity}</div>
-                        `;
-                        
-                        // Add event listener for checkbox
+                                <div class="medicine-details">
+                                    <div class="medicine-name">${escapeHtml(medicine.item_name)}</div>
+                                    <div class="medicine-meta">
+                                        <span>Dose: ${escapeHtml(medicine.dose || 'N/A')}</span>
+                                        <span>Notes: ${escapeHtml(medicine.notes || 'None')}</span>
+                                    </div>
+                                </div>
+                                <div class="medicine-qty">Qty: ${medicine.quantity || 'N/A'}</div>
+                            `;
+                            
+                            // Add event listener for checkbox
                         const checkbox = medicineCard.querySelector('input[type="checkbox"]');
                         checkbox.addEventListener('change', function() {
                             toggleMedicinePreparation(medicineId, this.checked);
@@ -855,9 +901,56 @@
                         timeSlotDiv.appendChild(medicineCard);
                     });
                     
-                    pvContent.appendChild(timeSlotDiv);
+                    prescriptionSection.appendChild(timeSlotDiv);
                 }
             });
+            
+            pvContent.appendChild(prescriptionSection);
+            }
+            
+            // Render therapy items section
+            if (therapyItems.length > 0) {
+                const therapySection = document.createElement('div');
+                therapySection.className = 'items-section';
+                therapySection.style.marginTop = '20px';
+                therapySection.innerHTML = '<h3 style="margin: 0 0 15px 0; color: #333;">Therapy Items</h3>';
+                
+                therapyItems.forEach(item => {
+                    const itemCard = document.createElement('div');
+                    itemCard.className = 'medicine-card';
+                    itemCard.style.borderLeft = '4px solid #4CAF50';
+                    
+                    const medicineId = `${currentPatient.patient_id}_${item.id}_${currentDate}`;
+                    const isPrepared = preparedMedicines.has(medicineId);
+                    
+                    if (isPrepared) {
+                        itemCard.classList.add('prepared');
+                    }
+                    
+                    itemCard.innerHTML = `
+                        <div class="medicine-checkbox">
+                            <input type="checkbox" id="med-${medicineId}" ${isPrepared ? 'checked' : ''}>
+                        </div>
+                        <div class="medicine-details">
+                            <div class="medicine-name">${escapeHtml(item.item_name)} <span style="color: #666; font-size: 0.9em;">(${escapeHtml(item.therapy_name || 'Therapy')})</span></div>
+                            <div class="medicine-meta">
+                                <span>Item Code: ${escapeHtml(item.item_code || 'N/A')}</span>
+                                <span>Dose: ${escapeHtml(item.dose || 'N/A')}</span>
+                                <span>Notes: ${escapeHtml(item.notes || 'None')}</span>
+                            </div>
+                        </div>
+                    `;
+                    
+                    const checkbox = itemCard.querySelector('input[type="checkbox"]');
+                    checkbox.addEventListener('change', function() {
+                        toggleMedicinePreparation(medicineId, this.checked);
+                    });
+                    
+                    therapySection.appendChild(itemCard);
+                });
+                
+                pvContent.appendChild(therapySection);
+            }
         }
         
         function toggleMedicinePreparation(medicineId, isPrepared) {
@@ -959,6 +1052,78 @@
                 }
             }
             return cookieValue;
+        }
+        
+        function loadChangeLog(patientId) {
+            const changeLogPanel = document.getElementById('changeLogPanel');
+            const changeLogContent = document.getElementById('changeLogContent');
+            
+            // Show panel
+            changeLogPanel.style.display = 'block';
+            changeLogContent.innerHTML = '<div class="loading">Loading change log...</div>';
+            
+            // Fetch change log
+            const apiUrl = `/sheduling/procurement/api/change-log/?patient_id=${patientId}&date=${currentDate}`;
+            fetch(apiUrl)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        renderChangeLog(data.data || []);
+                    } else {
+                        changeLogContent.innerHTML = '<p style="color: #666;">No change log entries found.</p>';
+                    }
+                })
+                .catch(error => {
+                    console.error('Error loading change log:', error);
+                    changeLogContent.innerHTML = '<p style="color: red;">Error loading change log.</p>';
+                });
+        }
+        
+        function renderChangeLog(logs) {
+            const changeLogContent = document.getElementById('changeLogContent');
+            
+            if (!logs || logs.length === 0) {
+                changeLogContent.innerHTML = '<p style="color: #666;">No change log entries found.</p>';
+                return;
+            }
+            
+            let html = '<div style="display: flex; flex-direction: column; gap: 15px;">';
+            
+            logs.forEach(log => {
+                const timestamp = new Date(log.timestamp);
+                const formattedDate = timestamp.toLocaleString();
+                
+                html += `
+                    <div style="padding: 12px; background: white; border-radius: 6px; border-left: 4px solid #2196F3;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                            <strong style="color: #333;">${escapeHtml(log.action_display || log.action)}</strong>
+                            <span style="font-size: 0.85em; color: #666;">${formattedDate}</span>
+                        </div>
+                        <div style="font-size: 0.9em; color: #666; margin-bottom: 8px;">
+                            Changed by: <strong>${escapeHtml(log.changed_by || 'Unknown')}</strong>
+                        </div>
+                        ${log.description ? `<div style="font-size: 0.9em; color: #555; margin-bottom: 8px;">${escapeHtml(log.description)}</div>` : ''}
+                        ${log.changes && log.changes.length > 0 ? `
+                            <div style="margin-top: 10px;">
+                                <strong style="font-size: 0.85em; color: #333;">Changes:</strong>
+                                <ul style="margin: 5px 0 0 0; padding-left: 20px; font-size: 0.85em;">
+                                    ${log.changes.map(change => `
+                                        <li style="margin-bottom: 5px;">
+                                            <strong>${escapeHtml(change.field)}</strong>: 
+                                            <span style="color: #d32f2f;">${escapeHtml(String(change.before))}</span> 
+                                            → 
+                                            <span style="color: #388e3c;">${escapeHtml(String(change.after))}</span>
+                                        </li>
+                                    `).join('')}
+                                </ul>
+                            </div>
+                        ` : ''}
+                    </div>
+                `;
+            });
+            
+            html += '</div>';
+            changeLogContent.innerHTML = html;
         }
         
         function saveChanges() {
