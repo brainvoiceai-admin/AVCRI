@@ -4,172 +4,864 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Therapy Entry — Allocation Status Minimal</title>
+  <title>Therapy Management System</title>
 
   <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
   <link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet" />
   <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 
   <style>
-    body{font-family:sans-serif;margin:20px;background:#fafafa}
-    .form-row{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px}
-    .form-group{flex:1;min-width:200px}
-    label{display:block;font-weight:600;margin-bottom:6px}
-    input,select,textarea{width:100%;padding:8px;border:1px solid #ccc;border-radius:6px}
-    button{padding:8px 12px;border-radius:6px;background:#1976d2;color:#fff;border:0;cursor:pointer}
-    .muted{color:#666}
-    .card{background:#fff;padding:12px;border-radius:8px;border:1px solid #eee;margin-bottom:12px}
-    .tag{display:inline-block;padding:6px 8px;border-radius:999px;border:1px solid #eee;margin-right:6px;background:#f7f7f7}
-    .small { max-width:160px; }
-    table { width:100%; border-collapse:collapse; }
-    th, td { padding:8px; border-bottom:1px solid #eee; text-align:left; vertical-align:top; }
-    /* Modal styles */
-    .modal-backdrop { position:fixed; inset:0; background:rgba(0,0,0,0.4); display:none; align-items:center; justify-content:center; z-index:9999; }
-    .modal { background:#fff; width:920px; max-width:98%; padding:16px; border-radius:8px; box-shadow:0 6px 24px rgba(0,0,0,0.2); max-height:86vh; overflow:auto; }
-    .modal h3 { margin-top:0; }
-    .modal-footer { display:flex; justify-content:flex-end; gap:8px; margin-top:12px; }
-    .btn-ghost { background:#fff; color:#1976d2; border:1px solid #1976d2; }
-    .btn-danger { background:#d9534f; color:#fff; }
-    .status-pill { padding:6px 8px; border-radius:999px; display:inline-block; font-weight:700; font-size:0.85em; }
-    .status-scheduled { background:#e8f4ff; color:#0b66b2; border:1px solid #d0eafc; }
-    .status-draft { background:#f8f9fa; color:#6c757d; border:1px solid #dee2e6; }
-    .status-cancelreq { background:#fff4e6; color:#b36b00; border:1px solid #ffebd1; }
-    .status-cancelled { background:#fdecea; color:#b02a2a; border:1px solid #f8d7da; }
-    .status-completed { background:#e9f9ec; color:#19692a; border:1px solid #d7f1d9; }
-    .status-mixed { background:#fff9e6; color:#856404; border:1px solid #ffeaa7; }
-    .small-muted { font-size:0.9em; color:#666; margin-top:6px; }
-    .date-row { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:8px 6px; border-bottom:1px solid #f1f1f1; }
-    .date-left { display:flex; align-items:center; gap:12px; min-width:260px; }
-    .input-inline { width:220px; }
-    .muted-small { font-size:0.85em; color:#666; }
-    .action-btn { margin-right:6px; }
+    /* Base Styles */
+    :root {
+      --primary: #2e7d32;
+      --primary-light: #4caf50;
+      --primary-dark: #1b5e20;
+      --secondary: #388e3c;
+      --accent: #81c784;
+      --light-bg: #f8fcf9;
+      --card-bg: #ffffff;
+      --text-dark: #1a4731;
+      --text-medium: #2d3748;
+      --text-light: #4a5568;
+      --border-light: #e2f0e9;
+      --border-medium: #c8e6d1;
+      --success: #4caf50;
+      --warning: #ff9800;
+      --danger: #f44336;
+      --shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+      --radius: 12px;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'Segoe UI', 'Roboto', Tahoma, Geneva, Verdana, sans-serif;
+      background: var(--light-bg);
+      color: var(--text-medium);
+      line-height: 1.6;
+      min-height: 100vh;
+    }
+
+    /* Layout */
+    .app-container {
+      display: flex;
+      min-height: 100vh;
+    }
+
+    .main-content {
+      flex: 1;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      margin-left: 265px;
+    }
+
+    /* Top Navigation Bar */
+    .top-navbar {
+      background: var(--card-bg);
+      padding: 16px 24px;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid var(--border-light);
+    }
+
+    .nav-brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .nav-brand i {
+      color: var(--primary);
+      font-size: 1.5rem;
+    }
+
+    .nav-brand h1 {
+      color: var(--text-dark);
+      font-size: 1.5rem;
+      font-weight: 700;
+    }
+
+    .patient-search-section {
+      display: flex;
+      align-items: center;
+      gap: 20px;
+      flex: 1;
+      max-width: 800px;
+      margin: 0 24px;
+    }
+
+    .patient-search-container {
+      flex: 1;
+      position: relative;
+    }
+
+    .search-input-group {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .search-input-group input {
+      flex: 1;
+      padding: 10px 16px;
+      border: 1px solid var(--border-medium);
+      border-radius: 8px;
+      font-size: 0.95rem;
+      transition: all 0.2s ease;
+    }
+
+    .search-input-group input:focus {
+      outline: none;
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(56, 161, 105, 0.1);
+    }
+
+    .nav-actions {
+      display: flex;
+      gap: 12px;
+    }
+
+    /* Patient Info Bar */
+    .patient-info-bar {
+      background: linear-gradient(135deg, #f0fff4 0%, #e6fffa 100%);
+      padding: 16px 24px;
+      border-bottom: 1px solid var(--border-light);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .patient-details {
+      display: flex;
+      align-items: center;
+      gap: 24px;
+    }
+
+    .patient-avatar {
+      width: 50px;
+      height: 50px;
+      border-radius: 50%;
+      background: var(--primary);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      font-size: 1.2rem;
+      font-weight: 600;
+    }
+
+    .patient-main-info h2 {
+      color: var(--text-dark);
+      font-size: 1.3rem;
+      margin-bottom: 4px;
+    }
+
+    .patient-meta {
+      display: flex;
+      gap: 16px;
+      color: var(--text-light);
+      font-size: 0.9rem;
+    }
+
+    .patient-meta span {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .patient-status {
+      display: flex;
+      gap: 12px;
+    }
+
+    .status-badge {
+      padding: 6px 12px;
+      border-radius: 20px;
+      font-size: 0.8rem;
+      font-weight: 600;
+    }
+
+    .status-vip {
+      background: #ffeb3b;
+      color: #856404;
+    }
+
+    .status-ip {
+      background: #e3f2fd;
+      color: #0d47a1;
+    }
+
+    /* Main Content Area */
+    .content-area {
+      padding: 24px;
+      flex: 1;
+      overflow-y: auto;
+    }
+
+    /* Cards */
+    .card {
+      background: var(--card-bg);
+      padding: 24px;
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      margin-bottom: 24px;
+      border: 1px solid var(--border-light);
+    }
+
+    .card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 20px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid var(--border-light);
+    }
+
+    .card-title {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      color: var(--text-dark);
+      font-size: 1.2rem;
+      font-weight: 600;
+    }
+
+    .card-title i {
+      color: var(--primary);
+    }
+
+    /* Form Elements */
+    .form-row {
+      display: flex;
+      gap: 16px;
+      flex-wrap: wrap;
+      margin-bottom: 16px;
+    }
+
+    .form-group {
+      flex: 1;
+      min-width: 200px;
+    }
+
+    label {
+      display: block;
+      font-weight: 600;
+      margin-bottom: 8px;
+      color: var(--text-dark);
+      font-size: 0.9rem;
+    }
+
+    input, select, textarea {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid var(--border-medium);
+      border-radius: 8px;
+      background: #ffffff;
+      font-size: 0.95rem;
+      transition: border-color 0.2s ease, box-shadow 0.2s ease;
+    }
+
+    input:focus, select:focus, textarea:focus {
+      outline: none;
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(56, 161, 105, 0.1);
+    }
+
+    /* Buttons */
+    .btn {
+      padding: 10px 16px;
+      border-radius: 8px;
+      background: var(--primary);
+      color: #ffffff;
+      border: 0;
+      cursor: pointer;
+      font-weight: 600;
+      font-size: 0.95rem;
+      transition: all 0.2s ease;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+    }
+
+    .btn:hover {
+      background: var(--primary-dark);
+      transform: translateY(-1px);
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    }
+
+    .btn:active {
+      transform: translateY(0);
+    }
+
+    .btn-outline {
+      background: transparent;
+      color: var(--primary);
+      border: 1px solid var(--primary);
+    }
+
+    .btn-outline:hover {
+      background: #f0fff4;
+    }
+
+    .btn-danger {
+      background: var(--danger);
+    }
+
+    .btn-danger:hover {
+      background: #d32f2f;
+    }
+
+    .btn-success {
+      background: var(--success);
+    }
+
+    .btn-success:hover {
+      background: #388e3c;
+    }
+
+    .btn-warning {
+      background: var(--warning);
+    }
+
+    .btn-warning:hover {
+      background: #e68900;
+    }
+
+    /* Item Groups Section */
+    .item-groups-container {
+      border: 1px dashed var(--border-medium);
+      padding: 20px;
+      border-radius: 8px;
+      margin-bottom: 16px;
+      background: #f7fff9;
+    }
+
+    .tag {
+      display: inline-block;
+      padding: 6px 10px;
+      border-radius: 20px;
+      border: 1px solid var(--border-medium);
+      margin-right: 8px;
+      margin-bottom: 8px;
+      background: #ffffff;
+      font-size: 0.85rem;
+      color: var(--text-medium);
+    }
+
+    .small {
+      max-width: 160px;
+    }
+
+    /* Therapies Table */
+    .table-container {
+      background: white;
+      border-radius: var(--radius);
+      overflow: hidden;
+      box-shadow: var(--shadow);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    th, td {
+      padding: 14px;
+      border-bottom: 1px solid var(--border-light);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      background: #f0fff4;
+      color: var(--text-dark);
+      font-weight: 600;
+      font-size: 0.9rem;
+    }
+
+    tr:hover {
+      background: #f7fff9;
+    }
+
+    /* Status Pills */
+    .status-pill {
+      padding: 6px 12px;
+      border-radius: 20px;
+      display: inline-block;
+      font-weight: 700;
+      font-size: 0.8rem;
+    }
+
+    .status-scheduled {
+      background: #e8f4ff;
+      color: #0b66b2;
+      border: 1px solid #d0eafc;
+    }
+
+    .status-draft {
+      background: #f8f9fa;
+      color: #6c757d;
+      border: 1px solid #dee2e6;
+    }
+
+    .status-cancelreq {
+      background: #fff4e6;
+      color: #b36b00;
+      border: 1px solid #ffebd1;
+    }
+
+    .status-cancelled {
+      background: #fdecea;
+      color: #b02a2a;
+      border: 1px solid #f8d7da;
+    }
+
+    .status-completed {
+      background: #e9f9ec;
+      color: #19692a;
+      border: 1px solid #d7f1d9;
+    }
+
+    .status-mixed {
+      background: #fff9e6;
+      color: #856404;
+      border: 1px solid #ffeaa7;
+    }
+
+    /* Action Buttons */
+    .action-btn {
+      margin-right: 8px;
+      padding: 6px 12px;
+      font-size: 0.85rem;
+    }
+
+    /* Modal Styles */
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.4);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 9999;
+    }
+
+    .modal {
+      background: #fff;
+      width: 920px;
+      max-width: 98%;
+      padding: 24px;
+      border-radius: var(--radius);
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+      max-height: 86vh;
+      overflow: auto;
+    }
+
+    .modal h3 {
+      margin-top: 0;
+      color: var(--text-dark);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .modal-footer {
+      display: flex;
+      justify-content: flex-end;
+      gap: 12px;
+      margin-top: 20px;
+    }
+
+    /* Form Actions */
+    .form-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 12px;
+      margin-top: 20px;
+    }
+
+    /* Search Results */
+    #search-results {
+      position: absolute;
+      z-index: 1000;
+      background: white;
+      border: 1px solid var(--border-medium);
+      border-radius: 8px;
+      max-height: 300px;
+      overflow-y: auto;
+      display: none;
+      width: 100%;
+      margin-top: 2px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    }
+
+    .search-result-item {
+      padding: 12px;
+      border-bottom: 1px solid var(--border-light);
+      cursor: pointer;
+      transition: background 0.2s ease;
+    }
+
+    .search-result-item:hover {
+      background: #f0fff4;
+    }
+
+    /* Select2 Customization */
+    .select2-container--default .select2-selection--single,
+    .select2-container--default .select2-selection--multiple {
+      border: 1px solid var(--border-medium);
+      border-radius: 8px;
+      min-height: 42px;
+    }
+
+    .select2-container--default .select2-selection--single .select2-selection__rendered {
+      line-height: 42px;
+    }
+
+    .select2-container--default .select2-selection--multiple .select2-selection__choice {
+      background-color: #e6fffa;
+      border: 1px solid #81e6d9;
+      border-radius: 4px;
+      color: var(--text-dark);
+    }
+
+    /* Empty State */
+    .empty-state {
+      text-align: center;
+      padding: 40px 20px;
+      color: var(--text-light);
+    }
+
+    .empty-state i {
+      font-size: 3rem;
+      color: var(--border-medium);
+      margin-bottom: 16px;
+    }
+
+    /* Status Modal Specific Styles */
+    .status-date-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 12px;
+      border-bottom: 1px solid var(--border-light);
+      transition: background 0.2s ease;
+    }
+
+    .status-date-row:hover {
+      background: #f7fff9;
+    }
+
+    .status-section {
+      margin-bottom: 20px;
+    }
+
+    .status-section h4 {
+      margin: 0 0 12px 0;
+      font-size: 14px;
+      color: var(--text-dark);
+      padding-bottom: 6px;
+      border-bottom: 1px solid var(--border-light);
+    }
+
+    /* Responsive Adjustments */
+    @media (max-width: 1024px) {
+      .form-row {
+        gap: 12px;
+      }
+      
+      .form-group {
+        min-width: 180px;
+      }
+      
+      .patient-search-section {
+        margin: 0 12px;
+      }
+    }
+
+    @media (max-width: 768px) {
+      .top-navbar {
+        flex-direction: column;
+        gap: 16px;
+        padding: 16px;
+      }
+      
+      .patient-search-section {
+        flex-direction: column;
+        width: 100%;
+        margin: 0;
+      }
+      
+      .patient-info-bar {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 16px;
+      }
+      
+      .patient-details {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 16px;
+      }
+      
+      .patient-meta {
+        flex-direction: column;
+        gap: 8px;
+      }
+      
+      .form-row {
+        flex-direction: column;
+      }
+      
+      .form-group {
+        min-width: auto;
+      }
+      
+      .small {
+        max-width: none;
+      }
+      
+      .modal {
+        padding: 16px;
+      }
+      
+      .nav-actions {
+        width: 100%;
+        justify-content: space-between;
+      }
+      
+      .status-date-row {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 8px;
+      }
+    }
   </style>
 </head>
 <body>
-  <h2>Add Therapy — Multiple Therapy Management</h2>
-
-  <div style="display:flex;gap:20px;align-items:flex-end;margin-bottom:12px;">
-    <div style="min-width:360px;">
-      <label for="header-patient-select">Search Patient</label>
-      <div style="display:flex;gap:8px;">
-        <input type="text" id="header-patient-select" placeholder="Enter at least 3 characters to search..." style="flex:1;padding:8px;border:1px solid #ccc;border-radius:6px;">
-        <button id="clear-patient-btn" style="padding:8px 12px;background:#dc3545;color:white;border:none;border-radius:6px;cursor:pointer;">Clear</button>
+  <div class="app-container">
+    <!-- Include your existing navigation -->
+    {% include 'dashboards/nav.html' %}
+    
+    <div class="main-content">
+      <!-- Top Navigation Bar with Patient Search -->
+      <div class="top-navbar">
+        <div class="nav-brand">
+          <i class="fas fa-spa"></i>
+          <h1>Therapy Manager</h1>
+        </div>
+        
+        <div class="patient-search-section">
+          <div class="patient-search-container">
+            <div class="search-input-group">
+              <input type="text" id="header-patient-select" placeholder="Search patient by name, ID, or registration number...">
+              <button id="clear-patient-btn" class="btn btn-outline">
+                <i class="fas fa-times"></i> Clear
+              </button>
+            </div>
+            <div id="search-results"></div>
+          </div>
+        </div>
+        
+        <div class="nav-actions">
+          <button id="export-json" class="btn btn-outline">
+            <i class="fas fa-file-export"></i> Export
+          </button>
+        </div>
       </div>
-      <div id="search-results" style="position:absolute;z-index:1000;background:white;border:1px solid #ccc;border-radius:6px;max-height:300px;overflow-y:auto;display:none;width:360px;margin-top:2px;"></div>
-    </div>
-    <div style="flex:1"></div>
-    <div>
-      <button id="export-json">Export JSON</button>
+      
+      <!-- Patient Info Bar -->
+      <div class="patient-info-bar">
+        <div class="patient-details">
+          <div class="patient-avatar" id="patient-avatar">?</div>
+          <div class="patient-main-info">
+            <h2 id="hdr-pat-name">No patient selected</h2>
+            <div class="patient-meta">
+              <span><i class="fas fa-id-card"></i> Registration: <span id="hdr-pat-reg">—</span></span>
+              <span><i class="fas fa-birthday-cake"></i> Age: <span id="hdr-pat-age">—</span></span>
+              <span><i class="fas fa-venus-mars"></i> Gender: <span id="hdr-pat-gender">—</span></span>
+              <span><i class="fas fa-procedures"></i> Room: <span id="hdr-pat-room">—</span></span>
+              <span><i class="fas fa-stethoscope"></i> Type: <span id="hdr-pat-type">—</span></span>
+            </div>
+          </div>
+        </div>
+        
+        <div class="patient-status">
+          <div class="status-badge status-vip" id="hdr-pat-vip-badge" style="display: none;">
+            <i class="fas fa-crown"></i> VIP
+          </div>
+          <div class="status-badge status-ip" id="hdr-pat-ip-badge" style="display: none;">
+            <i class="fas fa-hospital-user"></i> INPATIENT
+          </div>
+        </div>
+      </div>
+      
+      <!-- Main Content Area -->
+      <div class="content-area">
+        <!-- Therapy Form Card -->
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">
+              <i class="fas fa-hand-holding-medical"></i>
+              <span id="form-title">Create New Therapy</span>
+            </div>
+          </div>
+          
+          <div class="form-row">
+            <div class="form-group" style="flex:2">
+              <label for="therapy-select">Therapy</label>
+              <select id="therapy-select"></select>
+            </div>
+
+            <div class="form-group small">
+              <label for="ext-int-select">External/Internal</label>
+              <select id="ext-int-select"><option value="">-- Select --</option><option>Internal</option><option>External</option></select>
+            </div>
+
+            <div class="form-group small">
+              <label for="slot-select">Slot</label>
+              <select id="slot-select"><option value="">-- Select --</option></select>
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group small">
+              <label for="from-date-input">From Date</label>
+              <input type="date" id="from-date-input">
+            </div>
+            <div class="form-group small">
+              <label for="to-date-input">To Date</label>
+              <input type="date" id="to-date-input">
+            </div>
+            <div class="form-group small">
+              <label for="days-input">Duration (Days)</label>
+              <input type="text" id="days-input" readonly>
+            </div>
+
+            <div class="form-group">
+              <label for="usage-select">Usage</label>
+              <select id="usage-select"><option value="">-- Select --</option></select>
+            </div>
+
+            <div class="form-group">
+              <label for="oil-class-select">Oil Class</label>
+              <select id="oil-class-select"><option value="">-- Select --</option></select>
+            </div>
+
+            <div class="form-group small">
+              <label for="procured-select">Procured From</label>
+              <select id="procured-select"><option value="">-- Select --</option></select>
+            </div>
+          </div>
+
+          <h4 style="margin: 20px 0 12px; color: var(--text-dark);">
+            <i class="fas fa-pills"></i> Therapy Items
+          </h4>
+          
+          <div class="item-groups-container">
+            <div class="form-row">
+              <div class="form-group">
+                <label for="item-builder-select">Select Items</label>
+                <select id="item-builder-select" multiple="multiple"></select>
+              </div>
+              <div class="form-group small">
+                <label for="item-builder-dosage">Dosage</label>
+                <input id="item-builder-dosage" type="text" placeholder="e.g. 2 tsp">
+              </div>
+              <div class="form-group small">
+                <label for="item-builder-uno">Unit</label>
+                <select id="item-builder-uno">
+                  <option value="">Select Unit</option>
+                </select>
+              </div>
+              <div style="display:flex;align-items:flex-end;">
+                <button id="add-item-group-btn" class="btn">
+                  <i class="fas fa-plus-circle"></i> Add Group
+                </button>
+              </div>
+            </div>
+            <div id="item-groups-list" style="margin-top:16px"></div>
+          </div>
+
+          <div class="form-actions">
+            <button id="allocate-therapy-btn" class="btn btn-success">
+              <i class="fas fa-save"></i> Save Therapy
+            </button>
+            <button id="update-therapy-btn" class="btn btn-success" style="display:none">
+              <i class="fas fa-sync-alt"></i> Update Therapy
+            </button>
+            <button id="clear-form" class="btn btn-outline">
+              <i class="fas fa-broom"></i> Clear Form
+            </button>
+          </div>
+        </div>
+
+        <!-- Therapies Table Card -->
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">
+              <i class="fas fa-list-alt"></i>
+              <span>Allocated Therapies</span>
+            </div>
+          </div>
+          
+          <div class="table-container">
+            <table>
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Therapy</th>
+                  <th>Ext/Int</th>
+                  <th>Slot</th>
+                  <th>Items</th>
+                  <th>From</th>
+                  <th>To</th>
+                  <th>Days</th>
+                  <th>Status</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="therapies-table-body">
+                <tr>
+                  <td colspan="10">
+                    <div class="empty-state">
+                      <i class="fas fa-spa"></i>
+                      <h3>No Therapies Found</h3>
+                      <p>Select a patient and create a new therapy to get started</p>
+                    </div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
-
-  <div id="header-patient-summary" class="card">
-    <h4><span id="hdr-pat-name">No patient selected</span> <small id="hdr-pat-badge" class="muted"></small></h4>
-    <div id="hdr-pat-meta" class="muted">Registration: — • Age/Gender: — / —</div>
-    <div id="hdr-pat-vip" class="muted">VIP: — • Room: —</div>
-    <div id="hdr-pat-ip" class="muted">IP No: —</div>
-    <div id="hdr-pat-unique" class="muted">Unique ID: —</div>
-    <div id="hdr-pat-type" class="muted">Patient Type: —</div>
-  </div>
-
-  <div class="card">
-    <h3 id="form-title">Add Therapy</h3>
-
-    <div class="form-row">
-      <div class="form-group" style="flex:2">
-        <label for="therapy-select">Therapy</label>
-        <select id="therapy-select"></select>
-      </div>
-
-      <div class="form-group small">
-        <label for="ext-int-select">Ext/Int</label>
-        <select id="ext-int-select"><option value="">--</option><option>Internal</option><option>External</option></select>
-      </div>
-
-      <div class="form-group small">
-        <label for="slot-select">Slot</label>
-        <select id="slot-select"><option value="">--</option></select>
-      </div>
-    </div>
-
-    <div class="form-row">
-      <div class="form-group small">
-        <label for="from-date-input">From</label><input type="date" id="from-date-input">
-      </div>
-      <div class="form-group small">
-        <label for="to-date-input">To</label><input type="date" id="to-date-input">
-      </div>
-      <div class="form-group small">
-        <label for="days-input">Days</label><input type="text" id="days-input" readonly>
-      </div>
-
-      <div class="form-group">
-        <label for="usage-select">Usage</label>
-        <select id="usage-select"><option value="">--</option></select>
-      </div>
-
-      <div class="form-group">
-        <label for="oil-class-select">Oil Class</label>
-        <select id="oil-class-select"><option value="">--</option></select>
-      </div>
-
-      <div class="form-group small">
-        <label for="procured-select">Procured From</label>
-        <select id="procured-select"><option value="">--</option></select>
-      </div>
-    </div>
-
-    <h4>Item Groups</h4>
-    <div style="border:1px dashed #ddd;padding:10px;border-radius:6px;margin-bottom:10px;">
-      <div class="form-row">
-        <div class="form-group">
-          <label for="item-builder-select">Select Items (multi)</label>
-          <select id="item-builder-select" multiple="multiple"></select>
-        </div>
-        <div class="form-group small">
-          <label for="item-builder-dosage">Dosage</label><input id="item-builder-dosage" type="text" placeholder="e.g. 2 tsp">
-        </div>
-        <div class="form-group small">
-          <label for="item-builder-uno">UNO</label>
-          <select id="item-builder-uno">
-            <option value="">Select Unit</option>
-          </select>
-        </div>
-        <div style="display:flex;align-items:flex-end;">
-          <button id="add-item-group-btn">Add Group</button>
-        </div>
-      </div>
-      <div id="item-groups-list" style="margin-top:10px"></div>
-    </div>
-
-    <div style="display:flex;justify-content:flex-end;gap:8px;">
-      <button id="allocate-therapy-btn">Add Therapy</button>
-      <button id="update-therapy-btn" style="display:none;background:#28a745">Update Therapy</button>
-      <button id="clear-form" style="background:#eee;color:#333">Clear</button>
-    </div>
-  </div>
-
-  <h3>Allocated Therapies</h3>
-  <table style="width:100%;border-collapse:collapse;margin-top:12px;">
-    <thead>
-      <tr style="text-align:left"><th>#</th><th>Therapy</th><th>Ext/Int</th><th>Slot</th><th>Items</th><th>From</th><th>To</th><th>Days</th><th>Status</th><th>Actions</th></tr>
-    </thead>
-    <tbody id="therapies-table-body"></tbody>
-  </table>
 
   <!-- Cancellation Modal -->
   <div id="cancel-modal-backdrop" class="modal-backdrop">
     <div class="modal" role="dialog" aria-modal="true">
-      <h3>Request Cancellation (Date Range)</h3>
-      <div id="cancel-modal-info" class="small-muted"></div>
-      <div style="margin-top:12px;" class="form-row">
+      <h3><i class="fas fa-ban"></i> Request Cancellation (Date Range)</h3>
+      <div id="cancel-modal-info" class="small-muted" style="margin-top: 8px;"></div>
+      <div style="margin-top:16px;" class="form-row">
         <div class="form-group"><label for="cancel-from">Cancel From</label><input type="date" id="cancel-from" /></div>
         <div class="form-group"><label for="cancel-to">Cancel To</label><input type="date" id="cancel-to" /></div>
       </div>
-      <div style="margin-top:10px;"><label>Reason for cancellation</label><textarea id="cancel-reason" placeholder="Enter reason" rows="3" style="resize:vertical"></textarea></div>
+      <div style="margin-top:16px;"><label>Reason for cancellation</label><textarea id="cancel-reason" placeholder="Enter reason for cancellation..." rows="3" style="resize:vertical"></textarea></div>
       <div class="modal-footer">
-        <button id="cancel-modal-close" class="btn-ghost">Close</button>
-        <button id="cancel-submit" class="btn-danger">Submit Cancellation Request</button>
+        <button id="cancel-modal-close" class="btn btn-outline">Close</button>
+        <button id="cancel-submit" class="btn btn-danger">Submit Cancellation Request</button>
       </div>
     </div>
   </div>
@@ -177,15 +869,15 @@
   <!-- Resume Modal -->
   <div id="resume-modal-backdrop" class="modal-backdrop">
     <div class="modal" role="dialog" aria-modal="true">
-      <h3>Resume Therapy</h3>
-      <div id="resume-modal-info" class="small-muted"></div>
-      <div style="margin-top:12px;" class="form-row">
+      <h3><i class="fas fa-play-circle"></i> Resume Therapy</h3>
+      <div id="resume-modal-info" class="small-muted" style="margin-top: 8px;"></div>
+      <div style="margin-top:16px;" class="form-row">
         <div class="form-group"><label for="resume-from">Resume From</label><input type="date" id="resume-from" /></div>
         <div class="form-group"><label for="resume-to">Resume To</label><input type="date" id="resume-to" /></div>
       </div>
       <div class="modal-footer">
-        <button id="resume-modal-close" class="btn-ghost">Close</button>
-        <button id="resume-submit" style="background:#28a745;color:#fff">Resume Therapy</button>
+        <button id="resume-modal-close" class="btn btn-outline">Close</button>
+        <button id="resume-submit" class="btn btn-success">Resume Therapy</button>
       </div>
     </div>
   </div>
@@ -193,11 +885,11 @@
   <!-- Allocation Status Modal (minimal: status + mark completed only) -->
   <div id="status-modal-backdrop" class="modal-backdrop">
     <div class="modal" role="dialog" aria-modal="true">
-      <h3>Allocation Status (Minimal)</h3>
-      <div id="status-modal-info" class="small-muted"></div>
+      <h3><i class="fas fa-calendar-check"></i> Allocation Status</h3>
+      <div id="status-modal-info" class="small-muted" style="margin-top: 8px;"></div>
 
-      <div style="margin-top:12px;">
-        <div style="display:flex;gap:8px;font-weight:700;padding:6px 8px;border-bottom:1px solid #ddd;">
+      <div style="margin-top:16px;">
+        <div style="display:flex;gap:8px;font-weight:700;padding:12px;border-bottom:1px solid var(--border-light);background:#f8f9fa;">
           <div style="width:140px">Date</div>
           <div style="width:120px">Slot</div>
           <div style="width:200px">Treatment Room</div>
@@ -209,7 +901,7 @@
       </div>
 
       <div class="modal-footer">
-        <button id="status-modal-close" class="btn-ghost">Close</button>
+        <button id="status-modal-close" class="btn btn-outline">Close</button>
       </div>
     </div>
   </div>
@@ -253,7 +945,6 @@ $(function(){
 
   // --- DOM refs ---
   const $patientSelect = $('#header-patient-select');
-  const $hdrName = $('#hdr-pat-name'), $hdrMeta = $('#hdr-pat-meta'), $hdrVip = $('#hdr-pat-vip'), $hdrIp = $('#hdr-pat-ip'), $hdrUnique = $('#hdr-pat-unique'), $hdrType = $('#hdr-pat-type');
   const $therapySelect = $('#therapy-select'), $slotSelect = $('#slot-select'), $fromDate = $('#from-date-input'), $toDate = $('#to-date-input'), $daysInput = $('#days-input');
   const $usageSelect = $('#usage-select'), $oilClassSelect = $('#oil-class-select'), $procuredSelect = $('#procured-select');
   const $itemBuilder = $('#item-builder-select'), $itemGroupsList = $('#item-groups-list');
@@ -266,6 +957,12 @@ $(function(){
   const $statusModal = $('#status-modal-backdrop'), $statusDatesList = $('#status-dates-list'), $statusModalInfo = $('#status-modal-info');
   const $statusCloseBtn = $('#status-modal-close');
 
+  const $resumeModal = $('#resume-modal-backdrop');
+  const $resumeCloseBtn = $('#resume-modal-close');
+  const $resumeSubmitBtn = $('#resume-submit');
+  const $resumeFrom = $('#resume-from');
+  const $resumeTo = $('#resume-to');
+
   // --- state ---
   let itemGroups = [];
   let addedTherapies = [];
@@ -273,30 +970,10 @@ $(function(){
   let editTherapyIndex = null;
   let viewingStatusTherapyIndex = null;
   let cancelingTherapyIndex = null;
-
-  // --- init select2s ---
-  $therapySelect.select2({ placeholder:'Search therapy (2+)', minimumInputLength:2, ajax:{
-    transport: function(p,s,f){ ajax({action:'search_therapies', q: p.data.q}).then(s).catch(f); },
-    processResults: data => ({ results: (data||[]).map(t => ({id: t.therapy_code, text: t.therapy_name})) }),
-    cache:true
-  }});
-
-  $itemBuilder.select2({
-    placeholder:'Search or type items (multi)',
-    minimumInputLength: 0,
-    tags: true,
-    tokenSeparators: [','],
-    ajax: {
-      transport: function(p, s, f){
-        ajax({action:'search_items', q: p.data.q}).then(s).catch(function(){ s({ results: [] }); });
-      },
-      processResults: data => ({ results: (data||[]).map(i => ({ id: i.item_code, text: i.item_name })) }),
-      cache:true
-    }
-  });
+  let resumingTherapyIndex = null;
+  let selectedPatient = null;
 
   // Patient search with auto-fill functionality
-  let selectedPatient = null;
   let searchTimeout;
   
   $('#header-patient-select').on('input', function() {
@@ -388,7 +1065,6 @@ $(function(){
       .then(data => {
         if (data.pat_name) {
           selectedPatient = data;
-          console.log(selectedPatient);
           populatePatientInfo(selectedPatient);
         } else {
           alert('Patient details not found');
@@ -400,14 +1076,42 @@ $(function(){
       });
   }
 
+  function updatePatientAvatar(patient) {
+    if (!patient) {
+      $('#patient-avatar').text('?').css('background', '#6c757d');
+      return;
+    }
+    
+    const name = patient.pat_name || '';
+    const initials = name.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2);
+    $('#patient-avatar').text(initials || '?');
+    
+    // Set VIP status badge
+    if (patient.vip_status && patient.vip_status.toLowerCase() === 'yes') {
+      $('#hdr-pat-vip-badge').show();
+    } else {
+      $('#hdr-pat-vip-badge').hide();
+    }
+    
+    // Set IP/OP status badge
+    if (patient.patient_type === 'IP') {
+      $('#hdr-pat-ip-badge').show();
+    } else {
+      $('#hdr-pat-ip-badge').hide();
+    }
+    
+    // Update patient info fields
+    $('#hdr-pat-reg').text(patient.pat_reg_no || patient.pat_op_reg_no || '—');
+    $('#hdr-pat-age').text(patient.pat_age || '—');
+    $('#hdr-pat-gender').text(patient.pat_sex || '—');
+    $('#hdr-pat-room').text(patient.pat_room_no || '—');
+    $('#hdr-pat-type').text(patient.patient_type || '—');
+  }
+
   function populatePatientInfo(patient) {
     $('#header-patient-select').val(patient.pat_op_reg_no || patient.pat_reg_no);
     $('#hdr-pat-name').text(patient.pat_name || 'Unknown');
-    $('#hdr-pat-meta').text('Registration: ' + (patient.pat_reg_no || patient.pat_op_reg_no ) + ' • Age/Gender: ' + ((patient.pat_age || '—') + ' / ' + (patient.pat_sex || '—')));
-    $('#hdr-pat-vip').text('VIP: ' + (patient.vip_status || 'No') + ' • Room: ' + (patient.pat_room_no || '—'));
-    $('#hdr-pat-ip').text('IP No: ' + (patient.pat_reg_no || patient.pat_op_reg_no ));
-    $('#hdr-pat-unique').text('Unique ID: ' + (patient.pat_ref_id || '—'));
-    $('#hdr-pat-type').text('Patient Type: IP');
+    updatePatientAvatar(patient);
     
     // Load patient therapies
     // Use pat_reg_no consistently (or pat_op_reg_no if pat_reg_no doesn't exist)
@@ -427,11 +1131,14 @@ $(function(){
     selectedPatient = null;
     $('#header-patient-select').val('');
     $('#hdr-pat-name').text('No patient selected');
-    $('#hdr-pat-meta').text('Registration: — • Age/Gender: — / —');
-    $('#hdr-pat-vip').text('VIP: — • Room: —');
-    $('#hdr-pat-ip').text('IP No: —');
-    $('#hdr-pat-unique').text('Unique ID: —');
-    $('#hdr-pat-type').text('Patient Type: —');
+    updatePatientAvatar(null);
+    $('#hdr-pat-vip-badge').hide();
+    $('#hdr-pat-ip-badge').hide();
+    $('#hdr-pat-reg').text('—');
+    $('#hdr-pat-age').text('—');
+    $('#hdr-pat-gender').text('—');
+    $('#hdr-pat-room').text('—');
+    $('#hdr-pat-type').text('—');
     addedTherapies = [];
     bookings = [];
     renderAll();
@@ -456,11 +1163,36 @@ $(function(){
     return `${hours}:${minutes} ${period}`;
   }
 
+  // --- init select2s ---
+  $therapySelect.select2({ 
+    placeholder:'Search therapy (2+)', 
+    minimumInputLength:2, 
+    ajax:{
+      transport: function(p,s,f){ ajax({action:'search_therapies', q: p.data.q}).then(s).catch(f); },
+      processResults: data => ({ results: (data||[]).map(t => ({id: t.therapy_code, text: t.therapy_name})) }),
+      cache:true
+    }
+  });
+
+  $itemBuilder.select2({
+    placeholder:'Search or type items (multi)',
+    minimumInputLength: 0,
+    tags: true,
+    tokenSeparators: [','],
+    ajax: {
+      transport: function(p, s, f){
+        ajax({action:'search_items', q: p.data.q}).then(s).catch(function(){ s({ results: [] }); });
+      },
+      processResults: data => ({ results: (data||[]).map(i => ({ id: i.item_code, text: i.item_name })) }),
+      cache:true
+    }
+  });
+
   // populate masters & slots with fallback
   function populateMasters(){
-    ajax({action:'masters', type:'usage'}).then(list => { $usageSelect.empty().append('<option value="">--</option>'); (list||FALLBACK_USAGE).forEach(u => $usageSelect.append(new Option(u.name, u.name))); }).catch(()=>{ $usageSelect.empty().append('<option value="">--</option>'); FALLBACK_USAGE.forEach(u => $usageSelect.append(new Option(u.name, u.name))); });
-    ajax({action:'masters', type:'procured'}).then(list => { $procuredSelect.empty().append('<option value="">--</option>'); (list||FALLBACK_PROCURED).forEach(p => $procuredSelect.append(new Option(p.name, p.name))); }).catch(()=>{ $procuredSelect.empty().append('<option value="">--</option>'); FALLBACK_PROCURED.forEach(p => $procuredSelect.append(new Option(p.name, p.name))); });
-    ajax({action:'masters', type:'oil'}).then(list => { $oilClassSelect.empty().append('<option value="">--</option>'); (list||FALLBACK_OIL).forEach(o => $oilClassSelect.append(new Option(o.name, o.name))); }).catch(()=>{ $oilClassSelect.empty().append('<option value="">--</option>'); FALLBACK_OIL.forEach(o => $oilClassSelect.append(new Option(o.name, o.name))); });
+    ajax({action:'masters', type:'usage'}).then(list => { $usageSelect.empty().append('<option value="">-- Select --</option>'); (list||FALLBACK_USAGE).forEach(u => $usageSelect.append(new Option(u.name, u.name))); }).catch(()=>{ $usageSelect.empty().append('<option value="">-- Select --</option>'); FALLBACK_USAGE.forEach(u => $usageSelect.append(new Option(u.name, u.name))); });
+    ajax({action:'masters', type:'procured'}).then(list => { $procuredSelect.empty().append('<option value="">-- Select --</option>'); (list||FALLBACK_PROCURED).forEach(p => $procuredSelect.append(new Option(p.name, p.name))); }).catch(()=>{ $procuredSelect.empty().append('<option value="">-- Select --</option>'); FALLBACK_PROCURED.forEach(p => $procuredSelect.append(new Option(p.name, p.name))); });
+    ajax({action:'masters', type:'oil'}).then(list => { $oilClassSelect.empty().append('<option value="">-- Select --</option>'); (list||FALLBACK_OIL).forEach(o => $oilClassSelect.append(new Option(o.name, o.name))); }).catch(()=>{ $oilClassSelect.empty().append('<option value="">-- Select --</option>'); FALLBACK_OIL.forEach(o => $oilClassSelect.append(new Option(o.name, o.name))); });
     ajax({action:'slots'}).then(resp => { 
       const slots = (resp && resp.slots) || resp || FALLBACK_SLOTS; 
       $slotSelect.find('option').not(':first').remove(); 
@@ -496,19 +1228,31 @@ $(function(){
 
   function renderItemGroups(){
     $itemGroupsList.empty();
-    if (!itemGroups.length){ $itemGroupsList.text('No item groups added'); return; }
+    if (!itemGroups.length){ 
+      $itemGroupsList.html(`
+        <div class="empty-state" style="padding:20px;">
+          <i class="fas fa-pills"></i>
+          <p>No therapy items added yet</p>
+        </div>
+      `); 
+      return; 
+    }
     itemGroups.forEach((g,i) => {
       const itemsHtml = g.items.map(it => `<span class="tag">${esc(it.item_name)}</span>`).join(' ');
       const $div = $(`
-        <div style="padding:8px;border:1px solid #eee;margin-bottom:8px;border-radius:6px;display:flex;justify-content:space-between;align-items:center;">
-          <div>
-            <div style="font-weight:600">Group ${i+1}</div>
-            <div>${itemsHtml}</div>
-            <div class="muted-small">Dosage: ${esc(g.dosage||'—')} • UNO: ${esc(g.uno||'—')}</div>
+        <div style="padding:12px;border:1px solid var(--border-light);margin-bottom:12px;border-radius:8px;display:flex;justify-content:space-between;align-items:center;background:white;">
+          <div style="flex:1;">
+            <div style="font-weight:600;color:var(--text-dark);margin-bottom:6px;">Group ${i+1}</div>
+            <div style="margin-bottom:6px;">${itemsHtml}</div>
+            <div class="small-muted">Dosage: ${esc(g.dosage||'—')} • UNO: ${esc(g.uno||'—')}</div>
           </div>
           <div>
-            <button class="edit-group action-btn" data-id="${g.id}">Edit</button>
-            <button class="remove-group action-btn" data-id="${g.id}" style="background:#d9534f;color:#fff">Remove</button>
+            <button class="edit-group action-btn btn btn-outline" data-id="${g.id}" style="margin-right:6px;">
+              <i class="fas fa-edit"></i> Edit
+            </button>
+            <button class="remove-group action-btn btn btn-danger" data-id="${g.id}">
+              <i class="fas fa-trash"></i> Remove
+            </button>
           </div>
         </div>
       `);
@@ -516,12 +1260,43 @@ $(function(){
     });
   }
 
-  $itemGroupsList.on('click', '.remove-group', function(){ const id = $(this).data('id'); itemGroups = itemGroups.filter(g=>g.id!==id); renderItemGroups(); });
-  $itemGroupsList.on('click', '.edit-group', function(){ const id = $(this).data('id'); const g = itemGroups.find(x=>x.id===id); if(!g) return; $itemBuilder.val(null).trigger('change'); g.items.forEach(it=>{ const opt = new Option(it.item_name, it.item_code, true, true); $itemBuilder.append(opt); }); $itemBuilder.trigger('change'); $('#item-builder-dosage').val(g.dosage||''); $('#item-builder-uno').val(g.uno||''); itemGroups = itemGroups.filter(x=>x.id!==id); renderItemGroups(); });
+  $itemGroupsList.on('click', '.remove-group', function(){ 
+    const id = $(this).data('id'); 
+    itemGroups = itemGroups.filter(g=>g.id!==id); 
+    renderItemGroups(); 
+  });
+  
+  $itemGroupsList.on('click', '.edit-group', function(){ 
+    const id = $(this).data('id'); 
+    const g = itemGroups.find(x=>x.id===id); 
+    if(!g) return; 
+    $itemBuilder.val(null).trigger('change'); 
+    g.items.forEach(it=>{ 
+      const opt = new Option(it.item_name, it.item_code, true, true); 
+      $itemBuilder.append(opt); 
+    }); 
+    $itemBuilder.trigger('change'); 
+    $('#item-builder-dosage').val(g.dosage||''); 
+    $('#item-builder-uno').val(g.uno||''); 
+    itemGroups = itemGroups.filter(x=>x.id!==id); 
+    renderItemGroups(); 
+  });
 
   // days calc
-  function calcDays(){ const f = $fromDate.val(), t = $toDate.val(); if(!f||!t){ $daysInput.val(''); return; } const fd=new Date(f), td=new Date(t); if(fd<=td) $daysInput.val(Math.ceil((td.getTime()-fd.getTime())/(1000*60*60*24))+1); else $daysInput.val(''); }
-  $fromDate.on('change', calcDays); $toDate.on('change', calcDays);
+  function calcDays(){ 
+    const f = $fromDate.val(), t = $toDate.val(); 
+    if(!f||!t){ 
+      $daysInput.val(''); 
+      return; 
+    } 
+    const fd=new Date(f), td=new Date(t); 
+    if(fd<=td) 
+      $daysInput.val(Math.ceil((td.getTime()-fd.getTime())/(1000*60*60*24))+1); 
+    else 
+      $daysInput.val(''); 
+  }
+  $fromDate.on('change', calcDays); 
+  $toDate.on('change', calcDays);
 
   // add therapy - auto-save to server as draft
   $allocateBtn.on('click', function(){
@@ -616,14 +1391,26 @@ $(function(){
   // render therapies table
   function renderTherapies(){
     $therapiesTableBody.empty();
-    if (!addedTherapies.length){ $therapiesTableBody.append('<tr><td colspan="10" class="muted">No therapies</td></tr>'); return; }
+    if (!addedTherapies.length){ 
+      $therapiesTableBody.append(`
+        <tr>
+          <td colspan="10">
+            <div class="empty-state">
+              <i class="fas fa-spa"></i>
+              <h3>No Therapies Found</h3>
+              <p>Select a patient and create a new therapy to get started</p>
+            </div>
+          </td>
+        </tr>
+      `); 
+      return; 
+    }
     addedTherapies.forEach((t,i) => {
-      const groupsHtml = (t.items_groups||[]).map(g => (g.items||[]).map(it => `<span class="tag">${esc(it.item_name)}</span>`).join(' ') + `<div class="muted-small">Dosage:${esc(g.dosage||'—')} • UNO:${esc(g.uno||'—')}</div>`).join('<hr/>');
+      const groupsHtml = (t.items_groups||[]).map(g => (g.items||[]).map(it => `<span class="tag">${esc(it.item_name)}</span>`).join(' ') + `<div class="small-muted">Dosage:${esc(g.dosage||'—')} • UNO:${esc(g.uno||'—')}</div>`).join('<hr style="margin:8px 0;border:none;border-top:1px solid var(--border-light);"/>');
       
       // Status logic - show counts if available
       let statusHtml = '';
       let statusClass = 'status-scheduled';
-      console.log('Therapy status:', t.status); // Debug log
       
       // Build status display with counts - format: "2 Draft / 3 Allocated"
       const statusSummary = t.status_summary || {};
@@ -679,12 +1466,22 @@ $(function(){
         <td>${esc(t.days||'')}</td>
         <td>${statusHtml}</td>
         <td>
-          <button class="view-status action-btn" data-i="${i}">View Status</button>
-          <button class="edit-therapy action-btn" data-i="${i}" style="background:#6c757d">Edit</button>
-          <button class="update-therapy action-btn" data-i="${i}" style="background:#28a745;display:none">Update</button>
+          <button class="view-status action-btn btn btn-outline" data-i="${i}">
+            <i class="fas fa-eye"></i> Status
+          </button>
+          <button class="edit-therapy action-btn btn btn-outline" data-i="${i}">
+            <i class="fas fa-edit"></i> Edit
+          </button>
+          <button class="update-therapy action-btn btn btn-success" data-i="${i}" style="display:none">
+            <i class="fas fa-sync-alt"></i> Update
+          </button>
           ${t.status === 'cancelled' ? 
-            `<button class="resume-therapy action-btn" data-i="${i}" style="background:#28a745">Resume</button>` : 
-            `<button class="cancel-therapy action-btn" data-i="${i}" style="background:#f39c12">Cancel</button>`
+            `<button class="resume-therapy action-btn btn btn-success" data-i="${i}">
+              <i class="fas fa-play-circle"></i> Resume
+            </button>` : 
+            `<button class="cancel-therapy action-btn btn btn-warning" data-i="${i}">
+              <i class="fas fa-ban"></i> Cancel
+            </button>`
           }
         </td>
       </tr>`;
@@ -705,20 +1502,18 @@ $(function(){
       $statusModalInfo.text(`Therapy: ${t.therapy_name} — ${t.from_date} → ${t.to_date}`);
       $statusDatesList.empty();
       const rows = bookings.filter(b=>b.therapyIndex===index).sort((a,b)=>a.date.localeCompare(b.date));
-      if (!rows.length) $statusDatesList.append('<div class="small-muted">No per-day allocations for this therapy.</div>');
+      if (!rows.length) $statusDatesList.append('<div class="empty-state" style="padding:20px;"><i class="fas fa-calendar-times"></i><p>No per-day allocations for this therapy.</p></div>');
       rows.forEach(b=> {
         const pillClass = ({scheduled:'status-scheduled', draft:'status-draft', pending:'status-draft', cancel_requested:'status-cancelreq', cancelled:'status-cancelled', completed:'status-completed'})[b.status] || 'status-scheduled';
         const statusText = ({scheduled:'Scheduled', draft:'Draft', pending:'Pending', cancel_requested:'Cancel Requested', cancelled:'Cancelled', completed:'Completed'})[b.status] || b.status;
         const $row = $(`
-          <div class="date-row" data-id="${b.id}">
+          <div class="status-date-row" data-id="${b.id}">
             <div style="display:flex;gap:12px;align-items:center;min-width:760px;">
-              <div style="width:140px">${b.date}</div>
+              <div style="width:140px"><strong>${b.date}</strong></div>
               <div style="width:120px">${esc(format12Hour(b.slot||''))}</div>
               <div style="width:200px">${esc(b.room||'—')}</div>
               <div style="width:200px">${esc(b.therapist||'—')}</div>
               <div style="width:140px"><span class="status-pill ${pillClass}">${statusText}</span></div>
-            </div>
-            <div>
             </div>
           </div>`);
         $statusDatesList.append($row);
@@ -758,14 +1553,14 @@ $(function(){
       statusOrder.forEach(status => {
         if (bookingsByStatus[status] && bookingsByStatus[status].length > 0) {
           const statusLabel = status.charAt(0).toUpperCase() + status.slice(1);
-          const $section = $(`<div style="margin-bottom:16px;"><h4 style="margin:0 0 8px 0;font-size:14px;color:#495057;">${statusLabel} Dates (${bookingsByStatus[status].length}):</h4></div>`);
+          const $section = $(`<div class="status-section"><h4>${statusLabel} Dates (${bookingsByStatus[status].length})</h4></div>`);
           $statusDatesList.append($section);
           
           bookingsByStatus[status].forEach(b => {
             const pillClass = ({scheduled:'status-scheduled', allocated:'status-scheduled', draft:'status-draft', pending:'status-draft', failed:'status-cancelled', cancel_requested:'status-cancelreq', cancelled:'status-cancelled', completed:'status-completed'})[b.status] || 'status-scheduled';
             const statusText = ({scheduled:'Scheduled', allocated:'Allocated', draft:'Draft', failed:'Failed', pending:'Pending', cancel_requested:'Cancel Requested', cancelled:'Cancelled', completed:'Completed'})[b.display_status || b.status] || b.status;
             const $row = $(`
-              <div class="date-row" data-id="${b.booking_id}" style="margin-bottom:8px;">
+              <div class="status-date-row" data-id="${b.booking_id}">
                 <div style="display:flex;gap:12px;align-items:center;min-width:760px;">
                   <div style="width:140px"><strong>${b.date}</strong></div>
                   <div style="width:120px">${esc(format12Hour(b.slot||''))}</div>
@@ -787,11 +1582,8 @@ $(function(){
   $statusCloseBtn.on('click', function(){ $statusModal.hide(); viewingStatusTherapyIndex = null; });
 
   // Request cancel flow (server)
-  $therapiesTableBody.on('click', '.request-cancel', function(){ const i=$(this).data('i'); openCancelModal(i); });
-  
-  // New action handlers
   $therapiesTableBody.on('click', '.cancel-therapy', function(){ const i=$(this).data('i'); openCancelModal(i); });
-  $therapiesTableBody.on('click', '.resume-therapy', function(){ const i=$(this).data('i'); openResumeModal(i); });
+  
   function openCancelModal(index){
     cancelingTherapyIndex = index; const t = addedTherapies[index]; if(!t) return;
     $('#cancel-modal-info').text(`Therapy: ${t.therapy_name} — Allowed cancel range: ${t.from_date||'—'} → ${t.to_date||'—'}`);
@@ -926,7 +1718,7 @@ $(function(){
   });
 
   function resetFormState(){
-    editTherapyIndex = null; $('#form-title').text('Allocate Therapy');
+    editTherapyIndex = null; $('#form-title').text('Create New Therapy');
     $therapySelect.val(null).trigger('change').prop('disabled', false);
     $slotSelect.val('').prop('disabled', false);
     $('#ext-int-select').val(''); $fromDate.val('').prop('disabled', false); $toDate.val('').prop('disabled', false); $daysInput.val('');
@@ -936,16 +1728,7 @@ $(function(){
   }
 
   // Resume modal handlers
-  const $resumeModal = $('#resume-modal-backdrop');
-  const $resumeCloseBtn = $('#resume-modal-close');
-  const $resumeSubmitBtn = $('#resume-submit');
-  const $resumeFrom = $('#resume-from');
-  const $resumeTo = $('#resume-to');
-  let resumingTherapyIndex = null;
-  
-  $resumeCloseBtn.on('click', function(){ $resumeModal.hide(); resumingTherapyIndex = null; });
-  $resumeSubmitBtn.on('click', function(){ submitResume(); });
-  
+  $therapiesTableBody.on('click', '.resume-therapy', function(){ const i=$(this).data('i'); openResumeModal(i); });
   
   function openResumeModal(index){
     resumingTherapyIndex = index; 
@@ -1012,6 +1795,8 @@ $(function(){
     }
   }
   
+  $resumeCloseBtn.on('click', function(){ $resumeModal.hide(); resumingTherapyIndex = null; });
+  $resumeSubmitBtn.on('click', function(){ submitResume(); });
 
   // export JSON
   $('#export-json').on('click', function(){
@@ -1027,6 +1812,11 @@ $(function(){
 
   // Initialize UnitNo dropdown
   loadUnitNumbers();
+
+  // Clear form button
+  $('#clear-form').on('click', function(){
+    resetFormState();
+  });
 
   // expose for debug
   window._therapyApp = { addedTherapies, bookings, itemGroups, renderAll };

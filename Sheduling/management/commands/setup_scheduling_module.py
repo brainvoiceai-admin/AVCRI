@@ -95,7 +95,6 @@ class Command(BaseCommand):
         # Add other relevant modules for scheduling staff
         relevant_modules = Module.objects.filter(
             name__in=[
-                'patient_lookup',
                 'therapy_schedule', 
                 'treatment_schedule',
                 'reports'
@@ -125,7 +124,6 @@ class Command(BaseCommand):
         # Add other relevant modules for doctors
         doctor_modules = Module.objects.filter(
             name__in=[
-                'patient_lookup',
                 'add_therapy',
                 'add_prescription',
                 'treatment_schedule',

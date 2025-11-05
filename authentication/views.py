@@ -500,6 +500,12 @@ def Manage_user(request):
             user.gender = request.POST.get('gender', 'male')  # Default to male if not provided
             user.is_active = request.POST.get('is_active') == 'on'
             
+            # Update password if provided
+            new_password = request.POST.get('password')
+            if new_password and new_password.strip():
+                user.set_password(new_password)
+                messages.info(request, f'Password for "{user.username}" has been updated.')
+            
             # Update role-specific fields
             patient_registration_number = request.POST.get('patient_registration_number')
             therapist_code = request.POST.get('therapist_code')

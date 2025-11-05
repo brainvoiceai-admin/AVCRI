@@ -31,6 +31,18 @@
             padding: 20px;
         }
         
+        .main-content {
+            margin-left: 300px;
+            padding: 20px;
+        }
+        
+        @media (max-width: 768px) {
+            .main-content {
+                margin-left: 0;
+                padding: 16px;
+            }
+        }
+        
         .container {
             max-width: 1200px;
             margin: 0 auto;
@@ -452,6 +464,8 @@
     </style>
 </head>
 <body>
+    {% include 'dashboards/nav.html' %}
+    <div class="main-content">
     <div class="container">
         <header>
             <h1>Prescription Scheduling Dashboard</h1>
@@ -983,5 +997,7 @@
             return div.innerHTML;
         }
     </script>
+    </div>
+</div>
 </body>
 </html>

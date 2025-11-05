@@ -27,9 +27,16 @@
     }
     
     .main-content { 
+      margin-left: 300px;
       padding: 24px; 
       max-width: 1200px; 
-      margin: 0 auto; 
+    }
+    
+    @media (max-width: 768px) {
+      .main-content {
+        margin-left: 0;
+        padding: 16px;
+      }
     }
     
     .card { 
@@ -209,6 +216,7 @@
   </style>
 </head>
 <body>
+  {% include 'dashboards/nav.html' %}
   <main class="main-content">
     <!-- Header -->
     <div class="page-header">

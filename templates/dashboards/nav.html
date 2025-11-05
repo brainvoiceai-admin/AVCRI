@@ -13,9 +13,12 @@
         {# ---------- Dynamic Module-based Navigation ---------- #}
         {% if user_modules %}
             {% for module in user_modules %}
+                {# Hide deprecated/removed modules even if still assigned in DB #}
+                {% if module.url_name != 'patient:patient_lookup' and module.url_name != 'prescription_dash' and module.name != 'patient_lookup' and module.name != 'prescriptions_dashboard' %}
                 <a href="{% url module.url_name %}" class="menu-item">
                     <span>{{ module.icon }}</span> {{ module.display_name }}
                 </a>
+                {% endif %}
             {% endfor %}
         {% else %}
             {# Fallback to role-based navigation for backward compatibility #}
@@ -23,9 +26,6 @@
             {% if request.user.role == "doctor_admin" or request.user.role == "doctor" or request.user.role == "super_admin" %}
             <div class="menu-section">
                 <div class="menu-section-title">Doctor Options</div>
-                <a href="{% url 'patient:patient_lookup' %}" class="menu-item">
-                    <span>🏥</span> patient_lookup
-                </a>
                 <a href="{% url 'patient_therapy' %}" class="menu-item">
                     <span>🏥</span> Add Therapy
                 </a>
@@ -67,9 +67,6 @@
                 <div class="menu-section-title">Patients</div>
                 <a href="{% url 'patient_profile' %}" class="menu-item">
                     <span>👤</span> Patient Profiles
-                </a>
-                <a href="{% url 'prescription_dash' %}" class="menu-item">
-                    <span>💊</span> Prescriptions Dashboard
                 </a>
                 <a href="{% url 'patient_dashboard' %}" class="menu-item">
                     <span>🧑‍⚕️</span> Patient Dashboard
