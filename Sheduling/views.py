@@ -3341,7 +3341,7 @@ def reschedule_therapy_api(request):
             return JsonResponse({'error': 'allocation_id and date are required'}, status=400)
         
         from .models import TherapyAllocation, Booking
-        from reshedule import expand_therapies_for_visit
+        from reshedule import allocate_therapy_for_visit
         
         try:
             allocation = TherapyAllocation.objects.get(id=allocation_id, status='failed')
@@ -3365,7 +3365,7 @@ def reschedule_therapy_api(request):
             
             # Call rescheduling algorithm
             try:
-                tasks = expand_therapies_for_visit(
+                tasks = allocate_therapy_for_visit(
                     allocation.id,
                     date,
                     create_bookings=True
@@ -3443,17 +3443,22 @@ def reschedule_all_failed_api(request):
             return JsonResponse({'error': 'date is required'}, status=400)
         
         from .models import TherapyAllocation, Booking
-        from reshedule import expand_therapies_for_visit
+        from reshedule import allocate_therapy_for_visit
         
         filter_date = parse_date(date)
         if not filter_date:
             return JsonResponse({'error': 'Invalid date format. Use YYYY-MM-DD.'}, status=400)
         
-        # Get failed allocations that overlap with the target date (day-wise filter)
-        failed_allocations = TherapyAllocation.objects.filter(
-            status='failed',
-            from_date__lte=filter_date,
-            to_date__gte=filter_date
+        # Get allocations that have failed bookings on the target date (day-wise filter)
+        failed_allocations = (
+            TherapyAllocation.objects
+            .filter(
+                from_date__lte=filter_date,
+                to_date__gte=filter_date,
+                bookings__date=filter_date,
+                bookings__status='failed'
+            )
+            .distinct()
         )
         
         if not failed_allocations.exists():
@@ -3488,7 +3493,7 @@ def reschedule_all_failed_api(request):
                     )
                 
                 # Call rescheduling algorithm
-                tasks = expand_therapies_for_visit(
+                tasks = allocate_therapy_for_visit(
                     allocation.id,
                     date,
                     create_bookings=True
@@ -3512,6 +3517,11 @@ def reschedule_all_failed_api(request):
                     if success_tasks:
                         allocation.status = 'allocated'
                         allocation.save(update_fields=['status'])
+                        # Ensure bookings for this date are marked scheduled
+                        try:
+                            Booking.objects.filter(allocation=allocation, date=filter_date).update(status='scheduled')
+                        except Exception:
+                            pass
                         success_count += 1
                         results.append({
                             'allocation_id': allocation.id,
