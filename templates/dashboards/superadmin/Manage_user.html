@@ -401,6 +401,14 @@
             <div class="row">
               <div class="col-md-6">
                 <div class="mb-3">
+                  <label for="edit_password{{ user.id }}" class="form-label">New Password (Optional)</label>
+                  <input type="password" class="form-control" id="edit_password{{ user.id }}" 
+                         name="password" placeholder="Leave blank to keep current password">
+                  <div class="form-text">Enter a new password to change it. Leave blank to keep the current password.</div>
+                </div>
+              </div>
+              <div class="col-md-6">
+                <div class="mb-3">
                   <div class="form-check">
                     <input class="form-check-input" type="checkbox" id="edit_is_active{{ user.id }}" 
                            name="is_active" {% if user.is_active %}checked{% endif %}>
