@@ -209,65 +209,12 @@ def mark_as_dispatched_api(request):
 @require_http_methods(["GET"])
 def get_prescription_details_api(request):
     """
-    API endpoint to get detailed prescription information for a patient.
+    API endpoint to get detailed prescription AND therapy items for a patient (procurement dashboard).
+    This includes both prescription items and therapy-related items (BookingItem).
     """
     try:
-        patient_id = request.GET.get('patient_id')
-        date = request.GET.get('date')
+        from .models import PrescriptionAllocation, Booking, BookingItem, PatientSnapshot
         
-        if not patient_id or not date:
-            return JsonResponse({'error': 'Patient ID and date are required'}, status=400)
-        
-        filter_date = parse_date(date)
-        if not filter_date:
-            return JsonResponse({'error': 'Invalid date format'}, status=400)
-        
-        # Get prescription
-        try:
-            prescription = PrescriptionScheduling.objects.get(
-                patient_id=patient_id,
-                prescription_date=filter_date
-            )
-        except PrescriptionScheduling.DoesNotExist:
-            return JsonResponse({'error': 'Prescription not found'}, status=404)
-        
-        # Get prescription items
-        items = prescription.items.all()
-        prescription_items = []
-        for item in items:
-            prescription_items.append({
-                'item_name': item.item_name,
-                'dose': item.dose,
-                'quantity': item.quantity,
-                'time': item.time,
-                'notes': item.notes
-            })
-        
-        # Get patient info
-        patient = prescription.patient
-        doctor = prescription.doctor
-        
-        patient_info = {
-            'name': patient.pat_name or 'Unknown',
-            'registration_no': patient.pat_reg_no,
-            'room_no': getattr(patient, 'pat_room_no', None),
-            'doctor_name': doctor.get_full_name() if hasattr(doctor, 'get_full_name') else (doctor.username if doctor else 'Unknown')
-        }
-        
-        return JsonResponse({
-            'success': True,
-            'patient_info': patient_info,
-            'prescription_items': prescription_items
-        })
-        
-    except Exception as e:
-        return JsonResponse({'error': str(e)}, status=500)
-
-
-def get_prescription_details_api(request):
-    """API to get detailed prescription items for a patient (procurement)."""
-    try:
-        from .models import PrescriptionAllocation
         patient_id = request.GET.get('patient_id')
         date = request.GET.get('date')
         
@@ -279,61 +226,188 @@ def get_prescription_details_api(request):
         if not filter_date:
             return JsonResponse({'error': 'Invalid date format'}, status=400)
         
-        # Get prescription scheduling record for that day
+        # Get patient
+        try:
+            patient = PatientSnapshot.objects.get(pk=patient_id)
+        except PatientSnapshot.DoesNotExist:
+            return JsonResponse({'error': 'Patient not found'}, status=404)
+        
+        # Get patient info
+        patient_info = {
+            'name': patient.pat_name or 'Unknown',
+            'registration_no': patient.pat_reg_no,
+            'room_no': getattr(patient, 'pat_room_no', None),
+            'doctor_name': None  # Will be set from prescription if available
+        }
+        
+        # ===== PRESCRIPTION ITEMS =====
+        prescription_items = []
         prescription = PrescriptionScheduling.objects.filter(
             patient_id=patient_id,
             prescription_date=filter_date
-        ).first()
+        ).select_related('doctor').first()
         
-        if not prescription:
-            return JsonResponse({'success': True, 'data': []})
+        if prescription:
+            # Set doctor name from prescription
+            if prescription.doctor:
+                patient_info['doctor_name'] = prescription.doctor.get_full_name() if hasattr(prescription.doctor, 'get_full_name') else (prescription.doctor.username if prescription.doctor else None)
+            
+            # Primary: items entered as PrescriptionItem
+            items_qs = PrescriptionItem.objects.filter(prescription_scheduling=prescription)
+            for item in items_qs:
+                prescription_items.append({
+                    'id': f'prescription_{item.id}',
+                    'type': 'prescription',
+                    'item_name': item.item_name,
+                    'dose': item.dose or '',
+                    'quantity': item.quantity or '',
+                    'time': item.time or '',
+                    'notes': item.notes or ''
+                })
+            
+            # Fallback: derive from PrescriptionAllocation.items_groups when no rows exist
+            if not prescription_items:
+                allocation = PrescriptionAllocation.objects.filter(
+                    patient_id=patient_id,
+                    from_date__lte=filter_date,
+                    to_date__gte=filter_date
+                ).first()
+                if allocation and allocation.items_groups:
+                    raw_groups = allocation.items_groups
+                    groups = []
+                    if isinstance(raw_groups, str):
+                        try:
+                            groups = json.loads(raw_groups)
+                        except Exception:
+                            groups = []
+                    elif isinstance(raw_groups, list):
+                        groups = raw_groups
+                    elif isinstance(raw_groups, dict):
+                        groups = [raw_groups]
+                    
+                    for group in groups:
+                        items = group.get('items', []) if isinstance(group, dict) else []
+                        for it in items:
+                            prescription_items.append({
+                                'id': f'prescription_alloc_{it.get("id", "")}',
+                                'type': 'prescription',
+                                'item_name': it.get('item_name', ''),
+                                'dose': group.get('dosage', ''),
+                                'quantity': it.get('quantity', ''),
+                                'time': group.get('time', ''),
+                                'notes': group.get('uno', '')
+                            })
         
-        # Primary: items entered as PrescriptionItem
-        items_qs = PrescriptionItem.objects.filter(prescription_scheduling=prescription)
-        prescription_items = []
-        for item in items_qs:
-            prescription_items.append({
-                'id': item.id,
-                'item_name': item.item_name,
-                'dose': item.dose,
-                'quantity': item.quantity,
-                'time': item.time,
-                'notes': item.notes or ''
-            })
+        # ===== THERAPY ITEMS (BookingItem) =====
+        # Get all bookings for this patient on this date
+        therapy_items = []
+        # Booking status can be: draft, scheduled, partially_cancelled, cancelled, completed
+        # Include all non-cancelled bookings (draft, scheduled, completed) to show items
+        bookings = Booking.objects.filter(
+            allocation__patient=patient,
+            date=filter_date
+        ).exclude(status='cancelled').select_related('allocation').prefetch_related('items')
         
-        # Fallback: derive from PrescriptionAllocation.items_groups when no rows exist
-        if not prescription_items:
-            allocation = PrescriptionAllocation.objects.filter(
-                patient_id=patient_id,
-                from_date__lte=filter_date,
-                to_date__gte=filter_date
-            ).first()
-            if allocation and allocation.items_groups:
-                raw_groups = allocation.items_groups
-                groups = []
-                if isinstance(raw_groups, str):
-                    try:
-                        groups = json.loads(raw_groups)
-                    except Exception:
-                        groups = []
-                elif isinstance(raw_groups, list):
-                    groups = raw_groups
-                elif isinstance(raw_groups, dict):
-                    groups = [raw_groups]
-                
-                for group in groups:
-                    items = group.get('items', []) if isinstance(group, dict) else []
-                    for it in items:
-                        prescription_items.append({
-                            'id': it.get('id'),
-                            'item_name': it.get('item_name', ''),
-                            'dose': group.get('dosage', ''),
-                            'quantity': it.get('quantity', ''),
-                            'time': group.get('time', ''),
-                            'notes': group.get('uno', '')
-                        })
+        for booking in bookings:
+            # BookingItem status can be: scheduled, cancelled, completed
+            # Include all non-cancelled items
+            for item in booking.items.exclude(status='cancelled'):
+                therapy_items.append({
+                    'id': f'therapy_{item.id}',
+                    'type': 'therapy',
+                    'therapy_name': booking.allocation.therapy_name if booking.allocation else '',
+                    'item_name': item.item_name,
+                    'item_code': item.item_code,
+                    'dose': item.dosage or '',
+                    'quantity': '',  # BookingItem doesn't have quantity field
+                    'time': '',  # BookingItem doesn't have time field
+                    'notes': item.uno or ''
+                })
         
-        return JsonResponse({'success': True, 'data': prescription_items})
+        # Combine all items (prescription first, then therapy)
+        all_items = prescription_items + therapy_items
+        
+        return JsonResponse({
+            'success': True,
+            'patient_info': patient_info,
+            'items': all_items,
+            'prescription_items': prescription_items,
+            'therapy_items': therapy_items,
+            'counts': {
+                'total': len(all_items),
+                'prescription': len(prescription_items),
+                'therapy': len(therapy_items)
+            }
+        })
     
     except Exception as e:
-        return JsonResponse({'error': str(e)}, status=500)
+        import traceback
+        return JsonResponse({'error': str(e), 'traceback': traceback.format_exc()}, status=500)
+
+
+@csrf_exempt
+@require_http_methods(["GET"])
+def get_prescription_change_log_api(request):
+    """
+    API endpoint to get change log for a patient's prescription.
+    Shows what changed from what (before_values vs after_values).
+    """
+    try:
+        patient_id = request.GET.get('patient_id')
+        date = request.GET.get('date')
+        
+        if not patient_id or not date:
+            return JsonResponse({'error': 'patient_id and date are required'}, status=400)
+        
+        filter_date = parse_date(date)
+        if not filter_date:
+            return JsonResponse({'error': 'Invalid date format'}, status=400)
+        
+        # Get all change logs for this patient and date
+        change_logs = PrescriptionChangeLog.objects.filter(
+            patient_id=patient_id,
+            prescription_date=filter_date
+        ).select_related('changed_by').order_by('-timestamp')
+        
+        logs_data = []
+        for log in change_logs:
+            # Format before_values and after_values for display
+            before_values = log.before_values or {}
+            after_values = log.after_values or {}
+            
+            # Build change description
+            changes = []
+            all_keys = set(list(before_values.keys()) + list(after_values.keys()))
+            
+            for key in all_keys:
+                before_val = before_values.get(key, 'N/A')
+                after_val = after_values.get(key, 'N/A')
+                
+                if before_val != after_val:
+                    changes.append({
+                        'field': key.replace('_', ' ').title(),
+                        'before': before_val,
+                        'after': after_val
+                    })
+            
+            logs_data.append({
+                'id': log.id,
+                'action': log.action,
+                'action_display': dict(log.ACTION_CHOICES).get(log.action, log.action),
+                'changed_by': log.changed_by.get_full_name() if log.changed_by and hasattr(log.changed_by, 'get_full_name') else (log.changed_by.username if log.changed_by else 'Unknown'),
+                'timestamp': log.timestamp.isoformat(),
+                'description': log.description or '',
+                'before_values': before_values,
+                'after_values': after_values,
+                'changes': changes  # Formatted list of what changed
+            })
+        
+        return JsonResponse({
+            'success': True,
+            'data': logs_data,
+            'count': len(logs_data)
+        })
+    
+    except Exception as e:
+        import traceback
+        return JsonResponse({'error': str(e), 'traceback': traceback.format_exc()}, status=500)

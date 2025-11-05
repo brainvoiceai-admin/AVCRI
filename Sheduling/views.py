@@ -394,6 +394,7 @@ def therapy_entry(request):
                 # capture old state
                 old_name = allocation.therapy_name
                 old_slot_id = getattr(allocation.timeslot, 'id', None)
+                old_from_date = allocation.from_date
                 old_to_date = allocation.to_date
 
                 # optional timeslot update ("HH:MM" or slot_number)
@@ -429,11 +430,74 @@ def therapy_entry(request):
                 if new_timeslot is not None:
                     allocation.timeslot = new_timeslot
 
-                # date extension (only create draft bookings for new dates)
-                extend_to = parse_date(payload.get('to_date') or '') if payload.get('to_date') else None
-                if extend_to and extend_to > allocation.to_date:
-                    allocation.to_date = extend_to
+                # Handle date range changes (not just extensions)
+                new_from_date = parse_date(payload.get('from_date') or '') if payload.get('from_date') else None
+                new_to_date = parse_date(payload.get('to_date') or '') if payload.get('to_date') else None
+                dates_changed = False
+                
+                if new_from_date and new_from_date != allocation.from_date:
+                    allocation.from_date = new_from_date
+                    dates_changed = True
+                
+                if new_to_date:
+                    if new_to_date != allocation.to_date:
+                        dates_changed = True
+                    allocation.to_date = new_to_date
                     allocation.days = (allocation.to_date - allocation.from_date).days + 1
+
+                # Delete bookings outside the new date range if dates changed
+                if dates_changed:
+                    # Get bookings that will be deleted
+                    bookings_to_delete = Booking.objects.filter(
+                        allocation=allocation
+                    ).exclude(
+                        date__gte=allocation.from_date,
+                        date__lte=allocation.to_date
+                    )
+                    
+                    # Cancel associated TherapistBooking and RoomBooking before deleting
+                    if bookings_to_delete.exists():
+                        try:
+                            from Patient.models import TherapistBooking as TB, RoomBooking as RB
+                            deleted_dates = list(bookings_to_delete.values_list('date', flat=True).distinct())
+                            deleted_booking_ids = list(bookings_to_delete.values_list('id', flat=True))
+                            
+                            # Cancel TherapistBooking for deleted dates
+                            TB.objects.filter(
+                                visit=allocation,
+                                date__in=deleted_dates,
+                                status__in=['BOOKED','scheduled']
+                            ).update(status='CANCELLED')
+                            TB.objects.filter(
+                                date__in=deleted_dates,
+                                patient_id=allocation.patient.id,
+                                status__in=['BOOKED','scheduled'],
+                                visit__isnull=True
+                            ).update(status='CANCELLED')
+                            
+                            # Cancel RoomBooking for deleted dates
+                            RB.objects.filter(
+                                therapy=allocation,
+                                date__in=deleted_dates,
+                                status__in=['BOOKED','scheduled']
+                            ).update(status='CANCELLED')
+                            RB.objects.filter(
+                                visit_id__in=deleted_booking_ids,
+                                status__in=['BOOKED','scheduled']
+                            ).update(status='CANCELLED')
+                            RB.objects.filter(
+                                date__in=deleted_dates,
+                                patient_id=allocation.patient.id,
+                                status__in=['BOOKED','scheduled'],
+                                therapy__isnull=True,
+                                visit__isnull=True
+                            ).update(status='CANCELLED')
+                        except Exception as e:
+                            print(f"Error canceling bookings for deleted dates: {e}")
+                            pass
+                    
+                    # Now delete the bookings
+                    bookings_to_delete.delete()
 
                 allocation.save()
 
@@ -450,43 +514,193 @@ def therapy_entry(request):
 
                 failed_reasons = []
                 any_success = False
+                date_change_success = False
+                date_change_failed_reasons = []
 
+                # Process re-allocation for dates where name/slot changed
                 if (name_changed or slot_changed) and FinalScheduleRun and expand_therapies_for_visit:
-                    for d in daterange(allocation.from_date, min(allocation.to_date, old_to_date)):
+                    # Process ALL dates in the NEW date range (not just old range)
+                    for d in daterange(allocation.from_date, allocation.to_date):
                         # If final schedule not run for this date: keep draft and skip immediate allocation
                         if not FinalScheduleRun.objects.filter(run_date=d).exists():
                             try:
                                 day_bookings = Booking.objects.filter(allocation=allocation, date=d)
                                 # release therapist assignments for those bookings
                                 BookingAssignment.objects.filter(booking__in=day_bookings).update(status='released')
+                                # cancel external TherapistBooking/RoomBooking to free them up
+                                from Patient.models import TherapistBooking as TB, RoomBooking as RB
+                                day_timeslot = allocation.timeslot
+                                if day_timeslot:
+                                    # Cancel TherapistBooking
+                                    TB.objects.filter(
+                                        visit=allocation,
+                                        date=d,
+                                        time_slot=day_timeslot,
+                                        status__in=['BOOKED','scheduled']
+                                    ).update(status='CANCELLED')
+                                    TB.objects.filter(
+                                        date=d,
+                                        time_slot=day_timeslot,
+                                        patient_id=allocation.patient.id,
+                                        status__in=['BOOKED','scheduled'],
+                                        visit__isnull=True
+                                    ).update(status='CANCELLED')
+                                    # Cancel RoomBooking
+                                    RB.objects.filter(
+                                        therapy=allocation,
+                                        date=d,
+                                        time_slot=day_timeslot,
+                                        status__in=['BOOKED','scheduled']
+                                    ).update(status='CANCELLED')
+                                    for booking in day_bookings:
+                                        RB.objects.filter(
+                                            visit=booking,
+                                            date=d,
+                                            time_slot=day_timeslot,
+                                            status__in=['BOOKED','scheduled']
+                                        ).update(status='CANCELLED')
+                                    RB.objects.filter(
+                                        date=d,
+                                        time_slot=day_timeslot,
+                                        patient_id=allocation.patient.id,
+                                        status__in=['BOOKED','scheduled'],
+                                        therapy__isnull=True,
+                                        visit__isnull=True
+                                    ).update(status='CANCELLED')
+                                else:
+                                    TB.objects.filter(visit=allocation, date=d, status__in=['BOOKED','scheduled']).update(status='CANCELLED')
+                                    RB.objects.filter(therapy=allocation, date=d, status__in=['BOOKED','scheduled']).update(status='CANCELLED')
                                 # put bookings back to draft, clear room and update to new timeslot
                                 day_bookings.update(status='draft', timeslot=allocation.timeslot, room=None)
                                 BookingItem.objects.filter(booking__in=day_bookings).update(status='draft')
-                            except Exception:
+                            except Exception as e:
+                                print(f"Error updating draft bookings for date {d}: {e}")
                                 pass
                             continue
 
-                        # Release previous assignments/resources for this date to avoid conflicts
+                        # Release previous assignments/resources for this date and create fresh bookings
                         try:
                             day_bookings = Booking.objects.filter(allocation=allocation, date=d)
                             # release therapist assignments for those bookings
                             BookingAssignment.objects.filter(booking__in=day_bookings).update(status='released')
                             # cancel external TherapistBooking/RoomBooking
                             from Patient.models import TherapistBooking as TB, RoomBooking as RB
-                            TB.objects.filter(date=d, patient_id=allocation.patient.id, status__in=['BOOKED','scheduled']).update(status='CANCELLED')
-                            RB.objects.filter(date=d, patient_id=allocation.patient.id, status__in=['BOOKED','scheduled']).update(status='CANCELLED')
-                            # delete old bookings so they don't appear in scheduled section
+                            # Get the timeslot for this date
+                            day_timeslot = allocation.timeslot
+                            if day_timeslot:
+                                # Cancel TherapistBooking: filter by visit (TherapyAllocation FK) or patient_id + date + timeslot
+                                TB.objects.filter(
+                                    visit=allocation,
+                                    date=d,
+                                    time_slot=day_timeslot,
+                                    status__in=['BOOKED','scheduled']
+                                ).update(status='CANCELLED')
+                                # Also cancel by patient_id if visit FK is not set
+                                TB.objects.filter(
+                                    date=d,
+                                    time_slot=day_timeslot,
+                                    patient_id=allocation.patient.id,
+                                    status__in=['BOOKED','scheduled'],
+                                    visit__isnull=True
+                                ).update(status='CANCELLED')
+                                
+                                # Cancel RoomBooking: filter by therapy (TherapyAllocation FK) or visit (Booking FK) or patient_id
+                                # First via therapy FK
+                                RB.objects.filter(
+                                    therapy=allocation,
+                                    date=d,
+                                    time_slot=day_timeslot,
+                                    status__in=['BOOKED','scheduled']
+                                ).update(status='CANCELLED')
+                                # Then via visit FK (Booking)
+                                for booking in day_bookings:
+                                    RB.objects.filter(
+                                        visit=booking,
+                                        date=d,
+                                        time_slot=day_timeslot,
+                                        status__in=['BOOKED','scheduled']
+                                    ).update(status='CANCELLED')
+                                # Also cancel by patient_id if neither FK is set
+                                RB.objects.filter(
+                                    date=d,
+                                    time_slot=day_timeslot,
+                                    patient_id=allocation.patient.id,
+                                    status__in=['BOOKED','scheduled'],
+                                    therapy__isnull=True,
+                                    visit__isnull=True
+                                ).update(status='CANCELLED')
+                            else:
+                                # If no timeslot, cancel all for this date and allocation
+                                TB.objects.filter(
+                                    visit=allocation,
+                                    date=d,
+                                    status__in=['BOOKED','scheduled']
+                                ).update(status='CANCELLED')
+                                RB.objects.filter(
+                                    therapy=allocation,
+                                    date=d,
+                                    status__in=['BOOKED','scheduled']
+                                ).update(status='CANCELLED')
+                            
+                            # Delete ALL old bookings for this date (they're for the old therapy)
+                            # Ensure we delete all to avoid duplicates
+                            booking_ids_to_delete = list(day_bookings.values_list('id', flat=True))
                             day_bookings.delete()
-                        except Exception:
+                            
+                            # Double-check: Ensure no bookings exist for this date (safety check)
+                            remaining_bookings = Booking.objects.filter(allocation=allocation, date=d)
+                            if remaining_bookings.exists():
+                                print(f"Warning: Found {remaining_bookings.count()} remaining bookings for date {d}, deleting...")
+                                remaining_bookings.delete()
+                            
+                            # Create new booking with updated therapy details (only one per date)
+                            new_booking = Booking.objects.create(
+                                allocation=allocation,
+                                date=d,
+                                timeslot=allocation.timeslot,
+                                room=None,
+                                status='draft'
+                            )
+                            
+                            # Create BookingItems from updated allocation.items_groups
+                            items_groups = allocation.items_groups or []
+                            for grp in items_groups:
+                                grp_dosage = grp.get('dosage', '')
+                                grp_uno = grp.get('uno', '')
+                                for it in grp.get('items', []):
+                                    BookingItem.objects.create(
+                                        booking=new_booking,
+                                        item_code=it.get('item_code') or it.get('id') or it.get('item_name', ''),
+                                        item_name=it.get('item_name') or it.get('text') or '',
+                                        dosage=it.get('dosage') or grp_dosage or '',
+                                        uno=it.get('uno') or grp_uno or '',
+                                        status='draft'
+                                    )
+                        except Exception as e:
+                            print(f"Error releasing resources and creating new bookings for date {d}: {e}")
+                            import traceback
+                            traceback.print_exc()
                             pass
 
-                        # Attempt re-allocation for this date
+                        # Attempt re-allocation for this date with fresh bookings
                         try:
+                            print(f"Running algorithm for allocation {allocation.id}, date {d} (name/slot changed, FinalScheduleRun exists)")
                             tasks = expand_therapies_for_visit(allocation.id, d.strftime('%Y-%m-%d'), create_bookings=True)
-                            if isinstance(tasks, list) and any(t.get('status') == 'BOOKED' for t in tasks):
-                                any_success = True
-                                Booking.objects.filter(allocation=allocation, date=d).update(status='scheduled')
-                                BookingItem.objects.filter(booking__allocation=allocation, booking__date=d).update(status='scheduled')
+                            print(f"Algorithm returned: {tasks}")
+                            # Only consider successful if ALL tasks are BOOKED (no FAILED tasks)
+                            if isinstance(tasks, list):
+                                booked_tasks = [t for t in tasks if t.get('status') == 'BOOKED']
+                                failed_tasks = [t for t in tasks if t.get('status') == 'FAILED']
+                                if booked_tasks and not failed_tasks:
+                                    any_success = True
+                                    Booking.objects.filter(allocation=allocation, date=d).update(status='scheduled')
+                                    BookingItem.objects.filter(booking__allocation=allocation, booking__date=d).update(status='scheduled')
+                                elif failed_tasks:
+                                    # If any failed, mark as failed
+                                    reason = failed_tasks[0].get('reason', 'unknown')
+                                    print(f"Allocation had failures for date {d}: {reason}")
+                                    Booking.objects.filter(allocation=allocation, date=d).update(status='failed')
+                                    BookingItem.objects.filter(booking__allocation=allocation, booking__date=d).update(status='failed')
                             else:
                                 reason = None
                                 if isinstance(tasks, list):
@@ -504,12 +718,169 @@ def therapy_entry(request):
                         allocation.status = 'failed'
                     allocation.save(update_fields=['status'])
 
-                # create draft bookings for extended dates (no auto-scheduling)
-                if extend_to and extend_to > old_to_date:
-                    new_start = old_to_date + timedelta(days=1)
-                    for d in daterange(new_start, extend_to):
+                # Create draft bookings for any dates in the new range that don't have bookings
+                if dates_changed or (name_changed or slot_changed):
+                    for d in daterange(allocation.from_date, allocation.to_date):
                         if not Booking.objects.filter(allocation=allocation, date=d).exists():
-                            Booking.objects.create(allocation=allocation, date=d, timeslot=allocation.timeslot, room=allocation.room, status='draft')
+                            booking = Booking.objects.create(
+                                allocation=allocation, 
+                                date=d, 
+                                timeslot=allocation.timeslot, 
+                                room=None, 
+                                status='draft'
+                            )
+                            # Create BookingItems from allocation.items_groups
+                            items_groups = allocation.items_groups or []
+                            for grp in items_groups:
+                                grp_dosage = grp.get('dosage', '')
+                                grp_uno = grp.get('uno', '')
+                                for it in grp.get('items', []):
+                                    BookingItem.objects.create(
+                                        booking=booking,
+                                        item_code=it.get('item_code') or it.get('id') or it.get('item_name', ''),
+                                        item_name=it.get('item_name') or it.get('text') or '',
+                                        dosage=it.get('dosage') or grp_dosage or '',
+                                        uno=it.get('uno') or grp_uno or '',
+                                        status='draft'
+                                    )
+                
+                # Auto-schedule new dates if FinalScheduleRun exists for them (even if name/slot didn't change)
+                if dates_changed and FinalScheduleRun and expand_therapies_for_visit:
+                    for d in daterange(allocation.from_date, allocation.to_date):
+                        # Check if Final Schedule has already run for this date
+                        if FinalScheduleRun.objects.filter(run_date=d).exists():
+                            # Check if booking exists (create if it doesn't)
+                            booking = Booking.objects.filter(allocation=allocation, date=d).first()
+                            if not booking:
+                                # Create booking if it doesn't exist
+                                booking = Booking.objects.create(
+                                    allocation=allocation,
+                                    date=d,
+                                    timeslot=allocation.timeslot,
+                                    room=None,
+                                    status='draft'
+                                )
+                                # Create BookingItems from allocation.items_groups
+                                items_groups = allocation.items_groups or []
+                                for grp in items_groups:
+                                    grp_dosage = grp.get('dosage', '')
+                                    grp_uno = grp.get('uno', '')
+                                    for it in grp.get('items', []):
+                                        BookingItem.objects.create(
+                                            booking=booking,
+                                            item_code=it.get('item_code') or it.get('id') or it.get('item_name', ''),
+                                            item_name=it.get('item_name') or it.get('text') or '',
+                                            dosage=it.get('dosage') or grp_dosage or '',
+                                            uno=it.get('uno') or grp_uno or '',
+                                            status='draft'
+                                        )
+                            
+                            # Since we're updating the therapy, delete old booking and create fresh one
+                            # Save booking details before deletion
+                            old_booking_timeslot = booking.timeslot
+                            old_booking_id = booking.id
+                            
+                            # Release assignments and cancel external bookings
+                            BookingAssignment.objects.filter(booking=booking).update(status='released')
+                            from Patient.models import TherapistBooking as TB, RoomBooking as RB
+                            if old_booking_timeslot:
+                                TB.objects.filter(
+                                    visit=allocation,
+                                    date=d,
+                                    time_slot=old_booking_timeslot,
+                                    status__in=['BOOKED','scheduled']
+                                ).update(status='CANCELLED')
+                                RB.objects.filter(
+                                    therapy=allocation,
+                                    date=d,
+                                    time_slot=old_booking_timeslot,
+                                    status__in=['BOOKED','scheduled']
+                                ).update(status='CANCELLED')
+                                RB.objects.filter(
+                                    visit_id=old_booking_id,
+                                    date=d,
+                                    time_slot=old_booking_timeslot,
+                                    status__in=['BOOKED','scheduled']
+                                ).update(status='CANCELLED')
+                            
+                            # Delete ALL old bookings for this date (safety: delete all, not just one)
+                            Booking.objects.filter(allocation=allocation, date=d).delete()
+                            
+                            # Double-check: Ensure no bookings exist for this date
+                            remaining_bookings = Booking.objects.filter(allocation=allocation, date=d)
+                            if remaining_bookings.exists():
+                                print(f"Warning: Found {remaining_bookings.count()} remaining bookings for date {d}, deleting...")
+                                remaining_bookings.delete()
+                            
+                            # Create fresh booking with updated therapy details (only one per date)
+                            new_booking = Booking.objects.create(
+                                allocation=allocation,
+                                date=d,
+                                timeslot=allocation.timeslot,
+                                room=None,
+                                status='draft'
+                            )
+                            
+                            # Create BookingItems from updated allocation.items_groups
+                            items_groups = allocation.items_groups or []
+                            for grp in items_groups:
+                                grp_dosage = grp.get('dosage', '')
+                                grp_uno = grp.get('uno', '')
+                                for it in grp.get('items', []):
+                                    BookingItem.objects.create(
+                                        booking=new_booking,
+                                        item_code=it.get('item_code') or it.get('id') or it.get('item_name', ''),
+                                        item_name=it.get('item_name') or it.get('text') or '',
+                                        dosage=it.get('dosage') or grp_dosage or '',
+                                        uno=it.get('uno') or grp_uno or '',
+                                        status='draft'
+                                    )
+                            
+                            # Now run algorithm with the fresh booking
+                            try:
+                                print(f"Running algorithm for allocation {allocation.id}, date {d} (FinalScheduleRun exists)")
+                                # Run algorithm for this date
+                                tasks = expand_therapies_for_visit(allocation.id, d.strftime('%Y-%m-%d'), create_bookings=True)
+                                print(f"Algorithm returned: {tasks}")
+                                # Only consider successful if ALL tasks are BOOKED (no FAILED tasks)
+                                if isinstance(tasks, list):
+                                    booked_tasks = [t for t in tasks if t.get('status') == 'BOOKED']
+                                    failed_tasks = [t for t in tasks if t.get('status') == 'FAILED']
+                                    if booked_tasks and not failed_tasks:
+                                        date_change_success = True
+                                        Booking.objects.filter(allocation=allocation, date=d).update(status='scheduled')
+                                        BookingItem.objects.filter(booking__allocation=allocation, booking__date=d).update(status='scheduled')
+                                        print(f"Successfully allocated for date {d}")
+                                    else:
+                                        reason = None
+                                        if failed_tasks:
+                                            reason = failed_tasks[0].get('reason', 'unknown')
+                                        elif not booked_tasks:
+                                            reason = 'allocation_failed'
+                                        print(f"Allocation failed for date {d}: {reason}")
+                                        date_change_failed_reasons.append({'date': d.isoformat(), 'reason': reason or 'unknown'})
+                                        Booking.objects.filter(allocation=allocation, date=d).update(status='failed')
+                                        BookingItem.objects.filter(booking__allocation=allocation, booking__date=d).update(status='failed')
+                                elif isinstance(tasks, dict):
+                                    reason = tasks.get('error', 'unknown')
+                                    print(f"Allocation failed for date {d}: {reason}")
+                                    date_change_failed_reasons.append({'date': d.isoformat(), 'reason': reason})
+                                    Booking.objects.filter(allocation=allocation, date=d).update(status='failed')
+                                    BookingItem.objects.filter(booking__allocation=allocation, booking__date=d).update(status='failed')
+                            except Exception as _e:
+                                print(f"Exception running algorithm for date {d}: {_e}")
+                                import traceback
+                                traceback.print_exc()
+                                date_change_failed_reasons.append({'date': d.isoformat(), 'reason': str(_e)})
+                                Booking.objects.filter(allocation=allocation, date=d).update(status='failed')
+                    
+                    # Update allocation status if any dates were processed
+                    if date_change_success or date_change_failed_reasons:
+                        if date_change_success:
+                            allocation.status = 'allocated'
+                        elif date_change_failed_reasons and not date_change_success:
+                            allocation.status = 'failed'
+                        allocation.save(update_fields=['status'])
                 
                 # Log audit event
                 log_therapy_audit(
@@ -994,6 +1365,7 @@ def therapy_entry(request):
             
             # Count statuses (map 'scheduled' to 'allocated' for consistency)
             if booking_status == 'scheduled':
+                # Count as both 'allocated' (for display) and 'scheduled' (for detailed counts)
                 status_counts['allocated'] += 1
                 status_counts['scheduled'] += 1
             elif booking_status in status_counts:
@@ -1033,9 +1405,12 @@ def therapy_entry(request):
             })
         
         # Build status summary (only include non-zero counts)
+        # Note: 'scheduled' bookings are counted in both 'allocated' and 'scheduled' in status_counts.
+        # For summary, we use 'allocated' count (which includes scheduled bookings) to avoid double-counting.
         status_summary = {}
-        if status_counts['allocated'] > 0 or status_counts['scheduled'] > 0:
-            status_summary['allocated'] = status_counts['allocated'] + status_counts['scheduled']
+        # Use 'allocated' count which already includes all scheduled bookings
+        if status_counts['allocated'] > 0:
+            status_summary['allocated'] = status_counts['allocated']
         if status_counts['failed'] > 0:
             status_summary['failed'] = status_counts['failed']
         if status_counts['cancelled'] > 0:
@@ -1072,9 +1447,12 @@ def therapy_entry(request):
                         status_counts[booking_status] += 1
                 
                 # Build status summary (only include non-zero counts)
+                # Note: 'scheduled' bookings are counted in both 'allocated' and 'scheduled' in status_counts.
+                # For summary, we use 'allocated' count (which includes scheduled bookings) to avoid double-counting.
                 status_summary = {}
-                if status_counts['allocated'] > 0 or status_counts['scheduled'] > 0:
-                    status_summary['allocated'] = status_counts['allocated'] + status_counts['scheduled']
+                # Use 'allocated' count which already includes all scheduled bookings
+                if status_counts['allocated'] > 0:
+                    status_summary['allocated'] = status_counts['allocated']
                 if status_counts['failed'] > 0:
                     status_summary['failed'] = status_counts['failed']
                 if status_counts['cancelled'] > 0:

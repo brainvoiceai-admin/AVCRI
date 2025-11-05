@@ -28,6 +28,7 @@ urlpatterns = [
     path('procurement/api/mark-dispatched/', procurement_views.mark_as_dispatched_api, name='mark_as_dispatched_api'),
     path('procurement/api/prescription-details/', procurement_views.get_prescription_details_api, name='get_procurement_prescription_details_api'),
     path('procurement/api/prescription-items/', procurement_views.get_prescription_details_api, name='get_procurement_prescription_items_api'),
+    path('procurement/api/change-log/', procurement_views.get_prescription_change_log_api, name='get_procurement_change_log_api'),
     
     # Patient Dashboard URLs (more specific patterns first)
     path('patient/api/patient-data/', patient_views.get_patient_data_api, name='get_patient_data_api'),
