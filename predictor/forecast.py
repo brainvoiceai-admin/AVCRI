@@ -5,7 +5,9 @@ import pandas as pd
 from django.db import transaction, connections
 from django.utils import timezone
 import logging
-
+import numpy as _np
+if not hasattr(_np, "float_"):
+    _np.float_ = _np.float64
 # Prophet import - ensure 'prophet' is installed in your env
 from prophet import Prophet
 
