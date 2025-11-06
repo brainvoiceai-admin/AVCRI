@@ -1764,9 +1764,18 @@ def prescription_entry_page(request):
                 }
                 
                 # Update fields
+                items_changed = False
                 if prescription_name:
                     allocation.prescription_name = prescription_name
                 if items_groups:
+                    # Compare old and new items_groups to detect changes
+                    old_items_groups = old_data.get('items_groups', [])
+                    import json
+                    # Normalize for comparison
+                    old_normalized = json.dumps(old_items_groups, sort_keys=True) if old_items_groups else ''
+                    new_normalized = json.dumps(items_groups, sort_keys=True) if items_groups else ''
+                    if old_normalized != new_normalized:
+                        items_changed = True
                     allocation.items_groups = items_groups
                 if procured_from is not None:
                     allocation.procured_from = procured_from
@@ -1790,6 +1799,31 @@ def prescription_entry_page(request):
                         'notes': allocation.notes
                     }
                 })
+                
+                # Create PrescriptionChangeLog entry for item updates
+                if items_changed:
+                    from .models import PrescriptionChangeLog
+                    from django.utils import timezone as tz
+                    from datetime import timedelta
+                    
+                    # Get all dates in the allocation range
+                    date_range = []
+                    current_date = allocation.from_date
+                    while current_date <= allocation.to_date:
+                        date_range.append(current_date)
+                        current_date += timedelta(days=1)
+                    
+                    # Create change log entries for each date in the range
+                    for date in date_range:
+                        PrescriptionChangeLog.objects.create(
+                            patient=allocation.patient,
+                            prescription_date=date,
+                            action='update',
+                            changed_by=request.user if request.user.is_authenticated else None,
+                            before_values={'items_groups': old_data.get('items_groups', [])},
+                            after_values={'items_groups': items_groups},
+                            description=f'Prescription items updated for {allocation.prescription_name}'
+                        )
                 
                 return JsonResponse({'status': 'ok', 'message': 'Prescription updated successfully'})
             except PrescriptionAllocation.DoesNotExist:
@@ -2152,18 +2186,46 @@ def prescription_entry_page(request):
             from_date = payload.get('from_date')
             to_date = payload.get('to_date')
             days = payload.get('days', 1)
-            
+
             if not allocation_id:
                 return JsonResponse({'error': 'missing_allocation_id'}, status=400)
-            
+
             try:
                 allocation = PrescriptionAllocation.objects.get(id=allocation_id)
-                
+
+                # Capture old state for change log
+                old_data = {
+                    'prescription_name': allocation.prescription_name,
+                    'items_groups': allocation.items_groups,
+                    'procured_from': allocation.procured_from,
+                    'from_date': allocation.from_date.isoformat() if allocation.from_date else None,
+                    'to_date': allocation.to_date.isoformat() if allocation.to_date else None,
+                    'days': allocation.days,
+                    'notes': allocation.notes
+                }
+
+                # Normalize existing items_groups to list for comparison
+                import json as _json
+                old_items_groups = allocation.items_groups
+                if isinstance(old_items_groups, str):
+                    try:
+                        old_items_groups = _json.loads(old_items_groups) if old_items_groups else []
+                    except Exception:
+                        old_items_groups = []
+
                 # Update fields
+                items_changed = False
                 if prescription_name:
                     allocation.prescription_name = prescription_name
-                if items_groups:
-                    allocation.items_groups = json.dumps(items_groups)
+                if items_groups is not None and items_groups != []:
+                    # Compare old and new groups (normalize for comparison)
+                    try:
+                        old_norm = _json.dumps(old_items_groups, sort_keys=True) if old_items_groups else ''
+                        new_norm = _json.dumps(items_groups, sort_keys=True) if items_groups else ''
+                        items_changed = (old_norm != new_norm)
+                    except Exception:
+                        items_changed = True
+                    allocation.items_groups = items_groups  # store as JSON (list), not string
                 if procured_from:
                     allocation.procured_from = procured_from
                 if from_date:
@@ -2172,20 +2234,48 @@ def prescription_entry_page(request):
                     allocation.to_date = parse_date(to_date)
                 if days:
                     allocation.days = days
-                
+
                 allocation.save()
-                
-                # Create notification - COMMENTED OUT TEMPORARILY DUE TO NETWORK ERRORS
-                # create_prescription_notification(allocation, 'prescription_updated', request.user)
-                
+
                 # Log audit
                 log_prescription_audit(request.user, 'update_prescription', 'PrescriptionAllocation', str(allocation.id), {
-                    'prescription_name': prescription_name,
-                    'from_date': from_date,
-                    'to_date': to_date,
-                    'days': days
+                    'old_data': old_data,
+                    'new_data': {
+                        'prescription_name': allocation.prescription_name,
+                        'items_groups': allocation.items_groups,
+                        'procured_from': allocation.procured_from,
+                        'from_date': allocation.from_date.isoformat() if allocation.from_date else None,
+                        'to_date': allocation.to_date.isoformat() if allocation.to_date else None,
+                        'days': allocation.days,
+                        'notes': allocation.notes
+                    }
                 })
-                
+
+                # Create PrescriptionChangeLog entry for item updates (cover each date in range)
+                if items_changed:
+                    from .models import PrescriptionChangeLog
+                    from datetime import timedelta
+
+                    # Build date range
+                    date_range = []
+                    current_date = allocation.from_date
+                    while current_date and allocation.to_date and current_date <= allocation.to_date:
+                        date_range.append(current_date)
+                        current_date += timedelta(days=1)
+                    if not date_range and allocation.from_date:
+                        date_range = [allocation.from_date]
+
+                    for d in date_range:
+                        PrescriptionChangeLog.objects.create(
+                            patient=allocation.patient,
+                            prescription_date=d,
+                            action='update',
+                            changed_by=request.user if request.user.is_authenticated else None,
+                            before_values={'items_groups': old_items_groups},
+                            after_values={'items_groups': allocation.items_groups},
+                            description=f'Prescription items updated for {allocation.prescription_name}'
+                        )
+
                 return JsonResponse({'status': 'ok', 'message': 'Prescription updated successfully'})
             except PrescriptionAllocation.DoesNotExist:
                 return JsonResponse({'error': 'allocation_not_found'}, status=404)

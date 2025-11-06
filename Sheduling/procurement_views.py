@@ -241,88 +241,262 @@ def get_prescription_details_api(request):
         }
         
         # ===== PRESCRIPTION ITEMS =====
-        prescription_items = []
+        prescription_groups = []  # List of groups with items
+        
+        # Get all PrescriptionAllocation records for this patient that cover the date
+        allocations = PrescriptionAllocation.objects.filter(
+            patient_id=patient_id,
+            from_date__lte=filter_date,
+            to_date__gte=filter_date
+        ).order_by('from_date', 'id')
+        
+        prescription_is_cancelled = False
+        prescription_status = 'draft'
+        
+        # Get prescription for doctor name
         prescription = PrescriptionScheduling.objects.filter(
             patient_id=patient_id,
             prescription_date=filter_date
         ).select_related('doctor').first()
         
-        if prescription:
-            # Set doctor name from prescription
-            if prescription.doctor:
-                patient_info['doctor_name'] = prescription.doctor.get_full_name() if hasattr(prescription.doctor, 'get_full_name') else (prescription.doctor.username if prescription.doctor else None)
+        if prescription and prescription.doctor:
+            patient_info['doctor_name'] = prescription.doctor.get_full_name() if hasattr(prescription.doctor, 'get_full_name') else (prescription.doctor.username if prescription.doctor else None)
+        
+        # Process all allocations and use items_groups exactly as stored
+        for allocation in allocations:
+            # Check if allocation is cancelled
+            if allocation.status == 'cancelled':
+                prescription_is_cancelled = True
+            if not prescription_status or prescription_status == 'draft':
+                prescription_status = allocation.status
             
-            # Primary: items entered as PrescriptionItem
-            items_qs = PrescriptionItem.objects.filter(prescription_scheduling=prescription)
-            for item in items_qs:
-                prescription_items.append({
-                    'id': f'prescription_{item.id}',
-                    'type': 'prescription',
-                    'item_name': item.item_name,
-                    'dose': item.dose or '',
-                    'quantity': item.quantity or '',
-                    'time': item.time or '',
-                    'notes': item.notes or ''
-                })
-            
-            # Fallback: derive from PrescriptionAllocation.items_groups when no rows exist
-            if not prescription_items:
-                allocation = PrescriptionAllocation.objects.filter(
-                    patient_id=patient_id,
-                    from_date__lte=filter_date,
-                    to_date__gte=filter_date
-                ).first()
-                if allocation and allocation.items_groups:
-                    raw_groups = allocation.items_groups
-                    groups = []
-                    if isinstance(raw_groups, str):
-                        try:
-                            groups = json.loads(raw_groups)
-                        except Exception:
-                            groups = []
-                    elif isinstance(raw_groups, list):
-                        groups = raw_groups
-                    elif isinstance(raw_groups, dict):
-                        groups = [raw_groups]
+            # Use the original items_groups structure from allocation - exactly as stored
+            if allocation.items_groups:
+                raw_groups = allocation.items_groups
+                groups = []
+                if isinstance(raw_groups, str):
+                    try:
+                        groups = json.loads(raw_groups)
+                    except Exception:
+                        groups = []
+                elif isinstance(raw_groups, list):
+                    groups = raw_groups
+                elif isinstance(raw_groups, dict):
+                    groups = [raw_groups]
+                
+                # Use groups exactly as they are in items_groups - no matching with PrescriptionItem
+                for group_idx, group in enumerate(groups):
+                    items = group.get('items', []) if isinstance(group, dict) else []
+                    group_items = []
                     
-                    for group in groups:
-                        items = group.get('items', []) if isinstance(group, dict) else []
-                        for it in items:
-                            prescription_items.append({
-                                'id': f'prescription_alloc_{it.get("id", "")}',
+                    # Convert items from items_groups to the format expected by frontend
+                    for it in items:
+                        # Only add non-empty items
+                        if it and (it.get('item_name') or it.get('id')):
+                            group_items.append({
+                                'id': f'prescription_alloc_{allocation.id}_{it.get("id", "")}',
                                 'type': 'prescription',
                                 'item_name': it.get('item_name', ''),
                                 'dose': group.get('dosage', ''),
                                 'quantity': it.get('quantity', ''),
                                 'time': group.get('time', ''),
-                                'notes': group.get('uno', '')
+                                'notes': group.get('uno', ''),
+                                'status': 'active'
                             })
+                    
+                    # Add the group exactly as it appears in items_groups
+                    prescription_groups.append({
+                        'group_id': f"prescription_group_{allocation.id}_{group_idx}",
+                        'time': group.get('time', 'M'),
+                        'dose': group.get('dosage', ''),
+                        'notes': group.get('uno', ''),
+                        'items': group_items,
+                        'is_group': True
+                    })
+        
+        # If no allocations found, check for PrescriptionItem records as fallback
+        if not prescription_groups and prescription:
+            items_qs = PrescriptionItem.objects.filter(prescription_scheduling=prescription).all()
+            prescription_is_cancelled = prescription.status == 'cancelled'
+            prescription_status = prescription.status
+            
+            if items_qs.exists():
+                for item in items_qs:
+                    # Create one group per prescription item
+                    prescription_groups.append({
+                        'group_id': f"prescription_item_{item.id}",
+                        'time': item.time or '',
+                        'dose': item.dose or '',
+                        'notes': item.notes or '',
+                        'items': [{
+                            'id': f'prescription_{item.id}',
+                            'type': 'prescription',
+                            'item_name': item.item_name,
+                            'dose': item.dose or '',
+                            'quantity': item.quantity or '',
+                            'time': item.time or '',
+                            'notes': item.notes or '',
+                            'status': getattr(item, 'status', 'active') if hasattr(item, 'status') else 'active'
+                        }],
+                        'is_group': True
+                    })
+        
+        # Flatten for backward compatibility (but prefer groups)
+        prescription_items = []
+        for group in prescription_groups:
+            # Add prescription status to first item of first group
+            if prescription_items == [] and group['items']:
+                group['items'][0]['prescription_status'] = prescription_status
+                group['items'][0]['prescription_is_cancelled'] = prescription_is_cancelled
+            prescription_items.extend(group['items'])
         
         # ===== THERAPY ITEMS (BookingItem) =====
         # Get all bookings for this patient on this date
-        therapy_items = []
-        # Booking status can be: draft, scheduled, partially_cancelled, cancelled, completed
-        # Include all non-cancelled bookings (draft, scheduled, completed) to show items
+        # Include ALL bookings (including cancelled) to show all items
         bookings = Booking.objects.filter(
             allocation__patient=patient,
             date=filter_date
-        ).exclude(status='cancelled').select_related('allocation').prefetch_related('items')
+        ).select_related('allocation').prefetch_related('items').order_by('allocation__therapy_name', 'timeslot')
+        
+        # Group therapy items by allocation and items_groups structure
+        therapy_groups = {}  # Key: (allocation_id, group_index), Value: {therapy_name, dosage, items: []}
         
         for booking in bookings:
-            # BookingItem status can be: scheduled, cancelled, completed
-            # Include all non-cancelled items
-            for item in booking.items.exclude(status='cancelled'):
-                therapy_items.append({
-                    'id': f'therapy_{item.id}',
-                    'type': 'therapy',
-                    'therapy_name': booking.allocation.therapy_name if booking.allocation else '',
-                    'item_name': item.item_name,
-                    'item_code': item.item_code,
-                    'dose': item.dosage or '',
-                    'quantity': '',  # BookingItem doesn't have quantity field
-                    'time': '',  # BookingItem doesn't have time field
-                    'notes': item.uno or ''
-                })
+            if not booking.allocation:
+                continue
+                
+            allocation = booking.allocation
+            therapy_name = allocation.therapy_name
+            
+            # Get items_groups from allocation to understand the grouping structure
+            items_groups = allocation.items_groups if isinstance(allocation.items_groups, list) else []
+            
+            # Get all BookingItems for this booking (including cancelled ones)
+            booking_items = booking.items.all()
+            
+            # If we have items_groups, try to match BookingItems to groups
+            if items_groups and booking_items.exists():
+                # Create a map of item_code/item_name to BookingItem for quick lookup
+                item_map = {item.item_code: item for item in booking_items}
+                item_map.update({item.item_name: item for item in booking_items if item.item_name not in item_map})
+                
+                # Group items according to items_groups structure
+                for group_idx, group in enumerate(items_groups):
+                    group_key = (allocation.id, group_idx)
+                    dosage = group.get('dosage', '')
+                    uno = group.get('uno', '')
+                    
+                    if group_key not in therapy_groups:
+                        therapy_groups[group_key] = {
+                            'therapy_name': therapy_name,
+                            'therapy_id': allocation.id,
+                            'dosage': dosage,
+                            'uno': uno,
+                            'booking_id': booking.id,
+                            'booking_status': booking.status,
+                            'items': []
+                        }
+                    
+                    # Match items from group to BookingItems
+                    group_items = group.get('items', [])
+                    for group_item in group_items:
+                        item_code = group_item.get('item_code') or group_item.get('id') or ''
+                        item_name = group_item.get('item_name') or group_item.get('text') or ''
+                        
+                        # Find matching BookingItem
+                        booking_item = None
+                        if item_code and item_code in item_map:
+                            booking_item = item_map[item_code]
+                        elif item_name and item_name in item_map:
+                            booking_item = item_map[item_name]
+                        else:
+                            # Try to find by name match
+                            for bi in booking_items:
+                                if bi.item_name == item_name or bi.item_code == item_code:
+                                    booking_item = bi
+                                    break
+                        
+                        if booking_item:
+                            therapy_groups[group_key]['items'].append({
+                                'id': f'therapy_{booking_item.id}',
+                                'type': 'therapy',
+                                'item_name': booking_item.item_name,
+                                'item_code': booking_item.item_code,
+                                'dose': booking_item.dosage or dosage,
+                                'quantity': '',
+                                'time': '',
+                                'notes': booking_item.uno or uno,
+                                'status': booking_item.status
+                                # Note: is_cancelled removed - cancellation is at booking level, not item level
+                            })
+                        else:
+                            # Item in group but not found in BookingItems (might be removed)
+                            therapy_groups[group_key]['items'].append({
+                                'id': f'therapy_missing_{group_idx}_{len(therapy_groups[group_key]["items"])}',
+                                'type': 'therapy',
+                                'item_name': item_name,
+                                'item_code': item_code,
+                                'dose': dosage,
+                                'quantity': '',
+                                'time': '',
+                                'notes': uno,
+                                'status': 'removed',
+                                'is_cancelled': False,
+                                'is_removed': True
+                            })
+            else:
+                # Fallback: if no items_groups, show items individually grouped by booking
+                group_key = (allocation.id, booking.id)
+                if group_key not in therapy_groups:
+                    therapy_groups[group_key] = {
+                        'therapy_name': therapy_name,
+                        'therapy_id': allocation.id,
+                        'dosage': '',
+                        'uno': '',
+                        'booking_id': booking.id,
+                        'booking_status': booking.status,
+                        'items': []
+                    }
+                
+                for item in booking_items:
+                    therapy_groups[group_key]['items'].append({
+                        'id': f'therapy_{item.id}',
+                        'type': 'therapy',
+                        'item_name': item.item_name,
+                        'item_code': item.item_code,
+                        'dose': item.dosage or '',
+                        'quantity': '',
+                        'time': '',
+                        'notes': item.uno or '',
+                        'status': item.status
+                        # Note: is_cancelled removed - cancellation is at booking level, not item level
+                    })
+        
+        # Convert grouped structure to flat list for response (but keep grouping info)
+        therapy_items = []
+        for group_key, group_data in therapy_groups.items():
+            # Check if the entire booking/therapy is cancelled
+            booking_is_cancelled = group_data['booking_status'] == 'cancelled'
+            
+            # Remove individual item cancellation status - cancellation is at booking level
+            items_without_cancellation = []
+            for item in group_data['items']:
+                item_copy = item.copy()
+                item_copy.pop('is_cancelled', None)  # Remove item-level cancellation
+                items_without_cancellation.append(item_copy)
+            
+            therapy_items.append({
+                'group_id': f"therapy_group_{group_key[0]}_{group_key[1]}",
+                'therapy_name': group_data['therapy_name'],
+                'therapy_id': group_data['therapy_id'],
+                'dosage': group_data['dosage'],
+                'uno': group_data['uno'],
+                'booking_id': group_data['booking_id'],
+                'booking_status': group_data['booking_status'],
+                'booking_is_cancelled': booking_is_cancelled,
+                'items': items_without_cancellation,
+                'is_group': True
+            })
         
         # Combine all items (prescription first, then therapy)
         all_items = prescription_items + therapy_items
@@ -330,12 +504,14 @@ def get_prescription_details_api(request):
         return JsonResponse({
             'success': True,
             'patient_info': patient_info,
-            'items': all_items,
-            'prescription_items': prescription_items,
-            'therapy_items': therapy_items,
+            'items': prescription_items,  # Prescription items for backward compatibility
+            'prescription_items': prescription_items,  # Flattened for backward compatibility
+            'prescription_groups': prescription_groups,  # Grouped prescription items
+            'therapy_items': therapy_items,  # Grouped therapy items
             'counts': {
-                'total': len(all_items),
+                'total': len(prescription_items) + sum(len(g['items']) for g in therapy_items),
                 'prescription': len(prescription_items),
+                'prescription_groups': len(prescription_groups),
                 'therapy': len(therapy_items)
             }
         })
@@ -374,22 +550,66 @@ def get_prescription_change_log_api(request):
             # Format before_values and after_values for display
             before_values = log.before_values or {}
             after_values = log.after_values or {}
-            
+
             # Build change description
             changes = []
             all_keys = set(list(before_values.keys()) + list(after_values.keys()))
-            
+
+            def _safe_list(val):
+                if isinstance(val, list):
+                    return val
+                return []
+
+            def _group_diff(before_groups, after_groups):
+                diffs = []
+                bg = _safe_list(before_groups)
+                ag = _safe_list(after_groups)
+                max_len = max(len(bg), len(ag))
+                for idx in range(max_len):
+                    b = bg[idx] if idx < len(bg) else {}
+                    a = ag[idx] if idx < len(ag) else {}
+                    # Only compare dict-like groups
+                    b = b if isinstance(b, dict) else {}
+                    a = a if isinstance(a, dict) else {}
+                    group_changes = []
+                    for f in ['dosage', 'usage', 'time', 'uno']:
+                        if (b.get(f) or '') != (a.get(f) or ''):
+                            group_changes.append({
+                                'field': f,
+                                'before': b.get(f) or '',
+                                'after': a.get(f) or ''
+                            })
+                    # Compare item names
+                    b_items = [it.get('item_name','') for it in (b.get('items') or []) if isinstance(it, dict)]
+                    a_items = [it.get('item_name','') for it in (a.get('items') or []) if isinstance(it, dict)]
+                    if b_items != a_items:
+                        group_changes.append({
+                            'field': 'items',
+                            'before': b_items,
+                            'after': a_items
+                        })
+                    if group_changes:
+                        diffs.append({
+                            'group_index': idx,
+                            'changes': group_changes
+                        })
+                return diffs
+
             for key in all_keys:
                 before_val = before_values.get(key, 'N/A')
                 after_val = after_values.get(key, 'N/A')
-                
+
                 if before_val != after_val:
-                    changes.append({
+                    entry = {
                         'field': key.replace('_', ' ').title(),
                         'before': before_val,
                         'after': after_val
-                    })
-            
+                    }
+                    # Add granular diff for items_groups
+                    if key == 'items_groups':
+                        entry['items_groups_changes'] = _group_diff(before_val, after_val)
+                    changes.append(entry)
+
             logs_data.append({
                 'id': log.id,
                 'action': log.action,

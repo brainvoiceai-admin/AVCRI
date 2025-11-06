@@ -781,6 +781,9 @@
             // Load patient medicines
             console.log('Loading medicines for patient ID:', patient.patient_id, 'Date:', currentDate);
             loadPatientMedicines(patient.patient_id);
+            
+            // Auto-load change log when patient is selected
+            loadChangeLog(patient.patient_id);
         }
         
         function loadPatientMedicines(patientId) {
@@ -810,8 +813,11 @@
                             document.getElementById('pv_room').textContent = info.room_no || '-';
                         }
                         
-                        // Render medicines (includes both prescription and therapy items)
-                        renderPatientMedicines(data.items || data.data || []);
+                        // Render medicines - pass prescription groups and therapy items separately
+                        const prescriptionGroups = data.prescription_groups || [];
+                        const prescriptionItems = data.prescription_items || data.items || [];  // Fallback for backward compatibility
+                        const therapyItems = data.therapy_items || [];
+                        renderPatientMedicines(prescriptionGroups, therapyItems, prescriptionItems);
                     } else {
                         console.error('API error:', data.error);
                         showAlert('error', data.error || 'Failed to load medicine details');
@@ -825,141 +831,282 @@
                 });
         }
         
-        function renderPatientMedicines(medicines) {
+        function renderPatientMedicines(prescriptionGroups, therapyItems, prescriptionItemsFallback) {
             const pvContent = document.getElementById('pv_content');
             
             // Clear content
             pvContent.innerHTML = '';
             
-            if (!medicines || medicines.length === 0) {
+            // Handle old format if prescriptionGroups is not provided
+            if (!prescriptionGroups || prescriptionGroups.length === 0) {
+                prescriptionGroups = [];
+                // Try to create groups from fallback items
+                if (prescriptionItemsFallback && prescriptionItemsFallback.length > 0) {
+                    // Group by time and dose
+                    const groupsMap = {};
+                    prescriptionItemsFallback.forEach(medicine => {
+                        const groupKey = `${medicine.time || 'M'}_${medicine.dose || ''}`;
+                        if (!groupsMap[groupKey]) {
+                            groupsMap[groupKey] = {
+                                'group_id': `prescription_group_${groupKey}`,
+                                'time': medicine.time || 'M',
+                                'dose': medicine.dose || '',
+                                'notes': medicine.notes || '',
+                                'items': [],
+                                'is_group': true
+                            };
+                        }
+                        groupsMap[groupKey]['items'].push(medicine);
+                    });
+                    prescriptionGroups = Object.values(groupsMap);
+                }
+            }
+            
+            therapyItems = therapyItems || [];
+            
+            // Debug logging
+            console.log('Rendering prescription groups:', prescriptionGroups.length, prescriptionGroups);
+            console.log('Rendering therapy items:', therapyItems.length, therapyItems);
+            
+            if (prescriptionGroups.length === 0 && therapyItems.length === 0) {
                 pvContent.innerHTML = '<p>No medicines or therapy items for selected date.</p>';
                 return;
             }
             
-            // Separate prescription and therapy items
-            const prescriptionItems = medicines.filter(m => m.type === 'prescription' || !m.type);
-            const therapyItems = medicines.filter(m => m.type === 'therapy');
-            
-            // Render prescription items section
-            if (prescriptionItems.length > 0) {
+            // Render prescription items section - grouped like therapy items
+            if (prescriptionGroups.length > 0) {
                 const prescriptionSection = document.createElement('div');
                 prescriptionSection.className = 'items-section';
                 prescriptionSection.innerHTML = '<h3 style="margin: 0 0 15px 0; color: #333;">Prescription Items</h3>';
                 
-                // Group prescription medicines by time slot
-                const medicinesByTime = {};
-                prescriptionItems.forEach(medicine => {
-                    const timeSlot = medicine.time || 'M';
-                    if (!medicinesByTime[timeSlot]) {
-                        medicinesByTime[timeSlot] = [];
+                // Check if entire prescription is cancelled (from first group's first item)
+                const firstGroup = prescriptionGroups[0];
+                const prescriptionIsCancelled = firstGroup?.items?.[0]?.prescription_is_cancelled || firstGroup?.items?.[0]?.prescription_status === 'cancelled';
+                
+                if (prescriptionIsCancelled) {
+                    prescriptionSection.style.border = '2px solid #e63757';
+                    prescriptionSection.style.borderRadius = '8px';
+                    prescriptionSection.style.padding = '15px';
+                    prescriptionSection.style.backgroundColor = '#fff5f5';
+                    const title = prescriptionSection.querySelector('h3');
+                    if (title) {
+                        title.innerHTML += ' <span style="color: #e63757; font-weight: bold; margin-left: 8px;">[CANCELLED]</span>';
                     }
-                    medicinesByTime[timeSlot].push(medicine);
-                });
+                }
                 
-                // Define time slot order
-                const timeSlotOrder = ['M', 'ABF', 'BL', 'AL', 'E', 'AD', 'BT', 'PRN'];
-                const timeSlotLabels = {
-                    'M': 'Morning',
-                    'ABF': 'After Breakfast',
-                    'BL': 'Before Lunch',
-                    'AL': 'After Lunch',
-                    'E': 'Evening',
-                    'AD': 'After Dinner',
-                    'BT': 'Bed Time',
-                    'PRN': 'As Needed'
-                };
-                
-                // Render prescription medicines by time slot
-                timeSlotOrder.forEach(timeSlot => {
-                    if (medicinesByTime[timeSlot]) {
-                        const timeSlotDiv = document.createElement('div');
-                        timeSlotDiv.className = 'time-slots';
-                        
-                        const timeSlotTitle = document.createElement('div');
-                        timeSlotTitle.className = 'time-slot-title';
-                        timeSlotTitle.textContent = timeSlotLabels[timeSlot] || timeSlot;
-                        timeSlotDiv.appendChild(timeSlotTitle);
-                        
-                        medicinesByTime[timeSlot].forEach(medicine => {
-                            const medicineCard = document.createElement('div');
-                            medicineCard.className = 'medicine-card';
+                // Render each prescription group
+                prescriptionGroups.forEach(group => {
+                    const items = group.items || [];
+                    // Show all groups, even if empty (to show all groups)
+                    
+                    const groupDiv = document.createElement('div');
+                    groupDiv.style.marginBottom = '20px';
+                    groupDiv.style.border = prescriptionIsCancelled ? '2px solid #e63757' : '1px solid #e3ebf6';
+                    groupDiv.style.borderRadius = '8px';
+                    groupDiv.style.padding = '15px';
+                    groupDiv.style.backgroundColor = prescriptionIsCancelled ? '#fff5f5' : '#f9fafd';
+                    if (prescriptionIsCancelled) {
+                        groupDiv.style.opacity = '0.7';
+                    }
+                    
+                    // Group header with time and dose
+                    const groupHeader = document.createElement('div');
+                    groupHeader.style.fontSize = '14px';
+                    groupHeader.style.fontWeight = '600';
+                    groupHeader.style.color = '#333';
+                    groupHeader.style.marginBottom = '10px';
+                    
+                    // Show the actual time as-is (no normalization)
+                    const timeLabel = group.time || 'M';
+                    
+                    groupHeader.innerHTML = `<strong>Time: ${escapeHtml(timeLabel)}</strong>`;
+                    if (group.dose) {
+                        groupHeader.innerHTML += ` - Dosage: <strong>${escapeHtml(group.dose)}</strong>`;
+                    }
+                    if (group.notes) {
+                        groupHeader.innerHTML += ` <span style="color: #666; font-size: 0.9em;">(${escapeHtml(group.notes)})</span>`;
+                    }
+                    groupDiv.appendChild(groupHeader);
+                    
+                    // Render items in this group (or show empty message)
+                    if (items.length === 0) {
+                        const emptyMsg = document.createElement('div');
+                        emptyMsg.style.color = '#666';
+                        emptyMsg.style.fontStyle = 'italic';
+                        emptyMsg.style.padding = '10px';
+                        emptyMsg.textContent = 'No items in this group';
+                        groupDiv.appendChild(emptyMsg);
+                    } else {
+                        items.forEach(item => {
+                            const itemCard = document.createElement('div');
+                            itemCard.className = 'medicine-card';
+                            itemCard.style.borderLeft = prescriptionIsCancelled ? '4px solid #e63757' : '4px solid #2c7be5';
+                            itemCard.style.marginBottom = '8px';
                             
-                            const medicineId = `${currentPatient.patient_id}_${medicine.id}_${currentDate}`;
+                            const medicineId = `${currentPatient.patient_id}_${item.id}_${currentDate}`;
                             const isPrepared = preparedMedicines.has(medicineId);
                             
                             if (isPrepared) {
-                                medicineCard.classList.add('prepared');
+                                itemCard.classList.add('prepared');
                             }
                             
-                            medicineCard.innerHTML = `
+                            itemCard.innerHTML = `
                                 <div class="medicine-checkbox">
-                                    <input type="checkbox" id="med-${medicineId}" ${isPrepared ? 'checked' : ''}>
+                                    <input type="checkbox" id="med-${medicineId}" ${isPrepared ? 'checked' : ''} ${prescriptionIsCancelled ? 'disabled' : ''}>
                                 </div>
                                 <div class="medicine-details">
-                                    <div class="medicine-name">${escapeHtml(medicine.item_name)}</div>
+                                    <div class="medicine-name">${escapeHtml(item.item_name)}</div>
                                     <div class="medicine-meta">
-                                        <span>Dose: ${escapeHtml(medicine.dose || 'N/A')}</span>
-                                        <span>Notes: ${escapeHtml(medicine.notes || 'None')}</span>
+                                        <span>Dose: ${escapeHtml(item.dose || group.dose || 'N/A')}</span>
+                                        <span>Notes: ${escapeHtml(item.notes || group.notes || 'None')}</span>
                                     </div>
                                 </div>
-                                <div class="medicine-qty">Qty: ${medicine.quantity || 'N/A'}</div>
+                                <div class="medicine-qty">Qty: ${item.quantity || 'N/A'}</div>
                             `;
                             
-                            // Add event listener for checkbox
-                        const checkbox = medicineCard.querySelector('input[type="checkbox"]');
-                        checkbox.addEventListener('change', function() {
-                            toggleMedicinePreparation(medicineId, this.checked);
+                            // Add event listener for checkbox (only if prescription not cancelled)
+                            if (!prescriptionIsCancelled) {
+                                const checkbox = itemCard.querySelector('input[type="checkbox"]');
+                                checkbox.addEventListener('change', function() {
+                                    toggleMedicinePreparation(medicineId, this.checked);
+                                });
+                            }
+                            
+                            groupDiv.appendChild(itemCard);
                         });
-                        
-                        timeSlotDiv.appendChild(medicineCard);
-                    });
+                    }
                     
-                    prescriptionSection.appendChild(timeSlotDiv);
-                }
-            });
-            
-            pvContent.appendChild(prescriptionSection);
+                    prescriptionSection.appendChild(groupDiv);
+                });
+                
+                pvContent.appendChild(prescriptionSection);
             }
             
-            // Render therapy items section
+            // Render therapy items section - grouped by therapy
             if (therapyItems.length > 0) {
                 const therapySection = document.createElement('div');
                 therapySection.className = 'items-section';
                 therapySection.style.marginTop = '20px';
                 therapySection.innerHTML = '<h3 style="margin: 0 0 15px 0; color: #333;">Therapy Items</h3>';
                 
+                // Group therapy items by therapy_name
+                const therapyGroups = {};
                 therapyItems.forEach(item => {
-                    const itemCard = document.createElement('div');
-                    itemCard.className = 'medicine-card';
-                    itemCard.style.borderLeft = '4px solid #4CAF50';
-                    
-                    const medicineId = `${currentPatient.patient_id}_${item.id}_${currentDate}`;
-                    const isPrepared = preparedMedicines.has(medicineId);
-                    
-                    if (isPrepared) {
-                        itemCard.classList.add('prepared');
+                    if (item.is_group && item.items) {
+                        // This is a grouped therapy item
+                        const therapyKey = item.therapy_name || 'Unknown Therapy';
+                        if (!therapyGroups[therapyKey]) {
+                            therapyGroups[therapyKey] = [];
+                        }
+                        therapyGroups[therapyKey].push(item);
+                    } else {
+                        // Legacy format - individual items
+                        const therapyKey = item.therapy_name || 'Unknown Therapy';
+                        if (!therapyGroups[therapyKey]) {
+                            therapyGroups[therapyKey] = [];
+                        }
+                        therapyGroups[therapyKey].push({ items: [item], dosage: item.dose || '', uno: item.notes || '' });
                     }
+                });
+                
+                // Render each therapy group
+                Object.keys(therapyGroups).forEach(therapyName => {
+                    // Check if any group in this therapy is cancelled
+                    const therapyGroupsList = therapyGroups[therapyName];
+                    const therapyIsCancelled = therapyGroupsList.some(group => group.booking_is_cancelled);
                     
-                    itemCard.innerHTML = `
-                        <div class="medicine-checkbox">
-                            <input type="checkbox" id="med-${medicineId}" ${isPrepared ? 'checked' : ''}>
-                        </div>
-                        <div class="medicine-details">
-                            <div class="medicine-name">${escapeHtml(item.item_name)} <span style="color: #666; font-size: 0.9em;">(${escapeHtml(item.therapy_name || 'Therapy')})</span></div>
-                            <div class="medicine-meta">
-                                <span>Item Code: ${escapeHtml(item.item_code || 'N/A')}</span>
-                                <span>Dose: ${escapeHtml(item.dose || 'N/A')}</span>
-                                <span>Notes: ${escapeHtml(item.notes || 'None')}</span>
-                            </div>
-                        </div>
-                    `;
+                    const therapyGroupDiv = document.createElement('div');
+                    therapyGroupDiv.style.marginBottom = '20px';
+                    therapyGroupDiv.style.border = therapyIsCancelled ? '2px solid #e63757' : '1px solid #e3ebf6';
+                    therapyGroupDiv.style.borderRadius = '8px';
+                    therapyGroupDiv.style.padding = '15px';
+                    therapyGroupDiv.style.backgroundColor = therapyIsCancelled ? '#fff5f5' : '#f9fafd';
                     
-                    const checkbox = itemCard.querySelector('input[type="checkbox"]');
-                    checkbox.addEventListener('change', function() {
-                        toggleMedicinePreparation(medicineId, this.checked);
+                    const therapyTitle = document.createElement('div');
+                    therapyTitle.style.fontSize = '16px';
+                    therapyTitle.style.fontWeight = '600';
+                    therapyTitle.style.color = '#333';
+                    therapyTitle.style.marginBottom = '10px';
+                    therapyTitle.innerHTML = therapyName;
+                    if (therapyIsCancelled) {
+                        therapyTitle.innerHTML += ' <span style="color: #e63757; font-weight: bold; margin-left: 8px;">[CANCELLED]</span>';
+                    }
+                    therapyGroupDiv.appendChild(therapyTitle);
+                    
+                    // Render each dosage group within this therapy
+                    therapyGroupsList.forEach(group => {
+                        const items = group.items || [];
+                        if (items.length === 0) return;
+                        
+                        const groupIsCancelled = group.booking_is_cancelled;
+                        
+                        // Show dosage if available
+                        if (group.dosage) {
+                            const dosageLabel = document.createElement('div');
+                            dosageLabel.style.fontSize = '14px';
+                            dosageLabel.style.fontWeight = '500';
+                            dosageLabel.style.color = '#666';
+                            dosageLabel.style.marginTop = '10px';
+                            dosageLabel.style.marginBottom = '8px';
+                            dosageLabel.textContent = `Dosage: ${escapeHtml(group.dosage)}`;
+                            if (groupIsCancelled) {
+                                dosageLabel.style.opacity = '0.7';
+                            }
+                            therapyGroupDiv.appendChild(dosageLabel);
+                        }
+                        
+                        // Render items in this group
+                        items.forEach(item => {
+                            const itemCard = document.createElement('div');
+                            itemCard.className = 'medicine-card';
+                            itemCard.style.borderLeft = groupIsCancelled ? '4px solid #e63757' : '4px solid #4CAF50';
+                            itemCard.style.marginBottom = '8px';
+                            if (groupIsCancelled) {
+                                itemCard.style.opacity = '0.7';
+                            }
+                            
+                            const medicineId = `${currentPatient.patient_id}_${item.id}_${currentDate}`;
+                            const isPrepared = preparedMedicines.has(medicineId);
+                            const isRemoved = item.is_removed || item.status === 'removed';
+                            
+                            if (isPrepared) {
+                                itemCard.classList.add('prepared');
+                            }
+                            if (isRemoved) {
+                                itemCard.style.borderLeft = '4px solid #f6c343';
+                                itemCard.style.opacity = '0.6';
+                            }
+                            
+                            itemCard.innerHTML = `
+                                <div class="medicine-checkbox">
+                                    <input type="checkbox" id="med-${medicineId}" ${isPrepared ? 'checked' : ''} ${(groupIsCancelled || isRemoved) ? 'disabled' : ''}>
+                                </div>
+                                <div class="medicine-details">
+                                    <div class="medicine-name">
+                                        ${escapeHtml(item.item_name)}
+                                        ${isRemoved ? '<span style="color: #f6c343; font-weight: bold; margin-left: 8px;">[REMOVED]</span>' : ''}
+                                    </div>
+                                    <div class="medicine-meta">
+                                        ${item.item_code ? `<span>Item Code: ${escapeHtml(item.item_code)}</span>` : ''}
+                                        ${item.dose ? `<span>Dose: ${escapeHtml(item.dose)}</span>` : ''}
+                                        ${item.notes ? `<span>Notes: ${escapeHtml(item.notes)}</span>` : ''}
+                                    </div>
+                                </div>
+                            `;
+                            
+                            // Add event listener for checkbox (only if not cancelled/removed)
+                            if (!groupIsCancelled && !isRemoved) {
+                                const checkbox = itemCard.querySelector('input[type="checkbox"]');
+                                checkbox.addEventListener('change', function() {
+                                    toggleMedicinePreparation(medicineId, this.checked);
+                                });
+                            }
+                            
+                            therapyGroupDiv.appendChild(itemCard);
+                        });
                     });
                     
-                    therapySection.appendChild(itemCard);
+                    therapySection.appendChild(therapyGroupDiv);
                 });
                 
                 pvContent.appendChild(therapySection);
@@ -1120,14 +1267,59 @@
                             <div style="margin-top: 10px;">
                                 <strong style="font-size: 0.85em; color: #333;">Changes:</strong>
                                 <ul style="margin: 5px 0 0 0; padding-left: 20px; font-size: 0.85em;">
-                                    ${log.changes.map(change => `
-                                        <li style="margin-bottom: 5px;">
-                                            <strong>${escapeHtml(change.field)}</strong>: 
-                                            <span style="color: #d32f2f;">${escapeHtml(String(change.before))}</span> 
-                                            → 
-                                            <span style="color: #388e3c;">${escapeHtml(String(change.after))}</span>
-                                        </li>
-                                    `).join('')}
+                                    ${log.changes.map(change => {
+                                        if (change.items_groups_changes && change.items_groups_changes.length) {
+                                            const groupsHtml = change.items_groups_changes.map(gch => {
+                                                const groupLines = (gch.changes || []).map(c => {
+                                                    if (c.field === 'items') {
+                                                        const beforeItems = Array.isArray(c.before) ? c.before.join(', ') : '';
+                                                        const afterItems = Array.isArray(c.after) ? c.after.join(', ') : '';
+                                                        return `
+                                                            <li style="margin-bottom:3px;">
+                                                                <span style="color:#333;">items</span>:
+                                                                <span style="color:#d32f2f;">${escapeHtml(beforeItems)}</span>
+                                                                →
+                                                                <span style="color:#388e3c;">${escapeHtml(afterItems)}</span>
+                                                            </li>
+                                                        `;
+                                                    }
+                                                    return `
+                                                        <li style=\"margin-bottom:3px;\">
+                                                            <span style=\"color:#333;\">${escapeHtml(c.field)}</span>:
+                                                            <span style=\"color:#d32f2f;\">${escapeHtml(String(c.before || ''))}</span>
+                                                            →
+                                                            <span style=\"color:#388e3c;\">${escapeHtml(String(c.after || ''))}</span>
+                                                        </li>
+                                                    `;
+                                                }).join('');
+                                                return `
+                                                    <li style="margin-bottom:6px;">
+                                                        <div style="font-weight:600;color:#555;">Group #${gch.group_index + 1}</div>
+                                                        <ul style="margin:4px 0 0 16px; padding:0; list-style: circle;">${groupLines}</ul>
+                                                    </li>
+                                                `;
+                                            }).join('');
+                                            return `
+                                                <li style="margin-bottom: 8px;">
+                                                    <div>
+                                                        <strong>Prescription groups updated</strong>
+                                                    </div>
+                                                    <div style="margin-top:6px;">
+                                                        <div style="font-weight:600;color:#444;font-size:0.85em;">Group changes:</div>
+                                                        <ul style="margin:4px 0 0 16px; padding:0; list-style: disc;">${groupsHtml}</ul>
+                                                    </div>
+                                                </li>
+                                            `;
+                                        }
+                                        return `
+                                            <li style="margin-bottom: 5px;">
+                                                <strong>${escapeHtml(change.field)}</strong>:
+                                                <span style="color: #d32f2f;">${escapeHtml(String(change.before))}</span>
+                                                →
+                                                <span style="color: #388e3c;">${escapeHtml(String(change.after))}</span>
+                                            </li>
+                                        `;
+                                    }).join('')}
                                 </ul>
                             </div>
                         ` : ''}
