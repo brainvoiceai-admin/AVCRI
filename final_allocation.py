@@ -259,17 +259,17 @@ def allocate_therapists(date, time_slot, therapy_requirements, last_therapists=N
     day_of_week = date.weekday()
     allocated = []
 
-    # Normalize patient gender to match CustomUser.gender choices
+    # Normalize patient gender: default to 'male' if not explicitly female
     desired_gender = None
     try:
         if patient_gender:
             g = str(patient_gender).strip().lower()
-            if g.startswith('m'):
-                desired_gender = 'male'
-            elif g.startswith('f'):
+            if g.startswith('f'):
                 desired_gender = 'female'
+            else:
+                desired_gender = 'male'
     except Exception:
-        desired_gender = None
+        desired_gender = 'male'
 
     grade_map = {
         "Super Senior Therapist": therapy_requirements.get("super_senior", 0),
@@ -299,24 +299,15 @@ def allocate_therapists(date, time_slot, therapy_requirements, last_therapists=N
 
     def get_therapist_gender(t):
         try:
-            # Direct fields on TherapistMaster if present
-            for field_name in ('gender', 'therapist_gender', 'sex'):
-                v = getattr(t, field_name, None)
-                if v:
-                    v_str = str(v).strip().lower()
-                    if v_str.startswith('m'):
-                        return 'male'
-                    if v_str.startswith('f'):
-                        return 'female'
-            # Linked user
-            u = getattr(t, 'user', None)
-            if u and getattr(u, 'gender', None):
-                return u.gender
-            # Linked therapist_profile -> user
-            tp = getattr(t, 'therapist_profile', None)
-            u2 = getattr(tp, 'user', None) if tp else None
-            if u2 and getattr(u2, 'gender', None):
-                return u2.gender
+            # Prioritize therapist_gender field from TherapistMaster (values: "Male"/"Female")
+            v = getattr(t, 'therapist_gender', None)
+            if v:
+                v_str = str(v).strip()
+                # Handle "Male"/"Female" (capitalized) or "male"/"female" (lowercase)
+                if v_str.lower().startswith('m'):
+                    return 'male'
+                if v_str.lower().startswith('f'):
+                    return 'female'
         except Exception:
             pass
         return None
@@ -342,30 +333,65 @@ def allocate_therapists(date, time_slot, therapy_requirements, last_therapists=N
                 grade_map[t.therapist_grade] -= 1
 
     # Allocate remaining
-    for grade, needed in list(grade_map.items()):
+    for grade, needed_original in list(grade_map.items()):
+        
+        needed = needed_original
+        current_grade_search = grade
+        
         if needed <= 0:
             continue
-        candidates_qs = TherapistMaster.objects.filter(therapist_grade=grade)
+
+        # --- NEW TRAINEE SUBSTITUTION LOGIC ---
+        is_substitution = False
+        if current_grade_search == "Trainee Therapist" and desired_gender == 'male':
+            # Check if any Male Trainee is available
+            available_trainee_count = TherapistMaster.objects.filter(
+                therapist_grade__iexact="Trainee Therapist",
+                therapist_gender__istartswith='m'
+            ).exclude(
+                therapistbooking__date=date,
+                therapistbooking__time_slot=time_slot,
+                therapistbooking__status='BOOKED'
+            ).count()
+            
+            # If 0 trainees are available, switch search to Junior Therapist (Grade Substitution)
+            if available_trainee_count == 0:
+                print(f"[DEBUG Allocation] Male Trainee required (needed={needed}). 0 available. Attempting substitution with Junior Therapist.")
+                current_grade_search = "Junior Therapist"
+                is_substitution = True
+        # --- END NEW LOGIC ---
+
+        candidates_qs = TherapistMaster.objects.filter(therapist_grade=current_grade_search)
+        
         if needs_bathing:
             candidates_qs = candidates_qs.filter(is_bathing_therapist=True) | candidates_qs
             # above keeps bathing-capable first only if you iterate deterministically; we'll check is_bathing flag explicitly below
+            
         # iterate candidates
         for t in candidates_qs:
+            if needed <= 0:
+                break
+            
             if t in allocated:
                 continue
             if therapist_on_leave(t):
                 continue
             if TherapistBooking.objects.filter(therapist=t, date=date, time_slot=time_slot, status='BOOKED').exists():
                 continue
+            
             # Enforce gender match at runtime
             if desired_gender:
                 t_gender = get_therapist_gender(t)
                 if t_gender != desired_gender:
                     continue
+            
+            # Check if the allocated therapist's grade matches the original or substitution grade
+            # NOTE: We allocate the therapist regardless of if they are the original grade or the substitute
             allocated.append(t)
+            
+            # Decrement both the needed count AND the original grade map count
             needed -= 1
-            if needed <= 0:
-                break
+            grade_map[grade] -= 1 # Decrement original Trainee/Junior count
 
     return allocated
 
@@ -557,6 +583,60 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
         req_total = int(therapy_req.get("total", 1) or 1)
         if len(candidate_therapists) < req_total:
             reason = "insufficient_therapists_available"
+            # Gender availability insight (non-blocking, for debugging/UX)
+            try:
+                desired_gender = None
+                pat_sex = getattr(getattr(allocation, 'patient', None), 'pat_sex', None)
+                if pat_sex:
+                    g = str(pat_sex).strip().lower()
+                    if g.startswith('m'):
+                        desired_gender = 'male'
+                    elif g.startswith('f'):
+                        desired_gender = 'female'
+                def _tg(x):
+                    try:
+                        # Only check therapist_gender field from TherapistMaster (values: "Male"/"Female")
+                        v = getattr(x, 'therapist_gender', None)
+                        if v:
+                            v_str = str(v).strip()
+                            # Handle "Male"/"Female" (capitalized) or "male"/"female" (lowercase)
+                            if v_str.lower().startswith('m'):
+                                return 'male'
+                            if v_str.lower().startswith('f'):
+                                return 'female'
+                    except Exception:
+                        return None
+                    return None
+                match_count = sum(1 for t in candidate_therapists if (desired_gender is None or _tg(t) == desired_gender))
+                # Per-grade availability of matching-gender therapists not on leave/booked
+                from masters.models import TherapistMaster, TherapistLeaveMaster
+                from Patient.models import TherapistBooking
+                day_of_week = target_date.weekday()
+                grade_availability = {}
+                for grade_key in ("super_senior","senior","junior","trainee"):
+                    if int(therapy_req.get(grade_key,0) or 0) > 0:
+                        # Match grade text against stored therapist_grade
+                        grade_text = grade_key.replace('_',' ')
+                        pool = TherapistMaster.objects.filter(therapist_grade__icontains=grade_text)
+                        available = 0
+                        # Use query_slot (resolved SlotMaster) for exact slot match when checking bookings
+                        for t in pool:
+                            if desired_gender and _tg(t) != desired_gender:
+                                continue
+                            if TherapistLeaveMaster.objects.filter(therapist=t, leave_day=day_of_week).exists():
+                                continue
+                            if TherapistBooking.objects.filter(therapist=t, date=target_date, time_slot=query_slot, status='BOOKED').exists():
+                                continue
+                            available += 1
+                        grade_availability[grade_key] = available
+                gender_info = {"required_gender": desired_gender, "available_matching_gender": match_count, "grade_availability": grade_availability}
+                # Append concise summary into reason for UI visibility
+                try:
+                    reason = f"insufficient_therapists_available (required={req_total}, found={len(candidate_therapists)}, gender={desired_gender or 'n/a'})"
+                except Exception:
+                    pass
+            except Exception:
+                gender_info = {}
             therapists_for_audit = [therapist_entry(t, False) for t in candidate_therapists]
             # Update booking status to failed
             try:
@@ -571,7 +651,7 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                         visit=None, therapy=None, date=target_date,
                         requested_time_slot=canonical_slot, requested_time_slot_value=requested_slot_value or '',
                         status='FAILED', reason=reason,
-                        extra={"required": req_total, "found": len(candidate_therapists), "booking_id": booking_id, "therapists": therapists_for_audit}
+                        extra={"required": req_total, "found": len(candidate_therapists), "booking_id": booking_id, "therapists": therapists_for_audit, **gender_info}
                     )
                 except Exception:
                     pass
@@ -657,7 +737,7 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                             room=room_candidate,
                             date=target_date,
                             timeslot=slot_master
-                        ).exclude(pk=booking_id).first()
+                        ).exclude(pk=booking.pk).first()
                         
                         if existing_booking:
                             print(f"[DEBUG] Room {room_candidate.room_no} already booked for {target_date} at {slot_master}, trying alternative room...")
@@ -668,7 +748,7 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                                     room=alternative_room,
                                     date=target_date,
                                     timeslot=slot_master
-                                ).exclude(pk=booking_id).first()
+                                ).exclude(pk=booking.pk).first()
                                 if not alt_conflict:
                                     room_candidate = alternative_room
                                     print(f"[DEBUG] Using alternative room: {alternative_room.room_no}")
@@ -684,7 +764,7 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                                             room=room,
                                             date=target_date,
                                             timeslot=slot_master
-                                        ).exclude(pk=booking_id).first()
+                                        ).exclude(pk=booking.pk).first()
                                         if not room_conflict:
                                             found_room = room
                                             print(f"[DEBUG] Using fallback room: {room.room_no}")
