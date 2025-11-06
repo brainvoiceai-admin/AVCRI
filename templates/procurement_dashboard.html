@@ -879,9 +879,8 @@
                 prescriptionSection.className = 'items-section';
                 prescriptionSection.innerHTML = '<h3 style="margin: 0 0 15px 0; color: #333;">Prescription Items</h3>';
                 
-                // Check if entire prescription is cancelled (from first group's first item)
-                const firstGroup = prescriptionGroups[0];
-                const prescriptionIsCancelled = firstGroup?.items?.[0]?.prescription_is_cancelled || firstGroup?.items?.[0]?.prescription_status === 'cancelled';
+                // Section is cancelled only if ALL groups are cancelled
+                const prescriptionIsCancelled = prescriptionGroups.every(g => g.is_cancelled);
                 
                 if (prescriptionIsCancelled) {
                     prescriptionSection.style.border = '2px solid #e63757';
@@ -901,11 +900,12 @@
                     
                     const groupDiv = document.createElement('div');
                     groupDiv.style.marginBottom = '20px';
-                    groupDiv.style.border = prescriptionIsCancelled ? '2px solid #e63757' : '1px solid #e3ebf6';
+                    const groupIsCancelled = !!group.is_cancelled;
+                    groupDiv.style.border = groupIsCancelled ? '2px solid #e63757' : '1px solid #e3ebf6';
                     groupDiv.style.borderRadius = '8px';
                     groupDiv.style.padding = '15px';
-                    groupDiv.style.backgroundColor = prescriptionIsCancelled ? '#fff5f5' : '#f9fafd';
-                    if (prescriptionIsCancelled) {
+                    groupDiv.style.backgroundColor = groupIsCancelled ? '#fff5f5' : '#f9fafd';
+                    if (groupIsCancelled) {
                         groupDiv.style.opacity = '0.7';
                     }
                     
@@ -940,7 +940,7 @@
                         items.forEach(item => {
                             const itemCard = document.createElement('div');
                             itemCard.className = 'medicine-card';
-                            itemCard.style.borderLeft = prescriptionIsCancelled ? '4px solid #e63757' : '4px solid #2c7be5';
+                            itemCard.style.borderLeft = groupIsCancelled ? '4px solid #e63757' : '4px solid #2c7be5';
                             itemCard.style.marginBottom = '8px';
                             
                             const medicineId = `${currentPatient.patient_id}_${item.id}_${currentDate}`;
