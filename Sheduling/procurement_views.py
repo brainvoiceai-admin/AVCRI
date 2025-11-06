@@ -262,13 +262,16 @@ def get_prescription_details_api(request):
         if prescription and prescription.doctor:
             patient_info['doctor_name'] = prescription.doctor.get_full_name() if hasattr(prescription.doctor, 'get_full_name') else (prescription.doctor.username if prescription.doctor else None)
         
+        # Determine overall cancellation only if all allocations are cancelled
+        if allocations:
+            all_cancelled = all(a.status == 'cancelled' for a in allocations)
+            prescription_is_cancelled = all_cancelled
+            # Set a representative status (prefer non-cancelled if any)
+            non_cancel_statuses = [a.status for a in allocations if a.status != 'cancelled']
+            prescription_status = non_cancel_statuses[0] if non_cancel_statuses else 'cancelled'
+        
         # Process all allocations and use items_groups exactly as stored
         for allocation in allocations:
-            # Check if allocation is cancelled
-            if allocation.status == 'cancelled':
-                prescription_is_cancelled = True
-            if not prescription_status or prescription_status == 'draft':
-                prescription_status = allocation.status
             
             # Use the original items_groups structure from allocation - exactly as stored
             if allocation.items_groups:
@@ -311,6 +314,7 @@ def get_prescription_details_api(request):
                         'dose': group.get('dosage', ''),
                         'notes': group.get('uno', ''),
                         'items': group_items,
+                        'is_cancelled': allocation.status == 'cancelled',
                         'is_group': True
                     })
         
