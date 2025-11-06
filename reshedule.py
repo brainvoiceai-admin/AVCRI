@@ -219,12 +219,24 @@ def get_allowed_slot_values(patient_type, therapy_category, used_slots=None):
 # -----------------------
 # Therapist allocation with EmergencyLeave integration (unchanged logic, blocking checks included)
 # -----------------------
-def allocate_therapists(date, time_slot, therapy_requirements, last_therapists=None, needs_bathing=False):
+def allocate_therapists(date, time_slot, therapy_requirements, last_therapists=None, needs_bathing=False, patient_gender=None):
     from masters.models import TherapistMaster, TherapistLeaveMaster, EmergencyLeave
     from Patient.models import TherapistBooking
 
     day_of_week = date.weekday()
     allocated = []
+
+    # Normalize patient gender to match CustomUser.gender choices
+    desired_gender = None
+    try:
+        if patient_gender:
+            g = str(patient_gender).strip().lower()
+            if g.startswith('m'):
+                desired_gender = 'male'
+            elif g.startswith('f'):
+                desired_gender = 'female'
+    except Exception:
+        desired_gender = None
 
     grade_map = {
         "Super Senior Therapist": therapy_requirements.get("super_senior", 0),
@@ -252,6 +264,30 @@ def allocate_therapists(date, time_slot, therapy_requirements, last_therapists=N
             return True
         return False
 
+    def get_therapist_gender(t):
+        try:
+            # Direct fields on TherapistMaster if present
+            for field_name in ('gender', 'therapist_gender', 'sex'):
+                v = getattr(t, field_name, None)
+                if v:
+                    v_str = str(v).strip().lower()
+                    if v_str.startswith('m'):
+                        return 'male'
+                    if v_str.startswith('f'):
+                        return 'female'
+            # Linked user
+            u = getattr(t, 'user', None)
+            if u and getattr(u, 'gender', None):
+                return u.gender
+            # Linked therapist_profile -> user
+            tp = getattr(t, 'therapist_profile', None)
+            u2 = getattr(tp, 'user', None) if tp else None
+            if u2 and getattr(u2, 'gender', None):
+                return u2.gender
+        except Exception:
+            pass
+        return None
+
     # Use last therapists first
     if last_therapists:
         for code in last_therapists:
@@ -260,6 +296,11 @@ def allocate_therapists(date, time_slot, therapy_requirements, last_therapists=N
             except TherapistMaster.DoesNotExist:
                 continue
             if grade_map.get(t.therapist_grade, 0) > 0:
+                # Gender match: skip if therapist gender does not match desired
+                if desired_gender:
+                    t_gender = get_therapist_gender(t)
+                    if t_gender != desired_gender:
+                        continue
                 if therapist_on_leave(t):
                     continue
                 if TherapistBooking.objects.filter(therapist=t, date=date, time_slot=time_slot, status='BOOKED').exists():
@@ -289,6 +330,11 @@ def allocate_therapists(date, time_slot, therapy_requirements, last_therapists=N
             # block if therapist already booked at date+slot
             if TherapistBooking.objects.filter(therapist=t, date=date, time_slot=time_slot, status='BOOKED').exists():
                 continue
+            # Enforce gender match at runtime
+            if desired_gender:
+                t_gender = get_therapist_gender(t)
+                if t_gender != desired_gender:
+                    continue
             allocated.append(t)
             needed -= 1
             if needed <= 0:
@@ -366,7 +412,16 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
     # candidate therapists
     candidate_therapists = []
     try:
-        candidate_therapists = allocate_therapists(date, canonical_slot, therapy_req, last_allocation.get("last_therapist_codes"), needs_bath_flag)
+        # Derive patient gender from allocation patient snapshot (e.g., 'Male'/'Female')
+        pat_sex = getattr(getattr(allocation, 'patient', None), 'pat_sex', None)
+        candidate_therapists = allocate_therapists(
+            date,
+            canonical_slot,
+            therapy_req,
+            last_allocation.get("last_therapist_codes"),
+            needs_bath_flag,
+            patient_gender=pat_sex
+        )
     except Exception:
         candidate_therapists = []
 
