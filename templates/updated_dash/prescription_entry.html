@@ -761,7 +761,6 @@
                 <tr>
                   <th>#</th>
                   <th>Prescription</th>
-                  <th>Ext/Int</th>
                   <th>Procured From</th>
                   <th>Medications</th>
                   <th>From</th>
@@ -773,7 +772,7 @@
               </thead>
               <tbody id="prescriptions-table-body">
                 <tr>
-                  <td colspan="10">
+                  <td colspan="9">
                     <div class="empty-state">
                       <i class="fas fa-prescription-bottle"></i>
                       <h3>No Prescriptions Found</h3>
@@ -1252,7 +1251,7 @@ $(function(){
     if (!addedPrescriptions.length){ 
       $prescriptionsTableBody.append(`
         <tr>
-          <td colspan="10">
+          <td colspan="9">
             <div class="empty-state">
               <i class="fas fa-prescription-bottle"></i>
               <h3>No Prescriptions Found</h3>
@@ -1321,7 +1320,6 @@ $(function(){
       const row = `<tr class="${statusClass}">
         <td>${i+1}</td>
         <td>${esc(p.prescription_name || 'Prescription')}</td>
-        <td>${esc(p.scope || '—')}</td>
         <td>${esc(p.procured_from || '—')}</td>
         <td>${groupsHtml}</td>
         <td>${esc(p.from_date||'')}</td>
