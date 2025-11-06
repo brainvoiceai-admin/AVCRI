@@ -140,6 +140,45 @@ class RoomMaster(models.Model):
 
 
 
+from django.db import models
+
+from django.db import models
+
+class Treatment(models.Model):
+    PRdate = models.DateTimeField(null=True, blank=True)
+    Treat_Doc_Code = models.CharField(max_length=50, null=True, blank=True)
+    Pat_Reg_No = models.CharField(max_length=50, primary_key=True)  # ✅ primary key
+    Pat_Room_No = models.CharField(max_length=50, null=True, blank=True)
+    DOA = models.DateTimeField(null=True, blank=True)
+    Treat_Item_Seq = models.IntegerField(null=True, blank=True)
+    Treat_Item_Seq1 = models.IntegerField(null=True, blank=True)
+    Treat_Ext_Int = models.CharField(max_length=50, null=True, blank=True)
+    From_Place = models.CharField(max_length=100, null=True, blank=True)
+    Treat_Thr = models.CharField(max_length=100, null=True, blank=True)
+    Treat_Item_Code = models.CharField(max_length=50, null=True, blank=True)
+    Treat_Usuage = models.CharField(max_length=50, null=True, blank=True)
+    No_Of_Days = models.IntegerField(null=True, blank=True)
+    Treat_From = models.DateTimeField(null=True, blank=True)
+    Treat_To = models.DateTimeField(null=True, blank=True)
+    Time_Pref = models.CharField(max_length=50, null=True, blank=True)
+    Thr_Code = models.CharField(max_length=50, null=True, blank=True)
+    Status = models.CharField(max_length=50, null=True, blank=True)
+    Canteen_Intim = models.CharField(max_length=10, null=True, blank=True)
+    Pat_Intim = models.CharField(max_length=10, null=True, blank=True)
+    Pat_Name = models.CharField(max_length=255, null=True, blank=True)
+    Pat_Sex = models.CharField(max_length=10, null=True, blank=True)
+    Pat_Age = models.CharField(max_length=10, null=True, blank=True)
+    Pat_DoD = models.DateTimeField(null=True, blank=True)
+    Upd_Dtime = models.DateTimeField(null=True, blank=True)
+    Treat_Class = models.CharField(max_length=50, null=True, blank=True)
+
+    class Meta:
+        managed = False
+        db_table = '[dbo].[Treatment]'
+        app_label = 'MySql_Data_pull'
+
+
+
 #for dbo.Therapist_Details
 class TherapistDetails(models.Model):
     therapist_code = models.CharField(max_length=50, primary_key=True)   # Therapist_Code
