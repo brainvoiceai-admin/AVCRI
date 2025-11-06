@@ -650,8 +650,8 @@
         function loadPatients() {
             showLoading();
             
-            // Fetch patients from API
-            fetch(`/sheduling/procurement/api/prescriptions/?date=${currentDate}&department=IP Pharmacy`)
+            // Fetch patients from API (department will be determined by backend from logged-in user)
+            fetch(`/sheduling/procurement/api/prescriptions/?date=${currentDate}`)
                 .then(response => response.json())
                 .then(data => {
                     hideLoading();
@@ -800,11 +800,29 @@
             fetch(apiUrl)
                 .then(response => {
                     console.log('API response status:', response.status);
+                    // Check if response is ok (status 200-299)
+                    if (!response.ok) {
+                        // Try to parse error response
+                        return response.json().then(data => {
+                            throw new Error(data.error || `HTTP ${response.status}: ${response.statusText}`);
+                        }).catch(() => {
+                            // If JSON parsing fails, throw with status
+                            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                        });
+                    }
                     return response.json();
                 })
                 .then(data => {
                     console.log('API response data:', data);
-                    if (data.success) {
+                    // Check if response has success field or error field
+                    if (data.error) {
+                        console.error('API error:', data.error);
+                        showAlert('error', data.error || 'Failed to load medicine details');
+                        pvContent.innerHTML = '<p>Failed to load medicine details.</p>';
+                        return;
+                    }
+                    
+                    if (data.success !== false) {
                         // Update patient info if available
                         if (data.patient_info) {
                             const info = data.patient_info;
@@ -819,15 +837,16 @@
                         const therapyItems = data.therapy_items || [];
                         renderPatientMedicines(prescriptionGroups, therapyItems, prescriptionItems);
                     } else {
-                        console.error('API error:', data.error);
+                        console.error('API returned success: false');
                         showAlert('error', data.error || 'Failed to load medicine details');
                         pvContent.innerHTML = '<p>Failed to load medicine details.</p>';
                     }
                 })
                 .catch(error => {
                     console.error('Error loading medicine details:', error);
-                    showAlert('error', 'Error loading medicine details');
-                    pvContent.innerHTML = '<p>Error loading medicine details.</p>';
+                    const errorMessage = error.message || 'Error loading medicine details';
+                    showAlert('error', errorMessage);
+                    pvContent.innerHTML = `<p>${errorMessage}</p>`;
                 });
         }
         

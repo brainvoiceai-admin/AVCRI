@@ -567,7 +567,7 @@
                 $('#search-loading').show();
                 
                 $.ajax({
-                    url: '{% url "search_patients" %}',
+                    url: '{% url "authentication:search_patients" %}',
                     method: 'GET',
                     data: { q: query },
                     dataType: 'json',
@@ -637,7 +637,7 @@
                 $('#search-results').hide();
 
                 $.ajax({
-                    url: '{% url "get_patient_details" %}',
+                    url: '{% url "authentication:get_patient_details" %}',
                     method: 'GET',
                     data: { reg_no: regNo },
                     dataType: 'json',

@@ -76,10 +76,10 @@
 <body>
   <div class="sidebar">
     <h4 class="p-3">Therapy Audit Log</h4>
-    <a href="{% url 'Therapy_Audit_Log' %}">All Therapy Actions</a>
-    <a href="{% url 'Audit_Log' %}">All Audit Logs</a>
-    <a href="{% url 'Manage_user' %}">User Management</a>
-    <a href="{% url 'logout' %}">Logout</a>
+    <a href="{% url 'authentication:Therapy_Audit_Log' %}">All Therapy Actions</a>
+    <a href="{% url 'authentication:Audit_Log' %}">All Audit Logs</a>
+    <a href="{% url 'authentication:Manage_user' %}">User Management</a>
+    <a href="{% url 'authentication:logout' %}">Logout</a>
   </div>
 
   <div class="main">
@@ -185,7 +185,7 @@
           </div>
           <div class="col-12">
             <button type="submit" class="btn btn-primary">Apply Filters</button>
-            <a href="{% url 'Therapy_Audit_Log' %}" class="btn btn-outline-secondary">Clear</a>
+            <a href="{% url 'authentication:Therapy_Audit_Log' %}" class="btn btn-outline-secondary">Clear</a>
           </div>
         </form>
       </div>
@@ -350,7 +350,7 @@
     function exportLogs() {
       // Get current URL parameters
       const urlParams = new URLSearchParams(window.location.search);
-      const exportUrl = '{% url "Therapy_Audit_Log" %}' + '?' + urlParams.toString() + '&export=csv';
+      const exportUrl = '{% url "authentication:Therapy_Audit_Log" %}' + '?' + urlParams.toString() + '&export=csv';
       window.open(exportUrl, '_blank');
     }
 

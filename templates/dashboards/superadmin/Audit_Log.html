@@ -188,7 +188,7 @@
               </div>
               <div class="col-12">
                 <button type="submit" class="btn btn-primary">Apply Filters</button>
-                <a href="{% url 'Audit_Log' %}" class="btn btn-secondary">Clear Filters</a>
+                <a href="{% url 'authentication:Audit_Log' %}" class="btn btn-secondary">Clear Filters</a>
               </div>
             </form>
           </div>
@@ -349,7 +349,7 @@
     function exportLogs() {
       // Get current filter parameters
       const params = new URLSearchParams(window.location.search);
-      const exportUrl = '{% url "Audit_Log" %}?' + params.toString() + '&export=1';
+      const exportUrl = '{% url "authentication:Audit_Log" %}?' + params.toString() + '&export=1';
       window.open(exportUrl, '_blank');
     }
 

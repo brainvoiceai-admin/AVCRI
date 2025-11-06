@@ -7,12 +7,12 @@ from django.utils import timezone
 from django.db import transaction
 from django.utils.dateparse import parse_date
 from .models import PrescriptionScheduling, PrescriptionChangeLog, PrescriptionItem, PrescriptionDispatch
-from .decorators import scheduling_access_required, api_access_required
+from .decorators import prescription_scheduling_access_required, prescription_scheduling_api_access_required
 import json
 from datetime import datetime
 
 @login_required
-@scheduling_access_required
+@prescription_scheduling_access_required
 def prescription_scheduling_dashboard(request):
     """
     Display the prescription scheduling dashboard with draft, scheduled, and dispatched prescriptions.
@@ -98,6 +98,7 @@ def prescription_scheduling_dashboard(request):
 
 @csrf_exempt
 @require_http_methods(["GET"])
+@prescription_scheduling_api_access_required
 def get_prescription_data_api(request):
     """
     API endpoint to fetch prescription data for the scheduling dashboard.
@@ -201,6 +202,7 @@ def get_prescription_data_api(request):
 
 @csrf_exempt
 @require_http_methods(["GET"])
+@prescription_scheduling_api_access_required
 def get_prescription_details_api(request):
     """
     API endpoint to get detailed prescription information for a patient.
@@ -270,6 +272,7 @@ def get_prescription_details_api(request):
 
 @csrf_exempt
 @require_http_methods(["POST"])
+@prescription_scheduling_api_access_required
 def send_final_prescription_api(request):
     """
     API endpoint to send final prescriptions to procurement departments.
@@ -348,6 +351,7 @@ def send_final_prescription_api(request):
 
 @csrf_exempt
 @require_http_methods(["GET"])
+@prescription_scheduling_api_access_required
 def get_change_log_api(request):
     """
     API endpoint to get change log for a patient's prescription.
@@ -392,6 +396,7 @@ def get_change_log_api(request):
 
 @csrf_exempt
 @require_http_methods(["POST"])
+@prescription_scheduling_api_access_required
 def update_prescription_status_api(request):
     """
     API endpoint to update prescription status (called from procurement dashboards).

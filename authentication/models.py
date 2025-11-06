@@ -87,7 +87,7 @@ class CustomUser(AbstractUser):
             "therapist": ["therapy_schedule"],
             "patient": ["patient_profiles", "patient_dashboard", "patient_feedback"],
             "nurse": ["nurse_dashboard"],
-            "ip_pharmacy_staff": ["ip_pharmacy"],
+            "ip_pharmacy_staff": ["ip_pharmacy", "procurement_dashboard"],
             "hr": ["hr_dashboard"],
             "housekeeping_staff": ["housekeeping"],
             "admin": ["user_management", "demand_prediction", "audit_log", "master_tables"],

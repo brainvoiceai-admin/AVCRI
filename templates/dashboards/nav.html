@@ -15,11 +15,23 @@
             {% for module in user_modules %}
                 {# Hide deprecated/removed modules even if still assigned in DB #}
                 {% if module.url_name != 'patient:patient_lookup' and module.url_name != 'prescription_dash' and module.name != 'patient_lookup' and module.name != 'prescriptions_dashboard' %}
-                <a href="{% url module.url_name %}" class="menu-item">
+                {# Handle URL namespaces: URLs with ':' have namespace, use as-is #}
+                {# URLs without ':' - check if it's a Sheduling URL or authentication URL #}
+                {% if ':' in module.url_name %}
+                    {# URLs with namespace (like 'patient:', 'predictor:') use as-is #}
+                    <a href="{% url module.url_name %}" class="menu-item">
+                {% elif module.url_name == 'therapistdash' or module.url_name == 'therapistadmindash' or module.url_name == 'doctordash' or module.url_name == 'superadmindash' or module.url_name == 'patientdash' or module.url_name == 'gmdash' or module.url_name == 'housekeepingdash' or module.url_name == 'nurse_dash' or module.url_name == 'ip_pharmacy' or module.url_name == 'Manage_user' or module.url_name == 'user_profile' or module.url_name == 'login' or module.url_name == 'logout' or module.url_name == 'Therapy_Report' or module.url_name == 'Therapy_Audit_Log' or module.url_name == 'Audit_Log' or module.url_name == 'patient_profile' or module.url_name == 'prescription_dash' or module.url_name == 'Patient_feedback_review' or module.url_name == 'medicin_prescription' or module.url_name == 'medicin_prescription_table' or module.url_name == 'view_patient_details' or module.url_name == 'therapist_feedback_form' or module.url_name == 'role_management' or module.url_name == 'create_role' or module.url_name == 'edit_role' or module.url_name == 'delete_role' or module.url_name == 'user_role_assignment' or module.url_name == 'module_management' or module.url_name == 'therapist_schedule' or module.url_name == 'add_therapy_with_autofill' or module.url_name == 'search_patients' or module.url_name == 'get_patient_details' or module.url_name == 'confirm_role_change' or module.url_name == 'execute_role_change' %}
+                    {# Known authentication URLs without namespace - add the namespace #}
+                    <a href="{% url 'authentication:'|add:module.url_name %}" class="menu-item">
+                {% else %}
+                    {# Assume it's a Sheduling URL or other app URL - use as-is #}
+                    <a href="{% url module.url_name %}" class="menu-item">
+                {% endif %}
                     <span>{{ module.icon }}</span> {{ module.display_name }}
                 </a>
                 {% endif %}
             {% endfor %}
+            
         {% else %}
             {# Fallback to role-based navigation for backward compatibility #}
             {# ---------- Doctor Section ---------- #}
@@ -38,7 +50,7 @@
                 <a href="{% url 'procurement_dashboard' %}" class="menu-item">
                     <span>📦</span> Procurement Dashboard
                 </a>
-                <a href="{% url 'Therapy_Report' %}" class="menu-item">
+                <a href="{% url 'authentication:Therapy_Report' %}" class="menu-item">
                     <span>📊</span> Reports & Analytics
                 </a>
             </div>
@@ -52,10 +64,10 @@
             {% if request.user.role == "therapist" or request.user.role == "super_admin" %}
             <div class="menu-section">
                 <div class="menu-section-title">Therapist Options</div>
-                <a href="{% url 'therapistdash' %}" class="menu-item">
+                <a href="{% url 'authentication:therapistdash' %}" class="menu-item">
                     <span>🗓️</span> My Therapy Schedule
                 </a>
-                <a href="{% url 'therapist_schedule' %}" class="menu-item">
+                <a href="{% url 'authentication:therapist_schedule' %}" class="menu-item">
                     <span>📅</span> Tomorrow's Schedule
                 </a>
             </div>
@@ -65,13 +77,13 @@
             {% if request.user.role == "patient" or request.user.role == "super_admin" %}
             <div class="menu-section">
                 <div class="menu-section-title">Patients</div>
-                <a href="{% url 'patient_profile' %}" class="menu-item">
+                <a href="{% url 'authentication:patient_profile' %}" class="menu-item">
                     <span>👤</span> Patient Profiles
                 </a>
                 <a href="{% url 'patient_dashboard' %}" class="menu-item">
                     <span>🧑‍⚕️</span> Patient Dashboard
                 </a>
-                <a href="{% url 'Patient_feedback_review' %}" class="menu-item">
+                <a href="{% url 'authentication:Patient_feedback_review' %}" class="menu-item">
                     <span>📝</span> Patient Feedback
                 </a>
             </div>
@@ -83,25 +95,28 @@
                 <div class="menu-section-title">Staff</div>
 
                 {% if request.user.role == "ip_pharmacy_staff" or request.user.role == "super_admin" %}
-                <a href="{% url 'ip_pharmacy' %}" class="menu-item">
+                <a href="{% url 'authentication:ip_pharmacy' %}" class="menu-item">
                     <span>🏥</span> In-Patient Pharmacy
+                </a>
+                <a href="{% url 'procurement_dashboard' %}" class="menu-item">
+                    <span>📦</span> Procurement Dashboard
                 </a>
                 {% endif %}
 
                 {% if request.user.role == "nurse" or request.user.role == "super_admin" %}
-                <a href="{% url 'nurse_dash' %}" class="menu-item">
+                <a href="{% url 'authentication:nurse_dash' %}" class="menu-item">
                     <span>🩺</span> Nurse Dashboard
                 </a>
                 {% endif %}
 
                 {% if request.user.role == "hr" or request.user.role == "super_admin" %}
-                <a href="{% url 'gmdash' %}" class="menu-item">
+                <a href="{% url 'authentication:gmdash' %}" class="menu-item">
                     <span>👥</span> HR Dashboard
                 </a>
                 {% endif %}
 
                 {% if request.user.role == "housekeeping_staff" or request.user.role == "super_admin" %}
-                <a href="{% url 'housekeepingdash' %}" class="menu-item">
+                <a href="{% url 'authentication:housekeepingdash' %}" class="menu-item">
                     <span>🧹</span> Housekeeping
                 </a>
                 {% endif %}
@@ -112,16 +127,16 @@
             {% if request.user.role == "admin" or request.user.role == "super_admin" %}
             <div class="menu-section">
                 <div class="menu-section-title">Administration</div>
-                <a href="{% url 'Manage_user' %}" class="menu-item">
+                <a href="{% url 'authentication:Manage_user' %}" class="menu-item">
                     <span>👥</span> User Management
                 </a>
                 <a href="{% url 'predictor:prediction_dashboard' %}" class="menu-item">
                     <span>📈</span> Demand Prediction
                 </a>
-                <a href="{% url 'Audit_Log' %}" class="menu-item">
+                <a href="{% url 'authentication:Audit_Log' %}" class="menu-item">
                     <span>📑</span> Audit Log
                 </a>
-                <a href="{% url 'Therapy_Audit_Log' %}" class="menu-item">
+                <a href="{% url 'authentication:Therapy_Audit_Log' %}" class="menu-item">
                     <span>🏥</span> Therapy Audit Log
                 </a>
             </div>
@@ -133,13 +148,13 @@
                 <a href="{% url 'master_management_dashboard' %}" class="menu-item">
                     <span>🗃️</span> Master Management
                 </a>
-                <a href="{% url 'role_management' %}" class="menu-item">
+                <a href="{% url 'authentication:role_management' %}" class="menu-item">
                     <span>👤</span> Role Management
                 </a>
-                <a href="{% url 'user_role_assignment' %}" class="menu-item">
+                <a href="{% url 'authentication:user_role_assignment' %}" class="menu-item">
                     <span>🔗</span> User Role Assignment
                 </a>
-                <a href="{% url 'module_management' %}" class="menu-item">
+                <a href="{% url 'authentication:module_management' %}" class="menu-item">
                     <span>📋</span> Module Management
                 </a>
                 <a href="{% url 'master_management_dashboard' %}" class="menu-item">
@@ -152,10 +167,10 @@
         {# ---------- Account Section (all roles) ---------- #}
         <div class="menu-section">
             <div class="menu-section-title">Account</div>
-            <a href="{% url 'user_profile' %}" class="menu-item">
+            <a href="{% url 'authentication:user_profile' %}" class="menu-item">
                 <span>✏️</span> Edit My Profile
             </a>
-            <a href="{% url 'logout' %}" class="menu-item" id="logout">
+            <a href="{% url 'authentication:logout' %}" class="menu-item" id="logout">
                 <span>🔐</span> Log Out
             </a>
         </div>
