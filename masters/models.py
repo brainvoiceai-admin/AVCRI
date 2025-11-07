@@ -176,7 +176,7 @@ class TherapistMaster(models.Model):
     # Foreign keys to user system
     user = models.ForeignKey('authentication.CustomUser', on_delete=models.CASCADE, related_name='therapist_master', verbose_name="User", null=True, blank=True)
     therapist_profile = models.ForeignKey('authentication.TherapistProfile', on_delete=models.CASCADE, related_name='therapist_master', verbose_name="Therapist Profile", null=True, blank=True)
-    
+    therapist_gender = models.CharField(max_length=200,verbose_name="Therapist Gender",null=True,blank=True,default="Male")
     # Therapist details (can be synced from user profile)
     therapist_code = models.CharField(max_length=20, unique=True, verbose_name="Therapist Code")
     therapist_name = models.CharField(max_length=255, verbose_name="Therapist Name")
