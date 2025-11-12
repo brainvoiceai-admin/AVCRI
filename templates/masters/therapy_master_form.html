@@ -51,12 +51,20 @@
                     <i class="fas fa-info-circle me-2"></i>Basic Information
                 </h5>
                 <div class="row">
+                    {% if object %}
                     <div class="col-md-6 mb-3">
-                        <label for="id_therapy_code" class="form-label">Therapy Code *</label>
-                        <input type="text" class="form-control" id="id_therapy_code" name="therapy_code" 
-                               value="{{ form.therapy_code.value|default:'' }}" required>
-                        <div class="invalid-feedback">Please provide a therapy code.</div>
+                        <label for="id_therapy_code" class="form-label">Therapy Code</label>
+                        <input type="text" class="form-control" id="id_therapy_code" 
+                               value="{{ object.therapy_code }}" readonly>
+                        <small class="form-text text-muted">Auto-generated code (cannot be changed)</small>
                     </div>
+                    {% else %}
+                    <div class="col-md-6 mb-3">
+                        <div class="alert alert-info">
+                            <i class="fas fa-info-circle"></i> Therapy code will be auto-generated (THEB + 3 digits)
+                        </div>
+                    </div>
+                    {% endif %}
                     <div class="col-md-6 mb-3">
                         <label for="id_therapy_name" class="form-label">Therapy Name *</label>
                         <input type="text" class="form-control" id="id_therapy_name" name="therapy_name" 
@@ -73,13 +81,7 @@
                     </div>
                     <div class="col-md-6 mb-3">
                         <label for="id_therapy_category" class="form-label">Therapy Category</label>
-                        <select class="form-select" id="id_therapy_category" name="therapy_category">
-                            <option value="">Select Category</option>
-                            <option value="Traditional" {% if form.therapy_category.value == 'Traditional' %}selected{% endif %}>Traditional</option>
-                            <option value="Modern" {% if form.therapy_category.value == 'Modern' %}selected{% endif %}>Modern</option>
-                            <option value="Ayurvedic" {% if form.therapy_category.value == 'Ayurvedic' %}selected{% endif %}>Ayurvedic</option>
-                            <option value="Panchakarma" {% if form.therapy_category.value == 'Panchakarma' %}selected{% endif %}>Panchakarma</option>
-                        </select>
+                        {{ form.therapy_category }}
                     </div>
                 </div>
             </div>
@@ -173,8 +175,8 @@
                         <input type="number" class="form-control" id="id_total_no_of_therapist" 
                                name="total_no_of_therapist" 
                                value="{{ form.total_no_of_therapist.value|default:0 }}" 
-                               min="0" placeholder="0">
-                        <small class="form-text text-muted">Total number of therapists required for this therapy</small>
+                               min="0" placeholder="0" readonly>
+                        <small class="form-text text-muted">Auto-calculated from therapist counts above</small>
                     </div>
                 </div>
             </div>
@@ -226,15 +228,24 @@
             }, false);
         })();
 
-        // Auto-generate therapy code from name
-        document.getElementById('id_therapy_name').addEventListener('input', function() {
-            const name = this.value;
-            const codeField = document.getElementById('id_therapy_code');
-            if (!codeField.value) {
-                const code = name.replace(/\s+/g, '').substring(0, 8).toUpperCase();
-                codeField.value = code;
-            }
-        });
+        // Auto-calculate total therapists
+        function calculateTotalTherapists() {
+            const superSenior = parseInt(document.getElementById('id_no_of_super_senior_therapist').value) || 0;
+            const senior = parseInt(document.getElementById('id_no_of_senior_therapist').value) || 0;
+            const junior = parseInt(document.getElementById('id_no_of_junior_therapist').value) || 0;
+            const trainee = parseInt(document.getElementById('id_no_of_trainee_therapist').value) || 0;
+            const total = superSenior + senior + junior + trainee;
+            document.getElementById('id_total_no_of_therapist').value = total;
+        }
+        
+        // Add event listeners to all therapist count fields
+        document.getElementById('id_no_of_super_senior_therapist').addEventListener('input', calculateTotalTherapists);
+        document.getElementById('id_no_of_senior_therapist').addEventListener('input', calculateTotalTherapists);
+        document.getElementById('id_no_of_junior_therapist').addEventListener('input', calculateTotalTherapists);
+        document.getElementById('id_no_of_trainee_therapist').addEventListener('input', calculateTotalTherapists);
+        
+        // Calculate on page load
+        calculateTotalTherapists();
     </script>
 </body>
 </html>

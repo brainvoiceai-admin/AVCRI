@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% if object %}Edit{% else %}Add{% endif %} Procurement Source</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    
+    <style>
+        .main-content {
+            padding-left: 275px;
+        }
+        .form-section {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        .required-field::after {
+            content: " *";
+            color: red;
+        }
+    </style>
+</head>
+<body>
+    {% include 'dashboards/nav.html' %}
+
+    <div class="main-content container mt-4">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h2>
+                <i class="fas fa-shopping-cart text-primary"></i>
+                {% if object %}Edit Procurement Source{% else %}Add New Procurement Source{% endif %}
+            </h2>
+            <div>
+                <a href="{% url 'procured_manage' %}" class="btn btn-secondary">
+                    <i class="fas fa-arrow-left me-2"></i>Back to List
+                </a>
+            </div>
+        </div>
+
+        {% if messages %}
+            {% for message in messages %}
+                <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
+                    {{ message }}
+                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                </div>
+            {% endfor %}
+        {% endif %}
+
+        <form method="post" class="needs-validation" novalidate>
+            {% csrf_token %}
+            
+            <div class="row">
+                <!-- Procurement Source Information -->
+                <div class="col-md-8">
+                    <div class="form-section">
+                        <h5 class="text-primary mb-3">
+                            <i class="fas fa-info-circle me-2"></i>Procurement Source Information
+                        </h5>
+                        
+                        <div class="row">
+                            <div class="col-md-8 mb-3">
+                                <label for="id_name" class="form-label required-field">Source Name</label>
+                                <input type="text" class="form-control" id="id_name" name="name" 
+                                       value="{{ form.name.value|default:'' }}" required
+                                       placeholder="e.g., Kashaya Room, IP Pharmacy">
+                                <div class="invalid-feedback">
+                                    Please provide a source name.
+                                </div>
+                                <small class="form-text text-muted">Name of the procurement source</small>
+                            </div>
+                            
+                            <div class="col-md-4 mb-3">
+                                <div class="form-check form-switch">
+                                    <input class="form-check-input" type="checkbox" id="id_is_active" 
+                                           name="is_active" {% if form.is_active.value|default:True %}checked{% endif %}>
+                                    <label class="form-check-label" for="id_is_active">
+                                        <i class="fas fa-check-circle me-1"></i>Active
+                                    </label>
+                                    <small class="form-text text-muted d-block">Source is currently active</small>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Help Section -->
+                <div class="col-md-4">
+                    <div class="card">
+                        <div class="card-header">
+                            <h6 class="mb-0">
+                                <i class="fas fa-question-circle me-2"></i>Help & Guidelines
+                            </h6>
+                        </div>
+                        <div class="card-body">
+                            <h6>Source Name</h6>
+                            <p class="small text-muted">Define where items are procured from (e.g., Kashaya Room, IP Pharmacy, OP Pharmacy).</p>
+                            
+                            <h6>Common Sources</h6>
+                            <div class="small text-muted">
+                                <div class="mb-1"><strong>Kashaya Room:</strong> Traditional medicine room</div>
+                                <div class="mb-1"><strong>IP Pharmacy:</strong> Inpatient pharmacy</div>
+                                <div class="mb-1"><strong>OP Pharmacy:</strong> Outpatient pharmacy</div>
+                            </div>
+                            
+                            <h6>Status</h6>
+                            <p class="small text-muted">Only active sources will appear in dropdowns and forms.</p>
+                        </div>
+                    </div>
+                    
+                    <div class="card mt-3">
+                        <div class="card-header">
+                            <h6 class="mb-0">
+                                <i class="fas fa-exclamation-triangle me-2"></i>Important Notes
+                            </h6>
+                        </div>
+                        <div class="card-body">
+                            <ul class="small text-muted mb-0">
+                                <li>All fields marked with * are required</li>
+                                <li>Source names should be unique</li>
+                                <li>Use clear descriptions</li>
+                                <li>Inactive sources won't appear in forms</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Form Actions -->
+            <div class="row mt-4">
+                <div class="col-12">
+                    <div class="d-flex justify-content-between">
+                        <a href="{% url 'procured_manage' %}" class="btn btn-outline-secondary">
+                            <i class="fas fa-times me-2"></i>Cancel
+                        </a>
+                        <div>
+                            <button type="submit" class="btn btn-success me-2">
+                                <i class="fas fa-save me-2"></i>
+                                {% if object %}Update Source{% else %}Create Source{% endif %}
+                            </button>
+                            {% if object %}
+                            <a href="{% url 'procured_delete' object.pk %}" 
+                               class="btn btn-outline-danger"
+                               onclick="return confirm('Are you sure you want to delete this procurement source?')">
+                                <i class="fas fa-trash me-2"></i>Delete
+                            </a>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </form>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // Form validation
+        (function() {
+            'use strict';
+            window.addEventListener('load', function() {
+                var forms = document.getElementsByClassName('needs-validation');
+                var validation = Array.prototype.filter.call(forms, function(form) {
+                    form.addEventListener('submit', function(event) {
+                        if (form.checkValidity() === false) {
+                            event.preventDefault();
+                            event.stopPropagation();
+                        }
+                        form.classList.add('was-validated');
+                    }, false);
+                });
+            }, false);
+        })();
+    </script>
+</body>
+</html>
+
+

@@ -6,11 +6,13 @@ from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib import messages
 from django.views.generic import ListView, CreateView, UpdateView, DeleteView
 from django.urls import reverse_lazy
+from django.db import models as db_models
+from django import forms
 from authentication.decorators import super_admin_required
 from .models import (
     Procured, OilClass, UsageType, PrescriptionTime, 
     PrescriptionScope, UnitNo, TherapyMaster, ItemMaster, SlotMaster,
-    TherapistMaster, TherapistLeaveMaster
+    TherapistGrade, TherapistMaster, TherapistLeaveMaster
 )
 import json
 
@@ -31,7 +33,7 @@ def get_master_data(request):
             ))
         elif master_type == 'slot':
             data = list(SlotMaster.objects.filter(is_active=True).values(
-                'slot_number', 'slot_name', 'start_time', 'end_time'
+                'slot_number', 'slot_name', 'slot_time'
             ))
         elif master_type == 'procured':
             data = list(Procured.objects.filter(is_active=True).values('id', 'name'))
@@ -96,10 +98,19 @@ def create_master_item(request):
                 unit_of_measure=data.get('unit_of_measure', '')
             )
         elif master_type == 'slot':
+            from datetime import datetime
+            slot_time_str = data.get('slot_time') or data.get('start_time', '09:00')
+            # Convert string to time if needed
+            if isinstance(slot_time_str, str):
+                try:
+                    slot_time = datetime.strptime(slot_time_str, '%H:%M').time()
+                except:
+                    slot_time = datetime.strptime(slot_time_str, '%H:%M:%S').time()
+            else:
+                slot_time = slot_time_str
             item = SlotMaster.objects.create(
                 slot_number=data['slot_number'],
-                start_time=data['start_time'],
-                end_time=data['end_time'],
+                slot_time=slot_time,
                 slot_name=data.get('slot_name', '')
             )
         else:
@@ -134,8 +145,16 @@ def update_master_item(request, item_id):
         elif master_type == 'slot':
             item = SlotMaster.objects.get(id=item_id)
             item.slot_name = data.get('slot_name', item.slot_name)
-            item.start_time = data.get('start_time', item.start_time)
-            item.end_time = data.get('end_time', item.end_time)
+            slot_time = data.get('slot_time') or data.get('start_time')
+            if slot_time:
+                from datetime import datetime
+                if isinstance(slot_time, str):
+                    try:
+                        item.slot_time = datetime.strptime(slot_time, '%H:%M').time()
+                    except:
+                        item.slot_time = datetime.strptime(slot_time, '%H:%M:%S').time()
+                else:
+                    item.slot_time = slot_time
             item.is_active = data.get('is_active', item.is_active)
         else:
             return JsonResponse({'error': 'Invalid master type'}, status=400)
@@ -182,46 +201,64 @@ class ProcuredManagementView(ListView):
         return Procured.objects.all().order_by('name')
     
     def post(self, request, *args, **kwargs):
-        """Handle POST requests for creating new procurement sources or updating existing ones"""
-        pk = kwargs.get('pk')
+        """Handle POST requests for creating new procurement sources"""
         name = request.POST.get('name')
         is_active = request.POST.get('is_active') == 'on'
         
-        if pk:
-            # Update existing record (enable/disable)
+        # Create new record
+        if name:
             try:
-                procured = Procured.objects.get(pk=pk)
-                procured.is_active = is_active
-                procured.save()
-                action = "enabled" if is_active else "disabled"
-                messages.success(request, f'Procurement source "{procured.name}" {action} successfully.')
-            except Procured.DoesNotExist:
-                messages.error(request, 'Procurement source not found.')
+                Procured.objects.create(
+                    name=name,
+                    is_active=is_active
+                )
+                messages.success(request, f'Procurement source "{name}" created successfully.')
             except Exception as e:
-                messages.error(request, f'Error updating procurement source: {str(e)}')
+                messages.error(request, f'Error creating procurement source: {str(e)}')
         else:
-            # Create new record
-            if name:
-                try:
-                    Procured.objects.create(
-                        name=name,
-                        is_active=is_active
-                    )
-                    messages.success(request, f'Procurement source "{name}" created successfully.')
-                except Exception as e:
-                    messages.error(request, f'Error creating procurement source: {str(e)}')
-            else:
-                messages.error(request, 'Name is required.')
+            messages.error(request, 'Name is required.')
         
         return redirect('procured_manage')
 
-class ProcuredDeleteView(DeleteView):
+class ProcuredUpdateView(UpdateView):
     model = Procured
+    fields = ['name', 'is_active']
+    template_name = 'masters/procured_form.html'
     success_url = reverse_lazy('procured_manage')
     
-    def delete(self, request, *args, **kwargs):
-        messages.success(request, 'Procured item deleted successfully.')
-        return super().delete(request, *args, **kwargs)
+    def form_valid(self, form):
+        messages.success(self.request, 'Procurement source updated successfully.')
+        return super().form_valid(form)
+
+@login_required
+@super_admin_required
+def procured_delete(request, pk):
+    """Delete a procurement source - function-based view to handle GET requests properly"""
+    procured = get_object_or_404(Procured, pk=pk)
+    procured_name = procured.name
+    procured.delete()
+    messages.success(request, f'Procurement source "{procured_name}" deleted successfully.')
+    return redirect('procured_manage')
+
+@login_required
+@super_admin_required
+def procured_enable(request, pk):
+    """Enable a procurement source"""
+    procured = get_object_or_404(Procured, pk=pk)
+    procured.is_active = True
+    procured.save()
+    messages.success(request, f'Procurement source "{procured.name}" enabled successfully.')
+    return redirect('procured_manage')
+
+@login_required
+@super_admin_required
+def procured_disable(request, pk):
+    """Disable a procurement source"""
+    procured = get_object_or_404(Procured, pk=pk)
+    procured.is_active = False
+    procured.save()
+    messages.success(request, f'Procurement source "{procured.name}" disabled successfully.')
+    return redirect('procured_manage')
 
 class OilClassManagementView(ListView):
     model = OilClass
@@ -233,46 +270,64 @@ class OilClassManagementView(ListView):
         return OilClass.objects.all().order_by('name')
     
     def post(self, request, *args, **kwargs):
-        """Handle POST requests for creating new oil classes or updating existing ones"""
-        pk = kwargs.get('pk')
+        """Handle POST requests for creating new oil classes"""
         name = request.POST.get('name')
         is_active = request.POST.get('is_active') == 'on'
         
-        if pk:
-            # Update existing record (enable/disable)
+        # Create new record
+        if name:
             try:
-                oil_class = OilClass.objects.get(pk=pk)
-                oil_class.is_active = is_active
-                oil_class.save()
-                action = "enabled" if is_active else "disabled"
-                messages.success(request, f'Oil class "{oil_class.name}" {action} successfully.')
-            except OilClass.DoesNotExist:
-                messages.error(request, 'Oil class not found.')
+                OilClass.objects.create(
+                    name=name,
+                    is_active=is_active
+                )
+                messages.success(request, f'Oil class "{name}" created successfully.')
             except Exception as e:
-                messages.error(request, f'Error updating oil class: {str(e)}')
+                messages.error(request, f'Error creating oil class: {str(e)}')
         else:
-            # Create new record
-            if name:
-                try:
-                    OilClass.objects.create(
-                        name=name,
-                        is_active=is_active
-                    )
-                    messages.success(request, f'Oil class "{name}" created successfully.')
-                except Exception as e:
-                    messages.error(request, f'Error creating oil class: {str(e)}')
-            else:
-                messages.error(request, 'Name is required.')
-            
-            return redirect('oilclass_manage')
+            messages.error(request, 'Name is required.')
+        
+        return redirect('oilclass_manage')
 
-class OilClassDeleteView(DeleteView):
+class OilClassUpdateView(UpdateView):
     model = OilClass
+    fields = ['name', 'is_active']
+    template_name = 'masters/oilclass_form.html'
     success_url = reverse_lazy('oilclass_manage')
     
-    def delete(self, request, *args, **kwargs):
-        messages.success(request, 'Oil class deleted successfully.')
-        return super().delete(request, *args, **kwargs)
+    def form_valid(self, form):
+        messages.success(self.request, 'Oil class updated successfully.')
+        return super().form_valid(form)
+
+@login_required
+@super_admin_required
+def oil_class_delete(request, pk):
+    """Delete an oil class - function-based view to handle GET requests properly"""
+    oil_class = get_object_or_404(OilClass, pk=pk)
+    oil_class_name = oil_class.name
+    oil_class.delete()
+    messages.success(request, f'Oil class "{oil_class_name}" deleted successfully.')
+    return redirect('oilclass_manage')
+
+@login_required
+@super_admin_required
+def oil_class_enable(request, pk):
+    """Enable an oil class"""
+    oil_class = get_object_or_404(OilClass, pk=pk)
+    oil_class.is_active = True
+    oil_class.save()
+    messages.success(request, f'Oil class "{oil_class.name}" enabled successfully.')
+    return redirect('oilclass_manage')
+
+@login_required
+@super_admin_required
+def oil_class_disable(request, pk):
+    """Disable an oil class"""
+    oil_class = get_object_or_404(OilClass, pk=pk)
+    oil_class.is_active = False
+    oil_class.save()
+    messages.success(request, f'Oil class "{oil_class.name}" disabled successfully.')
+    return redirect('oilclass_manage')
 
 class UsageTypeManagementView(ListView):
     model = UsageType
@@ -284,46 +339,64 @@ class UsageTypeManagementView(ListView):
         return UsageType.objects.all().order_by('name')
     
     def post(self, request, *args, **kwargs):
-        """Handle POST requests for creating new usage types or updating existing ones"""
-        pk = kwargs.get('pk')
+        """Handle POST requests for creating new usage types"""
         name = request.POST.get('name')
         is_active = request.POST.get('is_active') == 'on'
         
-        if pk:
-            # Update existing record (enable/disable)
+        # Create new record
+        if name:
             try:
-                usage_type = UsageType.objects.get(pk=pk)
-                usage_type.is_active = is_active
-                usage_type.save()
-                action = "enabled" if is_active else "disabled"
-                messages.success(request, f'Usage type "{usage_type.name}" {action} successfully.')
-            except UsageType.DoesNotExist:
-                messages.error(request, 'Usage type not found.')
+                UsageType.objects.create(
+                    name=name,
+                    is_active=is_active
+                )
+                messages.success(request, f'Usage type "{name}" created successfully.')
             except Exception as e:
-                messages.error(request, f'Error updating usage type: {str(e)}')
+                messages.error(request, f'Error creating usage type: {str(e)}')
         else:
-            # Create new record
-            if name:
-                try:
-                    UsageType.objects.create(
-                        name=name,
-                        is_active=is_active
-                    )
-                    messages.success(request, f'Usage type "{name}" created successfully.')
-                except Exception as e:
-                    messages.error(request, f'Error creating usage type: {str(e)}')
-            else:
-                messages.error(request, 'Name is required.')
-            
-            return redirect('usagetype_manage')
+            messages.error(request, 'Name is required.')
+        
+        return redirect('usagetype_manage')
 
-class UsageTypeDeleteView(DeleteView):
+class UsageTypeUpdateView(UpdateView):
     model = UsageType
+    fields = ['name', 'is_active']
+    template_name = 'masters/usagetype_form.html'
     success_url = reverse_lazy('usagetype_manage')
     
-    def delete(self, request, *args, **kwargs):
-        messages.success(request, 'Usage type deleted successfully.')
-        return super().delete(request, *args, **kwargs)
+    def form_valid(self, form):
+        messages.success(self.request, 'Usage type updated successfully.')
+        return super().form_valid(form)
+
+@login_required
+@super_admin_required
+def usage_type_delete(request, pk):
+    """Delete a usage type - function-based view to handle GET requests properly"""
+    usage_type = get_object_or_404(UsageType, pk=pk)
+    usage_type_name = usage_type.name
+    usage_type.delete()
+    messages.success(request, f'Usage type "{usage_type_name}" deleted successfully.')
+    return redirect('usagetype_manage')
+
+@login_required
+@super_admin_required
+def usage_type_enable(request, pk):
+    """Enable a usage type"""
+    usage_type = get_object_or_404(UsageType, pk=pk)
+    usage_type.is_active = True
+    usage_type.save()
+    messages.success(request, f'Usage type "{usage_type.name}" enabled successfully.')
+    return redirect('usagetype_manage')
+
+@login_required
+@super_admin_required
+def usage_type_disable(request, pk):
+    """Disable a usage type"""
+    usage_type = get_object_or_404(UsageType, pk=pk)
+    usage_type.is_active = False
+    usage_type.save()
+    messages.success(request, f'Usage type "{usage_type.name}" disabled successfully.')
+    return redirect('usagetype_manage')
 
 class PrescriptionTimeManagementView(ListView):
     model = PrescriptionTime
@@ -335,46 +408,64 @@ class PrescriptionTimeManagementView(ListView):
         return PrescriptionTime.objects.all().order_by('name')
     
     def post(self, request, *args, **kwargs):
-        """Handle POST requests for creating new prescription times or updating existing ones"""
-        pk = kwargs.get('pk')
+        """Handle POST requests for creating new prescription times"""
         name = request.POST.get('name')
         is_active = request.POST.get('is_active') == 'on'
         
-        if pk:
-            # Update existing record (enable/disable)
+        # Create new record
+        if name:
             try:
-                prescription_time = PrescriptionTime.objects.get(pk=pk)
-                prescription_time.is_active = is_active
-                prescription_time.save()
-                action = "enabled" if is_active else "disabled"
-                messages.success(request, f'Prescription time "{prescription_time.name}" {action} successfully.')
-            except PrescriptionTime.DoesNotExist:
-                messages.error(request, 'Prescription time not found.')
+                PrescriptionTime.objects.create(
+                    name=name,
+                    is_active=is_active
+                )
+                messages.success(request, f'Prescription time "{name}" created successfully.')
             except Exception as e:
-                messages.error(request, f'Error updating prescription time: {str(e)}')
+                messages.error(request, f'Error creating prescription time: {str(e)}')
         else:
-            # Create new record
-            if name:
-                try:
-                    PrescriptionTime.objects.create(
-                        name=name,
-                        is_active=is_active
-                    )
-                    messages.success(request, f'Prescription time "{name}" created successfully.')
-                except Exception as e:
-                    messages.error(request, f'Error creating prescription time: {str(e)}')
-            else:
-                messages.error(request, 'Name is required.')
-            
-            return redirect('prestime_manage')
+            messages.error(request, 'Name is required.')
+        
+        return redirect('prestime_manage')
 
-class PrescriptionTimeDeleteView(DeleteView):
+class PrescriptionTimeUpdateView(UpdateView):
     model = PrescriptionTime
+    fields = ['name', 'is_active']
+    template_name = 'masters/prestime_form.html'
     success_url = reverse_lazy('prestime_manage')
     
-    def delete(self, request, *args, **kwargs):
-        messages.success(request, 'Prescription time deleted successfully.')
-        return super().delete(request, *args, **kwargs)
+    def form_valid(self, form):
+        messages.success(self.request, 'Prescription time updated successfully.')
+        return super().form_valid(form)
+
+@login_required
+@super_admin_required
+def prescription_time_delete(request, pk):
+    """Delete a prescription time - function-based view to handle GET requests properly"""
+    time = get_object_or_404(PrescriptionTime, pk=pk)
+    time_name = time.name
+    time.delete()
+    messages.success(request, f'Prescription time "{time_name}" deleted successfully.')
+    return redirect('prestime_manage')
+
+@login_required
+@super_admin_required
+def prescription_time_enable(request, pk):
+    """Enable a prescription time"""
+    time = get_object_or_404(PrescriptionTime, pk=pk)
+    time.is_active = True
+    time.save()
+    messages.success(request, f'Prescription time "{time.name}" enabled successfully.')
+    return redirect('prestime_manage')
+
+@login_required
+@super_admin_required
+def prescription_time_disable(request, pk):
+    """Disable a prescription time"""
+    time = get_object_or_404(PrescriptionTime, pk=pk)
+    time.is_active = False
+    time.save()
+    messages.success(request, f'Prescription time "{time.name}" disabled successfully.')
+    return redirect('prestime_manage')
 
 class PrescriptionScopeManagementView(ListView):
     model = PrescriptionScope
@@ -386,46 +477,64 @@ class PrescriptionScopeManagementView(ListView):
         return PrescriptionScope.objects.all().order_by('name')
     
     def post(self, request, *args, **kwargs):
-        """Handle POST requests for creating new prescription scopes or updating existing ones"""
-        pk = kwargs.get('pk')
+        """Handle POST requests for creating new prescription scopes"""
         name = request.POST.get('name')
         is_active = request.POST.get('is_active') == 'on'
         
-        if pk:
-            # Update existing record (enable/disable)
+        # Create new record
+        if name:
             try:
-                prescription_scope = PrescriptionScope.objects.get(pk=pk)
-                prescription_scope.is_active = is_active
-                prescription_scope.save()
-                action = "enabled" if is_active else "disabled"
-                messages.success(request, f'Prescription scope "{prescription_scope.name}" {action} successfully.')
-            except PrescriptionScope.DoesNotExist:
-                messages.error(request, 'Prescription scope not found.')
+                PrescriptionScope.objects.create(
+                    name=name,
+                    is_active=is_active
+                )
+                messages.success(request, f'Prescription scope "{name}" created successfully.')
             except Exception as e:
-                messages.error(request, f'Error updating prescription scope: {str(e)}')
+                messages.error(request, f'Error creating prescription scope: {str(e)}')
         else:
-            # Create new record
-            if name:
-                try:
-                    PrescriptionScope.objects.create(
-                        name=name,
-                        is_active=is_active
-                    )
-                    messages.success(request, f'Prescription scope "{name}" created successfully.')
-                except Exception as e:
-                    messages.error(request, f'Error creating prescription scope: {str(e)}')
-            else:
-                messages.error(request, 'Name is required.')
-            
-            return redirect('prescope_manage')
+            messages.error(request, 'Name is required.')
+        
+        return redirect('prescope_manage')
 
-class PrescriptionScopeDeleteView(DeleteView):
+class PrescriptionScopeUpdateView(UpdateView):
     model = PrescriptionScope
+    fields = ['name', 'is_active']
+    template_name = 'masters/prescope_form.html'
     success_url = reverse_lazy('prescope_manage')
     
-    def delete(self, request, *args, **kwargs):
-        messages.success(request, 'Prescription scope deleted successfully.')
-        return super().delete(request, *args, **kwargs)
+    def form_valid(self, form):
+        messages.success(self.request, 'Prescription scope updated successfully.')
+        return super().form_valid(form)
+
+@login_required
+@super_admin_required
+def prescription_scope_delete(request, pk):
+    """Delete a prescription scope - function-based view to handle GET requests properly"""
+    scope = get_object_or_404(PrescriptionScope, pk=pk)
+    scope_name = scope.name
+    scope.delete()
+    messages.success(request, f'Prescription scope "{scope_name}" deleted successfully.')
+    return redirect('prescope_manage')
+
+@login_required
+@super_admin_required
+def prescription_scope_enable(request, pk):
+    """Enable a prescription scope"""
+    scope = get_object_or_404(PrescriptionScope, pk=pk)
+    scope.is_active = True
+    scope.save()
+    messages.success(request, f'Prescription scope "{scope.name}" enabled successfully.')
+    return redirect('prescope_manage')
+
+@login_required
+@super_admin_required
+def prescription_scope_disable(request, pk):
+    """Disable a prescription scope"""
+    scope = get_object_or_404(PrescriptionScope, pk=pk)
+    scope.is_active = False
+    scope.save()
+    messages.success(request, f'Prescription scope "{scope.name}" disabled successfully.')
+    return redirect('prescope_manage')
 
 # UnitNo views
 class UnitNoListView(ListView):
@@ -476,13 +585,15 @@ class UnitNoUpdateView(UpdateView):
         messages.success(self.request, 'Unit updated successfully.')
         return super().form_valid(form)
 
-class UnitNoDeleteView(DeleteView):
-    model = UnitNo
-    success_url = reverse_lazy('unit_list')
-
-    def delete(self, request, *args, **kwargs):
-        messages.success(request, 'Unit deleted successfully.')
-        return super().delete(request, *args, **kwargs)
+@login_required
+@super_admin_required
+def unit_no_delete(request, pk):
+    """Delete a unit - function-based view to handle GET requests properly"""
+    unit = get_object_or_404(UnitNo, pk=pk)
+    unit_name = unit.unit_name
+    unit.delete()
+    messages.success(request, f'Unit "{unit_name}" deleted successfully.')
+    return redirect('unit_list')
 
 @login_required
 @super_admin_required
@@ -601,35 +712,145 @@ class TherapyMasterManagementView(ListView):
     paginate_by = 20
 
     def get_queryset(self):
-        return TherapyMaster.objects.all().order_by('therapy_name')
+        queryset = TherapyMaster.objects.all()
+        
+        # Search filter (server-side)
+        search = self.request.GET.get('search', '')
+        if search:
+            queryset = queryset.filter(
+                db_models.Q(therapy_code__icontains=search) |
+                db_models.Q(therapy_name__icontains=search) |
+                db_models.Q(therapy_group__icontains=search)
+            )
+        
+        # Status filter (server-side)
+        status = self.request.GET.get('status', '')
+        if status == 'active':
+            queryset = queryset.filter(is_active=True)
+        elif status == 'inactive':
+            queryset = queryset.filter(is_active=False)
+        
+        # Category filter (server-side)
+        category = self.request.GET.get('category', '')
+        if category:
+            queryset = queryset.filter(therapy_category=category)
+        
+        return queryset.order_by('therapy_name')
+    
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['search'] = self.request.GET.get('search', '')
+        context['status_filter'] = self.request.GET.get('status', '')
+        context['category_filter'] = self.request.GET.get('category', '')
+        return context
 
 class TherapyMasterCreateView(CreateView):
     model = TherapyMaster
-    fields = ['therapy_code', 'therapy_name', 'therapy_group', 'therapy_category', 'therapy_duration', 'bathing_required', 'treatment_room_required', 'cost_of_therapy', 'no_of_super_senior_therapist', 'no_of_senior_therapist', 'no_of_junior_therapist', 'no_of_trainee_therapist', 'total_no_of_therapist', 'is_active']
+    fields = ['therapy_name', 'therapy_group', 'therapy_category', 'therapy_duration', 'bathing_required', 'treatment_room_required', 'cost_of_therapy', 'no_of_super_senior_therapist', 'no_of_senior_therapist', 'no_of_junior_therapist', 'no_of_trainee_therapist', 'is_active']
     template_name = 'masters/therapy_master_form.html'
     success_url = reverse_lazy('therapy_master_manage')
     
+    def get_form(self, form_class=None):
+        form = super().get_form(form_class)
+        # Make therapy_code read-only/hidden since it's auto-generated
+        if 'therapy_code' in form.fields:
+            form.fields['therapy_code'].widget.attrs['readonly'] = True
+        # Update therapy_category to use dropdown with Medium, Hard, Easy
+        if 'therapy_category' in form.fields:
+            form.fields['therapy_category'].widget = forms.Select(choices=[
+                ('', 'Select Category'),
+                ('Medium', 'Medium'),
+                ('Hard', 'Hard'),
+                ('Easy', 'Easy'),
+            ])
+        return form
+    
     def form_valid(self, form):
-        messages.success(self.request, 'Therapy created successfully.')
-        return super().form_valid(form)
+        # Auto-generate unique therapy code by incrementing from highest existing code
+        # Get all existing therapy codes that start with THEB
+        existing_codes = TherapyMaster.objects.filter(
+            therapy_code__startswith='THEB'
+        ).values_list('therapy_code', flat=True)
+        
+        # Extract numbers from existing codes and find the highest
+        max_number = 0
+        for code in existing_codes:
+            try:
+                # Extract number part after 'THEB'
+                number_part = int(code.replace('THEB', ''))
+                if number_part > max_number:
+                    max_number = number_part
+            except (ValueError, AttributeError):
+                continue
+        
+        # Increment by 1
+        next_number = max_number + 1
+        
+        # Ensure it doesn't exceed 999
+        if next_number > 999:
+            raise ValueError("Maximum therapy code limit reached (THEB999)")
+        
+        # Generate new code
+        therapy_code = f"THEB{next_number:03d}"
+        
+        # Calculate total number of therapists
+        instance = form.save(commit=False)
+        instance.therapy_code = therapy_code
+        instance.total_no_of_therapist = (
+            instance.no_of_super_senior_therapist +
+            instance.no_of_senior_therapist +
+            instance.no_of_junior_therapist +
+            instance.no_of_trainee_therapist
+        )
+        instance.save()
+        
+        messages.success(self.request, f'Therapy "{instance.therapy_name}" ({therapy_code}) created successfully.')
+        return redirect(self.success_url)
 
 class TherapyMasterUpdateView(UpdateView):
     model = TherapyMaster
-    fields = ['therapy_code', 'therapy_name', 'therapy_group', 'therapy_category', 'therapy_duration', 'bathing_required', 'treatment_room_required', 'cost_of_therapy', 'no_of_super_senior_therapist', 'no_of_senior_therapist', 'no_of_junior_therapist', 'no_of_trainee_therapist', 'total_no_of_therapist', 'is_active']
+    fields = ['therapy_name', 'therapy_group', 'therapy_category', 'therapy_duration', 'bathing_required', 'treatment_room_required', 'cost_of_therapy', 'no_of_super_senior_therapist', 'no_of_senior_therapist', 'no_of_junior_therapist', 'no_of_trainee_therapist', 'is_active']
     template_name = 'masters/therapy_master_form.html'
     success_url = reverse_lazy('therapy_master_manage')
     
-    def form_valid(self, form):
-        messages.success(self.request, 'Therapy updated successfully.')
-        return super().form_valid(form)
-
-class TherapyMasterDeleteView(DeleteView):
-    model = TherapyMaster
-    success_url = reverse_lazy('therapy_master_manage')
+    def get_form(self, form_class=None):
+        form = super().get_form(form_class)
+        # Make therapy_code read-only since it shouldn't be changed
+        if 'therapy_code' in form.fields:
+            form.fields['therapy_code'].widget.attrs['readonly'] = True
+        # Update therapy_category to use dropdown with Medium, Hard, Easy
+        if 'therapy_category' in form.fields:
+            form.fields['therapy_category'].widget = forms.Select(choices=[
+                ('', 'Select Category'),
+                ('Medium', 'Medium'),
+                ('Hard', 'Hard'),
+                ('Easy', 'Easy'),
+            ])
+        return form
     
-    def delete(self, request, *args, **kwargs):
-        messages.success(request, 'Therapy deleted successfully.')
-        return super().delete(request, *args, **kwargs)
+    def form_valid(self, form):
+        # Auto-calculate total number of therapists
+        instance = form.save(commit=False)
+        instance.total_no_of_therapist = (
+            instance.no_of_super_senior_therapist +
+            instance.no_of_senior_therapist +
+            instance.no_of_junior_therapist +
+            instance.no_of_trainee_therapist
+        )
+        instance.save()
+        
+        messages.success(self.request, f'Therapy "{instance.therapy_name}" updated successfully.')
+        return redirect(self.success_url)
+
+@login_required
+@super_admin_required
+def therapy_master_delete(request, pk):
+    """Delete a therapy - function-based view to handle GET requests properly"""
+    therapy = get_object_or_404(TherapyMaster, pk=pk)
+    therapy_name = therapy.therapy_name
+    therapy.delete()
+    messages.success(request, f'Therapy "{therapy_name}" deleted successfully.')
+    return redirect('therapy_master_manage')
 
 # Item Master CRUD Views
 class ItemMasterManagementView(ListView):
@@ -681,7 +902,7 @@ class SlotMasterManagementView(ListView):
 
 class SlotMasterCreateView(CreateView):
     model = SlotMaster
-    fields = ['slot_number', 'slot_name', 'start_time', 'end_time', 'is_active']
+    fields = ['slot_number', 'slot_name', 'slot_time', 'is_active']
     template_name = 'masters/slot_master_form.html'
     success_url = reverse_lazy('slot_master_manage')
     
@@ -691,7 +912,7 @@ class SlotMasterCreateView(CreateView):
 
 class SlotMasterUpdateView(UpdateView):
     model = SlotMaster
-    fields = ['slot_number', 'slot_name', 'start_time', 'end_time', 'is_active']
+    fields = ['slot_number', 'slot_name', 'slot_time', 'is_active']
     template_name = 'masters/slot_master_form.html'
     success_url = reverse_lazy('slot_master_manage')
     
@@ -699,13 +920,15 @@ class SlotMasterUpdateView(UpdateView):
         messages.success(self.request, 'Slot updated successfully.')
         return super().form_valid(form)
 
-class SlotMasterDeleteView(DeleteView):
-    model = SlotMaster
-    success_url = reverse_lazy('slot_master_manage')
-    
-    def delete(self, request, *args, **kwargs):
-        messages.success(request, 'Slot deleted successfully.')
-        return super().delete(request, *args, **kwargs)
+@login_required
+@super_admin_required
+def slot_master_delete(request, pk):
+    """Delete a slot - function-based view to handle GET requests properly"""
+    slot = get_object_or_404(SlotMaster, pk=pk)
+    slot_number = slot.slot_number
+    slot.delete()
+    messages.success(request, f'Slot {slot_number} deleted successfully.')
+    return redirect('slot_master_manage')
 
 # Therapist Master CRUD Views
 class TherapistMasterManagementView(ListView):
@@ -715,27 +938,97 @@ class TherapistMasterManagementView(ListView):
     paginate_by = 20
 
     def get_queryset(self):
-        return TherapistMaster.objects.prefetch_related('leaves').all().order_by('therapist_name')
+        queryset = TherapistMaster.objects.prefetch_related('leaves', 'therapist_grade').all()
+        
+        # Search filter
+        search = self.request.GET.get('search', '')
+        if search:
+            queryset = queryset.filter(
+                db_models.Q(therapist_code__icontains=search) |
+                db_models.Q(therapist_name__icontains=search) |
+                db_models.Q(employee_code__icontains=search)
+            )
+        
+        # Status filter
+        status = self.request.GET.get('status', '')
+        if status == 'active':
+            queryset = queryset.filter(is_active=True)
+        elif status == 'inactive':
+            queryset = queryset.filter(is_active=False)
+        
+        # Grade filter
+        grade = self.request.GET.get('grade', '')
+        if grade:
+            queryset = queryset.filter(therapist_grade__id=grade)
+        
+        return queryset.order_by('therapist_name')
+    
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['grades'] = TherapistGrade.objects.filter(is_active=True).order_by('display_order', 'name')
+        context['search'] = self.request.GET.get('search', '')
+        context['status_filter'] = self.request.GET.get('status', '')
+        context['grade_filter'] = self.request.GET.get('grade', '')
+        return context
 
 class TherapistMasterCreateView(CreateView):
     model = TherapistMaster
-    fields = ['therapist_code', 'therapist_name', 'therapist_grade', 'employee_code', 'is_bathing_therapist', 'is_active']
+    fields = ['therapist_name', 'therapist_grade', 'employee_code', 'is_bathing_therapist', 'is_active']
     template_name = 'masters/therapist_master_form.html'
     success_url = reverse_lazy('therapist_master_manage')
     
+    def get_form(self, form_class=None):
+        form = super().get_form(form_class)
+        # Make therapist_code read-only/hidden since it's auto-generated
+        if 'therapist_code' in form.fields:
+            form.fields['therapist_code'].widget.attrs['readonly'] = True
+        # Update grade field to use TherapistGrade queryset
+        if 'therapist_grade' in form.fields:
+            form.fields['therapist_grade'].queryset = TherapistGrade.objects.filter(is_active=True).order_by('display_order', 'name')
+        return form
+    
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['grades'] = TherapistGrade.objects.filter(is_active=True).order_by('display_order', 'name')
+        return context
+    
     def form_valid(self, form):
         """Create user account and profile when creating therapist master"""
-        therapist_code = form.cleaned_data['therapist_code']
+        # Auto-generate unique therapist code by incrementing from highest existing code
+        # Get all existing therapist codes that start with THP
+        existing_codes = TherapistMaster.objects.filter(
+            therapist_code__startswith='THP'
+        ).values_list('therapist_code', flat=True)
+        
+        # Extract numbers from existing codes and find the highest
+        max_number = 0
+        for code in existing_codes:
+            try:
+                # Extract number part after 'THP'
+                number_part = int(code.replace('THP', ''))
+                if number_part > max_number:
+                    max_number = number_part
+            except (ValueError, AttributeError):
+                continue
+        
+        # Increment by 1
+        next_number = max_number + 1
+        
+        # Ensure it doesn't exceed 9999
+        if next_number > 9999:
+            raise ValueError("Maximum therapist code limit reached (THP9999)")
+        
+        # Generate new code
+        therapist_code = f"THP{next_number:04d}"
+        
+        # Set the auto-generated code
+        instance = form.save(commit=False)
+        instance.therapist_code = therapist_code
+        
         therapist_name = form.cleaned_data['therapist_name']
-        therapist_grade = form.cleaned_data.get('therapist_grade', 'Junior')
+        therapist_grade = form.cleaned_data.get('therapist_grade')
         employee_code = form.cleaned_data['employee_code']
         is_bathing_therapist = form.cleaned_data.get('is_bathing_therapist', True)
-        
-        # Check if therapist already has a user
-        existing_therapist = TherapistMaster.objects.filter(therapist_code=therapist_code).first()
-        if existing_therapist and existing_therapist.user:
-            messages.warning(self.request, f'Therapist "{therapist_code}" already has a user account.')
-            return super().form_valid(form)
         
         # Generate username and email
         username = therapist_code.lower().replace(' ', '_')
@@ -764,31 +1057,43 @@ class TherapistMasterCreateView(CreateView):
         
         # Create therapist profile
         from authentication.models import TherapistProfile
+        # Get grade name for profile (if grade is a ForeignKey)
+        grade_name = therapist_grade.name if therapist_grade else 'Junior'
         therapist_profile = TherapistProfile.objects.create(
             user=user,
             therapist_code=therapist_code,
             employee_code=employee_code,
-            therapist_grade=therapist_grade,
+            therapist_grade=grade_name,
             is_bathing_therapist=is_bathing_therapist
         )
         
         # Link user and profile to the therapist master instance
-        instance = form.save(commit=False)
         instance.user = user
         instance.therapist_profile = therapist_profile
         instance.save()
         
-        messages.success(self.request, f'Therapist user account created successfully. Username: {username}, Default password: {default_password}')
-        return super().form_valid(form)
+        messages.success(self.request, f'Therapist "{therapist_name}" ({therapist_code}) created successfully. Username: {username}, Default password: {default_password}')
+        return redirect(self.success_url)
 
 class TherapistMasterUpdateView(UpdateView):
     model = TherapistMaster
-    fields = ['therapist_code', 'therapist_name', 'therapist_grade', 'employee_code', 'is_bathing_therapist', 'is_active']
+    fields = ['therapist_name', 'therapist_grade', 'employee_code', 'is_bathing_therapist', 'is_active']
     template_name = 'masters/therapist_master_form.html'
     success_url = reverse_lazy('therapist_master_manage')
     
+    def get_form(self, form_class=None):
+        form = super().get_form(form_class)
+        # Make therapist_code read-only since it shouldn't be changed
+        if 'therapist_code' in form.fields:
+            form.fields['therapist_code'].widget.attrs['readonly'] = True
+        # Update grade field to use TherapistGrade queryset
+        if 'therapist_grade' in form.fields:
+            form.fields['therapist_grade'].queryset = TherapistGrade.objects.filter(is_active=True).order_by('display_order', 'name')
+        return form
+    
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
+        context['grades'] = TherapistGrade.objects.filter(is_active=True).order_by('display_order', 'name')
         
         # Add leave management context
         context['therapist_leaves'] = [
@@ -829,13 +1134,60 @@ class TherapistMasterUpdateView(UpdateView):
         messages.success(self.request, 'Therapist and leave schedule updated successfully.')
         return response
 
-class TherapistMasterDeleteView(DeleteView):
-    model = TherapistMaster
-    success_url = reverse_lazy('therapist_master_manage')
+@login_required
+@super_admin_required
+def therapist_master_delete(request, pk):
+    """Delete a therapist - function-based view to handle GET requests properly"""
+    therapist = get_object_or_404(TherapistMaster, pk=pk)
+    therapist_name = therapist.therapist_name
+    therapist_code = therapist.therapist_code
+    therapist.delete()
+    messages.success(request, f'Therapist "{therapist_name}" ({therapist_code}) deleted successfully.')
+    return redirect('therapist_master_manage')
+
+# Therapist Grade CRUD Views
+class TherapistGradeManagementView(ListView):
+    model = TherapistGrade
+    template_name = 'masters/therapistgrade_manage.html'
+    context_object_name = 'grade_list'
+    paginate_by = 20
+
+    def get_queryset(self):
+        return TherapistGrade.objects.all().order_by('display_order', 'name')
+
+class TherapistGradeCreateView(CreateView):
+    model = TherapistGrade
+    fields = ['name', 'display_order', 'is_active']
+    template_name = 'masters/therapistgrade_form.html'
+    success_url = reverse_lazy('therapistgrade_manage')
     
-    def delete(self, request, *args, **kwargs):
-        messages.success(request, 'Therapist deleted successfully.')
-        return super().delete(request, *args, **kwargs)
+    def form_valid(self, form):
+        messages.success(self.request, 'Therapist grade created successfully.')
+        return super().form_valid(form)
+
+class TherapistGradeUpdateView(UpdateView):
+    model = TherapistGrade
+    fields = ['name', 'display_order', 'is_active']
+    template_name = 'masters/therapistgrade_form.html'
+    success_url = reverse_lazy('therapistgrade_manage')
+    
+    def form_valid(self, form):
+        messages.success(self.request, 'Therapist grade updated successfully.')
+        return super().form_valid(form)
+
+@login_required
+@super_admin_required
+def therapist_grade_delete(request, pk):
+    """Delete a therapist grade - function-based view"""
+    grade = get_object_or_404(TherapistGrade, pk=pk)
+    grade_name = grade.name
+    # Check if any therapists are using this grade
+    if TherapistMaster.objects.filter(therapist_grade=grade).exists():
+        messages.error(request, f'Cannot delete grade "{grade_name}" because it is assigned to one or more therapists.')
+        return redirect('therapistgrade_manage')
+    grade.delete()
+    messages.success(request, f'Therapist grade "{grade_name}" deleted successfully.')
+    return redirect('therapistgrade_manage')
 
 # Therapist Management API endpoints
 @login_required

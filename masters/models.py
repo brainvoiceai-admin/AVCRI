@@ -155,20 +155,38 @@ class ItemMaster(models.Model):
 class SlotMaster(models.Model):
     """Master list of time slots for therapy scheduling."""
     slot_number = models.IntegerField(unique=True, verbose_name="Slot Number")
-    start_time = models.TimeField(verbose_name="Start Time")
-    end_time = models.TimeField(verbose_name="End Time")
+    slot_time = models.TimeField(verbose_name="Slot Time")
     slot_name = models.CharField(max_length=100, null=True, blank=True, verbose_name="Slot Name")
     is_active = models.BooleanField(default=True, verbose_name="Active")
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="Created At")
     updated_at = models.DateTimeField(auto_now=True, verbose_name="Updated At")
 
     def __str__(self):
-        return f"Slot {self.slot_number}: {self.start_time.strftime('%H:%M')} - {self.end_time.strftime('%H:%M')}"
+        # Format time in 12-hour format
+        time_str = self.slot_time.strftime('%I:%M %p')
+        return f"Slot {self.slot_number}: {time_str}"
 
     class Meta:
         verbose_name = "Slot Master"
         verbose_name_plural = "Slot Masters"
         ordering = ["slot_number"]
+
+# Therapist Grade Master
+class TherapistGrade(models.Model):
+    """Master list of therapist grades/levels."""
+    name = models.CharField(max_length=100, unique=True, verbose_name="Grade Name")
+    display_order = models.IntegerField(default=0, verbose_name="Display Order", help_text="Order for display in dropdowns")
+    is_active = models.BooleanField(default=True, verbose_name="Active")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Created At")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="Updated At")
+
+    def __str__(self):
+        return self.name
+
+    class Meta:
+        verbose_name = "Therapist Grade"
+        verbose_name_plural = "Therapist Grades"
+        ordering = ["display_order", "name"]
 
 # Therapist Master
 class TherapistMaster(models.Model):
@@ -180,7 +198,7 @@ class TherapistMaster(models.Model):
     # Therapist details (can be synced from user profile)
     therapist_code = models.CharField(max_length=20, unique=True, verbose_name="Therapist Code")
     therapist_name = models.CharField(max_length=255, verbose_name="Therapist Name")
-    therapist_grade = models.CharField(max_length=100, verbose_name="Therapist Grade")
+    therapist_grade = models.ForeignKey(TherapistGrade, on_delete=models.PROTECT, related_name='therapists', verbose_name="Therapist Grade", null=True, blank=True)
     employee_code = models.CharField(max_length=50, unique=True, verbose_name="Employee Code", help_text="Used for emergency leave API mapping")
     is_bathing_therapist = models.BooleanField(default=True, verbose_name="Bathing Therapist")
     is_active = models.BooleanField(default=True, verbose_name="Active")

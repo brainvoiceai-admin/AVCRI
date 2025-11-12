@@ -2,7 +2,7 @@ from django.contrib import admin
 from .models import (
     Procured, OilClass, UsageType, PrescriptionTime, 
     PrescriptionScope, UnitNo, TherapyMaster, ItemMaster, SlotMaster,
-    TherapistMaster, TherapistLeaveMaster
+    TherapistMaster, TherapistLeaveMaster, TherapistGrade
 )
 
 @admin.register(Procured)
@@ -97,14 +97,14 @@ class ItemMasterAdmin(admin.ModelAdmin):
 
 @admin.register(SlotMaster)
 class SlotMasterAdmin(admin.ModelAdmin):
-    list_display = ['slot_number', 'slot_name', 'start_time', 'end_time', 'is_active', 'created_at']
+    list_display = ['slot_number', 'slot_name', 'slot_time', 'is_active', 'created_at']
     list_filter = ['is_active', 'created_at']
     search_fields = ['slot_name', 'slot_number']
     list_editable = ['is_active']
     ordering = ['slot_number']
     fieldsets = (
         ('Slot Information', {
-            'fields': ('slot_number', 'slot_name', 'start_time', 'end_time')
+            'fields': ('slot_number', 'slot_name', 'slot_time')
         }),
         ('Status', {
             'fields': ('is_active',)
@@ -141,6 +141,22 @@ class TherapistMasterAdmin(admin.ModelAdmin):
         return 'No User'
     get_gender.short_description = 'Gender'
     get_gender.admin_order_field = 'user__gender'
+
+@admin.register(TherapistGrade)
+class TherapistGradeAdmin(admin.ModelAdmin):
+    list_display = ['name', 'display_order', 'is_active', 'created_at', 'updated_at']
+    list_filter = ['is_active', 'created_at']
+    search_fields = ['name']
+    list_editable = ['display_order', 'is_active']
+    ordering = ['display_order', 'name']
+    fieldsets = (
+        ('Grade Information', {
+            'fields': ('name', 'display_order')
+        }),
+        ('Status', {
+            'fields': ('is_active',)
+        }),
+    )
 
 @admin.register(TherapistLeaveMaster)
 class TherapistLeaveMasterAdmin(admin.ModelAdmin):
