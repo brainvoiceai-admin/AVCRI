@@ -11,7 +11,7 @@ def module_access_required(module_name):
         @wraps(view_func)
         def wrapper(request, *args, **kwargs):
             if not request.user.is_authenticated:
-                return redirect('login')
+                return redirect('authentication:login')
             
             if not request.user.has_module_access(module_name):
                 messages.error(request, f'You do not have permission to access {module_name}.')
@@ -28,7 +28,7 @@ def super_admin_required(view_func):
     @wraps(view_func)
     def wrapper(request, *args, **kwargs):
         if not request.user.is_authenticated:
-            return redirect('login')
+            return redirect('authentication:login')
         
         if request.user.role != 'super_admin':
             messages.error(request, 'You must be a super admin to access this page.')
@@ -44,7 +44,7 @@ def admin_required(view_func):
     @wraps(view_func)
     def wrapper(request, *args, **kwargs):
         if not request.user.is_authenticated:
-            return redirect('login')
+            return redirect('authentication:login')
         
         if request.user.role not in ['admin', 'super_admin']:
             messages.error(request, 'You must be an admin to access this page.')
@@ -62,7 +62,7 @@ def role_required(allowed_roles):
         @wraps(view_func)
         def wrapper(request, *args, **kwargs):
             if not request.user.is_authenticated:
-                return redirect('login')
+                return redirect('authentication:login')
             
             if request.user.role not in allowed_roles and request.user.role != 'super_admin':
                 messages.error(request, f'Access denied. This page is only for: {", ".join(allowed_roles)}.')

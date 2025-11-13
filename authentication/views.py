@@ -72,11 +72,11 @@ def create_role(request):
         
         if not name or not display_name:
             messages.error(request, 'Name and Display Name are required.')
-            return redirect('role_management')
+            return redirect('authentication:role_management')
         
         if Role.objects.filter(name=name).exists():
             messages.error(request, 'A role with this name already exists.')
-            return redirect('role_management')
+            return redirect('authentication:role_management')
         
         role = Role.objects.create(
             name=name,
@@ -90,7 +90,7 @@ def create_role(request):
             role.modules.set(modules)
         
         messages.success(request, f'Role "{role.display_name}" created successfully.')
-        return redirect('role_management')
+        return redirect('authentication:role_management')
     
     # GET request - show create role form
     modules = Module.objects.filter(is_active=True).order_by('order', 'name')
@@ -118,7 +118,7 @@ def edit_role(request, role_id):
         role.save()
         
         messages.success(request, f'Role "{role.display_name}" updated successfully.')
-        return redirect('role_management')
+        return redirect('authentication:role_management')
     
     modules = Module.objects.filter(is_active=True).order_by('order', 'name')
     context = {
@@ -137,11 +137,11 @@ def delete_role(request, role_id):
     users_with_role = CustomUser.objects.filter(custom_role=role)
     if users_with_role.exists():
         messages.error(request, f'Cannot delete role "{role.display_name}" because {users_with_role.count()} user(s) are assigned to it.')
-        return redirect('role_management')
+        return redirect('authentication:role_management')
     
     role.delete()
     messages.success(request, f'Role "{role.display_name}" deleted successfully.')
-    return redirect('role_management')
+    return redirect('authentication:role_management')
 
 @login_required
 @super_admin_required
@@ -161,7 +161,7 @@ def user_role_assignment(request):
         user.save()
         
         messages.success(request, f'Role assignment updated for {user.username}.')
-        return redirect('user_role_assignment')
+        return redirect('authentication:user_role_assignment')
     
     context = {
         'users': users,
@@ -230,7 +230,7 @@ def module_management(request):
                 module.delete()
                 messages.success(request, f'Module "{module.display_name}" deleted successfully.')
         
-        return redirect('module_management')
+        return redirect('authentication:module_management')
     
     context = {
         'modules': modules,
@@ -275,7 +275,7 @@ def get_dashboard_redirect_url(user):
 
     Per current requirement, always redirect to the User Profile Dashboard.
     """
-    return 'user_profile'
+    return 'authentication:user_profile'
 
 def logout_view(request):
     """Logout view"""
@@ -388,12 +388,12 @@ def Manage_user(request):
                     from authentication.models import PatientProfile
                     if PatientProfile.objects.filter(patient_reg_no=patient_registration_number).exists():
                         messages.error(request, f'Patient registration number "{patient_registration_number}" already exists.')
-                        return redirect('Manage_user')
+                        return redirect('authentication:Manage_user')
                 elif role == 'therapist' and therapist_code:
                     from authentication.models import TherapistProfile
                     if TherapistProfile.objects.filter(therapist_code=therapist_code).exists():
                         messages.error(request, f'Therapist code "{therapist_code}" already exists.')
-                        return redirect('Manage_user')
+                        return redirect('authentication:Manage_user')
                 
                 gender = request.POST.get('gender', 'male')  # Default to male if not provided
                 
@@ -467,11 +467,20 @@ def Manage_user(request):
                         experience_years=0
                     )
                 elif role in ['scheduling_staff', 'ip_pharmacy_staff', 'imu_staff', 'finance_staff', 'hr', 'housekeeping_staff']:
+                    # Get department from POST data, especially important for IP Pharmacy Staff
+                    department = request.POST.get('department', '')
+                    if not department and role == 'ip_pharmacy_staff':
+                        # Require department for IP Pharmacy Staff
+                        messages.error(request, 'Department is required for IP Pharmacy Staff.')
+                        return redirect('authentication:Manage_user')
+                    if not department:
+                        department = _get_department_for_role(role)
+                    
                     StaffProfile.objects.create(
                         user=user,
                         staff_id=f"STF{user.id:06d}",
-                        department=self._get_department_for_role(role),
-                        designation=self._get_designation_for_role(role)
+                        department=department,
+                        designation=_get_designation_for_role(role)
                     )
                 
                 messages.success(request, f'User "{user.username}" created successfully.')
@@ -540,7 +549,15 @@ def Manage_user(request):
                 profile_data['qualification'] = request.POST.get('qualification', 'B.Sc Nursing')
             elif user.role in ['scheduling_staff', 'ip_pharmacy_staff', 'imu_staff', 'finance_staff', 'hr', 'housekeeping_staff']:
                 profile_data['staff_id'] = request.POST.get('staff_id', f"STF{user.id:06d}")
-                profile_data['department'] = request.POST.get('department', _get_department_for_role(user.role))
+                # Get department from POST data, especially important for IP Pharmacy Staff
+                department = request.POST.get('department', '')
+                if not department and user.role == 'ip_pharmacy_staff':
+                    # Require department for IP Pharmacy Staff
+                    messages.error(request, 'Department is required for IP Pharmacy Staff.')
+                    return redirect('authentication:Manage_user')
+                if not department:
+                    department = _get_department_for_role(user.role)
+                profile_data['department'] = department
                 profile_data['designation'] = request.POST.get('designation', _get_designation_for_role(user.role))
             
             # Change user role - this will delete all existing data
@@ -548,7 +565,7 @@ def Manage_user(request):
             
             if not success:
                 messages.error(request, message)
-                return redirect('Manage_user')
+                return redirect('authentication:Manage_user')
             else:
                 # Update therapist master if role is therapist
                 if user.role == 'therapist' and new_profile:
@@ -614,7 +631,7 @@ def Manage_user(request):
                 request=request
             )
         
-        return redirect('Manage_user')
+        return redirect('authentication:Manage_user')
     
     context = {
         'users': users,
@@ -1235,7 +1252,7 @@ def confirm_role_change(request, user_id):
     
     if not new_role:
         messages.error(request, 'New role not specified.')
-        return redirect('Manage_user')
+        return redirect('authentication:Manage_user')
     
     # Role display names
     role_display_names = {
@@ -1268,14 +1285,14 @@ def execute_role_change(request):
     """Execute the role change after confirmation"""
     if request.method != 'POST':
         messages.error(request, 'Invalid request method.')
-        return redirect('Manage_user')
+        return redirect('authentication:Manage_user')
     
     user_id = request.POST.get('user_id')
     new_role = request.POST.get('new_role')
     
     if not user_id or not new_role:
         messages.error(request, f'Invalid request parameters. user_id: {user_id}, new_role: {new_role}')
-        return redirect('Manage_user')
+        return redirect('authentication:Manage_user')
     
     user = get_object_or_404(CustomUser, id=user_id)
     
@@ -1333,4 +1350,4 @@ def execute_role_change(request):
         import traceback
         traceback.print_exc()
     
-    return redirect('Manage_user')
+    return redirect('authentication:Manage_user')

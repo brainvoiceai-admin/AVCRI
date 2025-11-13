@@ -7,12 +7,12 @@ from django.utils import timezone
 from django.db import transaction
 from django.utils.dateparse import parse_date
 from .models import PrescriptionScheduling, PrescriptionChangeLog, PrescriptionItem, PrescriptionDispatch
-from .decorators import scheduling_access_required, api_access_required
+from .decorators import procurement_access_required, procurement_api_access_required
 import json
 from datetime import datetime
 
 @login_required
-@scheduling_access_required
+@procurement_access_required
 def procurement_dashboard(request):
     """
     Display the procurement dashboard for prescription preparation and dispatch.
@@ -21,13 +21,13 @@ def procurement_dashboard(request):
 
 @csrf_exempt
 @require_http_methods(["GET"])
+@procurement_api_access_required
 def get_procurement_prescriptions_api(request):
     """
     API endpoint to fetch prescriptions for procurement departments.
     """
     try:
         date = request.GET.get('date')
-        department = request.GET.get('department', 'IP Pharmacy')
         
         if not date:
             return JsonResponse({'error': 'Date is required'}, status=400)
@@ -36,12 +36,65 @@ def get_procurement_prescriptions_api(request):
         if not filter_date:
             return JsonResponse({'error': 'Invalid date format'}, status=400)
         
-        # Get prescriptions that were sent to this department
-        prescriptions = PrescriptionScheduling.objects.filter(
-            prescription_date=filter_date,
-            sent_to=department,
-            status__in=['scheduled', 'dispatched']
-        ).select_related('patient', 'doctor').prefetch_related('items')
+        # For super_admin: show all prescriptions (no department filter)
+        # For IP Pharmacy Staff: show only their department's prescriptions
+        user_department = None
+        if request.user.role == 'super_admin':
+            # Super admin sees all prescriptions
+            prescriptions = PrescriptionScheduling.objects.filter(
+                prescription_date=filter_date,
+                status__in=['scheduled', 'dispatched']
+            ).select_related('patient', 'doctor').prefetch_related('items')
+        else:
+            # Get department from logged-in user's StaffProfile
+            if hasattr(request.user, 'staff_profile'):
+                user_department = request.user.staff_profile.department
+            elif request.user.role == 'ip_pharmacy_staff':
+                # Fallback: if user doesn't have StaffProfile, return error
+                return JsonResponse({'error': 'User department not configured. Please contact administrator.'}, status=400)
+            else:
+                # For admin/scheduling_staff, allow department parameter or default to IP Pharmacy
+                user_department = request.GET.get('department', 'IP Pharmacy')
+            
+            # Get prescriptions that match this department (check both sent_to and procured_from)
+            # Case-insensitive matching
+            user_dept_normalized = user_department.strip().lower() if user_department else ''
+            
+            # Get all prescriptions for the date
+            all_prescriptions = PrescriptionScheduling.objects.filter(
+                prescription_date=filter_date,
+                status__in=['scheduled', 'dispatched']
+            ).select_related('patient', 'doctor').prefetch_related('items')
+            
+            # Also get all allocations for this date to check procured_from
+            from .models import PrescriptionAllocation
+            all_allocations = PrescriptionAllocation.objects.filter(
+                from_date__lte=filter_date,
+                to_date__gte=filter_date
+            ).select_related('patient')
+            
+            # Build a set of patient IDs that have allocations with procured_from matching user's department
+            matching_patient_ids_from_allocations = set()
+            for alloc in all_allocations:
+                procured_from = alloc.procured_from.strip().lower() if alloc.procured_from else ''
+                if procured_from == user_dept_normalized:
+                    matching_patient_ids_from_allocations.add(alloc.patient_id)
+            
+            # Filter prescriptions: include if EITHER sent_to matches OR patient has allocation with procured_from matching
+            matching_prescriptions = []
+            for pres in all_prescriptions:
+                sent_to_matches = pres.sent_to and pres.sent_to.strip().lower() == user_dept_normalized
+                procured_from_matches = pres.patient_id in matching_patient_ids_from_allocations
+                
+                # Include prescription if either sent_to or procured_from matches
+                if sent_to_matches or procured_from_matches:
+                    matching_prescriptions.append(pres)
+            
+            # Convert back to queryset
+            prescription_ids = [p.id for p in matching_prescriptions]
+            prescriptions = PrescriptionScheduling.objects.filter(
+                id__in=prescription_ids
+            ).select_related('patient', 'doctor').prefetch_related('items')
         
         data = []
         for prescription in prescriptions:
@@ -51,11 +104,37 @@ def get_procurement_prescriptions_api(request):
             if prescription_count == 0:
                 try:
                     from .models import PrescriptionAllocation
-                    allocation = PrescriptionAllocation.objects.filter(
+                    # Get allocation for this patient/date
+                    allocation_query = PrescriptionAllocation.objects.filter(
                         patient=prescription.patient,
                         from_date__lte=filter_date,
                         to_date__gte=filter_date
-                    ).first()
+                    )
+                    
+                    # If not super_admin, filter allocation by procured_from or sent_to
+                    if request.user.role != 'super_admin' and user_department:
+                        # Normalize user department for case-insensitive comparison
+                        user_dept_normalized = user_department.strip().lower() if user_department else ''
+                        
+                        # Filter allocations: procured_from must match OR be empty (then rely on sent_to)
+                        filtered_allocs = []
+                        for alloc in allocation_query:
+                            procured_from = alloc.procured_from.strip() if alloc.procured_from else ''
+                            has_procured_from = bool(procured_from)
+                            procured_from_normalized = procured_from.lower() if procured_from else ''
+                            procured_from_matches = procured_from_normalized == user_dept_normalized
+                            
+                            # Include if procured_from matches (case-insensitive), or if procured_from is empty (sent_to already filtered)
+                            if (has_procured_from and procured_from_matches) or not has_procured_from:
+                                filtered_allocs.append(alloc)
+                        
+                        if filtered_allocs:
+                            allocation = filtered_allocs[0]
+                        else:
+                            allocation = None
+                    else:
+                        allocation = allocation_query.first()
+                    
                     if allocation and allocation.items_groups:
                         raw_groups = allocation.items_groups
                         groups = []
@@ -128,6 +207,7 @@ def get_procurement_prescriptions_api(request):
 
 @csrf_exempt
 @require_http_methods(["POST"])
+@procurement_api_access_required
 def mark_as_dispatched_api(request):
     """
     API endpoint to mark a prescription as dispatched.
@@ -207,6 +287,7 @@ def mark_as_dispatched_api(request):
 
 @csrf_exempt
 @require_http_methods(["GET"])
+@procurement_api_access_required
 def get_prescription_details_api(request):
     """
     API endpoint to get detailed prescription AND therapy items for a patient (procurement dashboard).
@@ -240,6 +321,48 @@ def get_prescription_details_api(request):
             'doctor_name': None  # Will be set from prescription if available
         }
         
+        # ===== DEPARTMENT FILTERING =====
+        # For super_admin: show all prescriptions (no department filter)
+        # For IP Pharmacy Staff: show only their department's prescriptions
+        user_department = None
+        if request.user.role != 'super_admin':
+            # Get department from logged-in user's StaffProfile
+            if hasattr(request.user, 'staff_profile'):
+                user_department = request.user.staff_profile.department
+            elif request.user.role == 'ip_pharmacy_staff':
+                # Fallback: if user doesn't have StaffProfile, return error
+                return JsonResponse({'error': 'User department not configured. Please contact administrator.'}, status=400)
+            else:
+                # For admin/scheduling_staff, allow department parameter or default to IP Pharmacy
+                user_department = request.GET.get('department', 'IP Pharmacy')
+        
+        # Get prescription for doctor name and department filtering
+        prescription_query = PrescriptionScheduling.objects.filter(
+            patient_id=patient_id,
+            prescription_date=filter_date
+        )
+        
+        # Filter by department if not super_admin (case-insensitive)
+        if user_department:
+            user_dept_normalized = user_department.strip().lower() if user_department else ''
+            # Get all prescriptions and filter case-insensitively
+            all_prescriptions = prescription_query.all()
+            matching_prescriptions = []
+            for ps in all_prescriptions:
+                if ps.sent_to and ps.sent_to.strip().lower() == user_dept_normalized:
+                    matching_prescriptions.append(ps)
+            
+            if matching_prescriptions:
+                prescription_query = PrescriptionScheduling.objects.filter(
+                    id__in=[p.id for p in matching_prescriptions]
+                )
+            else:
+                prescription_query = PrescriptionScheduling.objects.none()
+        
+        prescription = prescription_query.select_related('doctor').first()
+        # Don't return early if no prescription - we might still have allocations with procured_from matching
+        # Only return early if we have no prescription AND no allocations will match
+        
         # ===== PRESCRIPTION ITEMS =====
         prescription_groups = []  # List of groups with items
         
@@ -250,14 +373,55 @@ def get_prescription_details_api(request):
             to_date__gte=filter_date
         ).order_by('from_date', 'id')
         
+        # Filter allocations based on department: check both sent_to and procured_from
+        if user_department:
+            # Normalize user department for case-insensitive comparison
+            user_dept_normalized = user_department.strip().lower() if user_department else ''
+            
+            # Get all PrescriptionScheduling records for this patient/date that match user's department
+            # Use case-insensitive comparison with __iexact
+            valid_prescriptions = PrescriptionScheduling.objects.filter(
+                patient_id=patient_id,
+                prescription_date=filter_date
+            )
+            
+            # Filter by sent_to case-insensitively
+            valid_prescriptions_list = []
+            for ps in valid_prescriptions:
+                if ps.sent_to and ps.sent_to.strip().lower() == user_dept_normalized:
+                    valid_prescriptions_list.append(ps)
+            
+            sent_to_matches = len(valid_prescriptions_list) > 0
+            
+            # Filter allocations based on:
+            # Priority: If procured_from is set, it MUST match user's department
+            # If procured_from is NOT set/empty, then check sent_to
+            filtered_allocations = []
+            for allocation in allocations:
+                procured_from = allocation.procured_from.strip() if allocation.procured_from else ''
+                has_procured_from = bool(procured_from)
+                procured_from_normalized = procured_from.lower() if procured_from else ''
+                procured_from_matches = procured_from_normalized == user_dept_normalized
+                
+                # Include allocation if:
+                # - procured_from is set AND matches user's department (case-insensitive), OR
+                # - procured_from is NOT set/empty AND sent_to matches user's department
+                # This ensures that:
+                # - If procured_from is set to "Kashaya Room" and user is "IP Pharmacy", exclude it
+                # - If procured_from is empty and sent_to is "IP Pharmacy", show it for IP Pharmacy users
+                # - If procured_from is set to "IP Pharmacy", show it for IP Pharmacy users
+                if (has_procured_from and procured_from_matches) or (not has_procured_from and sent_to_matches):
+                    filtered_allocations.append(allocation)
+            
+            # Convert to queryset by filtering by IDs
+            if filtered_allocations:
+                allocation_ids = [a.id for a in filtered_allocations]
+                allocations = allocations.filter(id__in=allocation_ids)
+            else:
+                allocations = allocations.none()  # Return empty queryset
+        
         prescription_is_cancelled = False
         prescription_status = 'draft'
-        
-        # Get prescription for doctor name
-        prescription = PrescriptionScheduling.objects.filter(
-            patient_id=patient_id,
-            prescription_date=filter_date
-        ).select_related('doctor').first()
         
         if prescription and prescription.doctor:
             patient_info['doctor_name'] = prescription.doctor.get_full_name() if hasattr(prescription.doctor, 'get_full_name') else (prescription.doctor.username if prescription.doctor else None)
@@ -527,6 +691,7 @@ def get_prescription_details_api(request):
 
 @csrf_exempt
 @require_http_methods(["GET"])
+@procurement_api_access_required
 def get_prescription_change_log_api(request):
     """
     API endpoint to get change log for a patient's prescription.
@@ -543,11 +708,124 @@ def get_prescription_change_log_api(request):
         if not filter_date:
             return JsonResponse({'error': 'Invalid date format'}, status=400)
         
+        # Get user's department for filtering change logs
+        user_department = None
+        if request.user.role != 'super_admin':
+            # Get department from logged-in user's StaffProfile
+            if hasattr(request.user, 'staff_profile'):
+                user_department = request.user.staff_profile.department
+            elif request.user.role == 'ip_pharmacy_staff':
+                # Fallback: if user doesn't have StaffProfile, return error
+                return JsonResponse({'error': 'User department not configured. Please contact administrator.'}, status=400)
+            else:
+                # For admin/scheduling_staff, allow department parameter or default to IP Pharmacy
+                user_department = request.GET.get('department', 'IP Pharmacy')
+        
         # Get all change logs for this patient and date
         change_logs = PrescriptionChangeLog.objects.filter(
             patient_id=patient_id,
             prescription_date=filter_date
         ).select_related('changed_by').order_by('-timestamp')
+        
+        # Filter change logs by department if not super_admin
+        if user_department:
+            user_dept_normalized = user_department.strip().lower() if user_department else ''
+            
+            # Get allocations for this patient/date to check procured_from
+            from .models import PrescriptionAllocation
+            allocations = PrescriptionAllocation.objects.filter(
+                patient_id=patient_id,
+                from_date__lte=filter_date,
+                to_date__gte=filter_date
+            )
+            
+            # Get prescription scheduling records to check sent_to
+            from .models import PrescriptionScheduling
+            prescriptions = PrescriptionScheduling.objects.filter(
+                patient_id=patient_id,
+                prescription_date=filter_date
+            )
+            
+            # Filter change logs to only show those relevant to user's department
+            # A change log is relevant if:
+            # 1. It mentions the user's department in sent_to or dispatched_from fields, OR
+            # 2. It's an item update and there's an allocation with procured_from matching user's department, OR
+            # 3. It's a status change and there's a prescription with sent_to matching user's department
+            
+            filtered_logs = []
+            for log in change_logs:
+                before_values = log.before_values or {}
+                after_values = log.after_values or {}
+                description = (log.description or '').lower()
+                
+                # Check if change log mentions user's department in after_values or before_values
+                sent_to_after = (after_values.get('sent_to') or '').strip().lower()
+                sent_to_before = (before_values.get('sent_to') or '').strip().lower()
+                dispatched_from_after = (after_values.get('dispatched_from') or '').strip().lower()
+                dispatched_from_before = (before_values.get('dispatched_from') or '').strip().lower()
+                
+                # Check if department is mentioned in the change log values
+                mentions_department = (
+                    sent_to_after == user_dept_normalized or
+                    sent_to_before == user_dept_normalized or
+                    dispatched_from_after == user_dept_normalized or
+                    dispatched_from_before == user_dept_normalized or
+                    user_department.lower() in description
+                )
+                
+                # For item updates (which don't have department in values), check allocations
+                # Item updates change items_groups, so we need to match the change log's items_groups
+                # with allocations that have procured_from matching user's department
+                if not mentions_department and log.action == 'update':
+                    # Get the items_groups from the change log
+                    log_after_groups = after_values.get('items_groups', [])
+                    log_before_groups = before_values.get('items_groups', [])
+                    
+                    # Check if any allocation with procured_from matching has items_groups that match
+                    # the change log (either before or after values)
+                    for alloc in allocations:
+                        procured_from = (alloc.procured_from or '').strip().lower()
+                        if procured_from == user_dept_normalized:
+                            alloc_items_groups = alloc.items_groups or []
+                            
+                            # Normalize for comparison
+                            try:
+                                # Compare: if after_values matches current allocation, it's this allocation's update
+                                # OR if before_values matches current, it might be a previous state
+                                alloc_str = json.dumps(alloc_items_groups, sort_keys=True) if alloc_items_groups else ''
+                                after_str = json.dumps(log_after_groups, sort_keys=True) if log_after_groups else ''
+                                before_str = json.dumps(log_before_groups, sort_keys=True) if log_before_groups else ''
+                                
+                                # Match if after_values matches current (most recent update) OR
+                                # if before_values matches current (this was the state before another update)
+                                if alloc_str == after_str or alloc_str == before_str:
+                                    mentions_department = True
+                                    break
+                            except:
+                                # If JSON comparison fails, do a simple equality check
+                                if alloc_items_groups == log_after_groups or alloc_items_groups == log_before_groups:
+                                    mentions_department = True
+                                    break
+                
+                # For status changes, check prescriptions
+                if not mentions_department and log.action == 'status_change':
+                    # Check if any prescription for this patient/date has sent_to matching
+                    for pres in prescriptions:
+                        sent_to = (pres.sent_to or '').strip().lower()
+                        if sent_to == user_dept_normalized:
+                            mentions_department = True
+                            break
+                
+                # Include log if it mentions the department
+                if mentions_department:
+                    filtered_logs.append(log)
+            
+            # Replace queryset with filtered list
+            if filtered_logs:
+                log_ids = [log.id for log in filtered_logs]
+                change_logs = PrescriptionChangeLog.objects.filter(id__in=log_ids).select_related('changed_by').order_by('-timestamp')
+            else:
+                change_logs = change_logs.none()
         
         logs_data = []
         for log in change_logs:

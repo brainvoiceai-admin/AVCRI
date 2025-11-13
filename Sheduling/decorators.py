@@ -23,7 +23,7 @@ def scheduling_access_required(view_func):
                     }, status=403)
                 else:
                     messages.error(request, 'You do not have permission to access therapy scheduling.')
-                    return redirect('authentication:dashboard')
+                    return redirect('authentication:user_profile')
         
         return view_func(request, *args, **kwargs)
     return wrapper
@@ -48,7 +48,7 @@ def scheduling_admin_required(view_func):
                 }, status=403)
             else:
                 messages.error(request, 'You do not have admin permission for therapy scheduling.')
-                return redirect('authentication:dashboard')
+                return redirect('authentication:user_profile')
         
         return view_func(request, *args, **kwargs)
     return wrapper
@@ -73,7 +73,7 @@ def therapist_access_required(view_func):
                 }, status=403)
             else:
                 messages.error(request, 'You do not have permission to view therapy schedules.')
-                return redirect('authentication:dashboard')
+                return redirect('authentication:user_profile')
         
         return view_func(request, *args, **kwargs)
     return wrapper
@@ -98,4 +98,118 @@ def api_access_required(view_func):
                 }, status=403)
         
         return view_func(request, *args, **kwargs)
+    return wrapper
+
+def procurement_access_required(view_func):
+    """
+    Decorator to check if user has access to procurement dashboard.
+    Allows super_admin, admin, scheduling_staff, and ip_pharmacy_staff.
+    """
+    @wraps(view_func)
+    def wrapper(request, *args, **kwargs):
+        if not request.user.is_authenticated:
+            return redirect('authentication:login')
+        
+        # Check if user has procurement access
+        allowed_roles = ['super_admin', 'admin', 'scheduling_staff', 'ip_pharmacy_staff']
+        if request.user.role not in allowed_roles:
+            if request.headers.get('Accept') == 'application/json':
+                return JsonResponse({
+                    'error': 'Access denied',
+                    'message': 'You do not have permission to access procurement dashboard'
+                }, status=403)
+            else:
+                messages.error(request, 'You do not have permission to access procurement dashboard.')
+                return redirect('authentication:user_profile')
+        
+        return view_func(request, *args, **kwargs)
+    return wrapper
+
+def procurement_api_access_required(view_func):
+    """
+    Decorator for procurement API endpoints.
+    Allows super_admin, admin, scheduling_staff, and ip_pharmacy_staff.
+    """
+    @wraps(view_func)
+    def wrapper(request, *args, **kwargs):
+        if not request.user.is_authenticated:
+            return JsonResponse({
+                'error': 'Authentication required'
+            }, status=401)
+        
+        # Check if user has procurement access
+        allowed_roles = ['super_admin', 'admin', 'scheduling_staff', 'ip_pharmacy_staff']
+        if request.user.role not in allowed_roles:
+            return JsonResponse({
+                'error': 'Access denied',
+                'message': 'You do not have permission to access procurement API'
+            }, status=403)
+        
+        return view_func(request, *args, **kwargs)
+    return wrapper
+
+def prescription_scheduling_access_required(view_func):
+    """
+    Decorator to check if user has access to prescription scheduling.
+    Allows users with prescription_scheduling module access or specific roles.
+    """
+    @wraps(view_func)
+    def wrapper(request, *args, **kwargs):
+        if not request.user.is_authenticated:
+            return redirect('authentication:login')
+        
+        # Allowed roles for prescription scheduling
+        allowed_roles = ['super_admin', 'admin', 'scheduling_staff', 'ip_pharmacy_staff', 'doctor']
+        
+        # Check if user has one of the allowed roles
+        if request.user.role in allowed_roles:
+            return view_func(request, *args, **kwargs)
+        
+        # Also check if user has prescription_scheduling module access (for custom roles)
+        if hasattr(request.user, 'has_module_access'):
+            if request.user.has_module_access('prescription_scheduling'):
+                return view_func(request, *args, **kwargs)
+        
+        # Access denied
+        if request.headers.get('Accept') == 'application/json':
+            return JsonResponse({
+                'error': 'Access denied',
+                'message': 'You do not have permission to access prescription scheduling'
+            }, status=403)
+        else:
+            messages.error(request, 'You do not have permission to access prescription scheduling.')
+            return redirect('authentication:user_profile')
+    
+    return wrapper
+
+def prescription_scheduling_api_access_required(view_func):
+    """
+    Decorator for prescription scheduling API endpoints.
+    Allows users with prescription_scheduling module access or specific roles.
+    """
+    @wraps(view_func)
+    def wrapper(request, *args, **kwargs):
+        if not request.user.is_authenticated:
+            return JsonResponse({
+                'error': 'Authentication required'
+            }, status=401)
+        
+        # Allowed roles for prescription scheduling
+        allowed_roles = ['super_admin', 'admin', 'scheduling_staff', 'ip_pharmacy_staff', 'doctor']
+        
+        # Check if user has one of the allowed roles
+        if request.user.role in allowed_roles:
+            return view_func(request, *args, **kwargs)
+        
+        # Also check if user has prescription_scheduling module access (for custom roles)
+        if hasattr(request.user, 'has_module_access'):
+            if request.user.has_module_access('prescription_scheduling'):
+                return view_func(request, *args, **kwargs)
+        
+        # Access denied
+        return JsonResponse({
+            'error': 'Access denied',
+            'message': 'You do not have permission to access prescription scheduling'
+        }, status=403)
+    
     return wrapper

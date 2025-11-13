@@ -409,7 +409,7 @@
                 <p>Login to continue</p>
             </div>
 
-            <form id="loginForm" method="POST" action="{% url 'login' %}">
+            <form id="loginForm" method="POST" action="{% url 'authentication:login' %}">
                 {% csrf_token %}
                 <div id="messageContainer">
                     {% if messages %}

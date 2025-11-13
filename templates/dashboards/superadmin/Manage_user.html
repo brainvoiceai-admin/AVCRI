@@ -73,8 +73,8 @@
           <h2>User Management Dashboard</h2>
           <div>
             <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addUserModal">+ Add User</button>
-            <a href="{% url 'role_management' %}" class="btn btn-success">Manage Roles</a>
-            <a href="{% url 'user_role_assignment' %}" class="btn btn-info">Assign Roles</a>
+            <a href="{% url 'authentication:role_management' %}" class="btn btn-success">Manage Roles</a>
+            <a href="{% url 'authentication:user_role_assignment' %}" class="btn btn-info">Assign Roles</a>
           </div>
         </div>
 
@@ -290,6 +290,19 @@
                   <div class="form-text">Required for therapist role for emergency leave API mapping</div>
                 </div>
               </div>
+              <div class="col-md-6" id="pharmacyDepartmentField" style="display: none;">
+                <div class="mb-3">
+                  <label for="department" class="form-label">Department *</label>
+                  <select class="form-select" id="department" name="department">
+                    <option value="">Select Department</option>
+                    <option value="IP Pharmacy">IP Pharmacy</option>
+                    <option value="Kashaya Room">Kashaya Room</option>
+                    <option value="OP Pharmacy">OP Pharmacy</option>
+                    <option value="Other">Other</option>
+                  </select>
+                  <div class="form-text">Required for IP Pharmacy Staff to filter prescriptions</div>
+                </div>
+              </div>
             </div>
           </div>
           <div class="modal-footer">
@@ -446,6 +459,19 @@
                   <div class="form-text">Required for therapist role for emergency leave API mapping</div>
                 </div>
               </div>
+              <div class="col-md-6" id="editPharmacyDepartmentField{{ user.id }}" style="display: none;">
+                <div class="mb-3">
+                  <label for="edit_department{{ user.id }}" class="form-label">Department *</label>
+                  <select class="form-select" id="edit_department{{ user.id }}" name="department">
+                    <option value="">Select Department</option>
+                    <option value="IP Pharmacy" {% if user.staff_profile and user.staff_profile.department == 'IP Pharmacy' %}selected{% endif %}>IP Pharmacy</option>
+                    <option value="Kashaya Room" {% if user.staff_profile and user.staff_profile.department == 'Kashaya Room' %}selected{% endif %}>Kashaya Room</option>
+                    <option value="OP Pharmacy" {% if user.staff_profile and user.staff_profile.department == 'OP Pharmacy' %}selected{% endif %}>OP Pharmacy</option>
+                    <option value="Other" {% if user.staff_profile and user.staff_profile.department == 'Other' %}selected{% endif %}>Other</option>
+                  </select>
+                  <div class="form-text">Required for IP Pharmacy Staff to filter prescriptions</div>
+                </div>
+              </div>
             </div>
           </div>
           <div class="modal-footer">
@@ -481,31 +507,48 @@
       const patientField = document.getElementById('patientRegistrationField');
       const therapistField = document.getElementById('therapistCodeField');
       const employeeField = document.getElementById('employeeCodeField');
+      const pharmacyField = document.getElementById('pharmacyDepartmentField');
       
       if (roleSelect.value === 'patient') {
         roleSpecificFields.style.display = 'block';
         patientField.style.display = 'block';
         therapistField.style.display = 'none';
         employeeField.style.display = 'none';
+        if (pharmacyField) pharmacyField.style.display = 'none';
         document.getElementById('patient_registration_number').required = true;
         document.getElementById('therapist_code').required = false;
         document.getElementById('employee_code').required = false;
+        if (document.getElementById('department')) document.getElementById('department').required = false;
       } else if (roleSelect.value === 'therapist') {
         roleSpecificFields.style.display = 'block';
         patientField.style.display = 'none';
         therapistField.style.display = 'block';
         employeeField.style.display = 'block';
+        if (pharmacyField) pharmacyField.style.display = 'none';
         document.getElementById('patient_registration_number').required = false;
         document.getElementById('therapist_code').required = true;
         document.getElementById('employee_code').required = true;
+        if (document.getElementById('department')) document.getElementById('department').required = false;
+      } else if (roleSelect.value === 'ip_pharmacy_staff') {
+        roleSpecificFields.style.display = 'block';
+        patientField.style.display = 'none';
+        therapistField.style.display = 'none';
+        employeeField.style.display = 'none';
+        if (pharmacyField) pharmacyField.style.display = 'block';
+        document.getElementById('patient_registration_number').required = false;
+        document.getElementById('therapist_code').required = false;
+        document.getElementById('employee_code').required = false;
+        if (document.getElementById('department')) document.getElementById('department').required = true;
       } else {
         roleSpecificFields.style.display = 'none';
         patientField.style.display = 'none';
         therapistField.style.display = 'none';
         employeeField.style.display = 'none';
+        if (pharmacyField) pharmacyField.style.display = 'none';
         document.getElementById('patient_registration_number').required = false;
         document.getElementById('therapist_code').required = false;
         document.getElementById('employee_code').required = false;
+        if (document.getElementById('department')) document.getElementById('department').required = false;
       }
     }
 
@@ -537,29 +580,49 @@
       const roleSpecificFields = document.getElementById('editRoleSpecificFields' + userId);
       const patientField = document.getElementById('editPatientRegistrationField' + userId);
       const therapistField = document.getElementById('editTherapistCodeField' + userId);
+      const employeeField = document.getElementById('editEmployeeCodeField' + userId);
+      const pharmacyField = document.getElementById('editPharmacyDepartmentField' + userId);
       
       if (roleSelect.value === 'patient') {
         roleSpecificFields.style.display = 'block';
         patientField.style.display = 'block';
         therapistField.style.display = 'none';
+        if (employeeField) employeeField.style.display = 'none';
+        if (pharmacyField) pharmacyField.style.display = 'none';
         document.getElementById('edit_patient_registration_number' + userId).required = true;
         document.getElementById('edit_therapist_code' + userId).required = false;
+        if (document.getElementById('edit_employee_code' + userId)) document.getElementById('edit_employee_code' + userId).required = false;
+        if (document.getElementById('edit_department' + userId)) document.getElementById('edit_department' + userId).required = false;
       } else if (roleSelect.value === 'therapist') {
         roleSpecificFields.style.display = 'block';
         patientField.style.display = 'none';
         therapistField.style.display = 'block';
-        document.getElementById('editEmployeeCodeField' + userId).style.display = 'block';
+        if (employeeField) employeeField.style.display = 'block';
+        if (pharmacyField) pharmacyField.style.display = 'none';
         document.getElementById('edit_patient_registration_number' + userId).required = false;
         document.getElementById('edit_therapist_code' + userId).required = true;
-        document.getElementById('edit_employee_code' + userId).required = true;
+        if (document.getElementById('edit_employee_code' + userId)) document.getElementById('edit_employee_code' + userId).required = true;
+        if (document.getElementById('edit_department' + userId)) document.getElementById('edit_department' + userId).required = false;
+      } else if (roleSelect.value === 'ip_pharmacy_staff') {
+        roleSpecificFields.style.display = 'block';
+        patientField.style.display = 'none';
+        therapistField.style.display = 'none';
+        if (employeeField) employeeField.style.display = 'none';
+        if (pharmacyField) pharmacyField.style.display = 'block';
+        document.getElementById('edit_patient_registration_number' + userId).required = false;
+        document.getElementById('edit_therapist_code' + userId).required = false;
+        if (document.getElementById('edit_employee_code' + userId)) document.getElementById('edit_employee_code' + userId).required = false;
+        if (document.getElementById('edit_department' + userId)) document.getElementById('edit_department' + userId).required = true;
       } else {
         roleSpecificFields.style.display = 'none';
         patientField.style.display = 'none';
         therapistField.style.display = 'none';
-        document.getElementById('editEmployeeCodeField' + userId).style.display = 'none';
+        if (employeeField) employeeField.style.display = 'none';
+        if (pharmacyField) pharmacyField.style.display = 'none';
         document.getElementById('edit_patient_registration_number' + userId).required = false;
         document.getElementById('edit_therapist_code' + userId).required = false;
-        document.getElementById('edit_employee_code' + userId).required = false;
+        if (document.getElementById('edit_employee_code' + userId)) document.getElementById('edit_employee_code' + userId).required = false;
+        if (document.getElementById('edit_department' + userId)) document.getElementById('edit_department' + userId).required = false;
       }
     }
 

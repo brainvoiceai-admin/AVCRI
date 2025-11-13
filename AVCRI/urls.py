@@ -26,7 +26,7 @@ def ws_notifications_disabled(request):
 urlpatterns = [
     path('admin/', admin.site.urls),
      path('', include(('Patient.urls', 'patient'), namespace='patient')),
-      path('authentication/', include('authentication.urls')),  # Add this line
+      path('authentication/', include(('authentication.urls', 'authentication'), namespace='authentication')),
       path('therapy/', include('MySql_Data_pull.urls')),
       path("predictor/", include("predictor.urls")),
       path("sheduling/", include("Sheduling.urls")),

@@ -17,19 +17,9 @@
             padding: 1.5rem;
             margin-bottom: 1.5rem;
         }
-        .time-preview {
-            background: #e3f2fd;
-            border: 1px solid #bbdefb;
-            border-radius: 6px;
-            padding: 1rem;
-            margin-top: 1rem;
-        }
-        .form-check-input {
-            margin-top: 0.25rem;
-        }
-        .form-check-label {
-            margin-left: 0.5rem;
-            font-weight: 500;
+        .required-field::after {
+            content: " *";
+            color: red;
         }
     </style>
 </head>
@@ -67,22 +57,23 @@
                         </h5>
                     </div>
                     <div class="card-body">
-                        <form method="post">
+                        <form method="post" class="needs-validation" novalidate>
                             {% csrf_token %}
                             
                             <div class="row">
                                 <div class="col-md-6 mb-3">
-                                    <label for="{{ form.slot_number.id_for_label }}" class="form-label">
-                                        Slot Number <span class="text-danger">*</span>
+                                    <label for="{{ form.slot_number.id_for_label }}" class="form-label required-field">
+                                        Slot Number
                                     </label>
                                     {{ form.slot_number }}
                                     {% if form.slot_number.errors %}
-                                        <div class="text-danger small">
+                                        <div class="invalid-feedback d-block">
                                             {% for error in form.slot_number.errors %}
                                                 {{ error }}
                                             {% endfor %}
                                         </div>
                                     {% endif %}
+                                    <small class="form-text text-muted">Unique number for this slot</small>
                                 </div>
                                 
                                 <div class="col-md-6 mb-3">
@@ -91,84 +82,63 @@
                                     </label>
                                     {{ form.slot_name }}
                                     {% if form.slot_name.errors %}
-                                        <div class="text-danger small">
+                                        <div class="invalid-feedback d-block">
                                             {% for error in form.slot_name.errors %}
                                                 {{ error }}
                                             {% endfor %}
                                         </div>
                                     {% endif %}
+                                    <small class="form-text text-muted">Optional descriptive name</small>
                                 </div>
                             </div>
                             
                             <div class="row">
                                 <div class="col-md-6 mb-3">
-                                    <label for="{{ form.start_time.id_for_label }}" class="form-label">
-                                        Start Time <span class="text-danger">*</span>
+                                    <label for="id_slot_time" class="form-label required-field">
+                                        Slot Time
                                     </label>
-                                    {{ form.start_time }}
-                                    {% if form.start_time.errors %}
-                                        <div class="text-danger small">
-                                            {% for error in form.start_time.errors %}
+                                    <input type="time" 
+                                           class="form-control" 
+                                           id="id_slot_time" 
+                                           name="slot_time" 
+                                           value="{% if form.slot_time.value %}{{ form.slot_time.value|time:'H:i' }}{% elif object %}{{ object.slot_time|time:'H:i' }}{% endif %}"
+                                           required>
+                                    {% if form.slot_time.errors %}
+                                        <div class="invalid-feedback d-block">
+                                            {% for error in form.slot_time.errors %}
                                                 {{ error }}
                                             {% endfor %}
                                         </div>
                                     {% endif %}
+                                    <small class="form-text text-muted">Time for this slot (12-hour format will be displayed)</small>
+                                    <div class="mt-2">
+                                        <strong>Preview:</strong> <span id="timePreview" class="badge bg-info">-</span>
+                                    </div>
                                 </div>
                                 
                                 <div class="col-md-6 mb-3">
-                                    <label for="{{ form.end_time.id_for_label }}" class="form-label">
-                                        End Time <span class="text-danger">*</span>
-                                    </label>
-                                    {{ form.end_time }}
-                                    {% if form.end_time.errors %}
-                                        <div class="text-danger small">
-                                            {% for error in form.end_time.errors %}
-                                                {{ error }}
-                                            {% endfor %}
-                                        </div>
-                                    {% endif %}
-                                </div>
-                            </div>
-                            
-                            <div class="row">
-                                <div class="col-md-6 mb-3">
-                                    <div class="form-check">
+                                    <div class="form-check form-switch mt-4">
                                         {{ form.is_active }}
                                         <label class="form-check-label" for="{{ form.is_active.id_for_label }}">
-                                            Active
+                                            <i class="fas fa-check-circle me-1"></i>Active
                                         </label>
                                     </div>
                                     {% if form.is_active.errors %}
-                                        <div class="text-danger small">
+                                        <div class="invalid-feedback d-block">
                                             {% for error in form.is_active.errors %}
                                                 {{ error }}
                                             {% endfor %}
                                         </div>
                                     {% endif %}
+                                    <small class="form-text text-muted">Only active slots will appear in scheduling</small>
                                 </div>
                             </div>
                             
-                            <!-- Time Preview -->
-                            <div class="time-preview" id="timePreview" style="display: none;">
-                                <h6><i class="fas fa-eye me-2"></i>Time Slot Preview</h6>
-                                <div class="row">
-                                    <div class="col-md-6">
-                                        <strong>Start:</strong> <span id="previewStart">-</span>
-                                    </div>
-                                    <div class="col-md-6">
-                                        <strong>End:</strong> <span id="previewEnd">-</span>
-                                    </div>
-                                </div>
-                                <div class="mt-2">
-                                    <strong>Duration:</strong> <span id="previewDuration">-</span>
-                                </div>
-                            </div>
-                            
-                            <div class="d-flex justify-content-between">
-                                <a href="{% url 'slot_master_manage' %}" class="btn btn-secondary">
+                            <div class="d-flex justify-content-between mt-4">
+                                <a href="{% url 'slot_master_manage' %}" class="btn btn-outline-secondary">
                                     <i class="fas fa-times me-2"></i>Cancel
                                 </a>
-                                <button type="submit" class="btn btn-primary">
+                                <button type="submit" class="btn btn-success">
                                     <i class="fas fa-save me-2"></i>
                                     {% if object %}Update{% else %}Create{% endif %} Time Slot
                                 </button>
@@ -189,9 +159,9 @@
                         <h6>Time Slot Guidelines</h6>
                         <ul class="list-unstyled small">
                             <li><i class="fas fa-check text-success me-2"></i>Slot numbers must be unique</li>
-                            <li><i class="fas fa-check text-success me-2"></i>Start time must be before end time</li>
-                            <li><i class="fas fa-check text-success me-2"></i>No overlapping time slots</li>
-                            <li><i class="fas fa-check text-success me-2"></i>Use 24-hour format for times</li>
+                            <li><i class="fas fa-check text-success me-2"></i>Time will be displayed in 12-hour format</li>
+                            <li><i class="fas fa-check text-success me-2"></i>Use descriptive slot names</li>
+                            <li><i class="fas fa-check text-success me-2"></i>Only active slots appear in scheduling</li>
                         </ul>
                         
                         <hr>
@@ -210,63 +180,52 @@
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
     <script>
-        // Add form validation and styling
-        document.addEventListener('DOMContentLoaded', function() {
-            // Style form fields (excluding checkboxes)
-            const formFields = document.querySelectorAll('input:not([type="checkbox"]), select, textarea');
-            formFields.forEach(field => {
-                field.classList.add('form-control');
-            });
-            
-            // Style checkboxes properly
-            const checkboxes = document.querySelectorAll('input[type="checkbox"]');
-            checkboxes.forEach(checkbox => {
-                checkbox.classList.add('form-check-input');
-            });
-            
-            // Add required field indicators
-            const requiredFields = document.querySelectorAll('input[required], select[required]');
-            requiredFields.forEach(field => {
-                field.classList.add('border-primary');
-            });
-            
-            // Time preview functionality
-            const startTimeField = document.getElementById('{{ form.start_time.id_for_label }}');
-            const endTimeField = document.getElementById('{{ form.end_time.id_for_label }}');
-            const timePreview = document.getElementById('timePreview');
-            const previewStart = document.getElementById('previewStart');
-            const previewEnd = document.getElementById('previewEnd');
-            const previewDuration = document.getElementById('previewDuration');
-            
-            function updateTimePreview() {
-                const startTime = startTimeField.value;
-                const endTime = endTimeField.value;
-                
-                if (startTime && endTime) {
-                    timePreview.style.display = 'block';
-                    previewStart.textContent = startTime;
-                    previewEnd.textContent = endTime;
-                    
-                    // Calculate duration
-                    const start = new Date('2000-01-01 ' + startTime);
-                    const end = new Date('2000-01-01 ' + endTime);
-                    
-                    if (end > start) {
-                        const diffMs = end - start;
-                        const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
-                        const diffMinutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
-                        previewDuration.textContent = `${diffHours}h ${diffMinutes}m`;
-                    } else {
-                        previewDuration.textContent = 'Invalid time range';
-                    }
+        // Form validation
+        (function() {
+            'use strict';
+            window.addEventListener('load', function() {
+                var forms = document.getElementsByClassName('needs-validation');
+                var validation = Array.prototype.filter.call(forms, function(form) {
+                    form.addEventListener('submit', function(event) {
+                        if (form.checkValidity() === false) {
+                            event.preventDefault();
+                            event.stopPropagation();
+                        }
+                        form.classList.add('was-validated');
+                    }, false);
+                });
+            }, false);
+        })();
+        
+        // Convert 24-hour time to 12-hour format for preview
+        function formatTime12Hour(time24) {
+            if (!time24) return '-';
+            const [hours, minutes] = time24.split(':');
+            const hour = parseInt(hours, 10);
+            const ampm = hour >= 12 ? 'PM' : 'AM';
+            const hour12 = hour % 12 || 12;
+            return `${hour12}:${minutes} ${ampm}`;
+        }
+        
+        // Update time preview
+        const slotTimeField = document.getElementById('id_slot_time');
+        const timePreview = document.getElementById('timePreview');
+        
+        if (slotTimeField) {
+            slotTimeField.addEventListener('change', function() {
+                const time24 = this.value;
+                if (time24) {
+                    timePreview.textContent = formatTime12Hour(time24);
                 } else {
-                    timePreview.style.display = 'none';
+                    timePreview.textContent = '-';
                 }
-            }
+            });
             
-            startTimeField.addEventListener('change', updateTimePreview);
-            endTimeField.addEventListener('change', updateTimePreview);
-        });
+            // Set initial preview
+            if (slotTimeField.value) {
+                timePreview.textContent = formatTime12Hour(slotTimeField.value);
+            }
+        }
     </script>
 </body>
 </html>

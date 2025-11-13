@@ -60,15 +60,20 @@
                         </h5>
                         
                         <div class="row">
+                            {% if object %}
                             <div class="col-md-6 mb-3">
-                                <label for="id_therapist_code" class="form-label required-field">Therapist Code</label>
-                                <input type="text" class="form-control" id="id_therapist_code" name="therapist_code" 
-                                       value="{{ form.therapist_code.value|default:'' }}" required>
-                                <div class="invalid-feedback">
-                                    Please provide a therapist code.
-                                </div>
-                                <small class="form-text text-muted">Unique identifier for the therapist</small>
+                                <label for="id_therapist_code" class="form-label">Therapist Code</label>
+                                <input type="text" class="form-control" id="id_therapist_code" 
+                                       value="{{ object.therapist_code }}" readonly>
+                                <small class="form-text text-muted">Auto-generated code (cannot be changed)</small>
                             </div>
+                            {% else %}
+                            <div class="col-md-6 mb-3">
+                                <div class="alert alert-info">
+                                    <i class="fas fa-info-circle"></i> Therapist code will be auto-generated (THP + 4 digits)
+                                </div>
+                            </div>
+                            {% endif %}
                             
                             <div class="col-md-6 mb-3">
                                 <label for="id_therapist_name" class="form-label required-field">Therapist Name</label>
@@ -83,17 +88,15 @@
                         <div class="row">
                             <div class="col-md-6 mb-3">
                                 <label for="id_therapist_grade" class="form-label required-field">Therapist Grade</label>
-                                <select class="form-select" id="id_therapist_grade" name="therapist_grade" required>
-                                    <option value="">Select Grade</option>
-                                    <option value="Senior" {% if form.therapist_grade.value == 'Senior' %}selected{% endif %}>Senior</option>
-                                    <option value="Junior" {% if form.therapist_grade.value == 'Junior' %}selected{% endif %}>Junior</option>
-                                    <option value="Trainee" {% if form.therapist_grade.value == 'Trainee' %}selected{% endif %}>Trainee</option>
-                                    <option value="Specialist" {% if form.therapist_grade.value == 'Specialist' %}selected{% endif %}>Specialist</option>
-                                    <option value="Consultant" {% if form.therapist_grade.value == 'Consultant' %}selected{% endif %}>Consultant</option>
-                                </select>
+                                {{ form.therapist_grade }}
                                 <div class="invalid-feedback">
                                     Please select a therapist grade.
                                 </div>
+                                <small class="form-text text-muted">
+                                    <a href="{% url 'therapistgrade_manage' %}" target="_blank">
+                                        <i class="fas fa-external-link-alt"></i> Manage Grades
+                                    </a>
+                                </small>
                             </div>
                             
                             <div class="col-md-6 mb-3">

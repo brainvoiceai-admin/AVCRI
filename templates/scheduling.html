@@ -648,6 +648,9 @@
                             <div class="card-title">Scheduled Therapies</div>
                             <div class="card-subtitle">Successfully scheduled therapies with therapist assignments. Use date filter to view schedules for specific dates.</div>
                         </div>
+                        <button class="btn btn-primary" id="print-therapy-pdf" title="Print to PDF" style="background: #2ed573; color: white; font-weight: 600; padding: 12px 24px; display: flex; align-items: center; gap: 8px;">
+                            <span style="font-size: 18px;">🖨️</span> Print to PDF
+                        </button>
                     </div>
                     
                     <div class="filters">
@@ -822,6 +825,10 @@
         </div>
     </div>
 
+    <!-- jsPDF Library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
+    
     <script>
         // Initialize the dashboard
         document.addEventListener('DOMContentLoaded', function() {
@@ -895,6 +902,11 @@
                     // If no date selected, show all scheduled therapies
                     loadTherapyData('allocated', '');
                 }
+            });
+            
+            // Print to PDF button
+            document.getElementById('print-therapy-pdf').addEventListener('click', function() {
+                printTherapyScheduleToPDF();
             });
             
             // Individual reschedule buttons (schedule buttons removed)
@@ -1352,6 +1364,146 @@
             if (event.target === rescheduleModal) {
                 closeRescheduleModal();
             }
+        }
+        
+        // Print Therapy Schedule to PDF
+        function printTherapyScheduleToPDF() {
+            const selectedDate = document.getElementById('scheduled-date').value;
+            
+            if (!selectedDate) {
+                alert('Please select a date first using the date filter');
+                return;
+            }
+            
+            // Show loading
+            const printBtn = document.getElementById('print-therapy-pdf');
+            const originalText = printBtn.innerHTML;
+            printBtn.disabled = true;
+            printBtn.innerHTML = '<span>⏳</span> Generating PDF...';
+            
+            // Fetch scheduled therapies data
+            fetch(`/sheduling/scheduling/api/therapy-data/?status=allocated&date=${selectedDate}`)
+                .then(response => response.json())
+                .then(data => {
+                    printBtn.disabled = false;
+                    printBtn.innerHTML = originalText;
+                    
+                    if (data.success && data.data.length > 0) {
+                        generateTherapyPDF(data.data, selectedDate);
+                    } else {
+                        alert('No scheduled therapies found for the selected date.');
+                    }
+                })
+                .catch(error => {
+                    printBtn.disabled = false;
+                    printBtn.innerHTML = originalText;
+                    alert('Error generating PDF: ' + error.message);
+                });
+        }
+        
+        function generateTherapyPDF(therapyData, date) {
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF('p', 'mm', 'a4');
+            
+            const pageWidth = doc.internal.pageSize.getWidth();
+            const pageHeight = doc.internal.pageSize.getHeight();
+            const margin = 15;
+            const contentWidth = pageWidth - (margin * 2);
+            let yPos = margin;
+            
+            // Remove duplicates based on booking_id
+            const uniqueData = [];
+            const seenBookingIds = new Set();
+            therapyData.forEach(item => {
+                const bookingId = item.booking_id || item.id;
+                if (!seenBookingIds.has(bookingId)) {
+                    seenBookingIds.add(bookingId);
+                    uniqueData.push(item);
+                }
+            });
+            
+            // Sort by time, then by patient name
+            uniqueData.sort((a, b) => {
+                const timeA = a.timeslot || '00:00';
+                const timeB = b.timeslot || '00:00';
+                if (timeA !== timeB) {
+                    return timeA.localeCompare(timeB);
+                }
+                return (a.patient_name || '').localeCompare(b.patient_name || '');
+            });
+            
+            // Header function
+            function addHeader() {
+                doc.setFontSize(18);
+                doc.setFont(undefined, 'bold');
+                doc.text('Therapy Scheduling Report', margin, yPos);
+                yPos += 8;
+                
+                doc.setFontSize(12);
+                doc.setFont(undefined, 'normal');
+                doc.text(`Date: ${date}`, margin, yPos);
+                yPos += 6;
+                
+                doc.setFontSize(10);
+                doc.text(`Generated: ${new Date().toLocaleString()}`, margin, yPos);
+                yPos += 10;
+                
+                // Draw line
+                doc.setLineWidth(0.5);
+                doc.line(margin, yPos, pageWidth - margin, yPos);
+                yPos += 8;
+            }
+            
+            // Footer function
+            function addFooter(pageNum, totalPages) {
+                const footerY = pageHeight - 10;
+                doc.setFontSize(8);
+                doc.setFont(undefined, 'normal');
+                doc.text(`Page ${pageNum} of ${totalPages}`, pageWidth / 2, footerY, { align: 'center' });
+                doc.text(`Date: ${date}`, margin, footerY);
+            }
+            
+            // Prepare table data
+            const tableData = uniqueData.map(item => [
+                item.patient_name || 'N/A',
+                item.patient_reg_no || 'N/A',
+                item.room_no || '—',
+                item.timeslot || '—',
+                item.therapists && item.therapists.length > 0 
+                    ? item.therapists.map(t => t.code).join(', ') 
+                    : '—'
+            ]);
+            
+            // Add header
+            addHeader();
+            
+            // Generate table with autoTable
+            doc.autoTable({
+                head: [['Patient Name', 'Reg. No.', 'Treatment Room', 'Time', 'Therapist Assigned']],
+                body: tableData,
+                startY: yPos,
+                margin: { left: margin, right: margin },
+                styles: {
+                    fontSize: 9,
+                    cellPadding: 3,
+                },
+                headStyles: {
+                    fillColor: [59, 130, 246],
+                    textColor: 255,
+                    fontStyle: 'bold',
+                },
+                alternateRowStyles: {
+                    fillColor: [245, 247, 250],
+                },
+                didDrawPage: function(data) {
+                    // Add footer on each page
+                    addFooter(data.pageNumber, data.totalPages);
+                },
+            });
+            
+            // Save PDF
+            const fileName = `Therapy_Schedule_${date.replace(/-/g, '_')}.pdf`;
+            doc.save(fileName);
         }
     </script>
     </div>

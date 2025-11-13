@@ -1385,7 +1385,7 @@ def therapy_entry(request):
                 therapists = []
             slot_s = ''
             try:
-                slot_s = b.timeslot.start_time.strftime('%H:%M') if getattr(b, 'timeslot', None) and getattr(b.timeslot, 'start_time', None) else ''
+                slot_s = b.timeslot.slot_time.strftime('%H:%M') if getattr(b, 'timeslot', None) and getattr(b.timeslot, 'slot_time', None) else ''
             except Exception:
                 slot_s = ''
             
@@ -3338,7 +3338,7 @@ def get_therapy_data_api(request):
                         'status': booking.status,
                         'booking_status': booking.status,
                         'room_no': room_no,
-                        'timeslot': booking.timeslot.start_time.strftime('%H:%M') if booking.timeslot else None,
+                        'timeslot': booking.timeslot.slot_time.strftime('%H:%M') if booking.timeslot else None,
                         'therapists': therapists,
                         'created_at': booking.allocation.created_at.isoformat(),
                         'allocated_by': booking.allocation.allocated_by.username if booking.allocation.allocated_by else None
@@ -3395,7 +3395,7 @@ def get_therapy_data_api(request):
                     'to_date': allocation.to_date.isoformat(),
                     'status': allocation.status,  # Keep allocation status but filter was based on booking
                     'room_no': allocation.room.room_no if allocation.room else None,
-                    'timeslot': allocation.timeslot.start_time.strftime('%H:%M') if allocation.timeslot else None,
+                    'timeslot': allocation.timeslot.slot_time.strftime('%H:%M') if allocation.timeslot else None,
                     'therapists': therapists,
                     'created_at': allocation.created_at.isoformat(),
                     'allocated_by': allocation.allocated_by.username if allocation.allocated_by else None

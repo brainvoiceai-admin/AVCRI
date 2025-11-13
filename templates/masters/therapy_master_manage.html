@@ -45,31 +45,41 @@
         <!-- Search and Filter Section -->
         <div class="card mb-4">
             <div class="card-body">
-                <div class="row">
-                    <div class="col-md-4">
-                        <input type="text" class="form-control" id="searchInput" placeholder="Search therapies...">
+                <form method="get" action="{% url 'therapy_master_manage' %}" id="filterForm">
+                    <div class="row">
+                        <div class="col-md-4">
+                            <input type="text" class="form-control" name="search" id="searchInput" 
+                                   placeholder="Search therapies..." value="{{ search }}">
+                        </div>
+                        <div class="col-md-3">
+                            <select class="form-select" name="status" id="statusFilter">
+                                <option value="">All Status</option>
+                                <option value="active" {% if status_filter == 'active' %}selected{% endif %}>Active</option>
+                                <option value="inactive" {% if status_filter == 'inactive' %}selected{% endif %}>Inactive</option>
+                            </select>
+                        </div>
+                        <div class="col-md-3">
+                            <select class="form-select" name="category" id="categoryFilter">
+                                <option value="">All Categories</option>
+                                <option value="Medium" {% if category_filter == 'Medium' %}selected{% endif %}>Medium</option>
+                                <option value="Hard" {% if category_filter == 'Hard' %}selected{% endif %}>Hard</option>
+                                <option value="Easy" {% if category_filter == 'Easy' %}selected{% endif %}>Easy</option>
+                            </select>
+                        </div>
+                        <div class="col-md-2">
+                            <button type="submit" class="btn btn-primary w-100">
+                                <i class="fas fa-search"></i> Filter
+                            </button>
+                        </div>
                     </div>
-                    <div class="col-md-3">
-                        <select class="form-select" id="statusFilter">
-                            <option value="">All Status</option>
-                            <option value="active">Active</option>
-                            <option value="inactive">Inactive</option>
-                        </select>
+                    <div class="row mt-2">
+                        <div class="col-md-12">
+                            <a href="{% url 'therapy_master_manage' %}" class="btn btn-outline-secondary btn-sm">
+                                <i class="fas fa-times"></i> Clear Filters
+                            </a>
+                        </div>
                     </div>
-                    <div class="col-md-3">
-                        <select class="form-select" id="categoryFilter">
-                            <option value="">All Categories</option>
-                            <option value="Traditional">Traditional</option>
-                            <option value="Modern">Modern</option>
-                            <option value="Ayurvedic">Ayurvedic</option>
-                        </select>
-                    </div>
-                    <div class="col-md-2">
-                        <button class="btn btn-primary w-100" onclick="applyFilters()">
-                            <i class="fas fa-search"></i> Filter
-                        </button>
-                    </div>
-                </div>
+                </form>
             </div>
         </div>
 
@@ -182,10 +192,10 @@
                 <ul class="pagination justify-content-center">
                     {% if page_obj.has_previous %}
                         <li class="page-item">
-                            <a class="page-link" href="?page=1">&laquo; First</a>
+                            <a class="page-link" href="?page=1{% if search %}&search={{ search }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if category_filter %}&category={{ category_filter }}{% endif %}">&laquo; First</a>
                         </li>
                         <li class="page-item">
-                            <a class="page-link" href="?page={{ page_obj.previous_page_number }}">Previous</a>
+                            <a class="page-link" href="?page={{ page_obj.previous_page_number }}{% if search %}&search={{ search }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if category_filter %}&category={{ category_filter }}{% endif %}">Previous</a>
                         </li>
                     {% endif %}
                     
@@ -197,10 +207,10 @@
                     
                     {% if page_obj.has_next %}
                         <li class="page-item">
-                            <a class="page-link" href="?page={{ page_obj.next_page_number }}">Next</a>
+                            <a class="page-link" href="?page={{ page_obj.next_page_number }}{% if search %}&search={{ search }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if category_filter %}&category={{ category_filter }}{% endif %}">Next</a>
                         </li>
                         <li class="page-item">
-                            <a class="page-link" href="?page={{ page_obj.paginator.num_pages }}">Last &raquo;</a>
+                            <a class="page-link" href="?page={{ page_obj.paginator.num_pages }}{% if search %}&search={{ search }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if category_filter %}&category={{ category_filter }}{% endif %}">Last &raquo;</a>
                         </li>
                     {% endif %}
                 </ul>
@@ -211,45 +221,16 @@
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous"></script>
     
     <script>
-        function applyFilters() {
-            const searchTerm = document.getElementById('searchInput').value.toLowerCase();
-            const statusFilter = document.getElementById('statusFilter').value;
-            const categoryFilter = document.getElementById('categoryFilter').value;
-            
-            const rows = document.querySelectorAll('tbody tr');
-            
-            rows.forEach(row => {
-                const therapyName = row.cells[1].textContent.toLowerCase();
-                const category = row.cells[3].textContent;
-                const statusBadge = row.cells[8].querySelector('.badge');
-                const isActive = statusBadge && statusBadge.textContent.includes('Active');
-                
-                let showRow = true;
-                
-                if (searchTerm && !therapyName.includes(searchTerm)) {
-                    showRow = false;
-                }
-                
-                if (statusFilter === 'active' && !isActive) {
-                    showRow = false;
-                } else if (statusFilter === 'inactive' && isActive) {
-                    showRow = false;
-                }
-                
-                if (categoryFilter && !category.includes(categoryFilter)) {
-                    showRow = false;
-                }
-                
-                row.style.display = showRow ? '' : 'none';
+        // Auto-dismiss messages after 5 seconds
+        document.addEventListener('DOMContentLoaded', function() {
+            const alerts = document.querySelectorAll('.alert');
+            alerts.forEach(function(alert) {
+                setTimeout(function() {
+                    const bsAlert = new bootstrap.Alert(alert);
+                    bsAlert.close();
+                }, 5000);
             });
-        }
-        
-        // Real-time search
-        document.getElementById('searchInput').addEventListener('input', applyFilters);
-        document.getElementById('statusFilter').addEventListener('change', applyFilters);
-        document.getElementById('categoryFilter').addEventListener('change', applyFilters);
+        });
     </script>
 </body>
 </html>
-
-

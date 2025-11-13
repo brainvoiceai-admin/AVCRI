@@ -544,6 +544,9 @@
                         <div class="card-title">Scheduled Prescriptions</div>
                         <div class="card-subtitle">Prescriptions sent to procurement departments for preparation.</div>
                     </div>
+                    <button class="btn btn-primary" id="print-prescription-pdf" title="Print to PDF" style="background: #2ed573; color: white; font-weight: 600; padding: 12px 24px; display: flex; align-items: center; gap: 8px;">
+                        <span style="font-size: 18px;">🖨️</span> Print to PDF
+                    </button>
                 </div>
                 
                 <div class="filters">
@@ -654,6 +657,10 @@
         </div>
     </div>
 
+    <!-- jsPDF Library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
+    
     <script>
         // Initialize the dashboard
         document.addEventListener('DOMContentLoaded', function() {
@@ -698,6 +705,11 @@
             });
             document.getElementById('dispatched-date').addEventListener('change', function() {
                 loadPrescriptionData('dispatched', this.value);
+            });
+            
+            // Print to PDF button
+            document.getElementById('print-prescription-pdf').addEventListener('click', function() {
+                printPrescriptionScheduleToPDF();
             });
             
             // Close modals when clicking outside
@@ -995,6 +1007,298 @@
             const div = document.createElement('div');
             div.textContent = text;
             return div.innerHTML;
+        }
+        
+        // Print Prescription Schedule to PDF
+        function printPrescriptionScheduleToPDF() {
+            const selectedDate = document.getElementById('scheduled-date').value;
+            
+            if (!selectedDate) {
+                alert('Please select a date first using the date filter');
+                return;
+            }
+            
+            // Show loading
+            const printBtn = document.getElementById('print-prescription-pdf');
+            const originalText = printBtn.innerHTML;
+            printBtn.disabled = true;
+            printBtn.innerHTML = '<span>⏳</span> Generating PDF...';
+            
+            // Fetch prescription data
+            fetch(`/sheduling/prescription/api/prescription-data/?status=scheduled&date=${selectedDate}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success && data.data.length > 0) {
+                        // Fetch details for each patient
+                        const patientPromises = data.data.map(item => 
+                            fetch(`/sheduling/prescription/api/prescription-details/?patient_id=${item.patient_id}&date=${selectedDate}`)
+                                .then(res => res.json())
+                                .then(detailData => ({
+                                    ...item,
+                                    details: detailData.success ? detailData : null
+                                }))
+                        );
+                        
+                        Promise.all(patientPromises)
+                            .then(patientsWithDetails => {
+                                // Fetch all therapy items once for the date
+                                fetch(`/sheduling/scheduling/api/therapy-data/?status=allocated&date=${selectedDate}`)
+                                    .then(res => res.json())
+                                    .then(therapyData => {
+                                        // Map therapies by patient registration number
+                                        const therapiesByPatient = {};
+                                        if (therapyData.success && therapyData.data) {
+                                            therapyData.data.forEach(therapy => {
+                                                const regNo = therapy.patient_reg_no;
+                                                if (!therapiesByPatient[regNo]) {
+                                                    therapiesByPatient[regNo] = [];
+                                                }
+                                                therapiesByPatient[regNo].push(therapy);
+                                            });
+                                        }
+                                        
+                                        // Add therapy items to each patient
+                                        const patientsWithAllData = patientsWithDetails.map(item => ({
+                                            ...item,
+                                            therapy_items: therapiesByPatient[item.registration_no] || []
+                                        }));
+                                        
+                                        printBtn.disabled = false;
+                                        printBtn.innerHTML = originalText;
+                                        generatePrescriptionPDF(patientsWithAllData, selectedDate);
+                                    })
+                                    .catch(error => {
+                                        printBtn.disabled = false;
+                                        printBtn.innerHTML = originalText;
+                                        // Still generate PDF without therapy items
+                                        generatePrescriptionPDF(patientsWithDetails, selectedDate);
+                                    });
+                            })
+                            .catch(error => {
+                                printBtn.disabled = false;
+                                printBtn.innerHTML = originalText;
+                                alert('Error fetching prescription details: ' + error.message);
+                            });
+                    } else {
+                        printBtn.disabled = false;
+                        printBtn.innerHTML = originalText;
+                        alert('No scheduled prescriptions found for the selected date.');
+                    }
+                })
+                .catch(error => {
+                    printBtn.disabled = false;
+                    printBtn.innerHTML = originalText;
+                    alert('Error generating PDF: ' + error.message);
+                });
+        }
+        
+        function generatePrescriptionPDF(prescriptionData, date) {
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF('p', 'mm', 'a4');
+            
+            const pageWidth = doc.internal.pageSize.getWidth();
+            const pageHeight = doc.internal.pageSize.getHeight();
+            const margin = 15;
+            let yPos = margin;
+            let currentPage = 1;
+            let totalPages = 1;
+            
+            // Remove duplicates based on patient_id
+            const uniqueData = [];
+            const seenPatientIds = new Set();
+            prescriptionData.forEach(item => {
+                if (!seenPatientIds.has(item.patient_id)) {
+                    seenPatientIds.add(item.patient_id);
+                    uniqueData.push(item);
+                }
+            });
+            
+            // Sort by patient name
+            uniqueData.sort((a, b) => (a.patient_name || '').localeCompare(b.patient_name || ''));
+            
+            // Header function
+            function addHeader() {
+                doc.setFontSize(18);
+                doc.setFont(undefined, 'bold');
+                doc.text('Prescription Scheduling Report', margin, yPos);
+                yPos += 8;
+                
+                doc.setFontSize(12);
+                doc.setFont(undefined, 'normal');
+                doc.text(`Date: ${date}`, margin, yPos);
+                yPos += 6;
+                
+                doc.setFontSize(10);
+                doc.text(`Generated: ${new Date().toLocaleString()}`, margin, yPos);
+                yPos += 10;
+                
+                // Draw line
+                doc.setLineWidth(0.5);
+                doc.line(margin, yPos, pageWidth - margin, yPos);
+                yPos += 8;
+            }
+            
+            // Footer function
+            function addFooter(pageNum) {
+                const footerY = pageHeight - 10;
+                doc.setFontSize(8);
+                doc.setFont(undefined, 'normal');
+                doc.text(`Page ${pageNum}`, pageWidth / 2, footerY, { align: 'center' });
+                doc.text(`Date: ${date}`, margin, footerY);
+            }
+            
+            // Check if we need a new page
+            function checkNewPage(requiredHeight) {
+                if (yPos + requiredHeight > pageHeight - 20) {
+                    addFooter(currentPage);
+                    doc.addPage();
+                    currentPage++;
+                    yPos = margin;
+                    addHeader();
+                }
+            }
+            
+            // Add initial header
+            addHeader();
+            
+            // Process each patient
+            uniqueData.forEach((item, index) => {
+                const patientInfo = item.details?.patient_info || {
+                    name: item.patient_name,
+                    registration_no: item.registration_no,
+                    room_no: item.room_no || 'N/A',
+                    doctor_name: item.doctor_name
+                };
+                
+                const prescriptionItems = item.details?.prescription_items || [];
+                const therapyItems = item.therapy_items || [];
+                
+                // Estimate required height (patient info + items tables + spacing)
+                const estimatedHeight = 35 + (prescriptionItems.length * 8) + (therapyItems.length * 8) + 30;
+                checkNewPage(estimatedHeight);
+                
+                // Patient Information Section
+                doc.setFontSize(14);
+                doc.setFont(undefined, 'bold');
+                doc.text(`Patient ${index + 1}: ${patientInfo.name}`, margin, yPos);
+                yPos += 7;
+                
+                doc.setFontSize(10);
+                doc.setFont(undefined, 'normal');
+                doc.text(`Registration No: ${patientInfo.registration_no}`, margin, yPos);
+                yPos += 5;
+                doc.text(`Room No: ${patientInfo.room_no}`, margin, yPos);
+                yPos += 5;
+                doc.text(`Doctor: ${patientInfo.doctor_name}`, margin, yPos);
+                yPos += 8;
+                
+                // Prescription Items Table
+                if (prescriptionItems.length > 0) {
+                    doc.setFontSize(11);
+                    doc.setFont(undefined, 'bold');
+                    doc.text('Prescription Items:', margin, yPos);
+                    yPos += 6;
+                    
+                    const tableData = prescriptionItems.map(item => [
+                        item.name || 'N/A',
+                        item.dose || '—',
+                        item.time || '—',
+                        item.quantity || '—',
+                        item.notes || '—'
+                    ]);
+                    
+                    doc.autoTable({
+                        head: [['Item Name', 'Dose', 'Time', 'Quantity', 'Notes']],
+                        body: tableData,
+                        startY: yPos,
+                        margin: { left: margin, right: margin },
+                        styles: {
+                            fontSize: 8,
+                            cellPadding: 2,
+                        },
+                        headStyles: {
+                            fillColor: [59, 130, 246],
+                            textColor: 255,
+                            fontStyle: 'bold',
+                        },
+                        alternateRowStyles: {
+                            fillColor: [245, 247, 250],
+                        },
+                        didDrawPage: function(data) {
+                            // Update yPos after table is drawn
+                            yPos = data.cursor.y + 5;
+                            // Add footer
+                            addFooter(data.pageNumber);
+                            currentPage = data.pageNumber;
+                        },
+                    });
+                    
+                    yPos = doc.lastAutoTable.finalY + 8;
+                } else {
+                    doc.setFontSize(10);
+                    doc.setFont(undefined, 'italic');
+                    doc.text('No prescription items found.', margin, yPos);
+                    yPos += 8;
+                }
+                
+                // Therapy Items Table
+                if (therapyItems.length > 0) {
+                    checkNewPage(15 + (therapyItems.length * 8));
+                    
+                    doc.setFontSize(11);
+                    doc.setFont(undefined, 'bold');
+                    doc.text('Therapy Items:', margin, yPos);
+                    yPos += 6;
+                    
+                    const therapyTableData = therapyItems.map(therapy => [
+                        therapy.therapy_name || 'N/A',
+                        therapy.timeslot || '—',
+                        therapy.room_no || '—',
+                        therapy.therapists && therapy.therapists.length > 0 
+                            ? therapy.therapists.map(t => t.code).join(', ') 
+                            : '—'
+                    ]);
+                    
+                    doc.autoTable({
+                        head: [['Therapy Name', 'Time', 'Room', 'Therapist']],
+                        body: therapyTableData,
+                        startY: yPos,
+                        margin: { left: margin, right: margin },
+                        styles: {
+                            fontSize: 8,
+                            cellPadding: 2,
+                        },
+                        headStyles: {
+                            fillColor: [16, 185, 129],
+                            textColor: 255,
+                            fontStyle: 'bold',
+                        },
+                        alternateRowStyles: {
+                            fillColor: [245, 247, 250],
+                        },
+                        didDrawPage: function(data) {
+                            yPos = data.cursor.y + 5;
+                            addFooter(data.pageNumber);
+                            currentPage = data.pageNumber;
+                        },
+                    });
+                    
+                    yPos = doc.lastAutoTable.finalY + 8;
+                }
+                
+                // Add spacing between patients
+                yPos += 5;
+                doc.setLineWidth(0.3);
+                doc.line(margin, yPos, pageWidth - margin, yPos);
+                yPos += 8;
+            });
+            
+            // Add final footer
+            addFooter(currentPage);
+            
+            // Save PDF
+            const fileName = `Prescription_Schedule_${date.replace(/-/g, '_')}.pdf`;
+            doc.save(fileName);
         }
     </script>
     </div>
