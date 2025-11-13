@@ -209,26 +209,111 @@ def create_therapist_booking_safe(therapist, date, time_slot, therapy_name, pati
 # -----------------------
 # Room allocation helper
 # -----------------------
-def allocate_treatment_room(date, time_slot, last_room=None):
+def allocate_treatment_room(date, time_slot, last_room=None, therapy_name=None, patient_id=None):
+    """
+    Allocate treatment room with special handling for 'Dhara & Pizichil' therapy.
+    
+    For 'Dhara & Pizichil' therapy:
+    - If patient has previous 'Dhara & Pizichil' treatment, try to assign same room
+    - If no previous treatment, assign any available room
+    - If previous room is unavailable, show error message
+    
+    Args:
+        date: Date for allocation
+        time_slot: Time slot for allocation
+        last_room: Preferred room number (string) or room object
+        therapy_name: Name of the therapy (to check for 'Dhara & Pizichil')
+        patient_id: Patient ID to check for previous room assignments
+    
+    Returns:
+        TreatmentRoom instance or None if no room available
+    """
     from Patient.models import RoomBooking, TreatmentRoom
-    if last_room:
+    
+    # Check if this is a 'Dhara & Pizichil' therapy
+    is_dhara_pizichil = False
+    if therapy_name:
+        therapy_lower = str(therapy_name).lower()
+        is_dhara_pizichil = 'dhara' in therapy_lower and 'pizichil' in therapy_lower
+    
+    # For 'Dhara & Pizichil', try to find previous room assignment
+    previous_room_no = None
+    if is_dhara_pizichil and patient_id:
         try:
-            if not RoomBooking.objects.filter(room__room_no=last_room, date=date, time_slot=time_slot, status='BOOKED').exists():
-                return TreatmentRoom.objects.get(room_no=last_room)
+            # Find most recent 'Dhara & Pizichil' room booking for this patient
+            # We need to filter for therapy names containing both 'dhara' and 'pizichil'
+            from django.db.models import Q
+            previous_bookings = RoomBooking.objects.filter(
+                patient_id=patient_id,
+                status='BOOKED'
+            ).exclude(
+                date=date,  # Exclude current date
+                time_slot=time_slot  # Exclude current slot
+            ).order_by('-date', '-time_slot').select_related('room')
+            
+            # Filter in Python to find bookings with both 'dhara' and 'pizichil' in name
+            for booking in previous_bookings:
+                therapy_name_lower = str(booking.therapy_name or '').lower()
+                if 'dhara' in therapy_name_lower and 'pizichil' in therapy_name_lower:
+                    if booking.room:
+                        previous_room_no = booking.room.room_no
+                        break
+        except Exception as e:
+            print(f"[DEBUG allocate_treatment_room] Error finding previous room: {e}")
+            previous_room_no = None
+    
+    # If we have a previous room for 'Dhara & Pizichil', try to use it first
+    if is_dhara_pizichil and previous_room_no:
+        try:
+            previous_room = TreatmentRoom.objects.get(room_no=previous_room_no)
+            # Check if previous room is available at this date/time_slot
+            if not RoomBooking.objects.filter(
+                room=previous_room,
+                date=date,
+                time_slot=time_slot,
+                status='BOOKED'
+            ).exists():
+                return previous_room
+            # Previous room is unavailable - we'll continue to find another room
+            # (We'll note this in the error message if no room is found)
         except TreatmentRoom.DoesNotExist:
             pass
+    
+    # Use last_room if provided (existing logic)
     if last_room:
         try:
-            last_room_obj = TreatmentRoom.objects.get(room_no=last_room)
+            if isinstance(last_room, str):
+                room_no = last_room
+            else:
+                room_no = getattr(last_room, 'room_no', None)
+            if room_no:
+                room = TreatmentRoom.objects.get(room_no=room_no)
+                if not RoomBooking.objects.filter(room=room, date=date, time_slot=time_slot, status='BOOKED').exists():
+                    return room
+        except TreatmentRoom.DoesNotExist:
+            pass
+    
+    # Same floor fallback (existing logic)
+    if last_room:
+        try:
+            if isinstance(last_room, str):
+                last_room_obj = TreatmentRoom.objects.get(room_no=last_room)
+            else:
+                last_room_obj = last_room
             same_floor = TreatmentRoom.objects.filter(floor=last_room_obj.floor)
             for r in same_floor:
                 if not RoomBooking.objects.filter(room=r, date=date, time_slot=time_slot, status='BOOKED').exists():
                     return r
         except TreatmentRoom.DoesNotExist:
             pass
+    
+    # Any available room (existing logic)
     for r in TreatmentRoom.objects.all():
         if not RoomBooking.objects.filter(room=r, date=date, time_slot=time_slot, status='BOOKED').exists():
             return r
+    
+    # No room available
+    # For 'Dhara & Pizichil', if we had a previous room but it's unavailable, this will be noted in error handling
     return None
 
 # -----------------------
@@ -312,6 +397,66 @@ def allocate_therapists(date, time_slot, therapy_requirements, last_therapists=N
             pass
         return None
 
+    def get_therapist_daily_session_count(t):
+        """Count how many therapy sessions a therapist already has on this date"""
+        try:
+            return TherapistBooking.objects.filter(
+                therapist=t,
+                date=date,
+                status='BOOKED'
+            ).count()
+        except Exception:
+            return 0
+
+    def can_assign_therapist(t, allow_extra=False):
+        """
+        Check if therapist can be assigned based on daily session limit.
+        - Normal limit: 5 sessions per day
+        - If allow_extra=True and all therapists have 5 sessions, allow 1 extra (max 6)
+        - If therapist already has 6 sessions, cannot assign
+        """
+        session_count = get_therapist_daily_session_count(t)
+        max_sessions = 6 if allow_extra else 5
+        return session_count < max_sessions
+
+    def check_grade_availability(grade, gender_filter):
+        """Check how many therapists of a specific grade and gender are available"""
+        candidates_qs = TherapistMaster.objects.filter(therapist_grade__iexact=grade)
+        
+        if gender_filter:
+            candidates_qs = candidates_qs.filter(therapist_gender__istartswith=gender_filter[0])
+        
+        print(f"[DEBUG Availability] Checking {gender_filter} {grade}: Found {candidates_qs.count()} in database")
+            
+        available_count = 0
+        unavailable_reasons = {}
+        
+        for t in candidates_qs:
+            reason = None
+            if t in allocated:
+                reason = "already_allocated_in_this_run"
+            elif therapist_on_leave(t):
+                reason = "on_leave"
+            elif TherapistBooking.objects.filter(therapist=t, date=date, time_slot=time_slot, status='BOOKED').exists():
+                reason = "already_booked_at_this_slot"
+            elif not can_assign_therapist(t, allow_extra=False) and not can_assign_therapist(t, allow_extra=True):
+                reason = "session_limit_reached"
+            else:
+                available_count += 1
+                reason = "available"
+            
+            unavailable_reasons[t.therapist_code] = reason
+        
+        # Print detailed breakdown
+        for code, reason in unavailable_reasons.items():
+            print(f"[DEBUG Availability] {code}: {reason}")
+        
+        print(f"[DEBUG Availability] {gender_filter} {grade}: {available_count} available out of {candidates_qs.count()}")
+        return available_count
+
+    # Check if all therapists have 5 sessions (to allow 1 extra)
+    all_therapists_at_limit = False
+
     # Use last therapists first
     if last_therapists:
         for code in last_therapists:
@@ -320,15 +465,22 @@ def allocate_therapists(date, time_slot, therapy_requirements, last_therapists=N
             except TherapistMaster.DoesNotExist:
                 continue
             if grade_map.get(t.therapist_grade, 0) > 0:
-                # Gender match: skip if therapist gender does not match desired
+                # STRICT GENDER MATCH: skip if therapist gender does not match desired
                 if desired_gender:
                     t_gender = get_therapist_gender(t)
                     if t_gender != desired_gender:
                         continue
                 if therapist_on_leave(t):
                     continue
+                # CHECK FOR EXISTING BOOKINGS: Do not assign if already booked at this date+time_slot
                 if TherapistBooking.objects.filter(therapist=t, date=date, time_slot=time_slot, status='BOOKED').exists():
                     continue
+                # Check daily session limit (max 5, or 6 if all therapists are at limit)
+                if not can_assign_therapist(t, allow_extra=False):
+                    # Check if we should allow extra (if all therapists have 5 sessions)
+                    if not can_assign_therapist(t, allow_extra=True):
+                        continue  # Therapist already has 6 sessions
+                    # Otherwise, we'll allow this if all therapists are at limit
                 allocated.append(t)
                 grade_map[t.therapist_grade] -= 1
 
@@ -341,57 +493,105 @@ def allocate_therapists(date, time_slot, therapy_requirements, last_therapists=N
         if needed <= 0:
             continue
 
-        # --- NEW TRAINEE SUBSTITUTION LOGIC ---
+        # --- STRICT GENDER MATCHING WITH GRADE SUBSTITUTION ONLY ---
+        substitution_hierarchy = {
+            "Trainee Therapist": ["Junior Therapist", "Senior Therapist", "Super Senior Therapist"],
+            "Junior Therapist": ["Senior Therapist", "Super Senior Therapist"],
+            "Senior Therapist": ["Super Senior Therapist"],
+            "Super Senior Therapist": []  # No substitution for highest grade
+        }
+        
         is_substitution = False
-        if current_grade_search == "Trainee Therapist" and desired_gender == 'male':
-            # Check if any Male Trainee is available
-            available_trainee_count = TherapistMaster.objects.filter(
-                therapist_grade__iexact="Trainee Therapist",
-                therapist_gender__istartswith='m'
-            ).exclude(
-                therapistbooking__date=date,
-                therapistbooking__time_slot=time_slot,
-                therapistbooking__status='BOOKED'
-            ).count()
+        substitution_chain = []
+        
+        # Check if we need substitution for the current grade
+        if current_grade_search in substitution_hierarchy and desired_gender:
+            # First check availability of current grade with matching gender
+            available_exact_match = check_grade_availability(current_grade_search, desired_gender)
+            print(f"[DEBUG Allocation] {desired_gender.capitalize()} {current_grade_search} required (needed={needed}). Exact match available: {available_exact_match}")
             
-            # If 0 trainees are available, switch search to Junior Therapist (Grade Substitution)
-            if available_trainee_count == 0:
-                print(f"[DEBUG Allocation] Male Trainee required (needed={needed}). 0 available. Attempting substitution with Junior Therapist.")
-                current_grade_search = "Junior Therapist"
-                is_substitution = True
-        # --- END NEW LOGIC ---
+            # If exact grade+gender not available, try substitution hierarchy WITH SAME GENDER
+            if available_exact_match == 0:
+                print(f"[DEBUG Allocation] No exact {desired_gender} {current_grade_search} available. Attempting substitution with SAME GENDER...")
+                
+                # Try each grade in substitution hierarchy WITH SAME GENDER
+                substitution_found = False
+                for substitute_grade in substitution_hierarchy[current_grade_search]:
+                    available_substitute = check_grade_availability(substitute_grade, desired_gender)
+                    print(f"[DEBUG Allocation] Checking {desired_gender} {substitute_grade}: {available_substitute} available")
+                    
+                    if available_substitute > 0:
+                        print(f"[DEBUG Allocation] Substituting {current_grade_search} with {substitute_grade} for {desired_gender} patient")
+                        current_grade_search = substitute_grade
+                        is_substitution = True
+                        substitution_chain = [current_grade_search, substitute_grade]
+                        substitution_found = True
+                        break
+                
+                if not substitution_found:
+                    print(f"[DEBUG Allocation] No substitution available for {desired_gender} {current_grade_search}. Strict gender matching enforced.")
+        # --- END STRICT GENDER MATCHING LOGIC ---
 
+        # Search for therapists with strict gender matching
         candidates_qs = TherapistMaster.objects.filter(therapist_grade=current_grade_search)
+        
+        # STRICT GENDER FILTER - never remove this
+        if desired_gender:
+            candidates_qs = candidates_qs.filter(therapist_gender__istartswith=desired_gender[0])
         
         if needs_bathing:
             candidates_qs = candidates_qs.filter(is_bathing_therapist=True) | candidates_qs
-            # above keeps bathing-capable first only if you iterate deterministically; we'll check is_bathing flag explicitly below
             
-        # iterate candidates
-        for t in candidates_qs:
-            if needed <= 0:
-                break
-            
+        # First, try to find therapists with < 5 sessions
+        candidates_list = list(candidates_qs)
+        available_candidates = []
+        for t in candidates_list:
             if t in allocated:
                 continue
             if therapist_on_leave(t):
                 continue
+            # CHECK FOR EXISTING BOOKINGS: Do not assign if already booked at this date+time_slot
             if TherapistBooking.objects.filter(therapist=t, date=date, time_slot=time_slot, status='BOOKED').exists():
                 continue
             
-            # Enforce gender match at runtime
+            # STRICT GENDER MATCH: Already enforced in query, but double-check
             if desired_gender:
                 t_gender = get_therapist_gender(t)
                 if t_gender != desired_gender:
-                    continue
+                    continue  # This should never happen due to query filter, but safety check
             
-            # Check if the allocated therapist's grade matches the original or substitution grade
-            # NOTE: We allocate the therapist regardless of if they are the original grade or the substitute
+            # Check daily session limit (prefer therapists with < 5 sessions)
+            session_count = get_therapist_daily_session_count(t)
+            if session_count < 5:
+                available_candidates.append((t, session_count))
+            elif session_count == 5:
+                # Keep track of therapists at limit (5 sessions) for potential extra assignment
+                available_candidates.append((t, session_count))
+        
+        # Sort by session count (prefer therapists with fewer sessions)
+        available_candidates.sort(key=lambda x: x[1])
+        
+        # Check if all therapists in this grade have 5 sessions
+        all_at_limit = all(count >= 5 for _, count in available_candidates) if available_candidates else False
+        
+        # If all therapists have 5 sessions, allow 1 extra (max 6)
+        # Otherwise, only assign to therapists with < 5 sessions
+        allow_extra = all_at_limit
+        
+        # Iterate through available candidates
+        for t, session_count in available_candidates:
+            if needed <= 0:
+                break
+            
+            # Check if we can assign (max 5 normally, or 6 if allowing extra)
+            if not allow_extra and session_count >= 5:
+                continue  # Skip therapists with 5+ sessions if not allowing extra
+            if allow_extra and session_count >= 6:
+                continue  # Skip therapists with 6+ sessions even when allowing extra
+            
             allocated.append(t)
-            
-            # Decrement both the needed count AND the original grade map count
             needed -= 1
-            grade_map[grade] -= 1 # Decrement original Trainee/Junior count
+            grade_map[grade] -= 1 # Decrement original grade count
 
     return allocated
 
@@ -583,6 +783,31 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
         req_total = int(therapy_req.get("total", 1) or 1)
         if len(candidate_therapists) < req_total:
             reason = "insufficient_therapists_available"
+            
+            # Check if all therapists have reached max sessions (6)
+            try:
+                from masters.models import TherapistMaster
+                from Patient.models import TherapistBooking
+                # Count therapists with 6 sessions on this date
+                from django.db.models import Count, Q
+                therapists_with_6_sessions = TherapistMaster.objects.annotate(
+                    session_count=Count(
+                        'therapistbooking',
+                        filter=Q(
+                            therapistbooking__date=target_date,
+                            therapistbooking__status='BOOKED'
+                        )
+                    )
+                ).filter(session_count__gte=6).count()
+                
+                total_therapists = TherapistMaster.objects.count()
+                
+                # If all therapists have 6 sessions, show specific error
+                if total_therapists > 0 and therapists_with_6_sessions == total_therapists:
+                    reason = "therapist_unavailability: All therapists have reached maximum sessions (6) for this day"
+            except Exception:
+                pass
+            
             # Gender availability insight (non-blocking, for debugging/UX)
             try:
                 desired_gender = None
@@ -683,11 +908,35 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
         room_candidate = getattr(booking, 'room', None)
         if needs_room_flag and not room_candidate:
             try:
-                room_candidate = allocate_treatment_room(target_date, allocate_slot_for_room, None)
+                room_candidate = allocate_treatment_room(
+                    target_date, 
+                    allocate_slot_for_room, 
+                    None,
+                    therapy_name=therapy_name,
+                    patient_id=patient_id
+                )
             except Exception:
                 room_candidate = None
         if needs_room_flag and not room_candidate:
+            # Check if this is 'Dhara & Pizichil' and we had a previous room that's unavailable
             reason = "no_room_available"
+            if therapy_name:
+                therapy_lower = str(therapy_name).lower()
+                if 'dhara' in therapy_lower and 'pizichil' in therapy_lower and patient_id:
+                    # Try to find previous room to show in error message
+                    try:
+                        from Patient.models import RoomBooking
+                        previous_booking = RoomBooking.objects.filter(
+                            patient_id=patient_id,
+                            status='BOOKED'
+                        ).exclude(date=target_date).order_by('-date', '-time_slot').select_related('room').first()
+                        if previous_booking:
+                            prev_therapy_lower = str(previous_booking.therapy_name or '').lower()
+                            if 'dhara' in prev_therapy_lower and 'pizichil' in prev_therapy_lower:
+                                if previous_booking.room:
+                                    reason = f"previous_room_unavailable: Previous room {previous_booking.room.room_no} for Dhara & Pizichil is unavailable"
+                    except Exception:
+                        pass
             # Update booking status to failed
             try:
                 booking.status = 'failed'
@@ -741,7 +990,13 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                         
                         if existing_booking:
                             print(f"[DEBUG] Room {room_candidate.room_no} already booked for {target_date} at {slot_master}, trying alternative room...")
-                            alternative_room = allocate_treatment_room(target_date, slot_master, getattr(room_candidate, 'room_no', None))
+                            alternative_room = allocate_treatment_room(
+                                target_date, 
+                                slot_master, 
+                                getattr(room_candidate, 'room_no', None),
+                                therapy_name=therapy_name,
+                                patient_id=patient_id
+                            )
                             if alternative_room and alternative_room != room_candidate:
                                 # Check if alternative room is also booked
                                 alt_conflict = BookingModel.objects.filter(
@@ -807,7 +1062,13 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                             raise
                         if not rb_created:
                             # RoomBooking already exists, try alternative room
-                            alternative_room = allocate_treatment_room(target_date, slot_master, getattr(room_candidate, 'room_no', None))
+                            alternative_room = allocate_treatment_room(
+                                target_date, 
+                                slot_master, 
+                                getattr(room_candidate, 'room_no', None),
+                                therapy_name=therapy_name,
+                                patient_id=patient_id
+                            )
                             if alternative_room and alternative_room != room_candidate:
                                 # Update booking room first
                                 booking.room = alternative_room
