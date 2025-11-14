@@ -1002,16 +1002,33 @@ def search_patients(request):
     try:
         from MySql_Data_pull.models import Registration, OPMaster
         from Patient.models import Repeated_Visitors
+        from datetime import datetime, timedelta
+        from django.utils import timezone
         
         patients = []
+        
+        # Calculate this week's date range (Monday to Sunday)
+        today = timezone.now().date()
+        # Get Monday of this week
+        days_since_monday = today.weekday()
+        week_start = today - timedelta(days=days_since_monday)
+        week_end = week_start + timedelta(days=6)
+        
+        # Convert to datetime for comparison with pat_visit_date
+        from datetime import time as dt_time
+        week_start_datetime = timezone.make_aware(datetime.combine(week_start, dt_time(0, 0, 0)))
+        week_end_datetime = timezone.make_aware(datetime.combine(week_end, dt_time(23, 59, 59, 999999)))
         
         # Search in IP patients (Registration table)
         try:
             ip_patients = Registration.objects.using('therapy_db').filter(
-                pat_reg_no__icontains=query
+                pat_reg_no__icontains=query,
+                pat_visit_date__gte=week_start_datetime,
+                pat_visit_date__lte=week_end_datetime,
+                pat_status__iexact='Active'
             ).values(
                 'pat_reg_no', 'pat_name', 'pat_sex', 'pat_age', 'pat_room_no', 
-                'pat_ref_id', 'pat_ph_no', 'pat_email', 'pat_reg_date'
+                'pat_ref_id', 'pat_ph_no', 'pat_email', 'pat_reg_date', 'pat_visit_date'
             )[:10]  # Limit to 10 results
             
             for patient in ip_patients:
@@ -1047,9 +1064,12 @@ def search_patients(request):
             print(f"Error searching IP patients: {e}")
         
         # Search in OP patients (OPMaster table)
+        # Note: OPMaster uses Reg_Date as visit date, filter for this week
         try:
             op_patients = OPMaster.objects.using('hospital_db').filter(
-                NPat_Reg_No__icontains=query
+                NPat_Reg_No__icontains=query,
+                Reg_Date__gte=week_start_datetime,
+                Reg_Date__lte=week_end_datetime
             ).values(
                 'NPat_Reg_No', 'NPat_Name', 'NPat_Sex', 'Reg_Date'
             )[:10]  # Limit to 10 results

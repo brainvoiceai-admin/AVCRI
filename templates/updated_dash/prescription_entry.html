@@ -681,22 +681,22 @@
                 <select id="item-builder-select" multiple="multiple"></select>
               </div>
               <div class="form-group small">
-                <label for="item-builder-dosage">Dosage</label>
-                <input id="item-builder-dosage" type="text" placeholder="e.g. 2 tsp">
+                <label for="item-builder-dosage">Dosage <span style="color:var(--danger);">*</span></label>
+                <input id="item-builder-dosage" type="text" placeholder="e.g. 2 tsp" required>
               </div>
               <div class="form-group small">
-                <label for="item-builder-usage">Usage</label>
-                <select id="item-builder-usage"><option value="">Select Usage</option></select>
+                <label for="item-builder-uno">Unit <span style="color:var(--danger);">*</span></label>
+                <select id="item-builder-uno" required>
+                  <option value="">Select Unit</option>
+                </select>
+              </div>
+              <div class="form-group small">
+                <label for="item-builder-usage">Usage <span style="color:var(--danger);">*</span></label>
+                <select id="item-builder-usage" required><option value="">Select Usage</option></select>
               </div>
               <div class="form-group small">
                 <label for="item-builder-time">Time</label>
                 <select id="item-builder-time"><option value="">Select Time</option></select>
-              </div>
-              <div class="form-group small">
-                <label for="item-builder-uno">Unit</label>
-                <select id="item-builder-uno">
-                  <option value="">Select Unit</option>
-                </select>
               </div>
               <div style="display:flex;align-items:flex-end;">
                 <button id="add-item-group-btn" class="btn">
@@ -910,7 +910,9 @@ $(function(){
     fetch('/search-patients/?q=' + encodeURIComponent(query))
       .then(response => response.json())
       .then(data => {
-        displaySearchResults(data || []);
+        // Handle both response formats: {patients: [...]} or [...]
+        const patients = data.patients || data || [];
+        displaySearchResults(patients);
       })
       .catch(error => {
         console.error('Search error:', error);
@@ -923,22 +925,27 @@ $(function(){
     resultsContainer.empty();
 
     if (patients.length === 0) {
-      resultsContainer.html('<div style="padding:10px;color:#666;">No patients found</div>').show();
+      resultsContainer.html('<div style="padding:10px;color:#666;">No active patients found for this week</div>').show();
       return;
     }
 
     patients.forEach(patient => {
+      // Handle both field name formats: pat_reg_no/registration_number, pat_name/patient_name
+      const regNo = patient.pat_reg_no || patient.registration_number;
+      const patName = patient.pat_name || patient.patient_name;
+      const patientType = patient.patient_type || (patient.source === 'IP' ? 'IP' : 'OP');
+      
       const resultItem = $(`
-        <div style="padding:10px;border-bottom:1px solid #eee;cursor:pointer;" class="search-result-item" data-reg-no="${patient.pat_reg_no}">
+        <div style="padding:10px;border-bottom:1px solid #eee;cursor:pointer;" class="search-result-item" data-reg-no="${regNo}">
           <div style="display:flex;justify-content:space-between;align-items:center;">
             <div>
-              <strong>${patient.pat_name || 'Unknown'}</strong>
+              <strong>${patName || 'Unknown'}</strong>
               <div style="font-size:0.9em;color:#666;margin-top:2px;">
-                Reg: ${patient.pat_reg_no}
+                Reg: ${regNo}
               </div>
             </div>
             <div>
-              ${patient.patient_type === 'IP' ? '<span style="background:#007bff;color:white;padding:2px 6px;border-radius:3px;font-size:0.8em;">IP</span>' : '<span style="background:#28a745;color:white;padding:2px 6px;border-radius:3px;font-size:0.8em;">OP</span>'}
+              ${patientType === 'IP' ? '<span style="background:#007bff;color:white;padding:2px 6px;border-radius:3px;font-size:0.8em;">IP</span>' : '<span style="background:#28a745;color:white;padding:2px 6px;border-radius:3px;font-size:0.8em;">OP</span>'}
             </div>
           </div>
         </div>
@@ -1075,12 +1082,29 @@ $(function(){
   // Add Group
   $('#add-item-group-btn').on('click', function(){
     const selected = $itemBuilder.select2('data') || [];
-    if (!selected.length){ alert('Select or type items before adding a group.'); return; }
     const dosage = $('#item-builder-dosage').val().trim();
     const usage = $('#item-builder-usage').val().trim();
     const time = $('#item-builder-time').val().trim();
     const uno = $('#item-builder-uno').val().trim();
-    const items = selected.map(s => ({ item_code: s.id, item_name: s.text || s.id }));
+    
+    // Validate mandatory fields
+    if (!dosage) {
+      alert('Dosage is mandatory');
+      $('#item-builder-dosage').focus();
+      return;
+    }
+    if (!uno) {
+      alert('Unit is mandatory');
+      $('#item-builder-uno').focus();
+      return;
+    }
+    if (!usage) {
+      alert('Usage is mandatory');
+      $('#item-builder-usage').focus();
+      return;
+    }
+    
+    const items = selected.length > 0 ? selected.map(s => ({ item_code: s.id, item_name: s.text || s.id })) : [];
     const grp = { id: Math.random().toString(36).slice(2,9), items, dosage, usage, time, uno };
     itemGroups.push(grp);
     $itemBuilder.val(null).trigger('change');
