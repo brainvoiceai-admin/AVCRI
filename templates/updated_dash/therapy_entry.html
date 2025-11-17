@@ -688,9 +688,9 @@
             <h2 id="hdr-pat-name">No patient selected</h2>
             <div class="patient-meta">
               <span><i class="fas fa-id-card"></i> Registration: <span id="hdr-pat-reg">—</span></span>
+              <span><i class="fas fa-procedures"></i> Room: <span id="hdr-pat-room">—</span></span>
               <span><i class="fas fa-birthday-cake"></i> Age: <span id="hdr-pat-age">—</span></span>
               <span><i class="fas fa-venus-mars"></i> Gender: <span id="hdr-pat-gender">—</span></span>
-              <span><i class="fas fa-procedures"></i> Room: <span id="hdr-pat-room">—</span></span>
               <span><i class="fas fa-stethoscope"></i> Type: <span id="hdr-pat-type">—</span></span>
             </div>
           </div>
@@ -741,16 +741,11 @@
             </div>
             <div class="form-group small">
               <label for="to-date-input">To Date</label>
-              <input type="date" id="to-date-input">
+              <input type="date" id="to-date-input" readonly>
             </div>
             <div class="form-group small">
               <label for="days-input">Duration (Days)</label>
-              <input type="text" id="days-input" readonly>
-            </div>
-
-            <div class="form-group">
-              <label for="usage-select">Usage <span style="color:var(--danger);">*</span></label>
-              <select id="usage-select" required><option value="">-- Select --</option></select>
+              <input type="number" id="days-input" min="1" placeholder="Enter number of days">
             </div>
 
             <div class="form-group">
@@ -775,14 +770,18 @@
                 <select id="item-builder-select" multiple="multiple"></select>
               </div>
               <div class="form-group small">
-                <label for="item-builder-dosage">Dosage <span style="color:var(--danger);">*</span></label>
-                <input id="item-builder-dosage" type="text" placeholder="e.g. 2 tsp" required>
+                <label for="item-builder-dosage">Dosage</label>
+                <input id="item-builder-dosage" type="text" placeholder="e.g. 2 tsp">
               </div>
               <div class="form-group small">
-                <label for="item-builder-uno">Unit <span style="color:var(--danger);">*</span></label>
-                <select id="item-builder-uno" required>
+                <label for="item-builder-uno">Unit</label>
+                <select id="item-builder-uno">
                   <option value="">Select Unit</option>
                 </select>
+              </div>
+              <div class="form-group small">
+                <label for="item-builder-usage">Usage</label>
+                <select id="item-builder-usage" multiple style="width:100%;"></select>
               </div>
               <div style="display:flex;align-items:flex-end;">
                 <button id="add-item-group-btn" class="btn">
@@ -946,7 +945,7 @@ $(function(){
   // --- DOM refs ---
   const $patientSelect = $('#header-patient-select');
   const $therapySelect = $('#therapy-select'), $slotSelect = $('#slot-select'), $fromDate = $('#from-date-input'), $toDate = $('#to-date-input'), $daysInput = $('#days-input');
-  const $usageSelect = $('#usage-select'), $oilClassSelect = $('#oil-class-select'), $procuredSelect = $('#procured-select');
+  const $oilClassSelect = $('#oil-class-select'), $procuredSelect = $('#procured-select');
   const $itemBuilder = $('#item-builder-select'), $itemGroupsList = $('#item-groups-list');
   const $allocateBtn = $('#allocate-therapy-btn'), $updateBtn = $('#update-therapy-btn'), $clearBtn = $('#clear-form');
   const $therapiesTableBody = $('#therapies-table-body');
@@ -1107,17 +1106,24 @@ $(function(){
       $('#hdr-pat-ip-badge').hide();
     }
     
-    // Update patient info fields
-    $('#hdr-pat-reg').text(patient.pat_reg_no || patient.pat_op_reg_no || '—');
-    $('#hdr-pat-age').text(patient.pat_age || '—');
-    $('#hdr-pat-gender').text(patient.pat_sex || '—');
-    $('#hdr-pat-room').text(patient.pat_room_no || '—');
-    $('#hdr-pat-type').text(patient.patient_type || '—');
+    // Update patient info fields with bold/highlighted styling
+    const regNo = patient.pat_reg_no || patient.pat_op_reg_no || '—';
+    const room = patient.pat_room_no || '—';
+    const age = patient.pat_age || '—';
+    const gender = patient.pat_sex || '—';
+    const type = patient.patient_type || '—';
+    
+    $('#hdr-pat-reg').html(`<strong style="font-weight: bold; color: var(--primary);">${regNo}</strong>`);
+    $('#hdr-pat-room').html(`<strong style="font-weight: bold; color: var(--primary);">${room}</strong>`);
+    $('#hdr-pat-age').html(`<strong style="font-weight: bold; color: var(--primary);">${age}</strong>`);
+    $('#hdr-pat-gender').html(`<strong style="font-weight: bold; color: var(--primary);">${gender}</strong>`);
+    $('#hdr-pat-type').html(`<strong style="font-weight: bold; color: var(--primary);">${type}</strong>`);
   }
 
   function populatePatientInfo(patient) {
     $('#header-patient-select').val(patient.pat_op_reg_no || patient.pat_reg_no);
-    $('#hdr-pat-name').text(patient.pat_name || 'Unknown');
+    // Make patient name bold/highlighted
+    $('#hdr-pat-name').html(`<strong style="font-weight: bold; color: var(--primary);">${patient.pat_name || 'Unknown'}</strong>`);
     updatePatientAvatar(patient);
     
     // Load patient therapies
@@ -1141,11 +1147,11 @@ $(function(){
     updatePatientAvatar(null);
     $('#hdr-pat-vip-badge').hide();
     $('#hdr-pat-ip-badge').hide();
-    $('#hdr-pat-reg').text('—');
-    $('#hdr-pat-age').text('—');
-    $('#hdr-pat-gender').text('—');
-    $('#hdr-pat-room').text('—');
-    $('#hdr-pat-type').text('—');
+    $('#hdr-pat-reg').html('—');
+    $('#hdr-pat-room').html('—');
+    $('#hdr-pat-age').html('—');
+    $('#hdr-pat-gender').html('—');
+    $('#hdr-pat-type').html('—');
     addedTherapies = [];
     bookings = [];
     renderAll();
@@ -1176,9 +1182,106 @@ $(function(){
     minimumInputLength:2, 
     ajax:{
       transport: function(p,s,f){ ajax({action:'search_therapies', q: p.data.q}).then(s).catch(f); },
-      processResults: data => ({ results: (data||[]).map(t => ({id: t.therapy_code, text: t.therapy_name})) }),
+      processResults: data => ({ 
+        results: (data||[]).map(t => ({
+          id: t.therapy_code, 
+          text: t.therapy_name,
+          therapy_category: t.therapy_category || ''
+        }))
+      }),
       cache:true
     }
+  });
+  
+  // Function to update slots based on therapy difficulty
+  function updateSlotsForTherapy() {
+    const selectedTherapy = $therapySelect.select2('data');
+    if (!selectedTherapy || selectedTherapy.length === 0) {
+      // No therapy selected, show all slots
+      populateSlots();
+      return;
+    }
+    
+    const therapy = selectedTherapy[0];
+    const therapyCategory = therapy.therapy_category || '';
+    
+    // If therapy difficulty is "Hard", filter out 5:30 PM and 11:30 AM slots
+    if (therapyCategory.toLowerCase() === 'hard') {
+      // Exclude 17:30 (5:30 PM) and 11:30 (11:30 AM) in HH:MM format
+      populateSlots(['17:30', '11:30']);
+    } else {
+      // Show all slots for other difficulties
+      populateSlots();
+    }
+  }
+  
+  // Function to populate slots with optional exclusion list
+  function populateSlots(excludeSlots = []) {
+    ajax({action:'slots'}).then(resp => { 
+      const slots = (resp && resp.slots) || resp || FALLBACK_SLOTS; 
+      $slotSelect.find('option').not(':first').remove(); 
+      (slots||FALLBACK_SLOTS).forEach(s => { 
+        const st = s.start_time || s.slot_time || s;
+        const slotTime = typeof st === 'string' ? st : (st.strftime ? st.strftime('%H:%M') : String(st));
+        
+        // Normalize slot time to HH:MM format for comparison
+        let normalizedSlotTime = slotTime;
+        if (slotTime.includes(':')) {
+          const [hours, minutes] = slotTime.split(':');
+          normalizedSlotTime = `${hours.padStart(2, '0')}:${minutes}`;
+        }
+        
+        // Check if this slot should be excluded
+        const shouldExclude = excludeSlots.some(exclude => {
+          // Normalize exclude time to HH:MM format
+          let normalizedExclude = exclude;
+          if (exclude.includes(':')) {
+            const [h, m] = exclude.split(':');
+            normalizedExclude = `${h.padStart(2, '0')}:${m}`;
+          }
+          return normalizedSlotTime === normalizedExclude;
+        });
+        
+        if (!shouldExclude) {
+          const displayText = format12Hour(slotTime);
+          $slotSelect.append(`<option value="${slotTime}">${displayText}</option>`);
+        }
+      }); 
+    }).catch(()=>{ 
+      $slotSelect.find('option').not(':first').remove(); 
+      FALLBACK_SLOTS.forEach(s => {
+        const st = s.start_time || s;
+        const slotTime = typeof st === 'string' ? st : (st.strftime ? st.strftime('%H:%M') : String(st));
+        
+        // Normalize slot time to HH:MM format for comparison
+        let normalizedSlotTime = slotTime;
+        if (slotTime.includes(':')) {
+          const [hours, minutes] = slotTime.split(':');
+          normalizedSlotTime = `${hours.padStart(2, '0')}:${minutes}`;
+        }
+        
+        // Check if this slot should be excluded
+        const shouldExclude = excludeSlots.some(exclude => {
+          // Normalize exclude time to HH:MM format
+          let normalizedExclude = exclude;
+          if (exclude.includes(':')) {
+            const [h, m] = exclude.split(':');
+            normalizedExclude = `${h.padStart(2, '0')}:${m}`;
+          }
+          return normalizedSlotTime === normalizedExclude;
+        });
+        
+        if (!shouldExclude) {
+          const displayText = format12Hour(slotTime);
+          $slotSelect.append(`<option value="${slotTime}">${displayText}</option>`);
+        }
+      }); 
+    });
+  }
+  
+  // Listen for therapy selection changes
+  $therapySelect.on('change', function() {
+    updateSlotsForTherapy();
   });
 
   $itemBuilder.select2({
@@ -1197,24 +1300,24 @@ $(function(){
 
   // populate masters & slots with fallback
   function populateMasters(){
-    ajax({action:'masters', type:'usage'}).then(list => { $usageSelect.empty().append('<option value="">-- Select --</option>'); (list||FALLBACK_USAGE).forEach(u => $usageSelect.append(new Option(u.name, u.name))); }).catch(()=>{ $usageSelect.empty().append('<option value="">-- Select --</option>'); FALLBACK_USAGE.forEach(u => $usageSelect.append(new Option(u.name, u.name))); });
+    // Populate item-builder-usage multiselect
+    ajax({action:'masters', type:'usagetype'}).then(list => { 
+      const $itemUsageSelect = $('#item-builder-usage'); 
+      $itemUsageSelect.empty(); 
+      (list||[]).forEach(x => $itemUsageSelect.append(new Option(x.name, x.name))); 
+      // Initialize Select2 for multiselect
+      if (!$itemUsageSelect.hasClass('select2-hidden-accessible')) {
+        $itemUsageSelect.select2({
+          placeholder: 'Select Usage (multiple)',
+          allowClear: true,
+          width: '100%'
+        });
+      }
+    }).catch(()=>{});
     ajax({action:'masters', type:'procured'}).then(list => { $procuredSelect.empty().append('<option value="">-- Select --</option>'); (list||FALLBACK_PROCURED).forEach(p => $procuredSelect.append(new Option(p.name, p.name))); }).catch(()=>{ $procuredSelect.empty().append('<option value="">-- Select --</option>'); FALLBACK_PROCURED.forEach(p => $procuredSelect.append(new Option(p.name, p.name))); });
-    ajax({action:'masters', type:'oil'}).then(list => { $oilClassSelect.empty().append('<option value="">-- Select --</option>'); (list||FALLBACK_OIL).forEach(o => $oilClassSelect.append(new Option(o.name, o.name))); }).catch(()=>{ $oilClassSelect.empty().append('<option value="">-- Select --</option>'); FALLBACK_OIL.forEach(o => $oilClassSelect.append(new Option(o.name, o.name))); });
-    ajax({action:'slots'}).then(resp => { 
-      const slots = (resp && resp.slots) || resp || FALLBACK_SLOTS; 
-      $slotSelect.find('option').not(':first').remove(); 
-      (slots||FALLBACK_SLOTS).forEach(s => { 
-        const st = s.start_time || s;
-        const displayText = format12Hour(st);
-        $slotSelect.append(`<option value="${st}">${displayText}</option>`);
-      }); 
-    }).catch(()=>{ 
-      $slotSelect.find('option').not(':first').remove(); 
-      FALLBACK_SLOTS.forEach(s => {
-        const displayText = format12Hour(s.start_time);
-        $slotSelect.append(`<option value="${s.start_time}">${displayText}</option>`);
-      }); 
-    });
+    ajax({action:'masters', type:'oil'}).then(list => { $oilClassSelect.empty().append('<option value="">-- Select --</option>'); (list||FALLBACK_OIL).forEach(o => $oilClassSelect.append(new Option(o.name, o.name))); }).catch(()=>{ $oilClassSelect.empty().append('<option value="">-- Select --</option>'); FALLBACK_OIL.forEach(o => $oilClassSelect.append(new Option(o.name, o.name))); }); 
+    // Use updateSlotsForTherapy to populate slots (respects therapy difficulty)
+    updateSlotsForTherapy();
   }
   populateMasters();
 
@@ -1223,25 +1326,37 @@ $(function(){
     const selected = $itemBuilder.select2('data') || [];
     const dosage = $('#item-builder-dosage').val().trim();
     const uno = $('#item-builder-uno').val().trim();
+    const usageSelect = $('#item-builder-usage');
+    const usageValues = usageSelect.val() || []; // Get array of selected values
+    const usage = usageValues.join(', '); // Join with comma and space
     
-    // Validate mandatory fields
-    if (!dosage) {
-      alert('Dosage is mandatory');
-      $('#item-builder-dosage').focus();
-      return;
-    }
-    if (!uno) {
-      alert('Unit is mandatory');
-      $('#item-builder-uno').focus();
-      return;
+    // Items are now optional - no validation required
+    // Only validate if at least one item is selected (then dosage, uno, usage are required)
+    if (selected.length > 0) {
+      if (!dosage) {
+        alert('Dosage is required when items are selected');
+        $('#item-builder-dosage').focus();
+        return;
+      }
+      if (!uno) {
+        alert('Unit is required when items are selected');
+        $('#item-builder-uno').focus();
+        return;
+      }
+      if (!usage || usageValues.length === 0) {
+        alert('At least one Usage is required when items are selected');
+        usageSelect.focus();
+        return;
+      }
     }
     
     const items = selected.length > 0 ? selected.map(s => ({ item_code: s.id, item_name: s.text || s.id })) : [];
-    const grp = { id: Math.random().toString(36).slice(2,9), items, dosage, uno };
+    const grp = { id: Math.random().toString(36).slice(2,9), items, dosage, uno, usage, usage_array: usageValues };
     itemGroups.push(grp);
     $itemBuilder.val(null).trigger('change');
     $('#item-builder-dosage').val('');
     $('#item-builder-uno').val('');
+    usageSelect.val(null).trigger('change');
     renderItemGroups();
   });
 
@@ -1263,7 +1378,7 @@ $(function(){
           <div style="flex:1;">
             <div style="font-weight:600;color:var(--text-dark);margin-bottom:6px;">Group ${i+1}</div>
             <div style="margin-bottom:6px;">${itemsHtml}</div>
-            <div class="small-muted">Dosage: ${esc(g.dosage||'—')} • UNO: ${esc(g.uno||'—')}</div>
+            <div class="small-muted">Dosage: ${esc(g.dosage||'—')} • UNO: ${esc(g.uno||'—')} • Usage: ${esc(g.usage||'—')}</div>
           </div>
           <div>
             <button class="edit-group action-btn btn btn-outline" data-id="${g.id}" style="margin-right:6px;">
@@ -1297,11 +1412,49 @@ $(function(){
     $itemBuilder.trigger('change'); 
     $('#item-builder-dosage').val(g.dosage||''); 
     $('#item-builder-uno').val(g.uno||''); 
+    // Handle usage - support both array and comma-separated string
+    const usageSelect = $('#item-builder-usage');
+    if (g.usage_array && Array.isArray(g.usage_array)) {
+      usageSelect.val(g.usage_array).trigger('change');
+    } else if (g.usage) {
+      // Split comma-separated string and trim each value
+      const usageArray = g.usage.split(',').map(u => u.trim()).filter(u => u);
+      usageSelect.val(usageArray).trigger('change');
+    } else {
+      usageSelect.val(null).trigger('change');
+    }
     itemGroups = itemGroups.filter(x=>x.id!==id); 
     renderItemGroups(); 
   });
 
-  // days calc
+  // Auto-calculate To Date from From Date and Days
+  function calcToDate() {
+    const fromDate = $fromDate.val();
+    const days = parseInt($daysInput.val()) || 0;
+    
+    if (!fromDate || days <= 0) {
+      $toDate.val('');
+      return;
+    }
+    
+    const from = new Date(fromDate);
+    if (isNaN(from.getTime())) {
+      $toDate.val('');
+      return;
+    }
+    
+    // Calculate end date: from date + (days - 1) since the from date is day 1
+    const to = new Date(from);
+    to.setDate(to.getDate() + (days - 1));
+    
+    // Format as YYYY-MM-DD
+    const year = to.getFullYear();
+    const month = String(to.getMonth() + 1).padStart(2, '0');
+    const day = String(to.getDate()).padStart(2, '0');
+    $toDate.val(`${year}-${month}-${day}`);
+  }
+  
+  // Calculate days from From Date and To Date (backward compatibility)
   function calcDays(){ 
     const f = $fromDate.val(), t = $toDate.val(); 
     if(!f||!t){ 
@@ -1314,7 +1467,22 @@ $(function(){
     else 
       $daysInput.val(''); 
   }
-  $fromDate.on('change', calcDays); 
+  
+  // Auto-calculate To Date when From Date or Days changes
+  $fromDate.on('change', function() {
+    calcDays(); // Calculate days if To Date is set
+    if ($daysInput.val()) {
+      calcToDate(); // Auto-calculate To Date if Days is set
+    }
+  });
+  
+  $daysInput.on('input change', function() {
+    if ($fromDate.val()) {
+      calcToDate(); // Auto-calculate To Date when Days changes
+    }
+  });
+  
+  // Keep backward compatibility for To Date changes (manual entry disabled but kept for calculation)
   $toDate.on('change', calcDays);
 
   // add therapy - auto-save to server as draft
@@ -1329,8 +1497,6 @@ $(function(){
     const from = $fromDate.val(), to = $toDate.val();
     if (!from || !to){ alert('Please set From and To dates'); return; }
     if (from > to){ alert('From must be <= To'); return; }
-    const usage = $usageSelect.val().trim();
-    if (!usage){ alert('Usage is mandatory'); $usageSelect.focus(); return; }
 
     // Prepare therapy data for server
     // Use pat_reg_no consistently for IP patients (or pat_op_reg_no if pat_reg_no doesn't exist)
@@ -1351,9 +1517,14 @@ $(function(){
       to_date: to,
       days: Math.ceil((new Date(to).getTime() - new Date(from).getTime()) / (1000 * 60 * 60 * 24)) + 1,
       oil_class: $oilClassSelect.val()||'',
-      usage: $usageSelect.val()||'',
       procured: $procuredSelect.val()||'',
-      items_groups: itemGroups.map(g => ({ items: g.items || [], dosage: g.dosage, uno: g.uno })),
+      items_groups: itemGroups.map(g => ({ 
+        items: g.items || [], 
+        dosage: g.dosage, 
+        uno: g.uno, 
+        usage: g.usage || (g.usage_array ? g.usage_array.join(', ') : ''),
+        usage_array: g.usage_array || (g.usage ? g.usage.split(',').map(u => u.trim()) : [])
+      })),
       notes: ''
     };
 
@@ -1379,7 +1550,7 @@ $(function(){
         
         // Reset form
         itemGroups = []; renderItemGroups();
-        $therapySelect.val(null).trigger('change'); $('#ext-int-select').val(''); $slotSelect.val(''); $fromDate.val(''); $toDate.val(''); $daysInput.val(''); $usageSelect.val(''); $oilClassSelect.val(''); $procuredSelect.val('');
+        $therapySelect.val(null).trigger('change'); $('#ext-int-select').val(''); $slotSelect.val(''); $fromDate.val(''); $toDate.val(''); $daysInput.val(''); $oilClassSelect.val(''); $procuredSelect.val('');
         
         renderAll();
         
@@ -1428,7 +1599,14 @@ $(function(){
     addedTherapies.forEach((t,i) => {
       const groupsHtml = (t.items_groups||[]).map(g => {
         const itemsHtml = (g.items||[]).length > 0 ? (g.items||[]).map(it => `<span class="tag">${esc(it.item_name)}</span>`).join(' ') : '<span class="tag" style="color:#999;">No items</span>';
-        return itemsHtml + `<div class="small-muted">Dosage:${esc(g.dosage||'—')} • UNO:${esc(g.uno||'—')}</div>`;
+        // Format usage - handle both string and array
+        let usageDisplay = '—';
+        if (g.usage) {
+          usageDisplay = esc(g.usage);
+        } else if (Array.isArray(g.usage_array) && g.usage_array.length > 0) {
+          usageDisplay = esc(g.usage_array.join(', '));
+        }
+        return itemsHtml + `<div class="small-muted">Dosage:${esc(g.dosage||'—')} • UNO:${esc(g.uno||'—')} • Usage:${usageDisplay}</div>`;
       }).join('<hr style="margin:8px 0;border:none;border-top:1px solid var(--border-light);"/>');
       
       // Status logic - show counts if available
@@ -1674,8 +1852,15 @@ $(function(){
     $fromDate.val(t.from_date||'').prop('disabled', false);
     $toDate.val(t.to_date||'').prop('disabled', false);
     $daysInput.val(t.days||'');
-    $usageSelect.val(t.usage||''); $oilClassSelect.val(t.oil_class||''); $procuredSelect.val(t.procured||'');
-    itemGroups = (t.items_groups||[]).map(g=>({ id: Math.random().toString(36).slice(2,9), items: g.items||[], dosage: g.dosage||'', uno: g.uno||'' }));
+    $oilClassSelect.val(t.oil_class||''); $procuredSelect.val(t.procured||'');
+    itemGroups = (t.items_groups||[]).map(g=>({ 
+      id: Math.random().toString(36).slice(2,9), 
+      items: g.items||[], 
+      dosage: g.dosage||'', 
+      uno: g.uno||'',
+      usage: g.usage||'',
+      usage_array: g.usage_array || (g.usage ? g.usage.split(',').map(u => u.trim()) : [])
+    }));
     renderItemGroups();
     $allocateBtn.hide(); $updateBtn.show(); window.scrollTo({top:0, behavior:'smooth'});
   }
@@ -1694,10 +1879,15 @@ $(function(){
     t.slot = $slotSelect.val() || '';
     t.from_date = $fromDate.val() || t.from_date;
     t.to_date = $toDate.val() || t.to_date;
-    t.usage = $usageSelect.val()||''; 
     t.oil_class = $oilClassSelect.val()||''; 
     t.procured = $procuredSelect.val()||'';
-    t.items_groups = itemGroups.map(g=>({items:g.items||[], dosage:g.dosage, uno:g.uno}));
+    t.items_groups = itemGroups.map(g=>({
+      items: g.items||[], 
+      dosage: g.dosage, 
+      uno: g.uno,
+      usage: g.usage || (g.usage_array ? g.usage_array.join(', ') : ''),
+      usage_array: g.usage_array || (g.usage ? g.usage.split(',').map(u => u.trim()) : [])
+    }));
     
     // Send update to server if therapy has allocation_id
     if (t.allocation_id) {
@@ -1708,9 +1898,14 @@ $(function(){
         from_date: t.from_date,
         to_date: t.to_date,
         ext_int: t.ext_int,
-        items_groups: t.items_groups.map(g => ({ items: g.items || [], dosage: g.dosage, uno: g.uno })),
+        items_groups: t.items_groups.map(g => ({ 
+          items: g.items || [], 
+          dosage: g.dosage, 
+          uno: g.uno,
+          usage: g.usage || (g.usage_array ? g.usage_array.join(', ') : ''),
+          usage_array: g.usage_array || (g.usage ? g.usage.split(',').map(u => u.trim()) : [])
+        })),
         oil_class: t.oil_class,
-        usage: t.usage,
         procured_from: t.procured,
         notes: t.notes || ''
       };
@@ -1745,7 +1940,7 @@ $(function(){
     $therapySelect.val(null).trigger('change').prop('disabled', false);
     $slotSelect.val('').prop('disabled', false);
     $('#ext-int-select').val(''); $fromDate.val('').prop('disabled', false); $toDate.val('').prop('disabled', false); $daysInput.val('');
-    $usageSelect.val(''); $oilClassSelect.val(''); $procuredSelect.val('');
+    $oilClassSelect.val(''); $procuredSelect.val('');
     itemGroups = []; renderItemGroups();
     $allocateBtn.show(); $updateBtn.hide();
   }

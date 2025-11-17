@@ -641,9 +641,9 @@
             <h2 id="hdr-pat-name">No patient selected</h2>
             <div class="patient-meta">
               <span><i class="fas fa-id-card"></i> Registration: <span id="hdr-pat-reg">—</span></span>
+              <span><i class="fas fa-procedures"></i> Room: <span id="hdr-pat-room">—</span></span>
               <span><i class="fas fa-birthday-cake"></i> Age: <span id="hdr-pat-age">—</span></span>
               <span><i class="fas fa-venus-mars"></i> Gender: <span id="hdr-pat-gender">—</span></span>
-              <span><i class="fas fa-procedures"></i> Room: <span id="hdr-pat-room">—</span></span>
               <span><i class="fas fa-stethoscope"></i> Type: <span id="hdr-pat-type">—</span></span>
             </div>
           </div>
@@ -692,7 +692,7 @@
               </div>
               <div class="form-group small">
                 <label for="item-builder-usage">Usage <span style="color:var(--danger);">*</span></label>
-                <select id="item-builder-usage" required><option value="">Select Usage</option></select>
+                <select id="item-builder-usage" multiple required style="width:100%;"></select>
               </div>
               <div class="form-group small">
                 <label for="item-builder-time">Time</label>
@@ -1012,17 +1012,24 @@ $(function(){
       $('#hdr-pat-ip-badge').hide();
     }
     
-    // Update patient info fields
-    $('#hdr-pat-reg').text(patient.pat_reg_no || patient.pat_op_reg_no || '—');
-    $('#hdr-pat-age').text(patient.pat_age || '—');
-    $('#hdr-pat-gender').text(patient.pat_sex || '—');
-    $('#hdr-pat-room').text(patient.pat_room_no || '—');
-    $('#hdr-pat-type').text(patient.patient_type || '—');
+    // Update patient info fields with bold/highlighted styling
+    const regNo = patient.pat_reg_no || patient.pat_op_reg_no || '—';
+    const room = patient.pat_room_no || '—';
+    const age = patient.pat_age || '—';
+    const gender = patient.pat_sex || '—';
+    const type = patient.patient_type || '—';
+    
+    $('#hdr-pat-reg').html(`<strong style="font-weight: bold; color: var(--primary);">${regNo}</strong>`);
+    $('#hdr-pat-room').html(`<strong style="font-weight: bold; color: var(--primary);">${room}</strong>`);
+    $('#hdr-pat-age').html(`<strong style="font-weight: bold; color: var(--primary);">${age}</strong>`);
+    $('#hdr-pat-gender').html(`<strong style="font-weight: bold; color: var(--primary);">${gender}</strong>`);
+    $('#hdr-pat-type').html(`<strong style="font-weight: bold; color: var(--primary);">${type}</strong>`);
   }
 
   function populatePatientInfo(patient) {
     $('#header-patient-select').val(patient.pat_op_reg_no || patient.pat_reg_no);
-    $('#hdr-pat-name').text(patient.pat_name || 'Unknown');
+    // Make patient name bold/highlighted
+    $('#hdr-pat-name').html(`<strong style="font-weight: bold; color: var(--primary);">${patient.pat_name || 'Unknown'}</strong>`);
     updatePatientAvatar(patient);
     
     // Load patient prescriptions
@@ -1040,11 +1047,11 @@ $(function(){
     updatePatientAvatar(null);
     $('#hdr-pat-vip-badge').hide();
     $('#hdr-pat-ip-badge').hide();
-    $('#hdr-pat-reg').text('—');
-    $('#hdr-pat-age').text('—');
-    $('#hdr-pat-gender').text('—');
-    $('#hdr-pat-room').text('—');
-    $('#hdr-pat-type').text('—');
+    $('#hdr-pat-reg').html('—');
+    $('#hdr-pat-room').html('—');
+    $('#hdr-pat-age').html('—');
+    $('#hdr-pat-gender').html('—');
+    $('#hdr-pat-type').html('—');
     addedPrescriptions = [];
     renderAll();
   }
@@ -1059,7 +1066,19 @@ $(function(){
   function populateMasters(){
     ajax({action:'masters', type:'procured'}).then(list => { $procuredSelect.empty().append('<option value="">-- Select Source --</option>'); (list||FALLBACK_PROCURED).forEach(p => $procuredSelect.append(new Option(p.name, p.name))); }).catch(()=>{ $procuredSelect.empty().append('<option value="">-- Select Source --</option>'); FALLBACK_PROCURED.forEach(p => $procuredSelect.append(new Option(p.name, p.name))); });
     ajax({action:'masters', type:'prescriptionscope'}).then(list => { $scopeSelect.empty().append('<option value="">-- Select --</option>'); (list||[]).forEach(x => $scopeSelect.append(new Option(x.name, x.name))); }).catch(()=>{ $scopeSelect.empty().append('<option value="">-- Select --</option>'); });
-    ajax({action:'masters', type:'usagetype'}).then(list => { const $u=$('#item-builder-usage'); $u.empty().append('<option value="">Select Usage</option>'); (list||[]).forEach(x => $u.append(new Option(x.name, x.name))); }).catch(()=>{});
+    ajax({action:'masters', type:'prescriptionusage'}).then(list => { 
+      const $u=$('#item-builder-usage'); 
+      $u.empty(); 
+      (list||[]).forEach(x => $u.append(new Option(x.name, x.name))); 
+      // Initialize Select2 for multiselect
+      if (!$u.hasClass('select2-hidden-accessible')) {
+        $u.select2({
+          placeholder: 'Select Usage (multiple)',
+          allowClear: true,
+          width: '100%'
+        });
+      }
+    }).catch(()=>{});
     ajax({action:'masters', type:'prescriptiontime'}).then(list => { const $t=$('#item-builder-time'); $t.empty().append('<option value="">Select Time</option>'); (list||[]).forEach(x => $t.append(new Option(x.name, x.name))); }).catch(()=>{});
   }
   populateMasters();
@@ -1083,7 +1102,9 @@ $(function(){
   $('#add-item-group-btn').on('click', function(){
     const selected = $itemBuilder.select2('data') || [];
     const dosage = $('#item-builder-dosage').val().trim();
-    const usage = $('#item-builder-usage').val().trim();
+    const usageSelect = $('#item-builder-usage');
+    const usageValues = usageSelect.val() || []; // Get array of selected values
+    const usage = usageValues.join(', '); // Join with comma and space
     const time = $('#item-builder-time').val().trim();
     const uno = $('#item-builder-uno').val().trim();
     
@@ -1098,18 +1119,18 @@ $(function(){
       $('#item-builder-uno').focus();
       return;
     }
-    if (!usage) {
-      alert('Usage is mandatory');
-      $('#item-builder-usage').focus();
+    if (!usage || usageValues.length === 0) {
+      alert('At least one Usage is mandatory');
+      usageSelect.focus();
       return;
     }
     
     const items = selected.length > 0 ? selected.map(s => ({ item_code: s.id, item_name: s.text || s.id })) : [];
-    const grp = { id: Math.random().toString(36).slice(2,9), items, dosage, usage, time, uno };
+    const grp = { id: Math.random().toString(36).slice(2,9), items, dosage, usage, usage_array: usageValues, time, uno };
     itemGroups.push(grp);
     $itemBuilder.val(null).trigger('change');
     $('#item-builder-dosage').val('');
-    $('#item-builder-usage').val('');
+    usageSelect.val(null).trigger('change');
     $('#item-builder-time').val('');
     $('#item-builder-uno').val('');
     renderItemGroups();
@@ -1166,7 +1187,17 @@ $(function(){
     }); 
     $itemBuilder.trigger('change'); 
     $('#item-builder-dosage').val(g.dosage||''); 
-    $('#item-builder-usage').val(g.usage||''); 
+    // Handle usage - support both array and comma-separated string
+    const usageSelect = $('#item-builder-usage');
+    if (g.usage_array && Array.isArray(g.usage_array)) {
+      usageSelect.val(g.usage_array).trigger('change');
+    } else if (g.usage) {
+      // Split comma-separated string and trim each value
+      const usageArray = g.usage.split(',').map(u => u.trim()).filter(u => u);
+      usageSelect.val(usageArray).trigger('change');
+    } else {
+      usageSelect.val(null).trigger('change');
+    }
     $('#item-builder-time').val(g.time||''); 
     $('#item-builder-uno').val(g.uno||''); 
     itemGroups = itemGroups.filter(x=>x.id!==id); 
@@ -1208,7 +1239,14 @@ $(function(){
       days: Math.ceil((new Date(to).getTime() - new Date(from).getTime()) / (1000 * 60 * 60 * 24)) + 1,
       procured_from: $procuredSelect.val()||'',
       scope: $scopeSelect.val()||'',
-      items_groups: itemGroups.map(g => ({ items: g.items, dosage: g.dosage, usage: g.usage, time: g.time, uno: g.uno })),
+      items_groups: itemGroups.map(g => ({ 
+        items: g.items, 
+        dosage: g.dosage, 
+        usage: g.usage || (g.usage_array ? g.usage_array.join(', ') : ''), 
+        usage_array: g.usage_array || (g.usage ? g.usage.split(',').map(u => u.trim()) : []),
+        time: g.time, 
+        uno: g.uno 
+      })),
       notes: ''
     };
 
@@ -1287,7 +1325,16 @@ $(function(){
       return; 
     }
     addedPrescriptions.forEach((p,i) => {
-      const groupsHtml = (p.items_groups||[]).map(g => (g.items||[]).map(it => `<span class="tag">${esc(it.item_name)}</span>`).join(' ') + `<div class="small-muted">Dosage:${esc(g.dosage||'—')} • Usage:${esc(g.usage||'—')} • Time:${esc(g.time||'—')} • UNO:${esc(g.uno||'—')}</div>`).join('<hr style="margin:8px 0;border:none;border-top:1px solid var(--border-light);"/>');
+      const groupsHtml = (p.items_groups||[]).map(g => {
+        // Format usage - handle both string and array
+        let usageDisplay = '—';
+        if (g.usage) {
+          usageDisplay = esc(g.usage);
+        } else if (Array.isArray(g.usage_array) && g.usage_array.length > 0) {
+          usageDisplay = esc(g.usage_array.join(', '));
+        }
+        return (g.items||[]).map(it => `<span class="tag">${esc(it.item_name)}</span>`).join(' ') + `<div class="small-muted">Dosage:${esc(g.dosage||'—')} • Usage:${usageDisplay} • Time:${esc(g.time||'—')} • UNO:${esc(g.uno||'—')}</div>`;
+      }).join('<hr style="margin:8px 0;border:none;border-top:1px solid var(--border-light);"/>');
       
       // Status logic - show counts if available, format: "2 Draft / 3 Active"
       let statusHtml = '';
@@ -1384,7 +1431,15 @@ $(function(){
     $daysInput.val(p.days||'');
     $procuredSelect.val(p.procured_from||'');
     $scopeSelect.val(p.scope||'');
-    itemGroups = (p.items_groups||[]).map(g=>({ id: Math.random().toString(36).slice(2,9), items: g.items||[], dosage: g.dosage||'', usage: g.usage||'', time: g.time||'', uno: g.uno||'' }));
+    itemGroups = (p.items_groups||[]).map(g=>({ 
+      id: Math.random().toString(36).slice(2,9), 
+      items: g.items||[], 
+      dosage: g.dosage||'', 
+      usage: g.usage||'', 
+      usage_array: g.usage_array || (g.usage ? g.usage.split(',').map(u => u.trim()) : []),
+      time: g.time||'', 
+      uno: g.uno||'' 
+    }));
     renderItemGroups();
     $allocateBtn.hide(); $updateBtn.show(); window.scrollTo({top:0, behavior:'smooth'});
   }
@@ -1395,7 +1450,14 @@ $(function(){
     // Update local data
     p.procured_from = $procuredSelect.val()||'';
     p.scope = $scopeSelect.val()||'';
-    p.items_groups = itemGroups.map(g=>({items:g.items, dosage:g.dosage, usage:g.usage, time:g.time, uno:g.uno}));
+    p.items_groups = itemGroups.map(g=>({
+      items: g.items, 
+      dosage: g.dosage, 
+      usage: g.usage || (g.usage_array ? g.usage_array.join(', ') : ''), 
+      usage_array: g.usage_array || (g.usage ? g.usage.split(',').map(u => u.trim()) : []),
+      time: g.time, 
+      uno: g.uno
+    }));
     
     // Send update to server if prescription has allocation_id
     if (p.allocation_id) {

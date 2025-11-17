@@ -83,13 +83,14 @@ class CustomUser(AbstractUser):
         """Get default modules for standard roles"""
         # This will be implemented based on the current navigation logic
         module_mapping = {
-            "doctor": ["add_therapy", "add_prescription", "reports", "treatment_schedule"],
+            "doctor": ["add_therapy", "add_prescription"],
             "therapist": ["therapy_schedule"],
             "patient": ["patient_profiles", "patient_dashboard", "patient_feedback"],
             "nurse": ["nurse_dashboard"],
             "ip_pharmacy_staff": ["ip_pharmacy", "procurement_dashboard"],
             "hr": ["hr_dashboard"],
             "housekeeping_staff": ["housekeeping"],
+            "scheduling_staff": ["scheduling_dashboard","prescription_scheduling"],
             "admin": ["user_management", "demand_prediction", "audit_log", "master_tables"],
         }
         

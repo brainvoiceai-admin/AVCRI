@@ -1,8 +1,9 @@
 from django.contrib import admin
 from .models import (
-    Procured, OilClass, UsageType, PrescriptionTime, 
+    Procured, OilClass, UsageType, PrescriptionUsage, PrescriptionTime, 
     PrescriptionScope, UnitNo, TherapyMaster, ItemMaster, SlotMaster,
-    TherapistMaster, TherapistLeaveMaster, TherapistGrade, StayingRoom
+    TherapistMaster, TherapistLeaveMaster, TherapistGrade, StayingRoom,
+    NurseTreatmentMaster, NurseMaster
 )
 
 @admin.register(Procured)
@@ -23,6 +24,14 @@ class OilClassAdmin(admin.ModelAdmin):
 
 @admin.register(UsageType)
 class UsageTypeAdmin(admin.ModelAdmin):
+    list_display = ['name', 'is_active', 'created_at', 'updated_at']
+    list_filter = ['is_active', 'created_at']
+    search_fields = ['name']
+    list_editable = ['is_active']
+    ordering = ['name']
+
+@admin.register(PrescriptionUsage)
+class PrescriptionUsageAdmin(admin.ModelAdmin):
     list_display = ['name', 'is_active', 'created_at', 'updated_at']
     list_filter = ['is_active', 'created_at']
     search_fields = ['name']
@@ -184,6 +193,38 @@ class StayingRoomAdmin(admin.ModelAdmin):
     fieldsets = (
         ('Room Information', {
             'fields': ('number', 'room_no', 'room_desc')
+        }),
+        ('Status', {
+            'fields': ('is_active',)
+        }),
+    )
+
+@admin.register(NurseTreatmentMaster)
+class NurseTreatmentMasterAdmin(admin.ModelAdmin):
+    list_display = ['treatment_code', 'name', 'number_of_nurse_required', 'is_active', 'created_at', 'updated_at']
+    list_filter = ['is_active', 'created_at']
+    search_fields = ['treatment_code', 'name']
+    list_editable = ['is_active']
+    ordering = ['treatment_code']
+    fieldsets = (
+        ('Treatment Information', {
+            'fields': ('treatment_code', 'name', 'number_of_nurse_required')
+        }),
+        ('Status', {
+            'fields': ('is_active',)
+        }),
+    )
+
+@admin.register(NurseMaster)
+class NurseMasterAdmin(admin.ModelAdmin):
+    list_display = ['nurse_code', 'nurse_name', 'designation', 'is_active', 'created_at', 'updated_at']
+    list_filter = ['is_active', 'designation', 'created_at']
+    search_fields = ['nurse_code', 'nurse_name', 'designation']
+    list_editable = ['is_active']
+    ordering = ['nurse_code']
+    fieldsets = (
+        ('Nurse Information', {
+            'fields': ('nurse_code', 'nurse_name', 'designation')
         }),
         ('Status', {
             'fields': ('is_active',)
