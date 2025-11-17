@@ -324,6 +324,21 @@
             font-weight: 500;
         }
         
+        .nurse-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+        }
+        
+        .nurse-badge {
+            background: #d1fae5;
+            color: #065f46;
+            padding: 4px 8px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+        
         .loading {
             display: none;
             text-align: center;
@@ -451,6 +466,11 @@
             }
             
             .therapist-list {
+                flex-direction: column;
+                gap: 4px;
+            }
+            
+            .nurse-list {
                 flex-direction: column;
                 gap: 4px;
             }
@@ -657,7 +677,7 @@
                     <div class="card-header">
                         <div>
                             <div class="card-title">Scheduled Therapies</div>
-                            <div class="card-subtitle">Successfully scheduled therapies with therapist assignments. Use date filter to view schedules for specific dates.</div>
+                            <div class="card-subtitle">Successfully scheduled therapies with therapist and nurse assignments. Use date filter to view schedules for specific dates.</div>
                         </div>
                         <button class="btn btn-primary" id="print-therapy-pdf" title="Print to PDF" style="background: #2ed573; color: white; font-weight: 600; padding: 12px 24px; display: flex; align-items: center; gap: 8px;">
                             <span style="font-size: 18px;">🖨️</span> Print to PDF
@@ -671,140 +691,144 @@
                         </div>
                     </div>
                     
-                    <div class="table-container">
-                        <table id="scheduled-table">
-                            <thead>
-                                <tr>
-                                    <th>Patient</th>
-                                    <th>Therapy</th>
-                                    <th>Time Slot</th>
-                                    <th>Date</th>
-                                    <th>Treatment Room No</th>
-                                    <th>Patient Room No</th>
-                                    <th>Therapist Assigned</th>
-                                    <th>Scheduled By</th>
-                                </tr>
-                            </thead>
-                            <tbody id="scheduled-body">
-                                {% if date_filter and scheduled_bookings %}
-                                    {# Show scheduled bookings for the filtered date #}
-                                    {% for booking in scheduled_bookings %}
-                                    {% load static %}
-                                    {% load custom_tags %}
+                    <!-- Therapist Schedule Section -->
+                    <div style="margin-bottom: 32px;">
+                        <h3 style="margin-bottom: 16px; color: var(--primary); font-size: 18px; font-weight: 600;">
+                            <i class="fas fa-user-md"></i> Therapist Schedule
+                        </h3>
+                        <div class="table-container">
+                            <table id="therapist-scheduled-table">
+                                <thead>
                                     <tr>
-                                        <td>
-                                            <div style="font-weight: 500;">{{ booking.allocation.patient.pat_name }}</div>
-                                            <div style="font-size: 12px; color: var(--gray);">{{ booking.allocation.patient.pat_reg_no }}</div>
-                                        </td>
-                                        <td>{{ booking.allocation.therapy_name }}</td>
-                                        <td>{{ booking.timeslot.slot_time|format_12hour|default:"—" }}</td>
-                                        <td>{{ booking.date|date:"Y-m-d" }}</td>
-                                        <td>
-                                            {% if booking.room %}
-                                                {{ booking.room.room_no }}
-                                            {% else %}
-                                                {% comment %}Get from RoomBooking via visit field (related_name='room_bookings'){% endcomment %}
-                                                {% with rb=booking.room_bookings.first %}
-                                                    {% if rb %}
-                                                        {{ rb.room.room_no }}
-                                                    {% else %}
-                                                        —
-                                                    {% endif %}
-                                                {% endwith %}
-                                            {% endif %}
-                                        </td>
-                                        <td>
-                                            {% if booking.allocation.patient.pat_room_no %}
-                                                {% load custom_tags %}
-                                                {% with room_no=booking.allocation.patient.pat_room_no|get_staying_room_display %}
-                                                    {{ room_no|default:booking.allocation.patient.pat_room_no }}
-                                                {% endwith %}
-                                            {% else %}
-                                                —
-                                            {% endif %}
-                                        </td>
-                                        <td>
-                                            <div class="therapist-list">
-                                                {% for assignment in booking.assignments.all %}
-                                                    <span class="therapist-badge">{{ assignment.therapist.therapist_name|default:assignment.therapist.therapist_code }}</span>
-                                                {% empty %}
-                                                    —
-                                                {% endfor %}
-                                            </div>
-                                        </td>
-                                        <td>{{ booking.allocation.allocated_by.username|default:"System" }}</td>
+                                        <th>Patient</th>
+                                        <th>Therapy</th>
+                                        <th>Time Slot</th>
+                                        <th>Date</th>
+                                        <th>Treatment Room No</th>
+                                        <th>Patient Room No</th>
+                                        <th>Therapist Assigned</th>
+                                        <th>Scheduled By</th>
                                     </tr>
-                                    {% empty %}
-                                    <tr>
-                                        <td colspan="8" class="empty-state">
-                                            <div class="empty-state-icon">✅</div>
-                                            <div>No scheduled therapies found for this date. Successfully scheduled therapies will appear here.</div>
-                                        </td>
-                                    </tr>
-                                    {% endfor %}
-                                {% else %}
-                                    {# Show all scheduled bookings when no date filter #}
-                                    {% for allocation in scheduled_allocations %}
-                                        {% for booking in allocation.bookings.all|dictsort:"date" %}
-                                            {% if booking.status == 'scheduled' %}
-                                            {% load static %}
-                                            {% load custom_tags %}
-                                            <tr>
-                                                <td>
-                                                    <div style="font-weight: 500;">{{ allocation.patient.pat_name }}</div>
-                                                    <div style="font-size: 12px; color: var(--gray);">{{ allocation.patient.pat_reg_no }}</div>
-                                                </td>
-                                                <td>{{ allocation.therapy_name }}</td>
-                                                <td>{{ booking.timeslot.slot_time|format_12hour|default:"—" }}</td>
-                                                <td>{{ booking.date|date:"Y-m-d" }}</td>
-                                                <td>
-                                                    {% if booking.room %}
-                                                        {{ booking.room.room_no }}
-                                                    {% else %}
-                                                        {% comment %}Get from RoomBooking via visit field{% endcomment %}
-                                                        {% with rb=booking.room_bookings.first %}
-                                                            {% if rb %}
-                                                                {{ rb.room.room_no }}
-                                                            {% else %}
-                                                                —
-                                                            {% endif %}
-                                                        {% endwith %}
-                                                    {% endif %}
-                                                </td>
-                                                <td>
-                                                    {% if allocation.patient.pat_room_no %}
-                                                        {% load custom_tags %}
-                                                        {% with room_no=allocation.patient.pat_room_no|get_staying_room_display %}
-                                                            {{ room_no|default:allocation.patient.pat_room_no }}
-                                                        {% endwith %}
-                                                    {% else %}
-                                                        —
-                                                    {% endif %}
-                                                </td>
-                                                <td>
-                                                    <div class="therapist-list">
-                                                        {% for assignment in booking.assignments.all %}
-                                                            <span class="therapist-badge">{{ assignment.therapist.therapist_name|default:assignment.therapist.therapist_code }}</span>
-                                                        {% empty %}
+                                </thead>
+                                <tbody id="therapist-scheduled-body">
+                                    {% if therapist_bookings %}
+                                        {% load static %}
+                                        {% load custom_tags %}
+                                        {% for booking in therapist_bookings %}
+                                        <tr>
+                                            <td>
+                                                <div style="font-weight: 500;">{{ booking.allocation.patient.pat_name }}</div>
+                                                <div style="font-size: 12px; color: var(--gray);">{{ booking.allocation.patient.pat_reg_no }}</div>
+                                            </td>
+                                            <td>{{ booking.allocation.therapy_name }}</td>
+                                            <td>{{ booking.timeslot.slot_time|format_12hour|default:"—" }}</td>
+                                            <td>{{ booking.date|date:"Y-m-d" }}</td>
+                                            <td>
+                                                {% if booking.room %}
+                                                    {{ booking.room.room_no }}
+                                                {% else %}
+                                                    {% with rb=booking.room_bookings.first %}
+                                                        {% if rb %}
+                                                            {{ rb.room.room_no }}
+                                                        {% else %}
                                                             —
-                                                        {% endfor %}
-                                                    </div>
-                                                </td>
-                                                <td>{{ allocation.allocated_by.username|default:"System" }}</td>
-                                            </tr>
-                                            {% endif %}
+                                                        {% endif %}
+                                                    {% endwith %}
+                                                {% endif %}
+                                            </td>
+                                            <td>
+                                                {% if booking.allocation.patient.pat_room_no %}
+                                                    {% with room_no=booking.allocation.patient.pat_room_no|get_staying_room_display %}
+                                                        {{ room_no|default:booking.allocation.patient.pat_room_no }}
+                                                    {% endwith %}
+                                                {% else %}
+                                                    —
+                                                {% endif %}
+                                            </td>
+                                            <td>
+                                                <div class="therapist-list">
+                                                    {% for assignment in booking.assignments.all %}
+                                                        <span class="therapist-badge">{{ assignment.therapist.therapist_name|default:assignment.therapist.therapist_code }}</span>
+                                                    {% empty %}
+                                                        —
+                                                    {% endfor %}
+                                                </div>
+                                            </td>
+                                            <td>{{ booking.allocation.allocated_by.username|default:"System" }}</td>
+                                        </tr>
                                         {% endfor %}
-                                    {% empty %}
+                                    {% else %}
+                                        <tr>
+                                            <td colspan="8" class="empty-state">
+                                                <div class="empty-state-icon">✅</div>
+                                                <div>No therapist schedules found for this date.</div>
+                                            </td>
+                                        </tr>
+                                    {% endif %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                    
+                    <!-- Nurse Schedule Section -->
+                    <div>
+                        <h3 style="margin-bottom: 16px; color: var(--primary); font-size: 18px; font-weight: 600;">
+                            <i class="fas fa-user-nurse"></i> Nurse Schedule
+                        </h3>
+                        <div class="table-container">
+                            <table id="nurse-scheduled-table">
+                                <thead>
                                     <tr>
-                                        <td colspan="8" class="empty-state">
-                                            <div class="empty-state-icon">✅</div>
-                                            <div>No scheduled therapies found. Successfully scheduled therapies will appear here.</div>
-                                        </td>
+                                        <th>Patient Name</th>
+                                        <th>Treatment Name</th>
+                                        <th>Patient Room No</th>
+                                        <th>Nurse Assigned</th>
                                     </tr>
-                                    {% endfor %}
-                                {% endif %}
-                            </tbody>
-                        </table>
+                                </thead>
+                                <tbody id="nurse-scheduled-body">
+                                    {% if nurse_bookings %}
+                                        {% load static %}
+                                        {% load custom_tags %}
+                                        {% for booking in nurse_bookings %}
+                                        <tr>
+                                            <td>
+                                                <div style="font-weight: 500;">{{ booking.allocation.patient.pat_name }}</div>
+                                                <div style="font-size: 12px; color: var(--gray);">{{ booking.allocation.patient.pat_reg_no }}</div>
+                                            </td>
+                                            <td>{{ booking.allocation.therapy_name }}</td>
+                                            <td>
+                                                {% if booking.allocation.patient.pat_room_no %}
+                                                    {% with room_no=booking.allocation.patient.pat_room_no|get_staying_room_display %}
+                                                        {{ room_no|default:booking.allocation.patient.pat_room_no }}
+                                                    {% endwith %}
+                                                {% else %}
+                                                    —
+                                                {% endif %}
+                                            </td>
+                                            <td>
+                                                <div class="nurse-list">
+                                                    {% for nurse_assignment in booking.nurse_assignments.all %}
+                                                        {% if nurse_assignment.status == 'assigned' %}
+                                                            <span class="nurse-badge">{{ nurse_assignment.nurse.nurse_name|default:nurse_assignment.nurse.nurse_code }}</span>
+                                                        {% endif %}
+                                                    {% empty %}
+                                                        —
+                                                    {% endfor %}
+                                                </div>
+                                            </td>
+                                        </tr>
+                                        {% endfor %}
+                                    {% else %}
+                                        <tr>
+                                            <td colspan="4" class="empty-state">
+                                                <div class="empty-state-icon">✅</div>
+                                                <div>No nurse schedules found for this date.</div>
+                                            </td>
+                                        </tr>
+                                    {% endif %}
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -980,11 +1004,104 @@
         }
 
         function updateTable(status, data) {
-            // Map status to correct tbody ID
-            let tbodyId = `${status}-body`;
+            // For scheduled/allocated status, separate into therapist and nurse schedules
             if (status === 'allocated' || status === 'scheduled') {
-                tbodyId = 'scheduled-body';  // Use 'scheduled-body' for allocated/scheduled therapies
+                const therapistTbody = document.getElementById('therapist-scheduled-body');
+                const nurseTbody = document.getElementById('nurse-scheduled-body');
+                
+                if (!therapistTbody || !nurseTbody) {
+                    console.error('Table bodies not found for scheduled therapies');
+                    return;
+                }
+                
+                // Separate therapist and nurse treatments
+                const therapistData = [];
+                const nurseData = [];
+                
+                data.forEach(item => {
+                    // Check if it's a nurse treatment (has nurses but no therapists, or check therapy_category)
+                    const hasNurses = item.nurses && item.nurses.length > 0;
+                    const hasTherapists = item.therapists && item.therapists.length > 0;
+                    const isNurseTreatment = hasNurses && !hasTherapists;
+                    
+                    if (isNurseTreatment) {
+                        nurseData.push(item);
+                    } else {
+                        therapistData.push(item);
+                    }
+                });
+                
+                // Update therapist table
+                therapistTbody.innerHTML = '';
+                if (therapistData.length === 0) {
+                    therapistTbody.innerHTML = `
+                        <tr>
+                            <td colspan="8" class="empty-state">
+                                <div class="empty-state-icon">✅</div>
+                                <div>No therapist schedules found for this date.</div>
+                            </td>
+                        </tr>
+                    `;
+                } else {
+                    therapistData.forEach(item => {
+                        const therapistsHtml = item.therapists && item.therapists.length > 0 
+                            ? `<div class="therapist-list">${item.therapists.map(t => `<span class="therapist-badge">${t.name || t.code || t}</span>`).join('')}</div>`
+                            : '<span class="muted">Not assigned</span>';
+                        
+                        const row = document.createElement('tr');
+                        row.innerHTML = `
+                            <td>
+                                <div style="font-weight: 500;">${escapeHtml(item.patient_name)}</div>
+                                <div style="font-size: 12px; color: var(--gray);">${escapeHtml(item.patient_reg_no)}</div>
+                            </td>
+                            <td>${escapeHtml(item.therapy_name)}</td>
+                            <td>${format12Hour(item.timeslot)}</td>
+                            <td>${item.date || item.from_date}</td>
+                            <td>${escapeHtml(item.room_no || '—')}</td>
+                            <td>${escapeHtml(item.patient_room_no || '—')}</td>
+                            <td>${therapistsHtml}</td>
+                            <td>${escapeHtml(item.allocated_by || 'System')}</td>
+                        `;
+                        therapistTbody.appendChild(row);
+                    });
+                }
+                
+                // Update nurse table
+                nurseTbody.innerHTML = '';
+                if (nurseData.length === 0) {
+                    nurseTbody.innerHTML = `
+                        <tr>
+                            <td colspan="4" class="empty-state">
+                                <div class="empty-state-icon">✅</div>
+                                <div>No nurse schedules found for this date.</div>
+                            </td>
+                        </tr>
+                    `;
+                } else {
+                    nurseData.forEach(item => {
+                        const nursesHtml = item.nurses && item.nurses.length > 0 
+                            ? `<div class="nurse-list">${item.nurses.map(n => `<span class="nurse-badge">${n.name || n.code || n}</span>`).join('')}</div>`
+                            : '<span class="muted">Not assigned</span>';
+                        
+                        const row = document.createElement('tr');
+                        row.innerHTML = `
+                            <td>
+                                <div style="font-weight: 500;">${escapeHtml(item.patient_name)}</div>
+                                <div style="font-size: 12px; color: var(--gray);">${escapeHtml(item.patient_reg_no)}</div>
+                            </td>
+                            <td>${escapeHtml(item.therapy_name)}</td>
+                            <td>${escapeHtml(item.patient_room_no || '—')}</td>
+                            <td>${nursesHtml}</td>
+                        `;
+                        nurseTbody.appendChild(row);
+                    });
+                }
+                
+                return;
             }
+            
+            // For other statuses (draft, failed), use the original logic
+            let tbodyId = `${status}-body`;
             const tbody = document.getElementById(tbodyId);
             if (!tbody) {
                 console.error(`Table body not found: ${tbodyId}`);
@@ -993,7 +1110,7 @@
             
             tbody.innerHTML = '';
             
-                if (data.length === 0) {
+            if (data.length === 0) {
                 let message = '';
                 let colspan = 5;
                 if (status === 'draft') {
@@ -1002,9 +1119,6 @@
                 } else if (status === 'failed') {
                     message = 'No failed therapies found. Failed therapies will appear here after scheduling attempts.';
                     colspan = 7;
-                } else if (status === 'allocated' || status === 'scheduled') {
-                    message = 'No scheduled therapies found. Successfully scheduled therapies will appear here.';
-                    colspan = 8;
                 } else {
                     message = `No ${status} therapies found. Use date filter to view therapies for specific dates.`;
                     colspan = 6;
@@ -1470,9 +1584,25 @@
                 }
             });
             
-            // Group by time slot
-            const slotGroups = {};
+            // Separate therapist and nurse treatments
+            const therapistTreatments = [];
+            const nurseTreatments = [];
             uniqueData.forEach(item => {
+                // Check if it's a nurse treatment (has nurses but no therapists)
+                const hasNurses = item.nurses && item.nurses.length > 0;
+                const hasTherapists = item.therapists && item.therapists.length > 0;
+                const isNurseTreatment = hasNurses && !hasTherapists;
+                
+                if (isNurseTreatment) {
+                    nurseTreatments.push(item);
+                } else {
+                    therapistTreatments.push(item);
+                }
+            });
+            
+            // Group therapist treatments by time slot
+            const slotGroups = {};
+            therapistTreatments.forEach(item => {
                 const slot = item.timeslot || '00:00';
                 if (!slotGroups[slot]) {
                     slotGroups[slot] = [];
@@ -1559,39 +1689,130 @@
             // Add header
             addHeader();
             
-            // Process each time slot
-            sortedSlots.forEach((slot, slotIndex) => {
-                const treatments = slotGroups[slot];
-                
-                // Check if we need a new page for the slot header
+            // ========== THERAPIST TREATMENTS SECTION ==========
+            if (therapistTreatments.length > 0) {
+                // Section heading for Therapist Treatments
                 checkNewPage(15);
-                
-                // Slot header
-                doc.setFontSize(14);
+                doc.setFontSize(16);
                 doc.setFont(undefined, 'bold');
                 doc.setFillColor(59, 130, 246);
-                doc.rect(margin, yPos - 5, contentWidth, 8, 'F');
+                doc.rect(margin, yPos - 5, contentWidth, 10, 'F');
                 doc.setTextColor(255, 255, 255);
-                doc.text(`Time Slot: ${format12HourPDF(slot)}`, margin + 5, yPos);
-                yPos += 10;
+                doc.text('Therapist Treatments', margin + 5, yPos + 3);
+                yPos += 12;
                 doc.setTextColor(0, 0, 0);
                 
-                // Prepare table data for this slot
-                const tableData = treatments.map(item => [
+                // Process each time slot for therapist treatments
+                sortedSlots.forEach((slot, slotIndex) => {
+                    const treatments = slotGroups[slot];
+                    if (!treatments || treatments.length === 0) return;
+                    
+                    // Check if we need a new page for the slot header
+                    checkNewPage(15);
+                    
+                    // Slot header
+                    doc.setFontSize(14);
+                    doc.setFont(undefined, 'bold');
+                    doc.setFillColor(59, 130, 246);
+                    doc.rect(margin, yPos - 5, contentWidth, 8, 'F');
+                    doc.setTextColor(255, 255, 255);
+                    doc.text(`Time Slot: ${format12HourPDF(slot)}`, margin + 5, yPos);
+                    yPos += 10;
+                    doc.setTextColor(0, 0, 0);
+                    
+                    // Prepare table data for this slot
+                    const tableData = treatments.map(item => [
+                        item.patient_name || 'N/A',
+                        item.patient_reg_no || 'N/A',
+                        item.patient_room_no || '—',
+                        item.room_no || '—',
+                        item.therapy_name || 'N/A',
+                        item.therapists && item.therapists.length > 0 
+                            ? item.therapists.map(t => t.name || t.code || t).join(', ') 
+                            : '—'
+                    ]);
+                    
+                    // Generate table for this slot
+                    doc.autoTable({
+                        head: [['Patient Name', 'Reg. No.', 'Patient Room', 'Treatment Room', 'Therapy', 'Therapist Assigned']],
+                        body: tableData,
+                        startY: yPos,
+                        margin: { left: margin, right: margin },
+                        styles: {
+                            fontSize: 8,
+                            cellPadding: 2.5,
+                        },
+                        headStyles: {
+                            fillColor: [100, 116, 139],
+                            textColor: 255,
+                            fontStyle: 'bold',
+                            fontSize: 9,
+                        },
+                        alternateRowStyles: {
+                            fillColor: [248, 250, 252],
+                        },
+                        didDrawPage: function(data) {
+                            // Add footer on each page
+                            addFooter(data.pageNumber);
+                            currentPage = data.pageNumber;
+                        },
+                    });
+                    
+                    // Update yPos after table
+                    yPos = doc.lastAutoTable.finalY + 8;
+                    
+                    // Add spacing between slots (except for last slot)
+                    if (slotIndex < sortedSlots.length - 1) {
+                        yPos += 5;
+                        doc.setLineWidth(0.3);
+                        doc.setDrawColor(200, 200, 200);
+                        doc.line(margin, yPos, pageWidth - margin, yPos);
+                        yPos += 8;
+                    }
+                });
+            }
+            
+            // ========== NURSE TREATMENTS SECTION ==========
+            if (nurseTreatments.length > 0) {
+                // Add spacing before nurse section
+                checkNewPage(20);
+                yPos += 10;
+                doc.setLineWidth(0.5);
+                doc.setDrawColor(100, 100, 100);
+                doc.line(margin, yPos, pageWidth - margin, yPos);
+                yPos += 10;
+                
+                // Section heading for Nurse Treatments
+                checkNewPage(15);
+                doc.setFontSize(16);
+                doc.setFont(undefined, 'bold');
+                doc.setFillColor(16, 185, 129); // Green color for nurse section
+                doc.rect(margin, yPos - 5, contentWidth, 10, 'F');
+                doc.setTextColor(255, 255, 255);
+                doc.text('Nurse Treatments', margin + 5, yPos + 3);
+                yPos += 12;
+                doc.setTextColor(0, 0, 0);
+                
+                // Sort nurse treatments by patient name
+                nurseTreatments.sort((a, b) => {
+                    return (a.patient_name || '').localeCompare(b.patient_name || '');
+                });
+                
+                // Prepare table data for nurse treatments
+                const nurseTableData = nurseTreatments.map(item => [
                     item.patient_name || 'N/A',
                     item.patient_reg_no || 'N/A',
                     item.patient_room_no || '—',
-                    item.room_no || '—',
                     item.therapy_name || 'N/A',
-                    item.therapists && item.therapists.length > 0 
-                        ? item.therapists.map(t => t.name || t.code || t).join(', ') 
+                    item.nurses && item.nurses.length > 0 
+                        ? item.nurses.map(n => n.name || n.code || n).join(', ') 
                         : '—'
                 ]);
                 
-                // Generate table for this slot
+                // Generate table for nurse treatments
                 doc.autoTable({
-                    head: [['Patient Name', 'Reg. No.', 'Patient Room', 'Treatment Room', 'Therapy', 'Therapist Assigned']],
-                    body: tableData,
+                    head: [['Patient Name', 'Reg. No.', 'Patient Room', 'Treatment Name', 'Nurse Assigned']],
+                    body: nurseTableData,
                     startY: yPos,
                     margin: { left: margin, right: margin },
                     styles: {
@@ -1599,13 +1820,13 @@
                         cellPadding: 2.5,
                     },
                     headStyles: {
-                        fillColor: [100, 116, 139],
+                        fillColor: [16, 185, 129], // Green header for nurse section
                         textColor: 255,
                         fontStyle: 'bold',
                         fontSize: 9,
                     },
                     alternateRowStyles: {
-                        fillColor: [248, 250, 252],
+                        fillColor: [240, 253, 244], // Light green alternate rows
                     },
                     didDrawPage: function(data) {
                         // Add footer on each page
@@ -1616,16 +1837,7 @@
                 
                 // Update yPos after table
                 yPos = doc.lastAutoTable.finalY + 8;
-                
-                // Add spacing between slots (except for last slot)
-                if (slotIndex < sortedSlots.length - 1) {
-                    yPos += 5;
-                    doc.setLineWidth(0.3);
-                    doc.setDrawColor(200, 200, 200);
-                    doc.line(margin, yPos, pageWidth - margin, yPos);
-                    yPos += 8;
-                }
-            });
+            }
             
             // Save PDF
             const fileName = `Therapy_Schedule_${date.replace(/-/g, '_')}.pdf`;

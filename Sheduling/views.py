@@ -178,6 +178,7 @@ ItemMaster = get_model_safe('masters', 'ItemMaster')
 TherapyMaster = get_model_safe('masters', 'TherapyMaster')
 SlotMaster = get_model_safe('masters', 'SlotMaster')
 TherapistMaster = get_model_safe('masters', 'TherapistMaster')
+NurseTreatmentMaster = get_model_safe('masters', 'NurseTreatmentMaster')
 
 # Masters
 Procured = get_model_safe('masters', 'Procured')
@@ -416,7 +417,11 @@ def therapy_entry(request):
                         new_timeslot = None
 
                 # Update therapy details
+                therapy_name_changed = False
                 if 'therapy_name' in payload:
+                    new_name = payload['therapy_name']
+                    if allocation.therapy_name != new_name:
+                        therapy_name_changed = True
                     allocation.therapy_name = payload['therapy_name']
                 if 'items_groups' in payload:
                     allocation.items_groups = payload['items_groups']
@@ -430,6 +435,11 @@ def therapy_entry(request):
                     allocation.notes = payload['notes']
                 if new_timeslot is not None:
                     allocation.timeslot = new_timeslot
+                
+                # Check if therapy code changed (might indicate nurse treatment change)
+                if 'therapy_code' in payload:
+                    allocation.therapy_code = payload['therapy_code']
+                    therapy_name_changed = True  # Assume change if code changed
 
                 # Handle date range changes (not just extensions)
                 new_from_date = parse_date(payload.get('from_date') or '') if payload.get('from_date') else None
@@ -851,6 +861,16 @@ def therapy_entry(request):
                                         date_change_success = True
                                         Booking.objects.filter(allocation=allocation, date=d).update(status='scheduled')
                                         BookingItem.objects.filter(booking__allocation=allocation, booking__date=d).update(status='scheduled')
+                                        
+                                        # Allocate nurses for nurse treatments
+                                        try:
+                                            from .nurse_allocation import reallocate_nurses_for_booking
+                                            bookings = Booking.objects.filter(allocation=allocation, date=d, status='scheduled')
+                                            for booking in bookings:
+                                                reallocate_nurses_for_booking(booking)
+                                        except Exception as nurse_e:
+                                            print(f"Error allocating nurses for booking on date {d}: {nurse_e}")
+                                        
                                         print(f"Successfully allocated for date {d}")
                                     else:
                                         reason = None
@@ -946,11 +966,16 @@ def therapy_entry(request):
         
         # ---------- allocate ----------
         if action_post == 'allocate':
-            # required fields
-            required = ['patient_reg_no', 'therapy_code', 'therapy_name', 'from_date', 'to_date', 'items_groups']
+            # required fields (items_groups is optional - can be empty array)
+            required = ['patient_reg_no', 'therapy_code', 'therapy_name', 'from_date', 'to_date']
             missing = [k for k in required if not payload.get(k)]
             if missing:
                 return JsonResponse({'error': 'missing_fields', 'missing': missing}, status=400)
+            
+            # items_groups is optional - default to empty array if not provided
+            items_groups = payload.get('items_groups', [])
+            if not isinstance(items_groups, list):
+                return JsonResponse({'error': 'items_groups must be a list'}, status=400)
 
             fdate = parse_date(payload['from_date'])
             tdate = parse_date(payload['to_date'])
@@ -1040,7 +1065,7 @@ def therapy_entry(request):
                         ext_int=payload.get('ext_int') or '',
                         timeslot=timeslot_obj,
                         room=room_obj,
-                        items_groups=payload.get('items_groups') or [],
+                        items_groups=items_groups,
                         oil_class=payload.get('oil_class') or payload.get('oil_class_id') or '',
                         usage=payload.get('usage') or '',
                         procured_from=payload.get('procured') or payload.get('procured_from') or '',
@@ -1252,10 +1277,12 @@ def therapy_entry(request):
     action = (request.GET.get('action') or '').strip().lower()
 
 
-    # search therapies
+    # search therapies (includes both TherapyMaster and NurseTreatmentMaster)
     if action == 'search_therapies':
         q = (request.GET.get('q') or '').strip()
         results = []
+        
+        # Add regular therapies from TherapyMaster
         if TherapyMaster is not None:
             qs = TherapyMaster.objects.filter(is_active=True).all()  # Use local master table
             if q:
@@ -1267,6 +1294,20 @@ def therapy_entry(request):
                     'therapy_name': getattr(t, 'therapy_name', ''),
                     'therapy_category': getattr(t, 'therapy_category', '') or ''
                 })
+        
+        # Add nurse treatments from NurseTreatmentMaster
+        if NurseTreatmentMaster is not None:
+            qs = NurseTreatmentMaster.objects.filter(is_active=True).all()
+            if q:
+                qs = qs.filter(Q(name__icontains=q) | Q(treatment_code__icontains=q))
+            qs = qs[:50]
+            for nt in qs:
+                results.append({
+                    'therapy_code': getattr(nt, 'treatment_code', ''),
+                    'therapy_name': getattr(nt, 'name', ''),
+                    'therapy_category': 'Nurse Treatment'  # Mark as nurse treatment
+                })
+        
         return JsonResponse(results, safe=False)
 
     # search items (external DB)
@@ -1388,11 +1429,32 @@ def therapy_entry(request):
                     therapists.append(therapist_name)
             except Exception:
                 therapists = []
+            
+            # Get nurses for this booking
+            nurses = []
+            try:
+                for na in b.nurse_assignments.filter(status='assigned'):
+                    nurse_name = getattr(na.nurse, 'nurse_name', '') or getattr(na.nurse, 'nurse_code', '') or ''
+                    if nurse_name:
+                        nurses.append(nurse_name)
+            except Exception:
+                nurses = []
+            
             slot_s = ''
             try:
                 slot_s = b.timeslot.slot_time.strftime('%H:%M') if getattr(b, 'timeslot', None) and getattr(b.timeslot, 'slot_time', None) else ''
             except Exception:
                 slot_s = ''
+            
+            # Get patient room number (staying room) - mapped from StayingRoom
+            patient_room_no = None
+            if alloc.patient.pat_room_no:
+                from masters.models import get_staying_room_display_number
+                patient_room_no = get_staying_room_display_number(alloc.patient.pat_room_no)
+            
+            # Check if this is a nurse treatment
+            from .nurse_allocation import is_nurse_treatment
+            is_nurse_treatment_flag = is_nurse_treatment(alloc.therapy_code, alloc.therapy_name) is not None
             
             # Map scheduled to allocated for display consistency
             display_status = 'allocated' if booking_status == 'scheduled' else booking_status
@@ -1403,11 +1465,17 @@ def therapy_entry(request):
                 'date': b.date.isoformat(),
                 'slot': slot_s,
                 'room': getattr(b.room, 'room_no', None),
+                'patient_room_no': patient_room_no,
                 'therapists': therapists,
+                'nurses': nurses,
+                'is_nurse_treatment': is_nurse_treatment_flag,
                 'status': booking_status,
                 'display_status': display_status,
                 'items': items
             })
+        
+        # Add is_nurse_treatment flag to the main response
+        out['is_nurse_treatment'] = is_nurse_treatment_flag
         
         # Build status summary (only include non-zero counts)
         # Note: 'scheduled' bookings are counted in both 'allocated' and 'scheduled' in status_counts.
@@ -2644,34 +2712,52 @@ def allocate_therapy(request):
 
     # Required top-level fields (front-end should send these)
     # patient_reg_no (string), therapy_code, therapy_name, from_date, to_date
-    required = ["patient_reg_no", "therapy_code", "therapy_name", "from_date", "to_date", "items_groups"]
+    # items_groups is optional - can be empty array
+    required = ["patient_reg_no", "therapy_code", "therapy_name", "from_date", "to_date"]
     missing = [k for k in required if k not in payload]
     if missing:
         return JsonResponse({"error": "Missing required fields", "missing": missing}, status=400)
-
+    
     # parse dates
     from_date = parse_date(payload["from_date"])
     to_date = parse_date(payload["to_date"])
     if not from_date or not to_date or from_date > to_date:
         return JsonResponse({"error": "Invalid from_date / to_date"}, status=400)
 
+    # Check if this is a nurse treatment early
+    from .nurse_allocation import is_nurse_treatment
+    nurse_treatment = is_nurse_treatment(payload.get("therapy_code"), payload.get("therapy_name"))
+    
     # timeslot: accept either slot_number (int) or "HH:MM" string
+    # For nurse treatments, timeslot is optional (they work entire day)
     timeslot = None
-    if payload.get("timeslot_slot_number") is not None:
-        try:
-            timeslot = SlotMaster.objects.get(slot_number=int(payload["timeslot_slot_number"]), is_active=True)  # Use local master table
-        except SlotMaster.DoesNotExist:
-            return JsonResponse({"error": "Slot with that slot_number not found"}, status=400)
-    elif payload.get("timeslot"):
-        t = parse_time_hhmm(payload["timeslot"])
-        if not t:
-            return JsonResponse({"error": "Invalid timeslot format, expected HH:MM"}, status=400)
-        timeslot = SlotMaster.objects.filter(slot_time=t, is_active=True).first()  # Use local master table
-        if not timeslot:
-            # Optionally create a timeslot if you want; for safety we require an existing one:
-            return JsonResponse({"error": "TimeSlot with that slot_time not found"}, status=400)
+    if not nurse_treatment:  # Only require timeslot for regular therapies
+        if payload.get("timeslot_slot_number") is not None:
+            try:
+                timeslot = SlotMaster.objects.get(slot_number=int(payload["timeslot_slot_number"]), is_active=True)  # Use local master table
+            except SlotMaster.DoesNotExist:
+                return JsonResponse({"error": "Slot with that slot_number not found"}, status=400)
+        elif payload.get("timeslot"):
+            t = parse_time_hhmm(payload["timeslot"])
+            if not t:
+                return JsonResponse({"error": "Invalid timeslot format, expected HH:MM"}, status=400)
+            timeslot = SlotMaster.objects.filter(slot_time=t, is_active=True).first()  # Use local master table
+            if not timeslot:
+                # Optionally create a timeslot if you want; for safety we require an existing one:
+                return JsonResponse({"error": "TimeSlot with that slot_time not found"}, status=400)
+    else:
+        # For nurse treatments, timeslot is optional - use if provided, but not required
+        if payload.get("timeslot_slot_number") is not None:
+            try:
+                timeslot = SlotMaster.objects.get(slot_number=int(payload["timeslot_slot_number"]), is_active=True)
+            except SlotMaster.DoesNotExist:
+                timeslot = None  # Don't fail, just set to None
+        elif payload.get("timeslot"):
+            t = parse_time_hhmm(payload["timeslot"])
+            if t:
+                timeslot = SlotMaster.objects.filter(slot_time=t, is_active=True).first()
 
-    # room (optional)
+    # room (optional for both regular and nurse treatments)
     room = None
     room_no = payload.get("room_no")  # optional string
     if room_no:
@@ -2680,9 +2766,10 @@ def allocate_therapy(request):
             return JsonResponse({"error": f"TreatmentRoom {room_no} not found"}, status=400)
 
     # therapists: optional list of therapist_codes that should be assigned for every date
+    # Skip therapist allocation for nurse treatments (already checked above)
     therapist_codes = payload.get("therapists") or []
     therapists = []
-    if therapist_codes:
+    if not nurse_treatment and therapist_codes:  # Only check therapists for non-nurse treatments
         therapists_qs = Therapist.objects.filter(therapist_code__in=therapist_codes)
         found_codes = set(t.therapist_code for t in therapists_qs)
         missing_ts = [c for c in therapist_codes if c not in found_codes]
@@ -2690,11 +2777,11 @@ def allocate_therapy(request):
             return JsonResponse({"error": "Some therapists not found", "missing_therapists": missing_ts}, status=400)
         therapists = list(therapists_qs)
 
-    # items_groups expected as list of groups:
+    # items_groups expected as list of groups (can be empty):
     # [{ "items":[{"item_code":"KAS","item_name":"Kashayam"}, ...], "dosage":"10 ml", "uno":"1" }, ...]
-    items_groups = payload.get("items_groups")
-    if not isinstance(items_groups, list) or len(items_groups) == 0:
-        return JsonResponse({"error": "items_groups must be a non-empty list"}, status=400)
+    # items_groups is optional - can be empty array (already set above)
+    if not isinstance(items_groups, list):
+        return JsonResponse({"error": "items_groups must be a list"}, status=400)
 
     # optional masters
     oil_class = payload.get("oil_class") or ""
@@ -2761,6 +2848,7 @@ def allocate_therapy(request):
             try:
                 from .models import FinalScheduleRun
                 from final_allocation import expand_therapies_for_visit
+                from .nurse_allocation import allocate_nurses_for_booking
 
                 any_succeeded = False
                 for d in daterange(from_date, to_date):
@@ -2773,6 +2861,19 @@ def allocate_therapy(request):
                             )
                             if isinstance(tasks, list) and any(t.get('status') == 'BOOKED' for t in tasks):
                                 any_succeeded = True
+                                
+                                # Allocate nurses for nurse treatments on this date
+                                from .models import Booking
+                                bookings = Booking.objects.filter(
+                                    allocation=allocation,
+                                    date=d,
+                                    status__in=['scheduled', 'draft']
+                                )
+                                for booking in bookings:
+                                    try:
+                                        allocate_nurses_for_booking(booking)
+                                    except Exception as nurse_e:
+                                        print(f"Error allocating nurses for booking {booking.id}: {nurse_e}")
                         except Exception as _e:
                             # continue to next date
                             pass
@@ -2784,18 +2885,24 @@ def allocate_therapy(request):
                 allocation.save(update_fields=['status'])
                 print(f"Automatic scheduling check failed for allocation {allocation.id}: {e}")
 
+            # nurse_treatment already checked above
+            
             created_bookings = []
             notifications_to_enqueue = []
 
             # iterate dates and create Booking, BookingItem, BookingAssignment
             for d in daterange(from_date, to_date):
+                # For nurse treatments, status starts as 'scheduled' (no therapist allocation needed)
+                # For regular therapies, status starts as 'draft' (will be scheduled by final schedule)
+                initial_status = "scheduled" if nurse_treatment else "draft"
+                
                 # create booking (UniqueConstraint on room/date/timeslot will guard)
                 booking = Booking.objects.create(
                     allocation=allocation,
                     date=d,
                     timeslot=timeslot,
                     room=room,
-                    status="scheduled"
+                    status=initial_status
                 )
 
                 # create items for this booking
@@ -2819,26 +2926,45 @@ def allocate_therapy(request):
                             "uno": bi.uno
                         })
 
-                # assign therapists (same therapists assigned to each date)
-                created_assignments = []
-                for t in therapists:
-                    assign = BookingAssignment.objects.create(
-                        booking=booking,
-                        booking_item=None,
-                        therapist=t,
-                        role=getattr(t, "therapist_grade", ""),
-                        assigned_for="booking",
-                        status="assigned"
-                    )
-                    created_assignments.append(assign)
+                # For nurse treatments, allocate nurses instead of therapists
+                if nurse_treatment:
+                    try:
+                        from .nurse_allocation import allocate_nurses_for_booking
+                        nurse_assignments = allocate_nurses_for_booking(booking)
+                        nurse_codes = [na.nurse.nurse_code for na in nurse_assignments] if nurse_assignments else []
+                    except Exception as nurse_e:
+                        print(f"Error allocating nurses for booking {booking.id}: {nurse_e}")
+                        nurse_codes = []
+                    
+                    created_bookings.append({
+                        "date": d.isoformat(),
+                        "booking_id": booking.pk,
+                        "items_count": len(created_items),
+                        "therapists": [],  # No therapists for nurse treatments
+                        "nurses": nurse_codes,  # Include nurses
+                        "room_no": room.room_no if room else None
+                    })
+                else:
+                    # assign therapists (same therapists assigned to each date) - only for regular therapies
+                    created_assignments = []
+                    for t in therapists:
+                        assign = BookingAssignment.objects.create(
+                            booking=booking,
+                            booking_item=None,
+                            therapist=t,
+                            role=getattr(t, "therapist_grade", ""),
+                            assigned_for="booking",
+                            status="assigned"
+                        )
+                        created_assignments.append(assign)
 
-                created_bookings.append({
-                    "date": d.isoformat(),
-                    "booking_id": booking.pk,
-                    "items_count": len(created_items),
-                    "therapists": [t.therapist_code for t in therapists],
-                    "room_no": room.room_no if room else None
-                })
+                    created_bookings.append({
+                        "date": d.isoformat(),
+                        "booking_id": booking.pk,
+                        "items_count": len(created_items),
+                        "therapists": [t.therapist_code for t in therapists],
+                        "room_no": room.room_no if room else None
+                    })
 
                 # prepare a notification entry for procurement / patient / therapists (simple aggregated payload)
                 if procured_from:
@@ -2993,14 +3119,50 @@ def scheduling_dashboard(request):
         ).select_related('allocation__patient', 'allocation', 'timeslot', 'room').prefetch_related(
             'assignments__therapist',
             'assignments__therapist__therapist_code',
+            'nurse_assignments__nurse',  # Prefetch nurse assignments
             'room_bookings__room'  # Prefetch RoomBooking for room lookup
         )
+        
+        # Separate therapist and nurse bookings
+        from .nurse_allocation import is_nurse_treatment
+        therapist_bookings = []
+        nurse_bookings = []
+        for booking in scheduled_bookings:
+            is_nurse = is_nurse_treatment(booking.allocation.therapy_code, booking.allocation.therapy_name)
+            if is_nurse:
+                nurse_bookings.append(booking)
+            else:
+                therapist_bookings.append(booking)
+    
+    # Separate therapist and nurse bookings for template
+    therapist_bookings_list = []
+    nurse_bookings_list = []
+    if filter_date:
+        from .nurse_allocation import is_nurse_treatment
+        for booking in scheduled_bookings:
+            is_nurse = is_nurse_treatment(booking.allocation.therapy_code, booking.allocation.therapy_name)
+            if is_nurse:
+                nurse_bookings_list.append(booking)
+            else:
+                therapist_bookings_list.append(booking)
+    else:
+        # When no date filter, separate from scheduled_allocations
+        from .nurse_allocation import is_nurse_treatment
+        for allocation in scheduled_allocations_with_bookings:
+            is_nurse = is_nurse_treatment(allocation.therapy_code, allocation.therapy_name)
+            for booking in allocation.bookings.filter(status='scheduled'):
+                if is_nurse:
+                    nurse_bookings_list.append(booking)
+                else:
+                    therapist_bookings_list.append(booking)
     
     context = {
         'draft_allocations': draft_allocations,
         'draft_bookings': draft_bookings,  # Pass bookings separately for per-date display
         'scheduled_allocations': scheduled_allocations_with_bookings,
         'scheduled_bookings': scheduled_bookings,  # Pass scheduled bookings per date
+        'therapist_bookings': therapist_bookings_list,  # Separate therapist bookings
+        'nurse_bookings': nurse_bookings_list,  # Separate nurse bookings
         'failed_allocations': failed_allocations,
         'date_filter': date_filter or '',
         'stats': {
@@ -3108,6 +3270,23 @@ def final_schedule_api(request):
             }
         except Exception as e:
             allocation_update_result = {
+                'success': False,
+                'error': str(e)
+            }
+        
+        # Step 3: Allocate nurses for nurse treatments
+        try:
+            from .nurse_allocation import allocate_nurses_for_date
+            
+            # Allocate nurses for all nurse treatments on this date
+            nurse_allocation_result = allocate_nurses_for_date(date_filter)
+            
+            nurse_allocation_update_result = {
+                'success': True,
+                'result': nurse_allocation_result
+            }
+        except Exception as e:
+            nurse_allocation_update_result = {
                 'success': False,
                 'error': str(e)
             }
@@ -3320,6 +3499,14 @@ def get_therapy_data_api(request):
                             'grade': getattr(assignment.therapist.therapist_grade, 'name', '') if assignment.therapist.therapist_grade else ''
                         })
                     
+                    # Get assigned nurses for this booking
+                    nurses = []
+                    for nurse_assignment in booking.nurse_assignments.filter(status='assigned'):
+                        nurses.append({
+                            'code': nurse_assignment.nurse.nurse_code,
+                            'name': nurse_assignment.nurse.nurse_name or nurse_assignment.nurse.nurse_code
+                        })
+                    
                     # Get room from booking, RoomBooking, allocation, or PatientSnapshot
                     room_no = None
                     if booking.room:
@@ -3379,6 +3566,7 @@ def get_therapy_data_api(request):
                         'patient_room_no': patient_room_no,
                         'timeslot': booking.timeslot.slot_time.strftime('%H:%M') if booking.timeslot else None,
                         'therapists': therapists,
+                        'nurses': nurses,
                         'created_at': booking.allocation.created_at.isoformat(),
                         'allocated_by': booking.allocation.allocated_by.username if booking.allocation.allocated_by else None
                     })
@@ -3414,38 +3602,48 @@ def get_therapy_data_api(request):
             
             # Convert to JSON format
             for allocation in allocations:
-                # Get assigned therapists from all bookings
-                therapists = []
-                for booking in allocation.bookings.all():
-                    for assignment in booking.assignments.all():
-                        therapists.append({
-                            'code': assignment.therapist.therapist_code,
-                            'name': assignment.therapist.therapist_name or assignment.therapist.therapist_code,
-                            'grade': getattr(assignment.therapist.therapist_grade, 'name', '') if assignment.therapist.therapist_grade else ''
-                        })
-                
-                # Get patient room number (staying room) - mapped from StayingRoom
-                patient_room_no = None
-                if allocation.patient.pat_room_no:
-                    from masters.models import get_staying_room_display_number
-                    patient_room_no = get_staying_room_display_number(allocation.patient.pat_room_no)
-                
-                data.append({
-                    'id': allocation.id,
-                    'patient_name': allocation.patient.pat_name,
-                    'patient_reg_no': allocation.patient.pat_reg_no,
-                    'therapy_name': allocation.therapy_name,
-                    'therapy_code': allocation.therapy_code,
-                    'from_date': allocation.from_date.isoformat(),
-                    'to_date': allocation.to_date.isoformat(),
-                    'status': allocation.status,  # Keep allocation status but filter was based on booking
-                    'room_no': allocation.room.room_no if allocation.room else None,
-                    'patient_room_no': patient_room_no,
-                    'timeslot': allocation.timeslot.slot_time.strftime('%H:%M') if allocation.timeslot else None,
-                    'therapists': therapists,
-                    'created_at': allocation.created_at.isoformat(),
-                    'allocated_by': allocation.allocated_by.username if allocation.allocated_by else None
-                })
+                    # Get assigned therapists from all bookings
+                    therapists = []
+                    for booking in allocation.bookings.all():
+                        for assignment in booking.assignments.all():
+                            therapists.append({
+                                'code': assignment.therapist.therapist_code,
+                                'name': assignment.therapist.therapist_name or assignment.therapist.therapist_code,
+                                'grade': getattr(assignment.therapist.therapist_grade, 'name', '') if assignment.therapist.therapist_grade else ''
+                            })
+                    
+                    # Get assigned nurses from all bookings
+                    nurses = []
+                    for booking in allocation.bookings.all():
+                        for nurse_assignment in booking.nurse_assignments.filter(status='assigned'):
+                            nurses.append({
+                                'code': nurse_assignment.nurse.nurse_code,
+                                'name': nurse_assignment.nurse.nurse_name or nurse_assignment.nurse.nurse_code
+                            })
+                    
+                    # Get patient room number (staying room) - mapped from StayingRoom
+                    patient_room_no = None
+                    if allocation.patient.pat_room_no:
+                        from masters.models import get_staying_room_display_number
+                        patient_room_no = get_staying_room_display_number(allocation.patient.pat_room_no)
+                    
+                    data.append({
+                        'id': allocation.id,
+                        'patient_name': allocation.patient.pat_name,
+                        'patient_reg_no': allocation.patient.pat_reg_no,
+                        'therapy_name': allocation.therapy_name,
+                        'therapy_code': allocation.therapy_code,
+                        'from_date': allocation.from_date.isoformat(),
+                        'to_date': allocation.to_date.isoformat(),
+                        'status': allocation.status,  # Keep allocation status but filter was based on booking
+                        'room_no': allocation.room.room_no if allocation.room else None,
+                        'patient_room_no': patient_room_no,
+                        'timeslot': allocation.timeslot.slot_time.strftime('%H:%M') if allocation.timeslot else None,
+                        'therapists': therapists,
+                        'nurses': nurses,
+                        'created_at': allocation.created_at.isoformat(),
+                        'allocated_by': allocation.allocated_by.username if allocation.allocated_by else None
+                    })
         
         return JsonResponse({
             'success': True,
