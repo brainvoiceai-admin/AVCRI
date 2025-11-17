@@ -1264,7 +1264,8 @@ def therapy_entry(request):
             for t in qs:
                 results.append({
                     'therapy_code': getattr(t, 'therapy_code', ''),
-                    'therapy_name': getattr(t, 'therapy_name', '')
+                    'therapy_name': getattr(t, 'therapy_name', ''),
+                    'therapy_category': getattr(t, 'therapy_category', '') or ''
                 })
         return JsonResponse(results, safe=False)
 
@@ -2351,6 +2352,14 @@ def prescription_entry_page(request):
             if UsageType is not None:
                 try:
                     for u in UsageType.objects.filter(is_active=True).order_by('name')[:200]:
+                        results.append({'name': getattr(u, 'name', '')})
+                except Exception:
+                    pass
+        elif master_type in ('prescriptionusage', 'prescription_usage'):
+            PrescriptionUsage = get_model_safe('masters', 'PrescriptionUsage')
+            if PrescriptionUsage is not None:
+                try:
+                    for u in PrescriptionUsage.objects.filter(is_active=True).order_by('name')[:200]:
                         results.append({'name': getattr(u, 'name', '')})
                 except Exception:
                     pass

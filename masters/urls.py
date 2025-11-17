@@ -17,6 +17,11 @@ urlpatterns = [
     path('usages/<int:pk>/delete/', views.usage_type_delete, name='usagetype_delete'),
     path('usages/<int:pk>/enable/', views.usage_type_enable, name='usagetype_enable'),
     path('usages/<int:pk>/disable/', views.usage_type_disable, name='usagetype_disable'),
+    path('prescription-usages/', views.PrescriptionUsageManagementView.as_view(), name='prescriptionusage_manage'), 
+    path('prescription-usages/<int:pk>/update/', views.PrescriptionUsageUpdateView.as_view(), name='prescriptionusage_update'),
+    path('prescription-usages/<int:pk>/delete/', views.prescription_usage_delete, name='prescriptionusage_delete'),
+    path('prescription-usages/<int:pk>/enable/', views.prescription_usage_enable, name='prescriptionusage_enable'),
+    path('prescription-usages/<int:pk>/disable/', views.prescription_usage_disable, name='prescriptionusage_disable'),
     path('times/', views.PrescriptionTimeManagementView.as_view(), name='prestime_manage'), 
     path('times/<int:pk>/update/', views.PrescriptionTimeUpdateView.as_view(), name='prestime_update'),
     path('times/<int:pk>/delete/', views.prescription_time_delete, name='prestime_delete'),
@@ -71,4 +76,16 @@ urlpatterns = [
     path('therapist-grades/add/', views.TherapistGradeCreateView.as_view(), name='therapistgrade_add'),
     path('therapist-grades/<int:pk>/update/', views.TherapistGradeUpdateView.as_view(), name='therapistgrade_update'),
     path('therapist-grades/<int:pk>/delete/', views.therapist_grade_delete, name='therapistgrade_delete'),
+    # Nurse Treatment Master CRUD
+    path('nurse-treatments/', views.NurseTreatmentMasterManagementView.as_view(), name='nursetreatment_manage'),
+    path('nurse-treatments/<int:pk>/update/', views.NurseTreatmentMasterUpdateView.as_view(), name='nursetreatment_update'),
+    path('nurse-treatments/<int:pk>/delete/', views.nurse_treatment_delete, name='nursetreatment_delete'),
+    path('nurse-treatments/<int:pk>/enable/', views.nurse_treatment_enable, name='nursetreatment_enable'),
+    path('nurse-treatments/<int:pk>/disable/', views.nurse_treatment_disable, name='nursetreatment_disable'),
+    # Nurse Master CRUD
+    path('nurses/', views.NurseMasterManagementView.as_view(), name='nursemaster_manage'),
+    path('nurses/<int:pk>/update/', views.NurseMasterUpdateView.as_view(), name='nursemaster_update'),
+    path('nurses/<int:pk>/delete/', views.nurse_master_delete, name='nursemaster_delete'),
+    path('nurses/<int:pk>/enable/', views.nurse_master_enable, name='nursemaster_enable'),
+    path('nurses/<int:pk>/disable/', views.nurse_master_disable, name='nursemaster_disable'),
 ]

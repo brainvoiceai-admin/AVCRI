@@ -6,13 +6,15 @@ from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib import messages
 from django.views.generic import ListView, CreateView, UpdateView, DeleteView
 from django.urls import reverse_lazy
+from django.utils.decorators import method_decorator
 from django.db import models as db_models
 from django import forms
-from authentication.decorators import super_admin_required
+from authentication.decorators import super_admin_required, module_access_required
 from .models import (
-    Procured, OilClass, UsageType, PrescriptionTime, 
+    Procured, OilClass, UsageType, PrescriptionUsage, PrescriptionTime, 
     PrescriptionScope, UnitNo, TherapyMaster, ItemMaster, SlotMaster,
-    TherapistGrade, TherapistMaster, TherapistLeaveMaster
+    TherapistGrade, TherapistMaster, TherapistLeaveMaster, NurseTreatmentMaster,
+    NurseMaster
 )
 import json
 
@@ -397,6 +399,230 @@ def usage_type_disable(request, pk):
     usage_type.save()
     messages.success(request, f'Usage type "{usage_type.name}" disabled successfully.')
     return redirect('usagetype_manage')
+
+# Prescription Usage Management Views
+@method_decorator(module_access_required('prescription_usage_manage'), name='dispatch')
+class PrescriptionUsageManagementView(ListView):
+    model = PrescriptionUsage
+    template_name = 'masters/prescriptionusage_manage.html'
+    context_object_name = 'prescriptionusage_list'
+    paginate_by = 20
+
+    def get_queryset(self):
+        return PrescriptionUsage.objects.all().order_by('name')
+    
+    def post(self, request, *args, **kwargs):
+        """Handle POST requests for creating new prescription usages"""
+        name = request.POST.get('name')
+        is_active = request.POST.get('is_active') == 'on'
+        
+        # Create new record
+        if name:
+            try:
+                PrescriptionUsage.objects.create(
+                    name=name,
+                    is_active=is_active
+                )
+                messages.success(request, f'Prescription usage "{name}" created successfully.')
+            except Exception as e:
+                messages.error(request, f'Error creating prescription usage: {str(e)}')
+        else:
+            messages.error(request, 'Name is required.')
+        
+        return redirect('prescriptionusage_manage')
+
+@method_decorator(module_access_required('prescription_usage_manage'), name='dispatch')
+class PrescriptionUsageUpdateView(UpdateView):
+    model = PrescriptionUsage
+    fields = ['name', 'is_active']
+    template_name = 'masters/prescriptionusage_form.html'
+    success_url = reverse_lazy('prescriptionusage_manage')
+    
+    def form_valid(self, form):
+        messages.success(self.request, 'Prescription usage updated successfully.')
+        return super().form_valid(form)
+
+@login_required
+@module_access_required('prescription_usage_manage')
+def prescription_usage_delete(request, pk):
+    """Delete a prescription usage - function-based view to handle GET requests properly"""
+    prescription_usage = get_object_or_404(PrescriptionUsage, pk=pk)
+    prescription_usage_name = prescription_usage.name
+    prescription_usage.delete()
+    messages.success(request, f'Prescription usage "{prescription_usage_name}" deleted successfully.')
+    return redirect('prescriptionusage_manage')
+
+@login_required
+@module_access_required('prescription_usage_manage')
+def prescription_usage_enable(request, pk):
+    """Enable a prescription usage"""
+    prescription_usage = get_object_or_404(PrescriptionUsage, pk=pk)
+    prescription_usage.is_active = True
+    prescription_usage.save()
+    messages.success(request, f'Prescription usage "{prescription_usage.name}" enabled successfully.')
+    return redirect('prescriptionusage_manage')
+
+@login_required
+@module_access_required('prescription_usage_manage')
+def prescription_usage_disable(request, pk):
+    """Disable a prescription usage"""
+    prescription_usage = get_object_or_404(PrescriptionUsage, pk=pk)
+    prescription_usage.is_active = False
+    prescription_usage.save()
+    messages.success(request, f'Prescription usage "{prescription_usage.name}" disabled successfully.')
+    return redirect('prescriptionusage_manage')
+
+# Nurse Treatment Master Management Views
+@method_decorator(super_admin_required, name='dispatch')
+class NurseTreatmentMasterManagementView(ListView):
+    model = NurseTreatmentMaster
+    template_name = 'masters/nursetreatment_manage.html'
+    context_object_name = 'nursetreatment_list'
+    paginate_by = 20
+
+    def get_queryset(self):
+        return NurseTreatmentMaster.objects.all().order_by('treatment_code')
+    
+    def post(self, request, *args, **kwargs):
+        """Handle POST requests for creating new nurse treatments"""
+        treatment_code = request.POST.get('treatment_code')
+        name = request.POST.get('name')
+        number_of_nurse_required = request.POST.get('number_of_nurse_required', 1)
+        is_active = request.POST.get('is_active') == 'on'
+        
+        # Create new record
+        if treatment_code and name:
+            try:
+                NurseTreatmentMaster.objects.create(
+                    treatment_code=treatment_code,
+                    name=name,
+                    number_of_nurse_required=int(number_of_nurse_required) if number_of_nurse_required else 1,
+                    is_active=is_active
+                )
+                messages.success(request, f'Nurse treatment "{treatment_code} - {name}" created successfully.')
+            except Exception as e:
+                messages.error(request, f'Error creating nurse treatment: {str(e)}')
+        else:
+            messages.error(request, 'Treatment code and name are required.')
+        
+        return redirect('nursetreatment_manage')
+
+@method_decorator(super_admin_required, name='dispatch')
+class NurseTreatmentMasterUpdateView(UpdateView):
+    model = NurseTreatmentMaster
+    fields = ['treatment_code', 'name', 'number_of_nurse_required', 'is_active']
+    template_name = 'masters/nursetreatment_form.html'
+    success_url = reverse_lazy('nursetreatment_manage')
+    
+    def form_valid(self, form):
+        messages.success(self.request, 'Nurse treatment updated successfully.')
+        return super().form_valid(form)
+
+@login_required
+@super_admin_required
+def nurse_treatment_delete(request, pk):
+    """Delete a nurse treatment - function-based view to handle GET requests properly"""
+    treatment = get_object_or_404(NurseTreatmentMaster, pk=pk)
+    treatment_name = f"{treatment.treatment_code} - {treatment.name}"
+    treatment.delete()
+    messages.success(request, f'Nurse treatment "{treatment_name}" deleted successfully.')
+    return redirect('nursetreatment_manage')
+
+@login_required
+@super_admin_required
+def nurse_treatment_enable(request, pk):
+    """Enable a nurse treatment"""
+    treatment = get_object_or_404(NurseTreatmentMaster, pk=pk)
+    treatment.is_active = True
+    treatment.save()
+    messages.success(request, f'Nurse treatment "{treatment.treatment_code} - {treatment.name}" enabled successfully.')
+    return redirect('nursetreatment_manage')
+
+@login_required
+@super_admin_required
+def nurse_treatment_disable(request, pk):
+    """Disable a nurse treatment"""
+    treatment = get_object_or_404(NurseTreatmentMaster, pk=pk)
+    treatment.is_active = False
+    treatment.save()
+    messages.success(request, f'Nurse treatment "{treatment.treatment_code} - {treatment.name}" disabled successfully.')
+    return redirect('nursetreatment_manage')
+
+# Nurse Master Management Views
+@method_decorator(super_admin_required, name='dispatch')
+class NurseMasterManagementView(ListView):
+    model = NurseMaster
+    template_name = 'masters/nursemaster_manage.html'
+    context_object_name = 'nursemaster_list'
+    paginate_by = 20
+
+    def get_queryset(self):
+        return NurseMaster.objects.all().order_by('nurse_code')
+    
+    def post(self, request, *args, **kwargs):
+        """Handle POST requests for creating new nurses"""
+        nurse_code = request.POST.get('nurse_code')
+        nurse_name = request.POST.get('nurse_name')
+        designation = request.POST.get('designation', '')
+        is_active = request.POST.get('is_active') == 'on'
+        
+        # Create new record
+        if nurse_code and nurse_name:
+            try:
+                NurseMaster.objects.create(
+                    nurse_code=nurse_code,
+                    nurse_name=nurse_name,
+                    designation=designation,
+                    is_active=is_active
+                )
+                messages.success(request, f'Nurse "{nurse_code} - {nurse_name}" created successfully.')
+            except Exception as e:
+                messages.error(request, f'Error creating nurse: {str(e)}')
+        else:
+            messages.error(request, 'Nurse code and name are required.')
+        
+        return redirect('nursemaster_manage')
+
+@method_decorator(super_admin_required, name='dispatch')
+class NurseMasterUpdateView(UpdateView):
+    model = NurseMaster
+    fields = ['nurse_code', 'nurse_name', 'designation', 'is_active']
+    template_name = 'masters/nursemaster_form.html'
+    success_url = reverse_lazy('nursemaster_manage')
+    
+    def form_valid(self, form):
+        messages.success(self.request, 'Nurse updated successfully.')
+        return super().form_valid(form)
+
+@login_required
+@super_admin_required
+def nurse_master_delete(request, pk):
+    """Delete a nurse - function-based view to handle GET requests properly"""
+    nurse = get_object_or_404(NurseMaster, pk=pk)
+    nurse_name = f"{nurse.nurse_code} - {nurse.nurse_name}"
+    nurse.delete()
+    messages.success(request, f'Nurse "{nurse_name}" deleted successfully.')
+    return redirect('nursemaster_manage')
+
+@login_required
+@super_admin_required
+def nurse_master_enable(request, pk):
+    """Enable a nurse"""
+    nurse = get_object_or_404(NurseMaster, pk=pk)
+    nurse.is_active = True
+    nurse.save()
+    messages.success(request, f'Nurse "{nurse.nurse_code} - {nurse.nurse_name}" enabled successfully.')
+    return redirect('nursemaster_manage')
+
+@login_required
+@super_admin_required
+def nurse_master_disable(request, pk):
+    """Disable a nurse"""
+    nurse = get_object_or_404(NurseMaster, pk=pk)
+    nurse.is_active = False
+    nurse.save()
+    messages.success(request, f'Nurse "{nurse.nurse_code} - {nurse.nurse_name}" disabled successfully.')
+    return redirect('nursemaster_manage')
 
 class PrescriptionTimeManagementView(ListView):
     model = PrescriptionTime

@@ -52,6 +52,58 @@ class UsageType(models.Model):
         verbose_name_plural = "Usage Types"
         ordering = ["name"]
 
+#Prescription Usage Master
+class PrescriptionUsage(models.Model):
+    """Master list of usage types specifically for prescriptions."""
+    name = models.CharField(max_length=100, unique=True, verbose_name="Prescription Usage Name")
+    is_active = models.BooleanField(default=True, verbose_name="Active")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Created At")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="Updated At")
+
+    def __str__(self):
+        return self.name
+
+    class Meta:
+        verbose_name = "Prescription Usage"
+        verbose_name_plural = "Prescription Usages"
+        ordering = ["name"]
+
+
+class NurseTreatmentMaster(models.Model):
+    """Master list of nurse treatments with required nurse count."""
+    treatment_code = models.CharField(max_length=50, unique=True, verbose_name="Treatment Code")
+    name = models.CharField(max_length=200, verbose_name="Treatment Name")
+    number_of_nurse_required = models.PositiveIntegerField(default=1, verbose_name="Number of Nurses Required")
+    is_active = models.BooleanField(default=True, verbose_name="Active")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Created At")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="Updated At")
+
+    def __str__(self):
+        return f"{self.treatment_code} - {self.name}"
+
+    class Meta:
+        verbose_name = "Nurse Treatment"
+        verbose_name_plural = "Nurse Treatments"
+        ordering = ["treatment_code"]
+
+
+class NurseMaster(models.Model):
+    """Master list of nurses with their codes, names, and designations."""
+    nurse_code = models.CharField(max_length=50, unique=True, verbose_name="Nurse Code")
+    nurse_name = models.CharField(max_length=200, verbose_name="Nurse Name")
+    designation = models.CharField(max_length=100, verbose_name="Designation")
+    is_active = models.BooleanField(default=True, verbose_name="Active")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Created At")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="Updated At")
+
+    def __str__(self):
+        return f"{self.nurse_code} - {self.nurse_name}"
+
+    class Meta:
+        verbose_name = "Nurse"
+        verbose_name_plural = "Nurses"
+        ordering = ["nurse_code"]
+
 
 #Prescription time master
 class PrescriptionTime(models.Model):
