@@ -631,6 +631,64 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
     if not allocation:
         return {"error": f"TherapyAllocation id {therapy_allocation_id} not found."}
 
+    # Check if this is a nurse treatment - if so, handle it separately
+    from Sheduling.nurse_allocation import is_nurse_treatment
+    nurse_treatment = is_nurse_treatment(allocation.therapy_code, allocation.therapy_name)
+    
+    if nurse_treatment:
+        # For nurse treatments, skip therapist allocation and just allocate nurses
+        bookings_qs = Booking.objects.filter(allocation_id=therapy_allocation_id, date=target_date)
+        if not bookings_qs.exists():
+            return {"error": f"No Booking rows found for allocation {therapy_allocation_id} on {target_date.isoformat()}."}
+        
+        tasks = []
+        from Sheduling.nurse_allocation import allocate_nurses_for_booking
+        
+        for booking in bookings_qs:
+            booking_id = booking.pk
+            therapy_name = allocation.therapy_name
+            
+            # Allocate nurses
+            try:
+                nurse_assignments = allocate_nurses_for_booking(booking)
+                # Mark booking as scheduled (nurse treatments don't need therapists)
+                booking.status = 'scheduled'
+                booking.save(update_fields=['status', 'updated_at'])
+                
+                # Get nurse names for response
+                nurse_names = [f"{na.nurse.nurse_name} ({na.nurse.nurse_code})" for na in nurse_assignments]
+                
+                tasks.append({
+                    "booking_id": booking_id,
+                    "allocation_id": therapy_allocation_id,
+                    "date": target_date.isoformat(),
+                    "therapy_name": therapy_name,
+                    "slot": getattr(booking.timeslot, 'slot_time', None).strftime('%H:%M') if booking.timeslot and hasattr(booking.timeslot, 'slot_time') else None,
+                    "status": "BOOKED",
+                    "reason": None,
+                    "room_no": getattr(booking.room, 'room_no', None) if booking.room else None,
+                    "therapists": [],  # No therapists for nurse treatments
+                    "nurses": nurse_names  # Include nurses in response
+                })
+            except Exception as e:
+                print(f"Error allocating nurses for booking {booking_id}: {e}")
+                booking.status = 'failed'
+                booking.save(update_fields=['status', 'updated_at'])
+                tasks.append({
+                    "booking_id": booking_id,
+                    "allocation_id": therapy_allocation_id,
+                    "date": target_date.isoformat(),
+                    "therapy_name": therapy_name,
+                    "slot": None,
+                    "status": "FAILED",
+                    "reason": f"Error allocating nurses: {str(e)}",
+                    "room_no": None,
+                    "therapists": [],
+                    "nurses": []
+                })
+        
+        return tasks
+
     bookings_qs = Booking.objects.filter(allocation_id=therapy_allocation_id, date=target_date)
     if not bookings_qs.exists():
         return {"error": f"No Booking rows found for allocation {therapy_allocation_id} on {target_date.isoformat()}."}

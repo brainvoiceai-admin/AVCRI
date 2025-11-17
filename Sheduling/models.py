@@ -183,6 +183,45 @@ class BookingAssignment(models.Model):
         return f"{self.therapist} assigned to {self.booking} ({self.assigned_for})"
 
 
+class BookingNurseAssignment(models.Model):
+    """
+    Assign nurses to bookings for nurse treatments.
+    Nurses are allocated for the entire day (not time-slot specific).
+    Unique constraint ensures one nurse per booking (nurses can work multiple bookings per day).
+    """
+    booking = models.ForeignKey(Booking, on_delete=models.CASCADE, related_name='nurse_assignments')
+    nurse = models.ForeignKey('masters.NurseMaster', on_delete=models.PROTECT)  # references NurseMaster
+    status = models.CharField(max_length=20, default='assigned')  # assigned | released
+    assigned_at = models.DateTimeField(auto_now_add=True)
+    released_at = models.DateTimeField(null=True, blank=True)
+    released_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
+
+    # denormalized snapshot of booking's date/timeslot for uniqueness checks
+    booking_date = models.DateField(db_index=True, null=True, blank=True)
+    booking_timeslot = models.ForeignKey('masters.SlotMaster', null=True, blank=True, on_delete=models.SET_NULL, related_name='booking_nurse_assignments')
+
+    class Meta:
+        constraints = [
+            # Unique constraint: one nurse per booking (nurses can work multiple bookings per day)
+            models.UniqueConstraint(fields=['nurse','booking'], name='ux_nurse_assignment_nurse_booking')
+        ]
+        indexes = [
+            models.Index(fields=['nurse','status']),
+            models.Index(fields=['booking','nurse']),
+            models.Index(fields=['booking_date','status']),  # For daily workload queries
+        ]
+
+    def save(self, *args, **kwargs):
+        # keep denormalized booking_date in sync with booking (timeslot not needed for nurses)
+        if self.booking:
+            self.booking_date = self.booking.date
+            # booking_timeslot is kept as None since nurses are allocated for entire day
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.nurse} assigned to {self.booking}"
+
+
 class CancellationRequest(models.Model):
     """
     CancellationRequest may target a date range and (optionally) a list of booking_item ids.

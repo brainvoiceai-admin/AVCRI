@@ -888,11 +888,12 @@
       <div id="status-modal-info" class="small-muted" style="margin-top: 8px;"></div>
 
       <div style="margin-top:16px;">
-        <div style="display:flex;gap:8px;font-weight:700;padding:12px;border-bottom:1px solid var(--border-light);background:#f8f9fa;">
+        <div id="status-header-row" style="display:flex;gap:8px;font-weight:700;padding:12px;border-bottom:1px solid var(--border-light);background:#f8f9fa;">
           <div style="width:140px">Date</div>
           <div style="width:120px">Slot</div>
           <div style="width:200px">Treatment Room</div>
-          <div style="width:200px">Therapist</div>
+          <div style="width:150px">Patient Room</div>
+          <div style="width:200px" id="staff-header">Therapist</div>
           <div style="width:140px">Status</div>
         </div>
 
@@ -1330,25 +1331,8 @@ $(function(){
     const usageValues = usageSelect.val() || []; // Get array of selected values
     const usage = usageValues.join(', '); // Join with comma and space
     
-    // Items are now optional - no validation required
-    // Only validate if at least one item is selected (then dosage, uno, usage are required)
-    if (selected.length > 0) {
-      if (!dosage) {
-        alert('Dosage is required when items are selected');
-        $('#item-builder-dosage').focus();
-        return;
-      }
-      if (!uno) {
-        alert('Unit is required when items are selected');
-        $('#item-builder-uno').focus();
-        return;
-      }
-      if (!usage || usageValues.length === 0) {
-        alert('At least one Usage is required when items are selected');
-        usageSelect.focus();
-        return;
-      }
-    }
+    // All fields are now optional - no validation required
+    // Users can add item groups with empty or partial data, or submit therapy without any items
     
     const items = selected.length > 0 ? selected.map(s => ({ item_code: s.id, item_name: s.text || s.id })) : [];
     const grp = { id: Math.random().toString(36).slice(2,9), items, dosage, uno, usage, usage_array: usageValues };
@@ -1709,10 +1693,11 @@ $(function(){
         const statusText = ({scheduled:'Scheduled', draft:'Draft', pending:'Pending', cancel_requested:'Cancel Requested', cancelled:'Cancelled', completed:'Completed'})[b.status] || b.status;
         const $row = $(`
           <div class="status-date-row" data-id="${b.id}">
-            <div style="display:flex;gap:12px;align-items:center;min-width:760px;">
+            <div style="display:flex;gap:12px;align-items:center;min-width:910px;">
               <div style="width:140px"><strong>${b.date}</strong></div>
               <div style="width:120px">${esc(format12Hour(b.slot||''))}</div>
               <div style="width:200px">${esc(b.room||'—')}</div>
+              <div style="width:150px">${esc(b.patient_room_no||'—')}</div>
               <div style="width:200px">${esc(b.therapist||'—')}</div>
               <div style="width:140px"><span class="status-pill ${pillClass}">${statusText}</span></div>
             </div>
@@ -1725,6 +1710,17 @@ $(function(){
 
     // fetch server allocation_status
     ajax({action:'allocation_status', allocation_id: t.allocation_id}).then(data => {
+      // Check if this is a nurse treatment
+      const isNurseTreatment = data.is_nurse_treatment || false;
+      
+      // Update header based on treatment type
+      const $staffHeader = $('#status-header-row').find('#staff-header');
+      if (isNurseTreatment) {
+        $staffHeader.text('Nurse');
+      } else {
+        $staffHeader.text('Therapist');
+      }
+      
       // Show status summary at top
       const statusSummary = data.status_summary || {};
       const summaryParts = [];
@@ -1760,13 +1756,20 @@ $(function(){
           bookingsByStatus[status].forEach(b => {
             const pillClass = ({scheduled:'status-scheduled', allocated:'status-scheduled', draft:'status-draft', pending:'status-draft', failed:'status-cancelled', cancel_requested:'status-cancelreq', cancelled:'status-cancelled', completed:'status-completed'})[b.status] || 'status-scheduled';
             const statusText = ({scheduled:'Scheduled', allocated:'Allocated', draft:'Draft', failed:'Failed', pending:'Pending', cancel_requested:'Cancel Requested', cancelled:'Cancelled', completed:'Completed'})[b.display_status || b.status] || b.status;
+            
+            // Show nurses for nurse treatments, therapists for regular treatments
+            const staffNames = isNurseTreatment 
+              ? ((b.nurses||[]).join(', ') || '—')
+              : ((b.therapists||[]).join(', ') || '—');
+            
             const $row = $(`
               <div class="status-date-row" data-id="${b.booking_id}">
-                <div style="display:flex;gap:12px;align-items:center;min-width:760px;">
+                <div style="display:flex;gap:12px;align-items:center;min-width:910px;">
                   <div style="width:140px"><strong>${b.date}</strong></div>
                   <div style="width:120px">${esc(format12Hour(b.slot||''))}</div>
                   <div style="width:200px">${esc(b.room||'—')}</div>
-                  <div style="width:200px">${esc((b.therapists||[]).join(', ')||'—')}</div>
+                  <div style="width:150px">${esc(b.patient_room_no||'—')}</div>
+                  <div style="width:200px">${esc(staffNames)}</div>
                   <div style="width:140px"><span class="status-pill ${pillClass}">${statusText}</span></div>
                 </div>
               </div>`);
