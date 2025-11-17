@@ -188,26 +188,28 @@ def get_therapists_on_leave_api(request):
 def get_time_slots_api(request):
     """API to get available time slots"""
     try:
-        # Get time slots from SlotMaster (deprecate TimeSlot)
-        time_slots = SlotMaster.objects.filter(is_active=True).order_by('start_time')
+        # Get time slots from SlotMaster (using slot_time field)
+        time_slots = SlotMaster.objects.filter(is_active=True).order_by('slot_time')
         
         slots_data = []
         for slot in time_slots:
+            # Format slot_time in 12-hour format for display
+            time_12hr = slot.slot_time.strftime('%I:%M %p').lstrip('0')
             slots_data.append({
                 'id': slot.pk,
-                'start_time': slot.start_time.strftime('%H:%M'),
-                'end_time': slot.end_time.strftime('%H:%M'),
+                'start_time': slot.slot_time.strftime('%H:%M'),
                 'slot_name': slot.slot_name or f"Slot {slot.slot_number}",
-                'display_name': f"{slot.start_time.strftime('%I:%M %p')} - {slot.end_time.strftime('%I:%M %p')}"
+                'display_name': time_12hr,
+                'slot_number': slot.slot_number
             })
         
         # If no time slots in database, return default ones
         if not slots_data:
             default_slots = [
-                {'id': 1, 'start_time': '09:00', 'end_time': '10:00', 'slot_name': 'Morning Slot', 'display_name': '09:00 AM - 10:00 AM'},
-                {'id': 2, 'start_time': '10:00', 'end_time': '11:00', 'slot_name': 'Late Morning', 'display_name': '10:00 AM - 11:00 AM'},
-                {'id': 3, 'start_time': '14:00', 'end_time': '15:00', 'slot_name': 'Afternoon Slot', 'display_name': '02:00 PM - 03:00 PM'},
-                {'id': 4, 'start_time': '15:00', 'end_time': '16:00', 'slot_name': 'Late Afternoon', 'display_name': '03:00 PM - 04:00 PM'},
+                {'id': 1, 'start_time': '09:00', 'slot_name': 'Morning Slot', 'display_name': '9:00 AM', 'slot_number': 1},
+                {'id': 2, 'start_time': '10:00', 'slot_name': 'Late Morning', 'display_name': '10:00 AM', 'slot_number': 2},
+                {'id': 3, 'start_time': '14:00', 'slot_name': 'Afternoon Slot', 'display_name': '2:00 PM', 'slot_number': 3},
+                {'id': 4, 'start_time': '15:00', 'slot_name': 'Late Afternoon', 'display_name': '3:00 PM', 'slot_number': 4},
             ]
             slots_data = default_slots
         

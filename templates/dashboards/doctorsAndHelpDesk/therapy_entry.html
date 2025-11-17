@@ -677,6 +677,66 @@
 
                 // Set patient type badge
                 $('#patient-type-badge').text(patient.patient_type).removeClass('bg-primary bg-success').addClass(patient.patient_type === 'IP' ? 'bg-primary' : 'bg-success');
+                
+                // Load saved therapies for this patient
+                loadPatientTherapies(patient.registration_number);
+            }
+            
+            function loadPatientTherapies(regNo) {
+                if (!regNo) return;
+                
+                $.ajax({
+                    url: '{% url "sheduling:patient_therapy" %}',
+                    method: 'GET',
+                    data: {
+                        action: 'patient_therapies',
+                        patient_reg_no: regNo
+                    },
+                    dataType: 'json',
+                    success: function(therapies) {
+                        console.log('Loaded patient therapies:', therapies);
+                        // Convert API response to format expected by addedTherapies array
+                        addedTherapies = therapies.map(t => {
+                            // Map items_groups to items format
+                            const items = [];
+                            if (t.items_groups && Array.isArray(t.items_groups)) {
+                                t.items_groups.forEach(group => {
+                                    if (group.items && Array.isArray(group.items)) {
+                                        group.items.forEach(item => {
+                                            items.push({
+                                                item_code: item.item_code || item.code || '',
+                                                item_name: item.item_name || item.name || '',
+                                                oil_class: item.oil_class || group.oil_class || t.oil_class || '',
+                                                usage: item.usage || group.usage || t.usage || '',
+                                                procured: item.procured || group.procured || t.procured || ''
+                                            });
+                                        });
+                                    }
+                                });
+                            }
+                            
+                            return {
+                                therapy_name: t.therapy_name || '',
+                                therapy_code: t.therapy_code || '',
+                                ext_int: t.ext_int || '',
+                                slot: t.slot || '', // Ensure slot is included
+                                items: items,
+                                from_date: t.from_date || '',
+                                to_date: t.to_date || '',
+                                days: t.days || '',
+                                allocation_id: t.allocation_id || null
+                            };
+                        });
+                        console.log('Mapped therapies:', addedTherapies);
+                        renderTable();
+                    },
+                    error: function(err) {
+                        console.error('Error loading patient therapies:', err);
+                        // Don't show error to user, just log it
+                        addedTherapies = [];
+                        renderTable();
+                    }
+                });
             }
 
             window.clearPatientSelection = function() {
@@ -1041,16 +1101,39 @@
                     return;
                 }
 
+                // Get slot value - try multiple methods to ensure we capture it
+                let slotValue = '';
+                if (slotSelect.value) {
+                    slotValue = slotSelect.value;
+                } else if ($('#slot-select').val()) {
+                    slotValue = $('#slot-select').val();
+                } else {
+                    const selectedOption = slotSelect.options[slotSelect.selectedIndex];
+                    if (selectedOption && selectedOption.value) {
+                        slotValue = selectedOption.value;
+                    }
+                }
+                
+                // Debug: log slot value being captured
+                console.log('Slot select element:', slotSelect);
+                console.log('Slot select value (direct):', slotSelect.value);
+                console.log('Slot select value (jQuery):', $('#slot-select').val());
+                console.log('Captured slotValue:', slotValue);
+
                 const newTherapy = {
                     therapy_name: selectedTherapyOption.text,
                     therapy_code: selectedTherapyOption.value,
                     ext_int: extIntSelect.value,
-                    slot: slotSelect.value || '', // NEW: store slot
+                    slot: slotValue, // Store slot value
                     items: JSON.parse(JSON.stringify(currentItems)), // deep copy
                     from_date: fromDateInput.value,
                     to_date: toDateInput.value,
                     days: daysInput.value || ''
                 };
+                
+                // Debug: log the complete therapy object before adding
+                console.log('New therapy object:', newTherapy);
+                console.log('New therapy slot:', newTherapy.slot);
 
                 addedTherapies.push(newTherapy);
                 renderTable();
@@ -1060,6 +1143,10 @@
             function renderTable() {
                 tableBody.innerHTML = '';
                 addedTherapies.forEach((therapy, index) => {
+                    // Debug: log therapy object to see slot value
+                    console.log('Rendering therapy:', therapy);
+                    console.log('Slot value:', therapy.slot);
+                    
                     // Build items html: one line per item with small meta
                     const itemsHtml = therapy.items.map(it => {
                         const metaParts = [];
@@ -1070,21 +1157,37 @@
                         return `<div style="margin-bottom:6px;"><strong>${it.item_name}</strong>${meta}</div>`;
                     }).join('');
 
-                    // Format slot display (friendly)
-                    const slotDisplay = therapy.slot ? (formatSlotDisplay(therapy.slot)) : '';
+                    // Format slot display (friendly) - ensure we handle the slot value
+                    let slotDisplay = '—';
+                    if (therapy.slot) {
+                        try {
+                            slotDisplay = formatSlotDisplay(therapy.slot);
+                            console.log('Formatted slot display:', slotDisplay, 'from value:', therapy.slot);
+                            // If formatting returns empty, use the raw value
+                            if (!slotDisplay || slotDisplay === '') {
+                                slotDisplay = therapy.slot;
+                            }
+                        } catch (e) {
+                            console.error('Error formatting slot:', e, 'Raw value:', therapy.slot);
+                            slotDisplay = therapy.slot || '—';
+                        }
+                    } else {
+                        console.warn('No slot value found for therapy:', therapy.therapy_name, 'Full therapy object:', therapy);
+                    }
 
                     const newRow = document.createElement('tr');
                     newRow.innerHTML = `
                         <td>${index + 1}</td>
                         <td>${therapy.therapy_name}</td>
                         <td>${therapy.ext_int || ''}</td>
-                        <td>${slotDisplay}</td>
+                        <td style="min-width: 100px;">${slotDisplay}</td>
                         <td>${itemsHtml}</td>
                         <td>${therapy.from_date}</td>
                         <td>${therapy.to_date}</td>
                         <td>${therapy.days}</td>
                         <td><button class="action-btn remove-btn remove-therapy" type="button" data-index="${index}"><i class="fas fa-trash me-1"></i>Remove</button></td>
                     `;
+                    console.log('Row HTML being inserted:', newRow.innerHTML);
                     tableBody.appendChild(newRow);
                 });
             }

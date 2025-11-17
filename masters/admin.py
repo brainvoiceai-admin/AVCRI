@@ -2,7 +2,7 @@ from django.contrib import admin
 from .models import (
     Procured, OilClass, UsageType, PrescriptionTime, 
     PrescriptionScope, UnitNo, TherapyMaster, ItemMaster, SlotMaster,
-    TherapistMaster, TherapistLeaveMaster, TherapistGrade
+    TherapistMaster, TherapistLeaveMaster, TherapistGrade, StayingRoom
 )
 
 @admin.register(Procured)
@@ -168,6 +168,22 @@ class TherapistLeaveMasterAdmin(admin.ModelAdmin):
     fieldsets = (
         ('Leave Information', {
             'fields': ('therapist', 'leave_day', 'leave_day_name')
+        }),
+        ('Status', {
+            'fields': ('is_active',)
+        }),
+    )
+
+@admin.register(StayingRoom)
+class StayingRoomAdmin(admin.ModelAdmin):
+    list_display = ['number', 'room_no', 'room_desc', 'is_active', 'created_at']
+    list_filter = ['is_active', 'created_at']
+    search_fields = ['number', 'room_no', 'room_desc']
+    list_editable = ['is_active']
+    ordering = ['number']
+    fieldsets = (
+        ('Room Information', {
+            'fields': ('number', 'room_no', 'room_desc')
         }),
         ('Status', {
             'fields': ('is_active',)

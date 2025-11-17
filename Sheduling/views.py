@@ -12,6 +12,7 @@ from django.utils import timezone
 from django.db import transaction, IntegrityError
 from authentication.models import AuditLog as AuthAuditLog
 from .decorators import scheduling_access_required, scheduling_admin_required, therapist_access_required, api_access_required
+from masters.models import get_staying_room_display_number
 
 EXTERNAL_DB_ALIAS = 'therapy_db'  # external SQL Server alias
 
@@ -407,7 +408,7 @@ def therapy_entry(request):
                             hh = int(parts[0]); mm = int(parts[1])
                             from_time = datetime.strptime(f"{hh:02d}:{mm:02d}", "%H:%M").time()
                             if SlotMaster is not None:
-                                new_timeslot = SlotMaster.objects.filter(start_time=from_time, is_active=True).first()
+                                new_timeslot = SlotMaster.objects.filter(slot_time=from_time, is_active=True).first()
                         else:
                             if SlotMaster is not None:
                                 new_timeslot = SlotMaster.objects.filter(slot_number=int(ts_val), is_active=True).first()
@@ -967,7 +968,7 @@ def therapy_entry(request):
                         hh = int(parts[0]); mm = int(parts[1])
                         from_time = datetime.strptime(f"{hh:02d}:{mm:02d}", "%H:%M").time()
                         if SlotMaster is not None:
-                            timeslot_obj = SlotMaster.objects.filter(start_time=from_time, is_active=True).first()
+                            timeslot_obj = SlotMaster.objects.filter(slot_time=from_time, is_active=True).first()
                     else:
                         # try slot_number int
                         if SlotMaster is not None:
@@ -1000,11 +1001,13 @@ def therapy_entry(request):
 
             # ensure patient snapshot
             pat_no = str(payload['patient_reg_no'])
+            raw_room_no = payload.get('patient_room_no') or ''
+            resolved_room_no = get_staying_room_display_number(raw_room_no) or ''
             ps_defaults = {
                 'pat_name': payload.get('patient_name') or '',
                 'pat_age': payload.get('patient_age') or '',
                 'pat_sex': payload.get('patient_sex') or '',
-                'pat_room_no': payload.get('patient_room_no') or '',
+                'pat_room_no': resolved_room_no,
                 'pat_ref_id': payload.get('pat_ref_id') or payload.get('pat_ref_id') or ''
             }
             if PatientSnapshot is None:
@@ -1319,7 +1322,7 @@ def therapy_entry(request):
             try:
                 qs = SlotMaster.objects.filter(is_active=True).all().order_by('slot_number')  # Use local master table
                 for s in qs:
-                    start = getattr(s, 'start_time', '')
+                    start = getattr(s, 'slot_time', '')
                     if hasattr(start, 'strftime'):
                         start_s = start.strftime('%H:%M')
                     else:
@@ -1380,7 +1383,8 @@ def therapy_entry(request):
             therapists = []
             try:
                 for a in b.assignments.all():
-                    therapists.append(getattr(a.therapist, 'therapist_code', '') or getattr(a.therapist, 'id', ''))
+                    therapist_name = getattr(a.therapist, 'therapist_name', '') or getattr(a.therapist, 'therapist_code', '') or getattr(a.therapist, 'id', '')
+                    therapists.append(therapist_name)
             except Exception:
                 therapists = []
             slot_s = ''
@@ -1460,12 +1464,17 @@ def therapy_entry(request):
                 if status_counts['draft'] > 0:
                     status_summary['draft'] = status_counts['draft']
                 
+                # Get slot time in HH:MM format
+                slot_value = ''
+                if a.timeslot and hasattr(a.timeslot, 'slot_time'):
+                    slot_value = a.timeslot.slot_time.strftime('%H:%M')
+                
                 out.append({
                     'allocation_id': a.pk,
                     'therapy_code': a.therapy_code,
                     'therapy_name': a.therapy_name,
                     'ext_int': a.ext_int,
-                    'slot': getattr(a.timeslot,'start_time',None).strftime('%H:%M') if getattr(a,'timeslot',None) and getattr(a.timeslot,'start_time',None) else '',
+                    'slot': slot_value,
                     'oil_class': a.oil_class,
                     'usage': a.usage,
                     'procured': a.procured_from,
@@ -1485,11 +1494,21 @@ def therapy_entry(request):
             try:
                 qs = PatientTherapy.objects.filter(patient__pat_reg_no=reg)[:200]
                 for pt in qs:
+                    # Get slot value - handle both slot_time and start_time for backward compatibility
+                    slot_val = ''
+                    if hasattr(pt, 'slot') and pt.slot:
+                        if hasattr(pt.slot, 'slot_time'):
+                            slot_val = pt.slot.slot_time.strftime('%H:%M') if pt.slot.slot_time else ''
+                        elif hasattr(pt.slot, 'start_time'):
+                            slot_val = pt.slot.start_time.strftime('%H:%M') if pt.slot.start_time else ''
+                        else:
+                            slot_val = str(getattr(pt, 'slot', ''))
+                    
                     out.append({
                         'therapy_code': getattr(pt, 'therapy_code', getattr(pt, 'therapy_id', '')),
                         'therapy_name': getattr(pt, 'therapy_name', '') or str(getattr(pt, 'therapy', '')),
                         'ext_int': getattr(pt, 'ext_int', ''),
-                        'slot': getattr(pt, 'slot', '') and (getattr(pt.slot, 'start_time', '') if hasattr(pt, 'slot') else getattr(pt, 'slot')),
+                        'slot': slot_val,
                         'oil_class': getattr(pt, 'oil_class', ''),
                         'usage': getattr(pt, 'usage', ''),
                         'procured': getattr(pt, 'procured_from', ''),
@@ -1590,13 +1609,15 @@ def prescription_entry_page(request):
             
             try:
                 # Get or create patient snapshot
+                raw_room_no = payload.get('patient_room_no', '')
+                resolved_room_no = get_staying_room_display_number(raw_room_no) if raw_room_no else ''
                 ps, created = PatientSnapshot.objects.get_or_create(
                     pat_reg_no=str(patient_reg_no),
                     defaults={
                         'pat_name': payload.get('patient_name', ''),
                         'pat_age': payload.get('patient_age', ''),
                         'pat_sex': payload.get('patient_sex', ''),
-                        'pat_room_no': payload.get('patient_room_no', ''),
+                        'pat_room_no': resolved_room_no,
                         'pat_ref_id': payload.get('patient_ref_id', ''),
                     }
                 )
@@ -1609,8 +1630,8 @@ def prescription_entry_page(request):
                     ps.pat_age = payload.get('patient_age'); changed = True
                 if payload.get('patient_sex') and ps.pat_sex != payload.get('patient_sex'):
                     ps.pat_sex = payload.get('patient_sex'); changed = True
-                if payload.get('patient_room_no') and ps.pat_room_no != payload.get('patient_room_no'):
-                    ps.pat_room_no = payload.get('patient_room_no'); changed = True
+                if resolved_room_no and ps.pat_room_no != resolved_room_no:
+                    ps.pat_room_no = resolved_room_no; changed = True
                 if payload.get('patient_ref_id') and ps.pat_ref_id != payload.get('patient_ref_id'):
                     ps.pat_ref_id = payload.get('patient_ref_id'); changed = True
                 
@@ -2022,13 +2043,15 @@ def prescription_entry_page(request):
             
             try:
                 # Get or create patient snapshot
+                raw_room_no = payload.get('patient_room_no', '')
+                resolved_room_no = get_staying_room_display_number(raw_room_no) if raw_room_no else ''
                 ps, created = PatientSnapshot.objects.get_or_create(
                     pat_reg_no=str(patient_reg_no),
                     defaults={
                         'pat_name': payload.get('patient_name', ''),
                         'pat_age': payload.get('patient_age', ''),
                         'pat_sex': payload.get('patient_sex', ''),
-                        'pat_room_no': payload.get('patient_room_no', ''),
+                        'pat_room_no': resolved_room_no,
                         'pat_ref_id': payload.get('patient_ref_id', ''),
                     }
                 )
@@ -2041,8 +2064,8 @@ def prescription_entry_page(request):
                     ps.pat_age = payload.get('patient_age'); changed = True
                 if payload.get('patient_sex') and ps.pat_sex != payload.get('patient_sex'):
                     ps.pat_sex = payload.get('patient_sex'); changed = True
-                if payload.get('patient_room_no') and ps.pat_room_no != payload.get('patient_room_no'):
-                    ps.pat_room_no = payload.get('patient_room_no'); changed = True
+                if resolved_room_no and ps.pat_room_no != resolved_room_no:
+                    ps.pat_room_no = resolved_room_no; changed = True
                 if payload.get('patient_ref_id') and ps.pat_ref_id != payload.get('patient_ref_id'):
                     ps.pat_ref_id = payload.get('patient_ref_id'); changed = True
                 if changed: ps.save()
@@ -2634,10 +2657,10 @@ def allocate_therapy(request):
         t = parse_time_hhmm(payload["timeslot"])
         if not t:
             return JsonResponse({"error": "Invalid timeslot format, expected HH:MM"}, status=400)
-        timeslot = SlotMaster.objects.filter(start_time=t, is_active=True).first()  # Use local master table
+        timeslot = SlotMaster.objects.filter(slot_time=t, is_active=True).first()  # Use local master table
         if not timeslot:
             # Optionally create a timeslot if you want; for safety we require an existing one:
-            return JsonResponse({"error": "TimeSlot with that start_time not found"}, status=400)
+            return JsonResponse({"error": "TimeSlot with that slot_time not found"}, status=400)
 
     # room (optional)
     room = None
@@ -3284,8 +3307,8 @@ def get_therapy_data_api(request):
                     for assignment in booking.assignments.all():
                         therapists.append({
                             'code': assignment.therapist.therapist_code,
-                            'name': assignment.therapist.therapist_name,
-                            'grade': assignment.therapist.therapist_grade
+                            'name': assignment.therapist.therapist_name or assignment.therapist.therapist_code,
+                            'grade': getattr(assignment.therapist.therapist_grade, 'name', '') if assignment.therapist.therapist_grade else ''
                         })
                     
                     # Get room from booking, RoomBooking, allocation, or PatientSnapshot
@@ -3325,6 +3348,12 @@ def get_therapy_data_api(request):
                     if not room_no and booking.allocation.patient.pat_room_no:
                         room_no = booking.allocation.patient.pat_room_no
                     
+                    # Get patient room number (staying room) - mapped from StayingRoom
+                    patient_room_no = None
+                    if booking.allocation.patient.pat_room_no:
+                        from masters.models import get_staying_room_display_number
+                        patient_room_no = get_staying_room_display_number(booking.allocation.patient.pat_room_no)
+                    
                     data.append({
                         'id': booking.allocation.id,
                         'booking_id': booking.id,
@@ -3338,6 +3367,7 @@ def get_therapy_data_api(request):
                         'status': booking.status,
                         'booking_status': booking.status,
                         'room_no': room_no,
+                        'patient_room_no': patient_room_no,
                         'timeslot': booking.timeslot.slot_time.strftime('%H:%M') if booking.timeslot else None,
                         'therapists': therapists,
                         'created_at': booking.allocation.created_at.isoformat(),
@@ -3381,9 +3411,15 @@ def get_therapy_data_api(request):
                     for assignment in booking.assignments.all():
                         therapists.append({
                             'code': assignment.therapist.therapist_code,
-                            'name': assignment.therapist.therapist_name,
-                            'grade': assignment.therapist.therapist_grade
+                            'name': assignment.therapist.therapist_name or assignment.therapist.therapist_code,
+                            'grade': getattr(assignment.therapist.therapist_grade, 'name', '') if assignment.therapist.therapist_grade else ''
                         })
+                
+                # Get patient room number (staying room) - mapped from StayingRoom
+                patient_room_no = None
+                if allocation.patient.pat_room_no:
+                    from masters.models import get_staying_room_display_number
+                    patient_room_no = get_staying_room_display_number(allocation.patient.pat_room_no)
                 
                 data.append({
                     'id': allocation.id,
@@ -3395,6 +3431,7 @@ def get_therapy_data_api(request):
                     'to_date': allocation.to_date.isoformat(),
                     'status': allocation.status,  # Keep allocation status but filter was based on booking
                     'room_no': allocation.room.room_no if allocation.room else None,
+                    'patient_room_no': patient_room_no,
                     'timeslot': allocation.timeslot.slot_time.strftime('%H:%M') if allocation.timeslot else None,
                     'therapists': therapists,
                     'created_at': allocation.created_at.isoformat(),

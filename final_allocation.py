@@ -44,6 +44,15 @@ def therapy_needs_bath(allocation_or_booking):
     details = get_therapy_details(th_name) if th_name else None
     return bool(details and str(getattr(details, 'bathing_required', '')).lower() == 'yes')
 
+def get_therapist_grade_name(therapist):
+    """Helper function to get therapist grade name from TherapistGrade FK"""
+    if not therapist:
+        return ''
+    if hasattr(therapist, 'therapist_grade') and therapist.therapist_grade:
+        if hasattr(therapist.therapist_grade, 'name'):
+            return therapist.therapist_grade.name
+    return ''
+
 def therapist_requirements(allocation_or_therapy_obj):
     name = getattr(allocation_or_therapy_obj, 'therapy_name', None)
     details = get_therapy_details(name) if name else None
@@ -421,7 +430,7 @@ def allocate_therapists(date, time_slot, therapy_requirements, last_therapists=N
 
     def check_grade_availability(grade, gender_filter):
         """Check how many therapists of a specific grade and gender are available"""
-        candidates_qs = TherapistMaster.objects.filter(therapist_grade__iexact=grade)
+        candidates_qs = TherapistMaster.objects.filter(therapist_grade__name__iexact=grade)
         
         if gender_filter:
             candidates_qs = candidates_qs.filter(therapist_gender__istartswith=gender_filter[0])
@@ -464,7 +473,8 @@ def allocate_therapists(date, time_slot, therapy_requirements, last_therapists=N
                 t = TherapistMaster.objects.get(therapist_code=code)
             except TherapistMaster.DoesNotExist:
                 continue
-            if grade_map.get(t.therapist_grade, 0) > 0:
+            therapist_grade_name = get_therapist_grade_name(t)
+            if grade_map.get(therapist_grade_name, 0) > 0:
                 # STRICT GENDER MATCH: skip if therapist gender does not match desired
                 if desired_gender:
                     t_gender = get_therapist_gender(t)
@@ -482,7 +492,7 @@ def allocate_therapists(date, time_slot, therapy_requirements, last_therapists=N
                         continue  # Therapist already has 6 sessions
                     # Otherwise, we'll allow this if all therapists are at limit
                 allocated.append(t)
-                grade_map[t.therapist_grade] -= 1
+                grade_map[therapist_grade_name] -= 1
 
     # Allocate remaining
     for grade, needed_original in list(grade_map.items()):
@@ -533,7 +543,7 @@ def allocate_therapists(date, time_slot, therapy_requirements, last_therapists=N
         # --- END STRICT GENDER MATCHING LOGIC ---
 
         # Search for therapists with strict gender matching
-        candidates_qs = TherapistMaster.objects.filter(therapist_grade=current_grade_search)
+        candidates_qs = TherapistMaster.objects.filter(therapist_grade__name=current_grade_search)
         
         # STRICT GENDER FILTER - never remove this
         if desired_gender:
@@ -682,10 +692,10 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
             if isinstance(canonical_slot, SlotMaster):
                 slot_master = canonical_slot
             else:
-                # Try to find SlotMaster by start_time
-                start_time = getattr(canonical_slot, 'start_time', None)
-                if start_time:
-                    slot_master = SlotMaster.objects.filter(start_time=start_time, is_active=True).first()
+                # Try to find SlotMaster by slot_time
+                slot_time = getattr(canonical_slot, 'slot_time', None)
+                if slot_time:
+                    slot_master = SlotMaster.objects.filter(slot_time=slot_time, is_active=True).first()
                 if not slot_master:
                     # Fallback: use existing booking timeslot if available
                     slot_master = getattr(booking, 'timeslot', None)
@@ -840,9 +850,9 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                 grade_availability = {}
                 for grade_key in ("super_senior","senior","junior","trainee"):
                     if int(therapy_req.get(grade_key,0) or 0) > 0:
-                        # Match grade text against stored therapist_grade
+                        # Match grade text against stored therapist_grade name
                         grade_text = grade_key.replace('_',' ')
-                        pool = TherapistMaster.objects.filter(therapist_grade__icontains=grade_text)
+                        pool = TherapistMaster.objects.filter(therapist_grade__name__icontains=grade_text)
                         available = 0
                         # Use query_slot (resolved SlotMaster) for exact slot match when checking bookings
                         for t in pool:
@@ -900,9 +910,9 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
         if not slot_master:
             # If we couldn't resolve slot_master earlier, try one more time before room allocation
             if canonical_slot and not isinstance(canonical_slot, SlotMaster):
-                start_time = getattr(canonical_slot, 'start_time', None)
-                if start_time:
-                    slot_master = SlotMaster.objects.filter(start_time=start_time, is_active=True).first()
+                slot_time = getattr(canonical_slot, 'slot_time', None)
+                if slot_time:
+                    slot_master = SlotMaster.objects.filter(slot_time=slot_time, is_active=True).first()
         allocate_slot_for_room = slot_master if slot_master else canonical_slot
         
         room_candidate = getattr(booking, 'room', None)
@@ -1130,7 +1140,7 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                                 therapist_code=t.therapist_code,
                                 defaults={
                                     'therapist_name': getattr(t, 'therapist_name', t.therapist_code),
-                                    'therapist_grade': getattr(t, 'therapist_grade', ''),
+                                    'therapist_grade': get_therapist_grade_name(t),
                                     'is_bathing_therapist': getattr(t, 'is_bathing_therapist', False)
                                 }
                             )
@@ -1163,7 +1173,7 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                                     booking_item=None,
                                     booking_date=target_date,
                                     booking_timeslot=slot_master,  # Explicitly set to avoid FK constraint issues
-                                    role=getattr(t, 'therapist_grade', ''),
+                                    role=get_therapist_grade_name(t),
                                     assigned_for='booking',
                                     status='assigned'
                                 )

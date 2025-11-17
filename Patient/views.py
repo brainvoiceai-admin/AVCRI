@@ -17,7 +17,7 @@ from django.http import JsonResponse
 from django.db.models import Q
 from datetime import date
 from MySql_Data_pull.models import Registration, OPMaster, store_Therapy, store_TherapyItem, store_Prescription, store_PrescriptionItem, ItemMaster,Visit
-from masters.models import UnitNo
+from masters.models import UnitNo, get_staying_room_display_number
 import json
 from .models import Repeated_Visitors
 from datetime import date, datetime
@@ -90,7 +90,10 @@ def search_patients_api(request):
         # Search in IP patients (Registration table)
         try:
             ip_patients = Registration.objects.using('therapy_db').filter(
-                Q(pat_reg_no__icontains=query) | Q(pat_name__icontains=query)
+                Q(pat_status='Y') & (
+                    Q(pat_reg_no__icontains=query) | 
+                    Q(pat_name__icontains=query)
+                )
             ).values('pat_reg_no', 'pat_name')[:10]
             
             for patient in ip_patients:
@@ -151,6 +154,7 @@ def get_patient_details_api(request):
             vip_status = "No"
             repeated_status = "No"
         
+        display_room_no = get_staying_room_display_number(patient.pat_room_no)
         patient_details = {
             'pat_reg_no': patient.pat_reg_no,
             'pat_name': patient.pat_name or 'Unknown',
@@ -158,7 +162,7 @@ def get_patient_details_api(request):
             'pat_sex': patient.pat_sex or 'Unknown',
             'vip_status': vip_status,
             'pat_op_reg_no': patient.pat_op_reg_no or '',
-            'pat_room_no': patient.pat_room_no or '',
+            'pat_room_no': display_room_no or '',
             'pat_ref_id': patient.pat_ref_id or '',
             'repeated_status': repeated_status,
             'patient_type': 'IP'
@@ -215,7 +219,7 @@ from django.http import JsonResponse
 from django.views.decorators.http import require_http_methods
 
 # import your models
-from .models import TimeSlot  # TimeSlot model you showed
+from masters.models import SlotMaster  # Use SlotMaster instead of TimeSlot
 
 
 @require_http_methods(["GET", "POST"])
@@ -265,12 +269,12 @@ def therapy_entry_view(request):
             if slot_value:
                 try:
                     parsed_time = datetime.strptime(slot_value.strip(), "%H:%M").time()
-                    # try to find TimeSlot row with matching start_time
-                    time_slot_found = TimeSlot.objects.filter(start_time=parsed_time).first()
+                    # try to find SlotMaster row with matching slot_time
+                    time_slot_found = SlotMaster.objects.filter(slot_time=parsed_time, is_active=True).first()
                     if time_slot_found:
                         time_slot_id = getattr(time_slot_found, 'slot_number', None) or getattr(time_slot_found, 'pk', None)
                     else:
-                        warnings.append(f"Row {idx+1}: slot '{slot_value}' not found in TimeSlot table.")
+                        warnings.append(f"Row {idx+1}: slot '{slot_value}' not found in SlotMaster table.")
                 except Exception:
                     warnings.append(f"Row {idx+1}: slot '{slot_value}' has invalid format; expected HH:MM.")
 
@@ -397,15 +401,16 @@ def review_view(request):
         # Try time_slot_id first (your sanitized view stores time_slot_id)
         time_slot_id = therapy_row.get('time_slot_id')
         if time_slot_id:
-            # TimeSlot primary key is slot_number per your model; attempt both ways
-            ts = TimeSlot.objects.filter(slot_number=time_slot_id).first()
+            from masters.models import SlotMaster
+            # SlotMaster primary key is slot_number; attempt both ways
+            ts = SlotMaster.objects.filter(slot_number=time_slot_id, is_active=True).first()
             if not ts:
-                ts = TimeSlot.objects.filter(pk=time_slot_id).first()
+                ts = SlotMaster.objects.filter(pk=time_slot_id, is_active=True).first()
             if ts:
                 try:
-                    slot_label = ts.start_time.strftime("%I:%M %p").lstrip("0")
+                    slot_label = ts.slot_time.strftime("%I:%M %p").lstrip("0")
                 except Exception:
-                    slot_label = str(ts.start_time)
+                    slot_label = str(ts.slot_time)
         else:
             # fallback to free-text slot_value (expected "HH:MM")
             sv = therapy_row.get('slot_value') or therapy_row.get('slot') or ''
@@ -505,10 +510,11 @@ def submit_all_data(request):
             ts_id = row.get('time_slot_id') or row.get('preferred_time_slot_id')
             if ts_id:
                 try:
-                    # Try matching slot_number first (your TimeSlot model uses slot_number as PK)
-                    preferred_ts_obj = TimeSlot.objects.using(DEFAULT_DB).filter(slot_number=ts_id).first()
+                    from masters.models import SlotMaster
+                    # Try matching slot_number first (SlotMaster uses slot_number)
+                    preferred_ts_obj = SlotMaster.objects.filter(slot_number=ts_id, is_active=True).first()
                     if not preferred_ts_obj:
-                        preferred_ts_obj = TimeSlot.objects.using(DEFAULT_DB).filter(pk=ts_id).first()
+                        preferred_ts_obj = SlotMaster.objects.filter(pk=ts_id, is_active=True).first()
                 except Exception:
                     preferred_ts_obj = None
 
@@ -519,14 +525,15 @@ def submit_all_data(request):
                     preferred_slot_text = sv
                     try:
                         parsed_time = datetime.strptime(sv, "%H:%M").time()
-                        preferred_ts_obj = TimeSlot.objects.using(DEFAULT_DB).filter(start_time=parsed_time).first()
+                        from masters.models import SlotMaster
+                        preferred_ts_obj = SlotMaster.objects.filter(slot_time=parsed_time, is_active=True).first()
                     except Exception:
                         preferred_ts_obj = None
 
             # 3) If we found an object, ensure we also have text form for debugging
             if not preferred_slot_text and preferred_ts_obj:
                 try:
-                    preferred_slot_text = preferred_ts_obj.start_time.strftime("%H:%M")
+                    preferred_slot_text = preferred_ts_obj.slot_time.strftime("%H:%M")
                 except Exception:
                     preferred_slot_text = ''
 
@@ -1481,7 +1488,8 @@ def compute_available_slots_for_date(date_obj, therapy_name, patient_type):
         # Room availability check (if therapy needs a room)
         room_ok = True
         if needs_room:
-            timeslot_q = TimeSlot.objects.filter(start_time=start_time).first()
+            from masters.models import SlotMaster
+            timeslot_q = SlotMaster.objects.filter(slot_time=start_time, is_active=True).first()
             if timeslot_q:
                 # RoomBooking.room is FK named 'room' — values_list('room',flat=True) returns PKs
                 booked_room_pks = RoomBooking.objects.filter(date=date_obj, time_slot=timeslot_q, status='BOOKED').values_list('room', flat=True)
@@ -1497,7 +1505,8 @@ def compute_available_slots_for_date(date_obj, therapy_name, patient_type):
             continue
 
         # Therapist capacity check
-        timeslot_q = TimeSlot.objects.filter(start_time=start_time).first()
+        from masters.models import SlotMaster
+        timeslot_q = SlotMaster.objects.filter(slot_time=start_time, is_active=True).first()
 
         # exclude therapists on leave using pk
         available_therapists = all_therapists_qs.exclude(pk__in=on_leave_ids)
@@ -1600,16 +1609,16 @@ def available_slots(request):
 @require_GET
 def time_slots(request):
     """
-    Return all TimeSlot rows in order:
+    Return all SlotMaster rows in order:
       { "slots": [ {"slot_number":1, "start_time":"06:30", "label":"6:30 AM"}, ... ] }
     """
-    from .models import TimeSlot
-    qs = TimeSlot.objects.order_by('slot_number')
+    from masters.models import SlotMaster
+    qs = SlotMaster.objects.filter(is_active=True).order_by('slot_number')
     slots = []
     for t in qs:
-        # ensure start_time exists; format HH:MM and friendly label
-        st = t.start_time.strftime("%H:%M")
-        label = t.start_time.strftime("%I:%M %p").lstrip("0")
+        # use slot_time field; format HH:MM and friendly label in 12-hour format
+        st = t.slot_time.strftime("%H:%M")
+        label = t.slot_time.strftime("%I:%M %p").lstrip("0")
         slots.append({"slot_number": t.slot_number, "start_time": st, "label": label})
     return JsonResponse({"slots": slots})
 

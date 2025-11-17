@@ -75,7 +75,7 @@ def get_patient_data_api(request):
                     
                     # Get time slot - use timeslot (no underscore) based on model
                     time_slot = booking.timeslot
-                    slot_hour = time_slot.start_time.hour if time_slot and hasattr(time_slot, 'start_time') else 9
+                    slot_hour = time_slot.slot_time.hour if time_slot and hasattr(time_slot, 'slot_time') else 9
                     
                     # Get room - check booking.room first, then RoomBooking via visit
                     room_no = None
