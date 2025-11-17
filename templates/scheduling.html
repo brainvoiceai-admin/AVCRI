@@ -1,3 +1,4 @@
+{% load custom_tags %}
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -536,7 +537,7 @@
                                         </td>
                                         <td>{{ booking.allocation.therapy_name }}</td>
                                         <td>{{ booking.date|date:"Y-m-d" }}</td>
-                                        <td>{{ booking.timeslot.start_time|date:"H:i"|default:"—" }}</td>
+                                        <td>{{ booking.timeslot.slot_time|format_12hour|default:"—" }}</td>
                                         <td>{{ booking.room.room_no|default:"—" }}</td>
                                     </tr>
                                     {% empty %}
@@ -557,7 +558,7 @@
                                         </td>
                                         <td>{{ allocation.therapy_name }}</td>
                                         <td>{{ allocation.from_date|date:"Y-m-d" }} to {{ allocation.to_date|date:"Y-m-d" }}</td>
-                                        <td>{{ allocation.timeslot.start_time|date:"H:i"|default:"—" }}</td>
+                                        <td>{{ allocation.timeslot.slot_time|format_12hour|default:"—" }}</td>
                                         <td>{{ allocation.room.room_no|default:"—" }}</td>
                                     </tr>
                                     {% empty %}
@@ -604,6 +605,7 @@
                                     <th>Patient</th>
                                     <th>Therapy</th>
                                     <th>Time Slot</th>
+                                    <th>Room No</th>
                                     <th>Failure Reason</th>
                                     <th>Recommendation</th>
                                     <th>Actions</th>
@@ -617,7 +619,16 @@
                                         <div style="font-size: 12px; color: var(--gray);">{{ allocation.patient.pat_reg_no }}</div>
                                     </td>
                                     <td>{{ allocation.therapy_name }}</td>
-                                    <td>{{ allocation.timeslot.start_time|date:"H:i"|default:"—" }}</td>
+                                    <td>{{ allocation.timeslot.slot_time|format_12hour|default:"—" }}</td>
+                                    <td>
+                                        {% if allocation.patient.pat_room_no %}
+                                            {% with room_no=allocation.patient.pat_room_no|get_staying_room_display %}
+                                                {{ room_no|default:allocation.patient.pat_room_no }}
+                                            {% endwith %}
+                                        {% else %}
+                                            —
+                                        {% endif %}
+                                    </td>
                                     <td>
                                         <span class="status-badge status-failed">Slot Conflict</span>
                                     </td>
@@ -630,7 +641,7 @@
                                 </tr>
                                 {% empty %}
                                 <tr>
-                                    <td colspan="6" class="empty-state">
+                                    <td colspan="7" class="empty-state">
                                         <div class="empty-state-icon">⚠️</div>
                                         <div>No failed schedules found. Failed therapies will appear here after scheduling attempts.</div>
                                     </td>
@@ -669,6 +680,7 @@
                                     <th>Time Slot</th>
                                     <th>Date</th>
                                     <th>Treatment Room No</th>
+                                    <th>Patient Room No</th>
                                     <th>Therapist Assigned</th>
                                     <th>Scheduled By</th>
                                 </tr>
@@ -685,7 +697,7 @@
                                             <div style="font-size: 12px; color: var(--gray);">{{ booking.allocation.patient.pat_reg_no }}</div>
                                         </td>
                                         <td>{{ booking.allocation.therapy_name }}</td>
-                                        <td>{{ booking.timeslot.start_time|date:"H:i"|default:"—" }}</td>
+                                        <td>{{ booking.timeslot.slot_time|format_12hour|default:"—" }}</td>
                                         <td>{{ booking.date|date:"Y-m-d" }}</td>
                                         <td>
                                             {% if booking.room %}
@@ -702,9 +714,19 @@
                                             {% endif %}
                                         </td>
                                         <td>
+                                            {% if booking.allocation.patient.pat_room_no %}
+                                                {% load custom_tags %}
+                                                {% with room_no=booking.allocation.patient.pat_room_no|get_staying_room_display %}
+                                                    {{ room_no|default:booking.allocation.patient.pat_room_no }}
+                                                {% endwith %}
+                                            {% else %}
+                                                —
+                                            {% endif %}
+                                        </td>
+                                        <td>
                                             <div class="therapist-list">
                                                 {% for assignment in booking.assignments.all %}
-                                                    <span class="therapist-badge">{{ assignment.therapist.therapist_code }}</span>
+                                                    <span class="therapist-badge">{{ assignment.therapist.therapist_name|default:assignment.therapist.therapist_code }}</span>
                                                 {% empty %}
                                                     —
                                                 {% endfor %}
@@ -714,7 +736,7 @@
                                     </tr>
                                     {% empty %}
                                     <tr>
-                                        <td colspan="7" class="empty-state">
+                                        <td colspan="8" class="empty-state">
                                             <div class="empty-state-icon">✅</div>
                                             <div>No scheduled therapies found for this date. Successfully scheduled therapies will appear here.</div>
                                         </td>
@@ -733,7 +755,7 @@
                                                     <div style="font-size: 12px; color: var(--gray);">{{ allocation.patient.pat_reg_no }}</div>
                                                 </td>
                                                 <td>{{ allocation.therapy_name }}</td>
-                                                <td>{{ booking.timeslot.start_time|date:"H:i"|default:"—" }}</td>
+                                                <td>{{ booking.timeslot.slot_time|format_12hour|default:"—" }}</td>
                                                 <td>{{ booking.date|date:"Y-m-d" }}</td>
                                                 <td>
                                                     {% if booking.room %}
@@ -750,9 +772,19 @@
                                                     {% endif %}
                                                 </td>
                                                 <td>
+                                                    {% if allocation.patient.pat_room_no %}
+                                                        {% load custom_tags %}
+                                                        {% with room_no=allocation.patient.pat_room_no|get_staying_room_display %}
+                                                            {{ room_no|default:allocation.patient.pat_room_no }}
+                                                        {% endwith %}
+                                                    {% else %}
+                                                        —
+                                                    {% endif %}
+                                                </td>
+                                                <td>
                                                     <div class="therapist-list">
                                                         {% for assignment in booking.assignments.all %}
-                                                            <span class="therapist-badge">{{ assignment.therapist.therapist_code }}</span>
+                                                            <span class="therapist-badge">{{ assignment.therapist.therapist_name|default:assignment.therapist.therapist_code }}</span>
                                                         {% empty %}
                                                             —
                                                         {% endfor %}
@@ -764,7 +796,7 @@
                                         {% endfor %}
                                     {% empty %}
                                     <tr>
-                                        <td colspan="7" class="empty-state">
+                                        <td colspan="8" class="empty-state">
                                             <div class="empty-state-icon">✅</div>
                                             <div>No scheduled therapies found. Successfully scheduled therapies will appear here.</div>
                                         </td>
@@ -934,6 +966,19 @@
                 });
         }
 
+        // Helper function to convert 24-hour time to 12-hour format
+        function format12Hour(time24) {
+            if (!time24) return '—';
+            const parts = String(time24).split(':');
+            if (parts.length !== 2) return time24;
+            let hours = parseInt(parts[0], 10);
+            const minutes = parts[1];
+            const period = hours >= 12 ? 'PM' : 'AM';
+            hours = hours % 12;
+            hours = hours ? hours : 12; // 0 should be 12
+            return `${hours}:${minutes} ${period}`;
+        }
+
         function updateTable(status, data) {
             // Map status to correct tbody ID
             let tbodyId = `${status}-body`;
@@ -956,10 +1001,10 @@
                     colspan = 5;
                 } else if (status === 'failed') {
                     message = 'No failed therapies found. Failed therapies will appear here after scheduling attempts.';
-                    colspan = 6;
+                    colspan = 7;
                 } else if (status === 'allocated' || status === 'scheduled') {
                     message = 'No scheduled therapies found. Successfully scheduled therapies will appear here.';
-                    colspan = 7;
+                    colspan = 8;
                 } else {
                     message = `No ${status} therapies found. Use date filter to view therapies for specific dates.`;
                     colspan = 6;
@@ -979,7 +1024,7 @@
             data.forEach(item => {
                 const row = document.createElement('tr');
                 const therapistsHtml = item.therapists && item.therapists.length > 0 
-                    ? `<div class="therapist-list">${item.therapists.map(t => `<span class="therapist-badge">${t.code}</span>`).join('')}</div>`
+                    ? `<div class="therapist-list">${item.therapists.map(t => `<span class="therapist-badge">${t.name || t.code || t}</span>`).join('')}</div>`
                     : '<span class="muted">Not assigned</span>';
                 
                 if (status === 'draft') {
@@ -992,7 +1037,7 @@
                         </td>
                         <td>${escapeHtml(item.therapy_name)}</td>
                         <td>${displayDate}</td>
-                        <td>${item.timeslot || '—'}</td>
+                        <td>${format12Hour(item.timeslot) || '—'}</td>
                         <td>${item.room_no || '—'}</td>
                     `;
                 } else if (status === 'failed') {
@@ -1002,7 +1047,8 @@
                             <div style="font-size: 12px; color: var(--gray);">${escapeHtml(item.patient_reg_no)}</div>
                         </td>
                         <td>${escapeHtml(item.therapy_name)}</td>
-                        <td>${item.timeslot || '—'}</td>
+                        <td>${format12Hour(item.timeslot) || '—'}</td>
+                        <td>${item.patient_room_no || '—'}</td>
                         <td>
                             <span class="status-badge status-failed">Slot Conflict</span>
                         </td>
@@ -1022,9 +1068,10 @@
                             <div style="font-size: 12px; color: var(--gray);">${escapeHtml(item.patient_reg_no)}</div>
                         </td>
                         <td>${escapeHtml(item.therapy_name)}</td>
-                        <td>${item.timeslot || '—'}</td>
+                        <td>${format12Hour(item.timeslot) || '—'}</td>
                         <td>${displayDate}</td>
                         <td>${item.room_no || '—'}</td>
+                        <td>${item.patient_room_no || '—'}</td>
                         <td>${therapistsHtml}</td>
                         <td>${escapeHtml(item.allocated_by || 'System')}</td>
                     `;
@@ -1410,6 +1457,7 @@
             const margin = 15;
             const contentWidth = pageWidth - (margin * 2);
             let yPos = margin;
+            let currentPage = 1;
             
             // Remove duplicates based on booking_id
             const uniqueData = [];
@@ -1422,30 +1470,62 @@
                 }
             });
             
-            // Sort by time, then by patient name
-            uniqueData.sort((a, b) => {
-                const timeA = a.timeslot || '00:00';
-                const timeB = b.timeslot || '00:00';
-                if (timeA !== timeB) {
-                    return timeA.localeCompare(timeB);
+            // Group by time slot
+            const slotGroups = {};
+            uniqueData.forEach(item => {
+                const slot = item.timeslot || '00:00';
+                if (!slotGroups[slot]) {
+                    slotGroups[slot] = [];
                 }
-                return (a.patient_name || '').localeCompare(b.patient_name || '');
+                slotGroups[slot].push(item);
             });
+            
+            // Helper function to format time in 12-hour format for PDF
+            function format12HourPDF(time24) {
+                if (!time24) return '—';
+                const parts = String(time24).split(':');
+                if (parts.length !== 2) return time24;
+                let hours = parseInt(parts[0], 10);
+                const minutes = parts[1];
+                const period = hours >= 12 ? 'PM' : 'AM';
+                hours = hours % 12;
+                hours = hours ? hours : 12; // 0 should be 12
+                return `${hours}:${minutes} ${period}`;
+            }
+            
+            // Sort slots chronologically (morning to evening)
+            const sortedSlots = Object.keys(slotGroups).sort((a, b) => {
+                const timeA = a.split(':').map(Number);
+                const timeB = b.split(':').map(Number);
+                const minutesA = timeA[0] * 60 + (timeA[1] || 0);
+                const minutesB = timeB[0] * 60 + (timeB[1] || 0);
+                return minutesA - minutesB;
+            });
+            
+            // Sort treatments within each slot by patient name
+            sortedSlots.forEach(slot => {
+                slotGroups[slot].sort((a, b) => {
+                    return (a.patient_name || '').localeCompare(b.patient_name || '');
+                });
+            });
+            
+            // Helper function to format date
+            function formatDate(dateStr) {
+                const d = new Date(dateStr + 'T00:00:00');
+                const options = { year: 'numeric', month: 'long', day: 'numeric' };
+                return d.toLocaleDateString('en-US', options);
+            }
             
             // Header function
             function addHeader() {
-                doc.setFontSize(18);
+                doc.setFontSize(20);
                 doc.setFont(undefined, 'bold');
-                doc.text('Therapy Scheduling Report', margin, yPos);
+                doc.text('Therapy Final Schedule', pageWidth / 2, yPos, { align: 'center' });
                 yPos += 8;
                 
-                doc.setFontSize(12);
-                doc.setFont(undefined, 'normal');
-                doc.text(`Date: ${date}`, margin, yPos);
-                yPos += 6;
-                
-                doc.setFontSize(10);
-                doc.text(`Generated: ${new Date().toLocaleString()}`, margin, yPos);
+                doc.setFontSize(16);
+                doc.setFont(undefined, 'bold');
+                doc.text(`Date: ${formatDate(date)}`, pageWidth / 2, yPos, { align: 'center' });
                 yPos += 10;
                 
                 // Draw line
@@ -1455,50 +1535,96 @@
             }
             
             // Footer function
-            function addFooter(pageNum, totalPages) {
+            function addFooter(pageNum) {
                 const footerY = pageHeight - 10;
                 doc.setFontSize(8);
                 doc.setFont(undefined, 'normal');
-                doc.text(`Page ${pageNum} of ${totalPages}`, pageWidth / 2, footerY, { align: 'center' });
+                doc.text(`Page ${pageNum}`, pageWidth / 2, footerY, { align: 'center' });
                 doc.text(`Date: ${date}`, margin, footerY);
             }
             
-            // Prepare table data
-            const tableData = uniqueData.map(item => [
-                item.patient_name || 'N/A',
-                item.patient_reg_no || 'N/A',
-                item.room_no || '—',
-                item.timeslot || '—',
-                item.therapists && item.therapists.length > 0 
-                    ? item.therapists.map(t => t.code).join(', ') 
-                    : '—'
-            ]);
+            // Check if new page needed
+            function checkNewPage(requiredSpace) {
+                if (yPos + requiredSpace > pageHeight - 20) {
+                    addFooter(currentPage);
+                    doc.addPage();
+                    currentPage++;
+                    yPos = margin;
+                    addHeader();
+                    return true;
+                }
+                return false;
+            }
             
             // Add header
             addHeader();
             
-            // Generate table with autoTable
-            doc.autoTable({
-                head: [['Patient Name', 'Reg. No.', 'Treatment Room', 'Time', 'Therapist Assigned']],
-                body: tableData,
-                startY: yPos,
-                margin: { left: margin, right: margin },
-                styles: {
-                    fontSize: 9,
-                    cellPadding: 3,
-                },
-                headStyles: {
-                    fillColor: [59, 130, 246],
-                    textColor: 255,
-                    fontStyle: 'bold',
-                },
-                alternateRowStyles: {
-                    fillColor: [245, 247, 250],
-                },
-                didDrawPage: function(data) {
-                    // Add footer on each page
-                    addFooter(data.pageNumber, data.totalPages);
-                },
+            // Process each time slot
+            sortedSlots.forEach((slot, slotIndex) => {
+                const treatments = slotGroups[slot];
+                
+                // Check if we need a new page for the slot header
+                checkNewPage(15);
+                
+                // Slot header
+                doc.setFontSize(14);
+                doc.setFont(undefined, 'bold');
+                doc.setFillColor(59, 130, 246);
+                doc.rect(margin, yPos - 5, contentWidth, 8, 'F');
+                doc.setTextColor(255, 255, 255);
+                doc.text(`Time Slot: ${format12HourPDF(slot)}`, margin + 5, yPos);
+                yPos += 10;
+                doc.setTextColor(0, 0, 0);
+                
+                // Prepare table data for this slot
+                const tableData = treatments.map(item => [
+                    item.patient_name || 'N/A',
+                    item.patient_reg_no || 'N/A',
+                    item.patient_room_no || '—',
+                    item.room_no || '—',
+                    item.therapy_name || 'N/A',
+                    item.therapists && item.therapists.length > 0 
+                        ? item.therapists.map(t => t.name || t.code || t).join(', ') 
+                        : '—'
+                ]);
+                
+                // Generate table for this slot
+                doc.autoTable({
+                    head: [['Patient Name', 'Reg. No.', 'Patient Room', 'Treatment Room', 'Therapy', 'Therapist Assigned']],
+                    body: tableData,
+                    startY: yPos,
+                    margin: { left: margin, right: margin },
+                    styles: {
+                        fontSize: 8,
+                        cellPadding: 2.5,
+                    },
+                    headStyles: {
+                        fillColor: [100, 116, 139],
+                        textColor: 255,
+                        fontStyle: 'bold',
+                        fontSize: 9,
+                    },
+                    alternateRowStyles: {
+                        fillColor: [248, 250, 252],
+                    },
+                    didDrawPage: function(data) {
+                        // Add footer on each page
+                        addFooter(data.pageNumber);
+                        currentPage = data.pageNumber;
+                    },
+                });
+                
+                // Update yPos after table
+                yPos = doc.lastAutoTable.finalY + 8;
+                
+                // Add spacing between slots (except for last slot)
+                if (slotIndex < sortedSlots.length - 1) {
+                    yPos += 5;
+                    doc.setLineWidth(0.3);
+                    doc.setDrawColor(200, 200, 200);
+                    doc.line(margin, yPos, pageWidth - margin, yPos);
+                    yPos += 8;
+                }
             });
             
             // Save PDF

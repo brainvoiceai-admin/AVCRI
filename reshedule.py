@@ -44,6 +44,15 @@ def therapy_needs_bath(allocation_or_booking):
     details = get_therapy_details(th_name) if th_name else None
     return bool(details and str(getattr(details, 'bathing_required', '')).lower() == 'yes')
 
+def get_therapist_grade_name(therapist):
+    """Helper function to get therapist grade name from TherapistGrade FK"""
+    if not therapist:
+        return ''
+    if hasattr(therapist, 'therapist_grade') and therapist.therapist_grade:
+        if hasattr(therapist.therapist_grade, 'name'):
+            return therapist.therapist_grade.name
+    return ''
+
 def therapist_requirements(allocation_or_therapy_obj):
     name = getattr(allocation_or_therapy_obj, 'therapy_name', None)
     details = get_therapy_details(name) if name else None
@@ -283,7 +292,8 @@ def allocate_therapists(date, time_slot, therapy_requirements, last_therapists=N
                 t = TherapistMaster.objects.get(therapist_code=code)
             except TherapistMaster.DoesNotExist:
                 continue
-            if grade_map.get(t.therapist_grade, 0) > 0:
+            therapist_grade_name = get_therapist_grade_name(t)
+            if grade_map.get(therapist_grade_name, 0) > 0:
                 # Gender match: skip if therapist gender does not match desired
                 if desired_gender:
                     t_gender = get_therapist_gender(t)
@@ -294,7 +304,7 @@ def allocate_therapists(date, time_slot, therapy_requirements, last_therapists=N
                 if TherapistBooking.objects.filter(therapist=t, date=date, time_slot=time_slot, status='BOOKED').exists():
                     continue
                 allocated.append(t)
-                grade_map[t.therapist_grade] -= 1
+                grade_map[therapist_grade_name] -= 1
 
     # Allocate remaining
     for grade_original, needed_original in list(grade_map.items()):
@@ -318,7 +328,7 @@ def allocate_therapists(date, time_slot, therapy_requirements, last_therapists=N
             # ensuring we satisfy the required number of trainee slots with Junior staff.
         # --- END NEW LOGIC ---
 
-        candidates_qs = TherapistMaster.objects.filter(therapist_grade=current_grade_search)
+        candidates_qs = TherapistMaster.objects.filter(therapist_grade__name=current_grade_search)
         
         # Build an ordered list of candidates (bathing first, then non-bathing)
         if needs_bathing:
@@ -371,7 +381,7 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
 
     requested_slot_value = None
     try:
-        requested_slot_value = canonical_slot.start_time.strftime("%H:%M")
+        requested_slot_value = canonical_slot.slot_time.strftime("%H:%M")
     except Exception:
         pass
 
@@ -473,7 +483,7 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
             grade_availability = {}
             for grade, needed in therapy_req.items():
                 if grade in ("super_senior","senior","junior","trainee") and int(therapy_req.get(grade,0) or 0) > 0:
-                    pool = TherapistMaster.objects.filter(therapist_grade__icontains=grade.replace('_',' '))
+                    pool = TherapistMaster.objects.filter(therapist_grade__name__icontains=grade.replace('_',' '))
                     available = 0
                     for t in pool:
                         if desired_gender and _tg(t) != desired_gender:
@@ -609,7 +619,7 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
                                 pt = PatientTherapist.objects.create(
                                     therapist_code=therapist_code,
                                     therapist_name=getattr(t, 'therapist_name', therapist_code),
-                                    therapist_grade=getattr(t, 'therapist_grade', '') or '' ,
+                                    therapist_grade=get_therapist_grade_name(t) or '' ,
                                     is_bathing_therapist=bool(getattr(t, 'is_bathing_therapist', False))
                                 )
 
@@ -762,7 +772,7 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                 # map to canonical slot model instance
                 try:
                     parsed_time = datetime.strptime(sv, "%H:%M").time()
-                    canonical_slot = SlotMaster.objects.filter(start_time=parsed_time).first()
+                    canonical_slot = SlotMaster.objects.filter(slot_time=parsed_time).first()
                 except Exception:
                     canonical_slot = None
                 if not canonical_slot:
@@ -836,7 +846,7 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                 for sv in allowed_slot_values:
                     try:
                         parsed_time = datetime.strptime(sv, "%H:%M").time()
-                        canonical_slot = SlotMaster.objects.filter(start_time=parsed_time).first()
+                        canonical_slot = SlotMaster.objects.filter(slot_time=parsed_time).first()
                     except Exception:
                         canonical_slot = None
                     if not canonical_slot:

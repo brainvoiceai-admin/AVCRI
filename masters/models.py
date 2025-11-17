@@ -249,6 +249,43 @@ class TherapistLeaveMaster(models.Model):
 
 
 
+class StayingRoom(models.Model):
+    """Master list for staying rooms."""
+    number = models.CharField(max_length=20, unique=True, verbose_name="No")
+    room_desc = models.CharField(max_length=255, verbose_name="Room Description")
+    room_no = models.CharField(max_length=50, verbose_name="Room Number")
+    is_active = models.BooleanField(default=True, verbose_name="Active")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Created At")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="Updated At")
+
+    class Meta:
+        verbose_name = "Staying Room"
+        verbose_name_plural = "Staying Rooms"
+        ordering = ["number"]
+
+    def __str__(self):
+        return f"{self.number} - {self.room_no}"
+
+
+def get_staying_room_display_number(room_number):
+    """
+    Given a room identifier (No), return the corresponding StayingRoom.room_no.
+    Falls back to the original value if no match is found.
+    """
+    if room_number in (None, ''):
+        return room_number
+    lookup = str(room_number).strip()
+    if not lookup:
+        return room_number
+    try:
+        staying_room = StayingRoom.objects.filter(number__iexact=lookup).first()
+        if staying_room and staying_room.room_no:
+            return staying_room.room_no
+    except Exception:
+        pass
+    return room_number
+
+
 class EmergencyLeave(models.Model):
     """
     Stores emergency leave records fetched from HRMS (or webhook events).

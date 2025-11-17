@@ -91,7 +91,7 @@ class TherapyAllocationAdmin(admin.ModelAdmin):
     room_info.short_description = 'Room'
     
     def timeslot_info(self, obj):
-        return obj.timeslot.start_time.strftime('%H:%M') if obj.timeslot else '—'
+        return obj.timeslot.slot_time.strftime('%H:%M') if obj.timeslot else '—'
     timeslot_info.short_description = 'Time Slot'
 
 @admin.register(Booking)
@@ -113,7 +113,7 @@ class BookingAdmin(admin.ModelAdmin):
     allocation_info.short_description = 'Therapy & Patient'
     
     def timeslot_info(self, obj):
-        return obj.timeslot.start_time.strftime('%H:%M') if obj.timeslot else '—'
+        return obj.timeslot.slot_time.strftime('%H:%M') if obj.timeslot else '—'
     timeslot_info.short_description = 'Time Slot'
     
     def room_info(self, obj):

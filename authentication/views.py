@@ -12,6 +12,7 @@ from django.utils import timezone
 from django.db import transaction, models
 from django.core.exceptions import ValidationError
 import json
+from masters.models import get_staying_room_display_number
 
 def log_audit_event(user, action, description, status='success', object_type='', object_id='', additional_data=None, request=None):
     """Utility function to log audit events"""
@@ -1045,12 +1046,13 @@ def search_patients(request):
                 # Determine patient type (IP if not 5 digits)
                 patient_type = 'IP' if len(str(patient['pat_reg_no'])) != 5 else 'OP'
                 
+                mapped_room = get_staying_room_display_number(patient['pat_room_no'])
                 patients.append({
                     'registration_number': patient['pat_reg_no'],
                     'patient_name': patient['pat_name'],
                     'sex': patient['pat_sex'],
                     'age': patient['pat_age'],
-                    'room_number': patient['pat_room_no'],
+                    'room_number': mapped_room,
                     'ip_number': patient['pat_reg_no'],  # IP number same as registration
                     'pat_ref_id': patient['pat_ref_id'],
                     'phone': patient['pat_ph_no'],
@@ -1157,12 +1159,13 @@ def get_patient_details(request):
             # Determine patient type
             patient_type = 'IP' if len(str(reg_no)) != 5 else 'OP'
             
+            display_room_no = get_staying_room_display_number(ip_patient.pat_room_no)
             patient_details = {
                 'registration_number': ip_patient.pat_reg_no,
                 'patient_name': ip_patient.pat_name,
                 'sex': ip_patient.pat_sex,
                 'age': ip_patient.pat_age,
-                'room_number': ip_patient.pat_room_no,
+                'room_number': display_room_no,
                 'ip_number': ip_patient.pat_reg_no,  # IP number same as registration
                 'pat_ref_id': ip_patient.pat_ref_id,
                 'phone': ip_patient.pat_ph_no,

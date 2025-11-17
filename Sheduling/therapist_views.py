@@ -76,11 +76,11 @@ def get_therapist_data_api(request):
                 # Get time slot display and value expected by frontend slots
                 slot_display = '6:30 AM'
                 slot_value = '6-30am'
-                if time_slot and hasattr(time_slot, 'start_time'):
-                    slot_display = time_slot.start_time.strftime('%I:%M %p')
+                if time_slot and hasattr(time_slot, 'slot_time'):
+                    slot_display = time_slot.slot_time.strftime('%I:%M %p')
                     # Format like '6-30am', '10-00am', '2-30pm'
-                    h_24 = int(time_slot.start_time.strftime('%H'))
-                    m = time_slot.start_time.strftime('%M')
+                    h_24 = int(time_slot.slot_time.strftime('%H'))
+                    m = time_slot.slot_time.strftime('%M')
                     ampm = 'am' if h_24 < 12 else 'pm'
                     h_12 = h_24 % 12
                     if h_12 == 0:
@@ -215,10 +215,10 @@ def get_therapist_sessions_by_date_api(request):
                 time_slot = booking.timeslot
                 slot_display = '6:30 AM'
                 slot_value = '6-30am'
-                if time_slot and hasattr(time_slot, 'start_time'):
-                    slot_display = time_slot.start_time.strftime('%I:%M %p')
-                    h_24 = int(time_slot.start_time.strftime('%H'))
-                    m = time_slot.start_time.strftime('%M')
+                if time_slot and hasattr(time_slot, 'slot_time'):
+                    slot_display = time_slot.slot_time.strftime('%I:%M %p')
+                    h_24 = int(time_slot.slot_time.strftime('%H'))
+                    m = time_slot.slot_time.strftime('%M')
                     ampm = 'am' if h_24 < 12 else 'pm'
                     h_12 = h_24 % 12
                     if h_12 == 0:
