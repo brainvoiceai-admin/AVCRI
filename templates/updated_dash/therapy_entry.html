@@ -1518,7 +1518,19 @@ $(function(){
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify(therapyData)
     })
-    .then(response => response.json())
+    .then(response => {
+      // Check if response is ok before parsing JSON
+      if (!response.ok) {
+        // Try to parse error response as JSON
+        return response.json().then(data => {
+          throw new Error(data.error || `Server error: ${response.status} ${response.statusText}`);
+        }).catch(() => {
+          // If JSON parsing fails, throw with status text
+          throw new Error(`Server error: ${response.status} ${response.statusText}`);
+        });
+      }
+      return response.json();
+    })
     .then(data => {
       if (data.status === 'ok') {
         // Add to local list with server response
@@ -1558,8 +1570,10 @@ $(function(){
       }
     })
     .catch(error => {
-      console.error('Error:', error);
-      alert('Error saving therapy to server');
+      console.error('Error saving therapy:', error);
+      // Show more detailed error message
+      const errorMessage = error.message || 'Error saving therapy to server. Please check your connection and try again.';
+      alert('Error saving therapy to server: ' + errorMessage);
     });
   });
 
