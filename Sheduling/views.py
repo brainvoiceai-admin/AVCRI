@@ -62,14 +62,17 @@ def log_therapy_audit(user, action, therapy_allocation=None, description="", add
         )
         
         # Also create Sheduling audit log for backward compatibility
-        if therapy_allocation:
-            AuditLog.objects.create(
-                user=user,
-                action=action,
-                obj_type='TherapyAllocation',
-                obj_id=str(therapy_allocation.id),
-                data=audit_data
-            )
+        if therapy_allocation and AuditLog is not None:
+            try:
+                AuditLog.objects.create(
+                    user=user,
+                    action=action,
+                    obj_type='TherapyAllocation',
+                    obj_id=str(therapy_allocation.id),
+                    data=audit_data
+                )
+            except Exception as audit_e:
+                print(f"AuditLog creation error: {audit_e}")
             
             # Create therapy notification - COMMENTED OUT DUE TO WEBSOCKET ERRORS
             # create_therapy_notification(therapy_allocation, action, user, additional_data)
@@ -966,97 +969,98 @@ def therapy_entry(request):
         
         # ---------- allocate ----------
         if action_post == 'allocate':
-            # required fields (items_groups is optional - can be empty array)
-            required = ['patient_reg_no', 'therapy_code', 'therapy_name', 'from_date', 'to_date']
-            missing = [k for k in required if not payload.get(k)]
-            if missing:
-                return JsonResponse({'error': 'missing_fields', 'missing': missing}, status=400)
-            
-            # items_groups is optional - default to empty array if not provided
-            items_groups = payload.get('items_groups', [])
-            if not isinstance(items_groups, list):
-                return JsonResponse({'error': 'items_groups must be a list'}, status=400)
-
-            fdate = parse_date(payload['from_date'])
-            tdate = parse_date(payload['to_date'])
-            if not fdate or not tdate or fdate > tdate:
-                return JsonResponse({'error': 'invalid_dates'}, status=400)
-
-            # resolve timeslot (accept "HH:MM" or slot_number)
-            timeslot_obj = None
-            ts_val = payload.get('timeslot') or payload.get('slot') or ''
-            if ts_val:
-                # try HH:MM
-                try:
-                    parts = ts_val.split(':')
-                    if len(parts) == 2:
-                        hh = int(parts[0]); mm = int(parts[1])
-                        from_time = datetime.strptime(f"{hh:02d}:{mm:02d}", "%H:%M").time()
-                        if SlotMaster is not None:
-                            timeslot_obj = SlotMaster.objects.filter(slot_time=from_time, is_active=True).first()
-                    else:
-                        # try slot_number int
-                        if SlotMaster is not None:
-                            timeslot_obj = SlotMaster.objects.filter(slot_number=int(ts_val), is_active=True).first()
-                except Exception:
-                    timeslot_obj = None
-
-                if timeslot_obj is None and SlotMaster is not None and ts_val:
-                    return JsonResponse({'error': 'timeslot_not_found', 'timeslot': ts_val}, status=400)
-
-            # room resolution (optional)
-            room_obj = None
-            room_no = payload.get('room_no') or payload.get('room')
-            if room_no:
-                if TreatmentRoom is not None:
-                    room_obj = TreatmentRoom.objects.filter(room_no=room_no).first()
-                    if not room_obj:
-                        return JsonResponse({'error': 'room_not_found', 'room_no': room_no}, status=400)
-
-            # therapists optional
-            therapist_codes = payload.get('therapists') or []
-            therapists = []
-            if therapist_codes and TherapistModel is not None:
-                qs = TherapistModel.objects.filter(therapist_code__in=therapist_codes)
-                found_codes = set(t.therapist_code for t in qs)
-                missing_ts = [c for c in therapist_codes if c not in found_codes]
-                if missing_ts:
-                    return JsonResponse({'error': 'therapists_not_found', 'missing': missing_ts}, status=400)
-                therapists = list(qs)
-
-            # ensure patient snapshot
-            pat_no = str(payload['patient_reg_no'])
-            raw_room_no = payload.get('patient_room_no') or ''
-            resolved_room_no = get_staying_room_display_number(raw_room_no) or ''
-            ps_defaults = {
-                'pat_name': payload.get('patient_name') or '',
-                'pat_age': payload.get('patient_age') or '',
-                'pat_sex': payload.get('patient_sex') or '',
-                'pat_room_no': resolved_room_no,
-                'pat_ref_id': payload.get('pat_ref_id') or payload.get('pat_ref_id') or ''
-            }
-            if PatientSnapshot is None:
-                return JsonResponse({'error': 'PatientSnapshot model not found'}, status=500)
-            ps, _ = PatientSnapshot.objects.get_or_create(pat_reg_no=pat_no, defaults=ps_defaults)
-            changed = False
-            if ps_defaults['pat_name'] and getattr(ps, 'pat_name', '') != ps_defaults['pat_name']:
-                ps.pat_name = ps_defaults['pat_name']; changed = True
-            if ps_defaults['pat_age'] and getattr(ps, 'pat_age', '') != ps_defaults['pat_age']:
-                ps.pat_age = ps_defaults['pat_age']; changed = True
-            if ps_defaults['pat_sex'] and getattr(ps, 'pat_sex', '') != ps_defaults['pat_sex']:
-                ps.pat_sex = ps_defaults['pat_sex']; changed = True
-            if ps_defaults['pat_room_no'] and getattr(ps, 'pat_room_no', '') != ps_defaults['pat_room_no']:
-                ps.pat_room_no = ps_defaults['pat_room_no']; changed = True
-            if ps_defaults['pat_ref_id'] and getattr(ps, 'pat_ref_id', '') != ps_defaults['pat_ref_id']:
-                ps.pat_ref_id = ps_defaults['pat_ref_id']; changed = True
-            if changed:
-                ps.save(update_fields=['pat_name', 'pat_age', 'pat_sex', 'pat_room_no', 'pat_ref_id', 'updated_at'])
-
-            # create allocation and per-date bookings atomically (all-or-nothing)
             try:
-                with transaction.atomic():
-                    if TherapyAllocation is None or Booking is None or BookingItem is None or BookingAssignment is None:
-                        return JsonResponse({'error': 'required models missing (TherapyAllocation/Booking/BookingItem/BookingAssignment)'}, status=500)
+                # required fields (items_groups is optional - can be empty array)
+                required = ['patient_reg_no', 'therapy_code', 'therapy_name', 'from_date', 'to_date']
+                missing = [k for k in required if not payload.get(k)]
+                if missing:
+                    return JsonResponse({'error': 'missing_fields', 'missing': missing}, status=400)
+                
+                # items_groups is optional - default to empty array if not provided
+                items_groups = payload.get('items_groups', [])
+                if not isinstance(items_groups, list):
+                    return JsonResponse({'error': 'items_groups must be a list'}, status=400)
+
+                fdate = parse_date(payload['from_date'])
+                tdate = parse_date(payload['to_date'])
+                if not fdate or not tdate or fdate > tdate:
+                    return JsonResponse({'error': 'invalid_dates'}, status=400)
+
+                # resolve timeslot (accept "HH:MM" or slot_number)
+                timeslot_obj = None
+                ts_val = payload.get('timeslot') or payload.get('slot') or ''
+                if ts_val:
+                    # try HH:MM
+                    try:
+                        parts = ts_val.split(':')
+                        if len(parts) == 2:
+                            hh = int(parts[0]); mm = int(parts[1])
+                            from_time = datetime.strptime(f"{hh:02d}:{mm:02d}", "%H:%M").time()
+                            if SlotMaster is not None:
+                                timeslot_obj = SlotMaster.objects.filter(slot_time=from_time, is_active=True).first()
+                        else:
+                            # try slot_number int
+                            if SlotMaster is not None:
+                                timeslot_obj = SlotMaster.objects.filter(slot_number=int(ts_val), is_active=True).first()
+                    except Exception:
+                        timeslot_obj = None
+
+                    if timeslot_obj is None and SlotMaster is not None and ts_val:
+                        return JsonResponse({'error': 'timeslot_not_found', 'timeslot': ts_val}, status=400)
+
+                # room resolution (optional)
+                room_obj = None
+                room_no = payload.get('room_no') or payload.get('room')
+                if room_no:
+                    if TreatmentRoom is not None:
+                        room_obj = TreatmentRoom.objects.filter(room_no=room_no).first()
+                        if not room_obj:
+                            return JsonResponse({'error': 'room_not_found', 'room_no': room_no}, status=400)
+
+                # therapists optional
+                therapist_codes = payload.get('therapists') or []
+                therapists = []
+                if therapist_codes and TherapistModel is not None:
+                    qs = TherapistModel.objects.filter(therapist_code__in=therapist_codes)
+                    found_codes = set(t.therapist_code for t in qs)
+                    missing_ts = [c for c in therapist_codes if c not in found_codes]
+                    if missing_ts:
+                        return JsonResponse({'error': 'therapists_not_found', 'missing': missing_ts}, status=400)
+                    therapists = list(qs)
+
+                # ensure patient snapshot
+                pat_no = str(payload['patient_reg_no'])
+                raw_room_no = payload.get('patient_room_no') or ''
+                resolved_room_no = get_staying_room_display_number(raw_room_no) or ''
+                ps_defaults = {
+                    'pat_name': payload.get('patient_name') or '',
+                    'pat_age': payload.get('patient_age') or '',
+                    'pat_sex': payload.get('patient_sex') or '',
+                    'pat_room_no': resolved_room_no,
+                    'pat_ref_id': payload.get('pat_ref_id') or payload.get('pat_ref_id') or ''
+                }
+                if PatientSnapshot is None:
+                    return JsonResponse({'error': 'PatientSnapshot model not found'}, status=500)
+                ps, _ = PatientSnapshot.objects.get_or_create(pat_reg_no=pat_no, defaults=ps_defaults)
+                changed = False
+                if ps_defaults['pat_name'] and getattr(ps, 'pat_name', '') != ps_defaults['pat_name']:
+                    ps.pat_name = ps_defaults['pat_name']; changed = True
+                if ps_defaults['pat_age'] and getattr(ps, 'pat_age', '') != ps_defaults['pat_age']:
+                    ps.pat_age = ps_defaults['pat_age']; changed = True
+                if ps_defaults['pat_sex'] and getattr(ps, 'pat_sex', '') != ps_defaults['pat_sex']:
+                    ps.pat_sex = ps_defaults['pat_sex']; changed = True
+                if ps_defaults['pat_room_no'] and getattr(ps, 'pat_room_no', '') != ps_defaults['pat_room_no']:
+                    ps.pat_room_no = ps_defaults['pat_room_no']; changed = True
+                if ps_defaults['pat_ref_id'] and getattr(ps, 'pat_ref_id', '') != ps_defaults['pat_ref_id']:
+                    ps.pat_ref_id = ps_defaults['pat_ref_id']; changed = True
+                if changed:
+                    ps.save(update_fields=['pat_name', 'pat_age', 'pat_sex', 'pat_room_no', 'pat_ref_id', 'updated_at'])
+
+                # create allocation and per-date bookings atomically (all-or-nothing)
+                try:
+                    with transaction.atomic():
+                        if TherapyAllocation is None or Booking is None or BookingItem is None or BookingAssignment is None:
+                            return JsonResponse({'error': 'required models missing (TherapyAllocation/Booking/BookingItem/BookingAssignment)'}, status=500)
 
                     alloc = TherapyAllocation.objects.create(
                         patient=ps,
@@ -1236,9 +1240,14 @@ def therapy_entry(request):
                         'date_status_map': date_status_map,
                         'overall_status': alloc.status
                     }, status=201)
-
-            except IntegrityError as e:
-                return JsonResponse({'error': 'conflict', 'details': str(e)}, status=409)
+                except IntegrityError as e:
+                    return JsonResponse({'error': 'conflict', 'details': str(e)}, status=409)
+            except Exception as e:
+                import traceback
+                error_trace = traceback.format_exc()
+                print(f"Error in allocate action: {e}")
+                print(error_trace)
+                return JsonResponse({'error': str(e), 'type': type(e).__name__}, status=500)
 
         # ---------- mark_completed ----------
         if action_post == 'mark_completed':
@@ -1449,7 +1458,7 @@ def therapy_entry(request):
             # Get patient room number (staying room) - mapped from StayingRoom
             patient_room_no = None
             if alloc.patient.pat_room_no:
-                from masters.models import get_staying_room_display_number
+                # Use the global import from line 15
                 patient_room_no = get_staying_room_display_number(alloc.patient.pat_room_no)
             
             # Check if this is a nurse treatment
@@ -3547,7 +3556,7 @@ def get_therapy_data_api(request):
                     # Get patient room number (staying room) - mapped from StayingRoom
                     patient_room_no = None
                     if booking.allocation.patient.pat_room_no:
-                        from masters.models import get_staying_room_display_number
+                        # Use the global import from line 15
                         patient_room_no = get_staying_room_display_number(booking.allocation.patient.pat_room_no)
                     
                     data.append({
@@ -3624,7 +3633,7 @@ def get_therapy_data_api(request):
                     # Get patient room number (staying room) - mapped from StayingRoom
                     patient_room_no = None
                     if allocation.patient.pat_room_no:
-                        from masters.models import get_staying_room_display_number
+                        # Use the global import from line 15
                         patient_room_no = get_staying_room_display_number(allocation.patient.pat_room_no)
                     
                     data.append({
