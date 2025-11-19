@@ -157,10 +157,171 @@ def create_therapist_booking_safe(therapist, date, time_slot, therapy_name, pati
         return tb, False
 
 # -----------------------
-# Room allocation helper (unchanged)
+# Room allocation helper - determines treatment rooms based on patient staying room
 # -----------------------
-def allocate_treatment_room(date, time_slot, last_room=None):
+def get_treatment_rooms_for_staying_room(patient_staying_room):
+    """
+    Returns list of treatment room numbers to check based on patient staying room.
+    Returns empty list if no match found.
+    
+    Rules:
+    - DS-1 to DS-6: TR-1/TR-2, then TR-3/TR-4, then TR-7/TR-8
+    - NR-7 to NR-14: TR-3/TR-4
+    - NR-15 to NR-21: TR-5/TR-6
+    - NR-22 to NR-27: TR-7/TR-8
+    - NR-28 to NR-33: TR-15/TR-16
+    - MG-1 to MG-10, CB-1/CB-2, FG-1 to FG-12: TR-9 to TR-14
+    - CT-1, CT-2, etc.: TRC-1, TRC-2, etc. (same number)
+    """
+    if not patient_staying_room:
+        return []
+    
+    staying_room = str(patient_staying_room).strip().upper()
+    
+    # Extract prefix and number
+    import re
+    match = re.match(r'([A-Z]+)-?(\d+)', staying_room)
+    if not match:
+        return []
+    
+    prefix = match.group(1)
+    try:
+        room_num = int(match.group(2))
+    except ValueError:
+        return []
+    
+    # DS-1 to DS-6: TR-1/TR-2, then TR-3/TR-4, then TR-7/TR-8
+    if prefix == 'DS' and 1 <= room_num <= 6:
+        return ['TR-1', 'TR-2', 'TR-3', 'TR-4', 'TR-7', 'TR-8']
+    
+    # NR-7 to NR-14: TR-3/TR-4
+    if prefix == 'NR' and 7 <= room_num <= 14:
+        return ['TR-3', 'TR-4']
+    
+    # NR-15 to NR-21: TR-5/TR-6
+    if prefix == 'NR' and 15 <= room_num <= 21:
+        return ['TR-5', 'TR-6']
+    
+    # NR-22 to NR-27: TR-7/TR-8
+    if prefix == 'NR' and 22 <= room_num <= 27:
+        return ['TR-7', 'TR-8']
+    
+    # NR-28 to NR-33: TR-15/TR-16
+    if prefix == 'NR' and 28 <= room_num <= 33:
+        return ['TR-15', 'TR-16']
+    
+    # MG-1 to MG-10, CB-1/CB-2, FG-1 to FG-12: TR-9 to TR-14
+    if prefix == 'MG' and 1 <= room_num <= 10:
+        return ['TR-9', 'TR-10', 'TR-11', 'TR-12', 'TR-13', 'TR-14']
+    if prefix == 'CB' and room_num in [1, 2]:
+        return ['TR-9', 'TR-10', 'TR-11', 'TR-12', 'TR-13', 'TR-14']
+    if prefix == 'FG' and 1 <= room_num <= 12:
+        return ['TR-9', 'TR-10', 'TR-11', 'TR-12', 'TR-13', 'TR-14']
+    
+    # CT-1, CT-2, etc.: TRC-1, TRC-2, etc. (same number)
+    if prefix == 'CT':
+        return [f'TRC-{room_num}']
+    
+    # No match found
+    return []
+
+def allocate_treatment_room(date, time_slot, last_room=None, patient_staying_room=None, patient=None):
+    """
+    Allocate treatment room based on patient staying room rules.
+    
+    NEW LOGIC: Allocates treatment rooms based on patient staying room:
+    - DS-1 to DS-6: Check TR-1/TR-2 first, then TR-3/TR-4, then TR-7/TR-8
+    - NR-7 to NR-14: Assign TR-3/TR-4
+    - NR-15 to NR-21: Assign TR-5/TR-6
+    - NR-22 to NR-27: Assign TR-7/TR-8
+    - NR-28 to NR-33: Assign TR-15/TR-16
+    - MG-1 to MG-10, CB-1/CB-2, FG-1 to FG-12: Assign TR-9 to TR-14
+    - CT-1, CT-2, etc.: Assign TRC-1, TRC-2, etc. (same number)
+    
+    For OP patients (no staying room):
+    - First try TR-9 to TR-14
+    - If not available, try TR-5, TR-6, TR-7
+    - If still not available, return None (allocation fails)
+    
+    If no room available from the list, returns None (allocation will fail).
+    
+    Args:
+        date: Date for allocation
+        time_slot: Time slot for allocation
+        last_room: Preferred room number (string) or room object (legacy, kept for compatibility)
+        patient_staying_room: Patient staying room number (e.g., 'DS-1', 'NR-7', 'CT-1')
+        patient: Patient object (PatientSnapshot) to check if OP (optional)
+    
+    Returns:
+        TreatmentRoom instance or None if no room available
+    """
     from Patient.models import RoomBooking, TreatmentRoom
+    
+    # Helper function to check room availability
+    def check_room_availability(room_no, exclude_trc=False):
+        try:
+            room = TreatmentRoom.objects.get(room_no=room_no)
+            # Strictly exclude TRC rooms for OP patients
+            if exclude_trc and room_no.upper().startswith('TRC'):
+                return None
+            if not RoomBooking.objects.filter(
+                room=room,
+                date=date,
+                time_slot=time_slot,
+                status='BOOKED'
+            ).exists():
+                return room
+        except TreatmentRoom.DoesNotExist:
+            pass
+        return None
+    
+    # NEW: Primary logic - allocate based on patient staying room
+    if patient_staying_room:
+        treatment_rooms = get_treatment_rooms_for_staying_room(patient_staying_room)
+        
+        if treatment_rooms:
+            # Check each treatment room in order for availability
+            for room_no in treatment_rooms:
+                room = check_room_availability(room_no)
+                if room:
+                    return room
+            
+            # None of the assigned rooms are available
+            return None
+    
+    # NEW: OP patient fallback logic (no staying room)
+    # Check if patient is OP (outpatient) - they don't have staying room
+    is_op_patient = False
+    if not patient_staying_room and patient:
+        try:
+            # Check if patient has is_op method (PatientSnapshot)
+            if hasattr(patient, 'is_op'):
+                is_op_patient = patient.is_op()
+            # Alternative: check registration number length (5 digits = OP)
+            elif hasattr(patient, 'pat_reg_no'):
+                digits = ''.join(ch for ch in str(patient.pat_reg_no or '') if ch.isdigit())
+                is_op_patient = len(digits) == 5
+        except Exception:
+            pass
+    
+    if is_op_patient:
+        # OP patients: Try TR-1 to TR-16 in order (STRICTLY NO TRC ROOMS)
+        op_rooms = ['TR-1', 'TR-2', 'TR-3', 'TR-4', 'TR-5', 'TR-6', 'TR-7', 'TR-8', 
+                   'TR-9', 'TR-10', 'TR-11', 'TR-12', 'TR-13', 'TR-14', 'TR-15', 'TR-16']
+        
+        # Try all rooms in order, explicitly excluding TRC rooms
+        for room_no in op_rooms:
+            # Double check: ensure room_no doesn't start with TRC
+            if room_no.upper().startswith('TRC'):
+                continue
+            room = check_room_availability(room_no, exclude_trc=True)
+            if room:
+                return room
+        
+        # No room available for OP patient - DO NOT fall through to legacy logic
+        return None
+    
+    # FALLBACK: Legacy logic if patient_staying_room is not provided and not OP
     if last_room:
         try:
             if not RoomBooking.objects.filter(room__room_no=last_room, date=date, time_slot=time_slot, status='BOOKED').exists():
@@ -176,9 +337,15 @@ def allocate_treatment_room(date, time_slot, last_room=None):
                     return r
         except TreatmentRoom.DoesNotExist:
             pass
-    for r in TreatmentRoom.objects.all():
-        if not RoomBooking.objects.filter(room=r, date=date, time_slot=time_slot, status='BOOKED').exists():
-            return r
+    # Any available room (legacy fallback - only if no staying room provided and NOT OP)
+    # STRICTLY exclude OP patients from this fallback to prevent TRC room assignment
+    if not patient_staying_room and not is_op_patient:
+        for r in TreatmentRoom.objects.all():
+            # Also exclude TRC rooms from legacy fallback
+            if r.room_no and r.room_no.upper().startswith('TRC'):
+                continue
+            if not RoomBooking.objects.filter(room=r, date=date, time_slot=time_slot, status='BOOKED').exists():
+                return r
     return None
 
 # -----------------------
@@ -536,12 +703,45 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
     room_candidate = getattr(booking, 'room', None)
     if needs_room_flag and not room_candidate:
         try:
-            room_candidate = allocate_treatment_room(date, canonical_slot, last_allocation.get("last_t_room"))
+            # Get patient staying room from allocation
+            patient_staying_room = getattr(allocation.patient, 'pat_room_no', None) if allocation and hasattr(allocation, 'patient') else None
+            patient_obj = allocation.patient if allocation and hasattr(allocation, 'patient') else None
+            room_candidate = allocate_treatment_room(
+                date, 
+                canonical_slot, 
+                last_allocation.get("last_t_room"),
+                patient_staying_room=patient_staying_room,
+                patient=patient_obj
+            )
         except Exception:
             room_candidate = None
 
     if needs_room_flag and not room_candidate:
+        # Build detailed error message based on patient staying room or OP status
         reason = "no_room_available"
+        if allocation and hasattr(allocation, 'patient'):
+            patient_staying_room = getattr(allocation.patient, 'pat_room_no', None)
+            if patient_staying_room:
+                treatment_rooms = get_treatment_rooms_for_staying_room(patient_staying_room)
+                if treatment_rooms:
+                    rooms_list = ', '.join(treatment_rooms)
+                    reason = f"no_room_available: Treatment rooms assigned for staying room {patient_staying_room} ({rooms_list}) are not available"
+                else:
+                    reason = f"no_room_available: No treatment room assignment rule found for staying room {patient_staying_room}"
+            else:
+                # Check if OP patient
+                try:
+                    is_op = False
+                    if hasattr(allocation.patient, 'is_op'):
+                        is_op = allocation.patient.is_op()
+                    elif hasattr(allocation.patient, 'pat_reg_no'):
+                        digits = ''.join(ch for ch in str(allocation.patient.pat_reg_no or '') if ch.isdigit())
+                        is_op = len(digits) == 5
+                    
+                    if is_op:
+                        reason = "no_room_available: No treatment room available for OP patient (TR-1 to TR-16)"
+                except Exception:
+                    pass
         if AllocationAttempt:
             try:
                 AllocationAttempt.objects.create(visit=None, therapy=None, date=date,
