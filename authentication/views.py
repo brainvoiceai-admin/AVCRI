@@ -1209,12 +1209,38 @@ def get_patient_details(request):
                     # Determine patient type
                     patient_type = 'OP' if len(str(reg_no)) == 5 else 'IP'
                     
+                    # Fetch room number and age from Treatment model for OP patients
+                    op_room_no = ''
+                    op_age = None
+                    try:
+                        from MySql_Data_pull.models import Treatment
+                        # Try to find treatment record - Pat_Reg_No is primary key (CharField)
+                        # Only fetch Pat_Room_No and Pat_Age to avoid errors with other columns
+                        reg_no_str = str(reg_no)
+                        treatment = Treatment.objects.using('iptherapy_db').filter(
+                            Pat_Reg_No=reg_no_str
+                        ).only('Pat_Reg_No', 'Pat_Room_No', 'Pat_Age').first()
+                        
+                        if treatment:
+                            if treatment.Pat_Room_No:
+                                op_room_no = str(treatment.Pat_Room_No).strip()
+                                print(f"[DEBUG] OP patient {reg_no} room number from Treatment: {op_room_no}")
+                            if treatment.Pat_Age:
+                                op_age = str(treatment.Pat_Age).strip()
+                                print(f"[DEBUG] OP patient {reg_no} age from Treatment: {op_age}")
+                        else:
+                            print(f"[DEBUG] No Treatment record found for OP patient {reg_no}")
+                    except Exception as e:
+                        print(f"Error fetching OP patient details from Treatment model: {e}")
+                        import traceback
+                        traceback.print_exc()
+                    
                     patient_details = {
                         'registration_number': op_patient.NPat_Reg_No,
                         'patient_name': op_patient.NPat_Name,
                         'sex': op_patient.NPat_Sex,
-                        'age': None,  # OP patients don't have age in this table
-                        'room_number': None,  # OP patients don't have room number
+                        'age': op_age,  # Fetch from Treatment model
+                        'room_number': op_room_no,  # Fetch from Treatment model
                         'ip_number': None,  # OP patients don't have IP number
                         'pat_ref_id': None,  # OP patients don't have pat_ref_id
                         'phone': None,  # OP patients don't have phone in this table

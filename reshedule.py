@@ -289,8 +289,8 @@ def allocate_treatment_room(date, time_slot, last_room=None, patient_staying_roo
             # None of the assigned rooms are available
             return None
     
-    # NEW: OP patient fallback logic (no staying room)
-    # Check if patient is OP (outpatient) - they don't have staying room
+    # NEW: OP patient fallback logic
+    # Check if patient is OP (outpatient)
     is_op_patient = False
     if not patient_staying_room and patient:
         try:
@@ -304,8 +304,48 @@ def allocate_treatment_room(date, time_slot, last_room=None, patient_staying_roo
         except Exception:
             pass
     
+    # For OP patients, check if they have a staying room from Treatment model
+    # If OP patient has staying room, use it for allocation
+    if is_op_patient and not patient_staying_room and patient:
+        try:
+            # Try to get room number from patient's pat_room_no (should be populated from Treatment model)
+            op_staying_room = getattr(patient, 'pat_room_no', None)
+            if op_staying_room:
+                patient_staying_room = str(op_staying_room).strip()
+        except Exception:
+            pass
+    
+    # If OP patient has staying room (e.g., CT-1), apply staying room rules
+    if is_op_patient and patient_staying_room:
+        # Check if it's a CT room - if yes, apply CT room logic (TRC rooms)
+        staying_room_upper = str(patient_staying_room).strip().upper()
+        if staying_room_upper.startswith('CT'):
+            # Extract CT room number and assign TRC room
+            import re
+            match = re.match(r'CT-?(\d+)', staying_room_upper)
+            if match:
+                try:
+                    ct_room_num = int(match.group(1))
+                    trc_room_no = f'TRC-{ct_room_num}'
+                    room = check_room_availability(trc_room_no)
+                    if room:
+                        return room
+                    # TRC room not available
+                    return None
+                except (ValueError, AttributeError):
+                    pass
+        
+        # For other room types, use staying room rules
+        treatment_rooms = get_treatment_rooms_for_staying_room(patient_staying_room)
+        if treatment_rooms:
+            for room_no in treatment_rooms:
+                room = check_room_availability(room_no)
+                if room:
+                    return room
+            return None
+    
+    # OP patients with no room or non-CT room: Try TR-1 to TR-16 in order
     if is_op_patient:
-        # OP patients: Try TR-1 to TR-16 in order (STRICTLY NO TRC ROOMS)
         op_rooms = ['TR-1', 'TR-2', 'TR-3', 'TR-4', 'TR-5', 'TR-6', 'TR-7', 'TR-8', 
                    'TR-9', 'TR-10', 'TR-11', 'TR-12', 'TR-13', 'TR-14', 'TR-15', 'TR-16']
         
@@ -739,7 +779,18 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
                         is_op = len(digits) == 5
                     
                     if is_op:
-                        reason = "no_room_available: No treatment room available for OP patient (TR-1 to TR-16)"
+                        # Check if OP patient has CT room
+                        op_room = getattr(allocation.patient, 'pat_room_no', None)
+                        if op_room and str(op_room).strip().upper().startswith('CT'):
+                            import re
+                            match = re.match(r'CT-?(\d+)', str(op_room).strip().upper())
+                            if match:
+                                ct_num = match.group(1)
+                                reason = f"no_room_available: Treatment room TRC-{ct_num} for OP patient staying room CT-{ct_num} is not available"
+                            else:
+                                reason = "no_room_available: No treatment room available for OP patient with CT room"
+                        else:
+                            reason = "no_room_available: No treatment room available for OP patient (TR-1 to TR-16)"
                 except Exception:
                     pass
         if AllocationAttempt:
