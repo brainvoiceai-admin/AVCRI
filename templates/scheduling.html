@@ -1723,7 +1723,6 @@
                     // Prepare table data for this slot
                     const tableData = treatments.map(item => [
                         item.patient_name || 'N/A',
-                        item.patient_reg_no || 'N/A',
                         item.patient_room_no || '—',
                         item.room_no || '—',
                         item.therapy_name || 'N/A',
@@ -1734,7 +1733,7 @@
                     
                     // Generate table for this slot
                     doc.autoTable({
-                        head: [['Patient Name', 'Reg. No.', 'Patient Room', 'Treatment Room', 'Therapy', 'Therapist Assigned']],
+                        head: [['Patient Name', 'Patient Room', 'Treatment Room', 'Therapy', 'Therapist Assigned']],
                         body: tableData,
                         startY: yPos,
                         margin: { left: margin, right: margin },
@@ -1801,7 +1800,6 @@
                 // Prepare table data for nurse treatments
                 const nurseTableData = nurseTreatments.map(item => [
                     item.patient_name || 'N/A',
-                    item.patient_reg_no || 'N/A',
                     item.patient_room_no || '—',
                     item.therapy_name || 'N/A',
                     item.nurses && item.nurses.length > 0 
@@ -1811,7 +1809,7 @@
                 
                 // Generate table for nurse treatments
                 doc.autoTable({
-                    head: [['Patient Name', 'Reg. No.', 'Patient Room', 'Treatment Name', 'Nurse Assigned']],
+                    head: [['Patient Name', 'Patient Room', 'Treatment Name', 'Nurse Assigned']],
                     body: nurseTableData,
                     startY: yPos,
                     margin: { left: margin, right: margin },
