@@ -126,6 +126,19 @@ DATABASES = {
             'driver': 'ODBC Driver 18 for SQL Server',
             'extra_params': 'TrustServerCertificate=yes;Encrypt=yes;',
         },
+    },
+    'iptherapy_db': {  # Therapy-new SQL Server
+        'ENGINE': 'mssql',
+        'NAME': os.getenv('IPTHERAPY_DB_NAME'),
+        'USER': os.getenv('IPTHERAPY_DB_USER'),
+        'PASSWORD': os.getenv('IPTHERAPY_DB_PASSWORD'),
+        'HOST': os.getenv('IPTHERAPY_DB_HOST'),
+        'PORT': os.getenv('IPTHERAPY_DB_PORT'),
+        'OPTIONS': {
+            'driver': 'ODBC Driver 18 for SQL Server',
+            'extra_params': 'TrustServerCertificate=yes;Encrypt=yes;',
+            'convert_tz': False,
+        },
     }
 }
 
