@@ -723,6 +723,11 @@
               <select id="therapy-select"></select>
             </div>
 
+            <div class="form-group">
+              <label for="therapy-usage-select">Usage</label>
+              <select id="therapy-usage-select" multiple style="width:100%;"></select>
+            </div>
+
             <div class="form-group small">
               <label for="ext-int-select">External/Internal</label>
               <select id="ext-int-select"><option value="">-- Select --</option><option>Internal</option><option>External</option></select>
@@ -746,11 +751,6 @@
             <div class="form-group small">
               <label for="days-input">Duration (Days)</label>
               <input type="number" id="days-input" min="1" placeholder="Enter number of days">
-            </div>
-
-            <div class="form-group">
-              <label for="oil-class-select">Oil Class</label>
-              <select id="oil-class-select"><option value="">-- Select --</option></select>
             </div>
 
             <div class="form-group small">
@@ -780,8 +780,8 @@
                 </select>
               </div>
               <div class="form-group small">
-                <label for="item-builder-usage">Usage</label>
-                <select id="item-builder-usage" multiple style="width:100%;"></select>
+                <label for="item-builder-oil-class">Oil Class</label>
+                <select id="item-builder-oil-class"><option value="">-- Select --</option></select>
               </div>
               <div style="display:flex;align-items:flex-end;">
                 <button id="add-item-group-btn" class="btn">
@@ -820,6 +820,7 @@
                 <tr>
                   <th>#</th>
                   <th>Therapy</th>
+                  <th>Usage</th>
                   <th>Ext/Int</th>
                   <th>Slot</th>
                   <th>Items</th>
@@ -832,7 +833,7 @@
               </thead>
               <tbody id="therapies-table-body">
                 <tr>
-                  <td colspan="10">
+                  <td colspan="11">
                     <div class="empty-state">
                       <i class="fas fa-spa"></i>
                       <h3>No Therapies Found</h3>
@@ -946,8 +947,10 @@ $(function(){
   // --- DOM refs ---
   const $patientSelect = $('#header-patient-select');
   const $therapySelect = $('#therapy-select'), $slotSelect = $('#slot-select'), $fromDate = $('#from-date-input'), $toDate = $('#to-date-input'), $daysInput = $('#days-input');
-  const $oilClassSelect = $('#oil-class-select'), $procuredSelect = $('#procured-select');
+  const $therapyUsageSelect = $('#therapy-usage-select');
+  const $procuredSelect = $('#procured-select');
   const $itemBuilder = $('#item-builder-select'), $itemGroupsList = $('#item-groups-list');
+  const $itemBuilderOilClass = $('#item-builder-oil-class');
   const $allocateBtn = $('#allocate-therapy-btn'), $updateBtn = $('#update-therapy-btn'), $clearBtn = $('#clear-form');
   const $therapiesTableBody = $('#therapies-table-body');
 
@@ -1313,24 +1316,51 @@ $(function(){
     }
   });
 
+  // Initialize Select2 for therapy-usage-select multiselect immediately
+  $therapyUsageSelect.select2({
+    placeholder: 'Select Usage (multiple)',
+    allowClear: true,
+    width: '100%',
+    multiple: true,
+    tags: false
+  });
+
   // populate masters & slots with fallback
   function populateMasters(){
-    // Populate item-builder-usage multiselect
+    // Populate therapy-usage-select multiselect (moved from item builder to therapy form)
     ajax({action:'masters', type:'usagetype'}).then(list => { 
-      const $itemUsageSelect = $('#item-builder-usage'); 
-      $itemUsageSelect.empty(); 
-      (list||[]).forEach(x => $itemUsageSelect.append(new Option(x.name, x.name))); 
-      // Initialize Select2 for multiselect
-      if (!$itemUsageSelect.hasClass('select2-hidden-accessible')) {
-        $itemUsageSelect.select2({
-          placeholder: 'Select Usage (multiple)',
-          allowClear: true,
-          width: '100%'
+      // Clear existing options
+      $therapyUsageSelect.empty();
+      
+      // Add options from API
+      if (list && list.length > 0) {
+        list.forEach(x => {
+          const option = new Option(x.name, x.name, false, false);
+          $therapyUsageSelect.append(option);
+        });
+      } else {
+        // Use fallback if API returns empty
+        FALLBACK_USAGE.forEach(x => {
+          const option = new Option(x.name, x.name, false, false);
+          $therapyUsageSelect.append(option);
         });
       }
-    }).catch(()=>{});
+      
+      // Trigger change to update Select2 display
+      $therapyUsageSelect.trigger('change');
+    }).catch(err => {
+      console.error('Error loading usage types:', err);
+      // Use fallback on error
+      $therapyUsageSelect.empty();
+      FALLBACK_USAGE.forEach(x => {
+        const option = new Option(x.name, x.name, false, false);
+        $therapyUsageSelect.append(option);
+      });
+      $therapyUsageSelect.trigger('change');
+    });
     ajax({action:'masters', type:'procured'}).then(list => { $procuredSelect.empty().append('<option value="">-- Select --</option>'); (list||FALLBACK_PROCURED).forEach(p => $procuredSelect.append(new Option(p.name, p.name))); }).catch(()=>{ $procuredSelect.empty().append('<option value="">-- Select --</option>'); FALLBACK_PROCURED.forEach(p => $procuredSelect.append(new Option(p.name, p.name))); });
-    ajax({action:'masters', type:'oil'}).then(list => { $oilClassSelect.empty().append('<option value="">-- Select --</option>'); (list||FALLBACK_OIL).forEach(o => $oilClassSelect.append(new Option(o.name, o.name))); }).catch(()=>{ $oilClassSelect.empty().append('<option value="">-- Select --</option>'); FALLBACK_OIL.forEach(o => $oilClassSelect.append(new Option(o.name, o.name))); }); 
+    // Populate Oil Class in item builder section
+    ajax({action:'masters', type:'oil'}).then(list => { $itemBuilderOilClass.empty().append('<option value="">-- Select --</option>'); (list||FALLBACK_OIL).forEach(o => $itemBuilderOilClass.append(new Option(o.name, o.name))); }).catch(()=>{ $itemBuilderOilClass.empty().append('<option value="">-- Select --</option>'); FALLBACK_OIL.forEach(o => $itemBuilderOilClass.append(new Option(o.name, o.name))); }); 
     // Use updateSlotsForTherapy to populate slots (respects therapy difficulty)
     updateSlotsForTherapy();
   }
@@ -1341,20 +1371,18 @@ $(function(){
     const selected = $itemBuilder.select2('data') || [];
     const dosage = $('#item-builder-dosage').val().trim();
     const uno = $('#item-builder-uno').val().trim();
-    const usageSelect = $('#item-builder-usage');
-    const usageValues = usageSelect.val() || []; // Get array of selected values
-    const usage = usageValues.join(', '); // Join with comma and space
+    const oilClass = $itemBuilderOilClass.val() || ''; // Get Oil Class from item builder
     
     // All fields are now optional - no validation required
     // Users can add item groups with empty or partial data, or submit therapy without any items
     
     const items = selected.length > 0 ? selected.map(s => ({ item_code: s.id, item_name: s.text || s.id })) : [];
-    const grp = { id: Math.random().toString(36).slice(2,9), items, dosage, uno, usage, usage_array: usageValues };
+    const grp = { id: Math.random().toString(36).slice(2,9), items, dosage, uno, oil_class: oilClass };
     itemGroups.push(grp);
     $itemBuilder.val(null).trigger('change');
     $('#item-builder-dosage').val('');
     $('#item-builder-uno').val('');
-    usageSelect.val(null).trigger('change');
+    $itemBuilderOilClass.val(''); // Clear Oil Class after adding
     renderItemGroups();
   });
 
@@ -1376,7 +1404,7 @@ $(function(){
           <div style="flex:1;">
             <div style="font-weight:600;color:var(--text-dark);margin-bottom:6px;">Group ${i+1}</div>
             <div style="margin-bottom:6px;">${itemsHtml}</div>
-            <div class="small-muted">Dosage: ${esc(g.dosage||'—')} • UNO: ${esc(g.uno||'—')} • Usage: ${esc(g.usage||'—')}</div>
+            <div class="small-muted">Dosage: ${esc(g.dosage||'—')} • UNO: ${esc(g.uno||'—')} • Oil Class: ${esc(g.oil_class||'—')}</div>
           </div>
           <div>
             <button class="edit-group action-btn btn btn-outline" data-id="${g.id}" style="margin-right:6px;">
@@ -1410,17 +1438,8 @@ $(function(){
     $itemBuilder.trigger('change'); 
     $('#item-builder-dosage').val(g.dosage||''); 
     $('#item-builder-uno').val(g.uno||''); 
-    // Handle usage - support both array and comma-separated string
-    const usageSelect = $('#item-builder-usage');
-    if (g.usage_array && Array.isArray(g.usage_array)) {
-      usageSelect.val(g.usage_array).trigger('change');
-    } else if (g.usage) {
-      // Split comma-separated string and trim each value
-      const usageArray = g.usage.split(',').map(u => u.trim()).filter(u => u);
-      usageSelect.val(usageArray).trigger('change');
-    } else {
-      usageSelect.val(null).trigger('change');
-    }
+    // Set Oil Class in item builder
+    $itemBuilderOilClass.val(g.oil_class||'');
     itemGroups = itemGroups.filter(x=>x.id!==id); 
     renderItemGroups(); 
   });
@@ -1509,19 +1528,19 @@ $(function(){
       pat_ref_id: selectedPatient.pat_ref_id || '',
       therapy_code: therapy.id,
       therapy_name: therapy.text,
+      usage: $therapyUsageSelect.val() || [], // Therapy-level usage (multiselect)
+      usage_array: $therapyUsageSelect.val() || [],
       ext_int: $('#ext-int-select').val(),
       slot: $slotSelect.val() || '',
       from_date: from,
       to_date: to,
       days: Math.ceil((new Date(to).getTime() - new Date(from).getTime()) / (1000 * 60 * 60 * 24)) + 1,
-      oil_class: $oilClassSelect.val()||'',
       procured: $procuredSelect.val()||'',
       items_groups: itemGroups.map(g => ({ 
         items: g.items || [], 
         dosage: g.dosage, 
         uno: g.uno, 
-        usage: g.usage || (g.usage_array ? g.usage_array.join(', ') : ''),
-        usage_array: g.usage_array || (g.usage ? g.usage.split(',').map(u => u.trim()) : [])
+        oil_class: g.oil_class || '' // Oil Class is now per item group
       })),
       notes: ''
     };
@@ -1560,7 +1579,7 @@ $(function(){
         
         // Reset form
         itemGroups = []; renderItemGroups();
-        $therapySelect.val(null).trigger('change'); $('#ext-int-select').val(''); $slotSelect.val(''); $fromDate.val(''); $toDate.val(''); $daysInput.val(''); $oilClassSelect.val(''); $procuredSelect.val('');
+        $therapySelect.val(null).trigger('change'); $('#ext-int-select').val(''); $slotSelect.val(''); $fromDate.val(''); $toDate.val(''); $daysInput.val(''); $therapyUsageSelect.val(null).trigger('change'); $procuredSelect.val('');
         
         renderAll();
         
@@ -1609,16 +1628,37 @@ $(function(){
       return; 
     }
     addedTherapies.forEach((t,i) => {
+      // Format therapy-level usage for display
+      let therapyUsageDisplay = '—';
+      if (t.usage_array && Array.isArray(t.usage_array) && t.usage_array.length > 0) {
+        therapyUsageDisplay = esc(t.usage_array.join(', '));
+      } else if (t.usage) {
+        let usageArray = [];
+        if (Array.isArray(t.usage)) {
+          usageArray = t.usage;
+        } else if (typeof t.usage === 'string') {
+          // Handle string that might be JSON array or comma-separated
+          const trimmed = t.usage.trim();
+          if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+            // It's a string representation of an array, parse it
+            try {
+              usageArray = JSON.parse(trimmed);
+            } catch (e) {
+              // If parsing fails, treat as comma-separated string
+              usageArray = trimmed.replace(/^\[|\]$/g, '').split(',').map(u => u.trim().replace(/^["']|["']$/g, '')).filter(u => u);
+            }
+          } else {
+            // Regular comma-separated string
+            usageArray = trimmed.split(',').map(u => u.trim()).filter(u => u);
+          }
+        }
+        therapyUsageDisplay = usageArray.length > 0 ? esc(usageArray.join(', ')) : '—';
+      }
+      
       const groupsHtml = (t.items_groups||[]).map(g => {
         const itemsHtml = (g.items||[]).length > 0 ? (g.items||[]).map(it => `<span class="tag">${esc(it.item_name)}</span>`).join(' ') : '<span class="tag" style="color:#999;">No items</span>';
-        // Format usage - handle both string and array
-        let usageDisplay = '—';
-        if (g.usage) {
-          usageDisplay = esc(g.usage);
-        } else if (Array.isArray(g.usage_array) && g.usage_array.length > 0) {
-          usageDisplay = esc(g.usage_array.join(', '));
-        }
-        return itemsHtml + `<div class="small-muted">Dosage:${esc(g.dosage||'—')} • UNO:${esc(g.uno||'—')} • Usage:${usageDisplay}</div>`;
+        // Oil Class is now per item group, usage is at therapy level
+        return itemsHtml + `<div class="small-muted">Dosage:${esc(g.dosage||'—')} • UNO:${esc(g.uno||'—')} • Oil Class:${esc(g.oil_class||'—')}</div>`;
       }).join('<hr style="margin:8px 0;border:none;border-top:1px solid var(--border-light);"/>');
       
       // Status logic - show counts if available
@@ -1671,6 +1711,7 @@ $(function(){
       const row = `<tr class="${statusClass}">
         <td>${i+1}</td>
         <td>${esc(t.therapy_name)}</td>
+        <td>${therapyUsageDisplay !== '—' ? esc(therapyUsageDisplay) : '—'}</td>
         <td>${esc(t.ext_int||'')}</td>
         <td>${esc(format12Hour(t.slot||''))}</td>
         <td>${groupsHtml}</td>
@@ -1883,14 +1924,42 @@ $(function(){
     $fromDate.val(t.from_date||'').prop('disabled', false);
     $toDate.val(t.to_date||'').prop('disabled', false);
     $daysInput.val(t.days||'');
-    $oilClassSelect.val(t.oil_class||''); $procuredSelect.val(t.procured||'');
+    // Load therapy-level usage (multiselect)
+    let usageValues = null;
+    if (t.usage_array && Array.isArray(t.usage_array) && t.usage_array.length > 0) {
+      usageValues = t.usage_array;
+    } else if (t.usage) {
+      if (Array.isArray(t.usage)) {
+        usageValues = t.usage;
+      } else if (typeof t.usage === 'string') {
+        const trimmed = t.usage.trim();
+        if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+          // It's a string representation of an array, parse it
+          try {
+            usageValues = JSON.parse(trimmed);
+          } catch (e) {
+            // If parsing fails, treat as comma-separated string with brackets
+            usageValues = trimmed.replace(/^\[|\]$/g, '').split(',').map(u => u.trim().replace(/^["']|["']$/g, '')).filter(u => u);
+          }
+        } else {
+          // Regular comma-separated string
+          usageValues = trimmed.split(',').map(u => u.trim()).filter(u => u);
+        }
+      }
+    }
+    
+    if (usageValues && usageValues.length > 0) {
+      $therapyUsageSelect.val(usageValues).trigger('change');
+    } else {
+      $therapyUsageSelect.val(null).trigger('change');
+    }
+    $procuredSelect.val(t.procured||'');
     itemGroups = (t.items_groups||[]).map(g=>({ 
       id: Math.random().toString(36).slice(2,9), 
       items: g.items||[], 
       dosage: g.dosage||'', 
       uno: g.uno||'',
-      usage: g.usage||'',
-      usage_array: g.usage_array || (g.usage ? g.usage.split(',').map(u => u.trim()) : [])
+      oil_class: g.oil_class || '' // Load Oil Class from item group
     }));
     renderItemGroups();
     $allocateBtn.hide(); $updateBtn.show(); window.scrollTo({top:0, behavior:'smooth'});
@@ -1910,14 +1979,15 @@ $(function(){
     t.slot = $slotSelect.val() || '';
     t.from_date = $fromDate.val() || t.from_date;
     t.to_date = $toDate.val() || t.to_date;
-    t.oil_class = $oilClassSelect.val()||''; 
+    // Update therapy-level usage (multiselect)
+    t.usage = $therapyUsageSelect.val() || [];
+    t.usage_array = $therapyUsageSelect.val() || [];
     t.procured = $procuredSelect.val()||'';
     t.items_groups = itemGroups.map(g=>({
       items: g.items||[], 
       dosage: g.dosage, 
       uno: g.uno,
-      usage: g.usage || (g.usage_array ? g.usage_array.join(', ') : ''),
-      usage_array: g.usage_array || (g.usage ? g.usage.split(',').map(u => u.trim()) : [])
+      oil_class: g.oil_class || '' // Include Oil Class in item group
     }));
     
     // Send update to server if therapy has allocation_id
@@ -1934,9 +2004,10 @@ $(function(){
           dosage: g.dosage, 
           uno: g.uno,
           usage: g.usage || (g.usage_array ? g.usage_array.join(', ') : ''),
-          usage_array: g.usage_array || (g.usage ? g.usage.split(',').map(u => u.trim()) : [])
+          usage_array: g.usage_array || (g.usage ? g.usage.split(',').map(u => u.trim()) : []),
+          oil_class: g.oil_class || '' // Include Oil Class in item group
         })),
-        oil_class: t.oil_class,
+        usage_should: t.usage_should || '', // Therapy-level usage
         procured_from: t.procured,
         notes: t.notes || ''
       };
@@ -1971,7 +2042,7 @@ $(function(){
     $therapySelect.val(null).trigger('change').prop('disabled', false);
     $slotSelect.val('').prop('disabled', false);
     $('#ext-int-select').val(''); $fromDate.val('').prop('disabled', false); $toDate.val('').prop('disabled', false); $daysInput.val('');
-    $oilClassSelect.val(''); $procuredSelect.val('');
+    $therapyUsageSelect.val(null).trigger('change'); $procuredSelect.val('');
     itemGroups = []; renderItemGroups();
     $allocateBtn.show(); $updateBtn.hide();
   }
