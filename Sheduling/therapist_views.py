@@ -61,6 +61,38 @@ def get_therapist_data_api(request):
                 'booking__timeslot', 'booking__room', 'therapist'
             )
             
+            # Pre-fetch TherapistBooking records to get is_bathing flags
+            # Use visit (TherapyAllocation) to match TherapistBooking records
+            therapist_bookings = {}
+            try:
+                from Patient.models import TherapistBooking
+                from masters.models import TherapistMaster
+                # Get all allocations (visits) for these bookings
+                allocations = [a.booking.allocation for a in assignments if a.booking.allocation]
+                # Get all therapist codes for these assignments
+                therapist_codes = [a.therapist.therapist_code for a in assignments]
+                # Get all TherapistMaster records
+                therapist_masters = {tm.therapist_code: tm for tm in TherapistMaster.objects.filter(
+                    therapist_code__in=therapist_codes
+                )}
+                # Get all TherapistBooking records for these visits and therapists
+                if therapist_masters and allocations:
+                    tb_list = TherapistBooking.objects.filter(
+                        visit__in=allocations,
+                        therapist__in=therapist_masters.values(),
+                        status='BOOKED'
+                    ).select_related('therapist', 'visit')
+                    # Create a map: (visit_id, therapist_code) -> is_bathing
+                    # ONLY use TherapistBooking.is_bathing field from Patient module
+                    for tb in tb_list:
+                        if tb.visit and tb.therapist:
+                            key = (tb.visit.id, tb.therapist.therapist_code)
+                            therapist_bookings[key] = tb.is_bathing  # Direct access to is_bathing field
+            except Exception as e:
+                print(f"Error pre-fetching TherapistBooking records: {e}")
+                import traceback
+                traceback.print_exc()
+            
             for assignment in assignments:
                 booking = assignment.booking
                 allocation = booking.allocation
@@ -69,6 +101,13 @@ def get_therapist_data_api(request):
                 # Get time slot and room info
                 time_slot = booking.timeslot  # Use timeslot (no underscore)
                 room = booking.room
+                
+                # Get is_bathing flag from TherapistBooking model ONLY (Patient module)
+                # Match by visit (TherapyAllocation) and therapist
+                is_bathing = False
+                if allocation and assignment.therapist:
+                    key = (allocation.id, assignment.therapist.therapist_code)
+                    is_bathing = therapist_bookings.get(key, False)
                 
                 # Format therapy name
                 therapy_name = allocation.therapy_name
@@ -123,10 +162,14 @@ def get_therapist_data_api(request):
                     'patient_name': patient.pat_name if patient else 'Unknown',
                     'patient_id': patient.pat_reg_no if patient else 'Unknown',
                     'therapy': therapy_name,
+                    'is_bathing': bool(is_bathing),  # Ensure boolean value for frontend display
                     'room': room_no,
                     'status': display_status,
                     'notes': booking.therapist_note or ''  # Use therapist_note field
                 }
+                # Debug logging
+                if is_bathing:
+                    print(f"[DEBUG] Therapist {assignment.therapist.therapist_code} has is_bathing=True for booking {booking.id}, therapy {therapy_name}")
                 sessions.append(session_data)
         except Exception as e:
             print(f"Error getting sessions: {e}")
@@ -203,10 +246,48 @@ def get_therapist_sessions_by_date_api(request):
                 'booking__timeslot', 'booking__room', 'therapist'
             )
             
+            # Pre-fetch TherapistBooking records to get is_bathing flags
+            # Use visit (TherapyAllocation) to match TherapistBooking records
+            therapist_bookings = {}
+            try:
+                from Patient.models import TherapistBooking
+                from masters.models import TherapistMaster
+                # Get all allocations (visits) for these bookings
+                allocations = [a.booking.allocation for a in assignments if a.booking.allocation]
+                # Get all therapist codes for these assignments
+                therapist_codes = [a.therapist.therapist_code for a in assignments]
+                # Get all TherapistMaster records
+                therapist_masters = {tm.therapist_code: tm for tm in TherapistMaster.objects.filter(
+                    therapist_code__in=therapist_codes
+                )}
+                # Get all TherapistBooking records for these visits and therapists
+                if therapist_masters and allocations:
+                    tb_list = TherapistBooking.objects.filter(
+                        visit__in=allocations,
+                        therapist__in=therapist_masters.values(),
+                        status='BOOKED'
+                    ).select_related('therapist', 'visit')
+                    # Create a map: (visit_id, therapist_code) -> is_bathing
+                    # ONLY use TherapistBooking.is_bathing field from Patient module
+                    for tb in tb_list:
+                        if tb.visit and tb.therapist:
+                            key = (tb.visit.id, tb.therapist.therapist_code)
+                            therapist_bookings[key] = tb.is_bathing  # Direct access to is_bathing field
+            except Exception as e:
+                print(f"Error pre-fetching TherapistBooking records: {e}")
+                import traceback
+                traceback.print_exc()
+            
             for assignment in assignments:
                 booking = assignment.booking
                 allocation = booking.allocation
                 patient = allocation.patient
+                
+                # Get is_bathing flag from pre-fetched data using visit (TherapyAllocation)
+                is_bathing = False
+                if allocation and assignment.therapist:
+                    key = (allocation.id, assignment.therapist.therapist_code)
+                    is_bathing = therapist_bookings.get(key, False)
                 
                 # Format therapy name
                 therapy_name = allocation.therapy_name
@@ -260,10 +341,14 @@ def get_therapist_sessions_by_date_api(request):
                     'patient_name': patient.pat_name if patient else 'Unknown',
                     'patient_id': patient.pat_reg_no if patient else 'Unknown',
                     'therapy': therapy_name,
+                    'is_bathing': bool(is_bathing),  # Ensure boolean value for frontend display
                     'room': room_no,
                     'status': display_status,
                     'notes': booking.therapist_note or ''
                 }
+                # Debug logging
+                if is_bathing:
+                    print(f"[DEBUG] Therapist {assignment.therapist.therapist_code} has is_bathing=True for booking {booking.id}, therapy {therapy_name}")
                 sessions.append(session_data)
         except Exception as e:
             print(f"Error getting sessions for date {selected_date}: {e}")

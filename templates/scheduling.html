@@ -747,8 +747,15 @@
                                             </td>
                                             <td>
                                                 <div class="therapist-list">
+                                                    {% load custom_tags %}
                                                     {% for assignment in booking.assignments.all %}
-                                                        <span class="therapist-badge">{{ assignment.therapist.therapist_name|default:assignment.therapist.therapist_code }}</span>
+                                                        {% with therapist_name=assignment.therapist.therapist_name|default:assignment.therapist.therapist_code %}
+                                                            {% with is_bathing=assignment|get_therapist_bathing_flag:booking %}
+                                                                <span class="therapist-badge">
+                                                                    {{ therapist_name }}{% if is_bathing %}(bathing){% endif %}
+                                                                </span>
+                                                            {% endwith %}
+                                                        {% endwith %}
                                                     {% empty %}
                                                         —
                                                     {% endfor %}
@@ -1045,7 +1052,12 @@
                 } else {
                     therapistData.forEach(item => {
                         const therapistsHtml = item.therapists && item.therapists.length > 0 
-                            ? `<div class="therapist-list">${item.therapists.map(t => `<span class="therapist-badge">${t.name || t.code || t}</span>`).join('')}</div>`
+                            ? `<div class="therapist-list">${item.therapists.map(t => {
+                                const name = t.name || t.code || t;
+                                const isBathing = t.is_bathing === true || (typeof t === 'string' && t.includes('(bathing)'));
+                                const displayName = isBathing && !name.includes('(bathing)') ? `${name}(bathing)` : name;
+                                return `<span class="therapist-badge">${escapeHtml(displayName)}</span>`;
+                            }).join('')}</div>`
                             : '<span class="muted">Not assigned</span>';
                         
                         const row = document.createElement('tr');
@@ -1138,7 +1150,12 @@
             data.forEach(item => {
                 const row = document.createElement('tr');
                 const therapistsHtml = item.therapists && item.therapists.length > 0 
-                    ? `<div class="therapist-list">${item.therapists.map(t => `<span class="therapist-badge">${t.name || t.code || t}</span>`).join('')}</div>`
+                    ? `<div class="therapist-list">${item.therapists.map(t => {
+                        const name = t.name || t.code || t;
+                        const isBathing = t.is_bathing === true || (typeof t === 'string' && t.includes('(bathing)'));
+                        const displayName = isBathing && !name.includes('(bathing)') ? `${name}(bathing)` : name;
+                        return `<span class="therapist-badge">${escapeHtml(displayName)}</span>`;
+                    }).join('')}</div>`
                     : '<span class="muted">Not assigned</span>';
                 
                 if (status === 'draft') {
@@ -1722,18 +1739,22 @@
                     
                     // Prepare table data for this slot
                     const tableData = treatments.map(item => [
-                        item.patient_name || 'N/A',
                         item.patient_room_no || '—',
+                        item.patient_name || 'N/A',
                         item.room_no || '—',
                         item.therapy_name || 'N/A',
                         item.therapists && item.therapists.length > 0 
-                            ? item.therapists.map(t => t.name || t.code || t).join(', ') 
+                            ? item.therapists.map(t => {
+                                const name = t.name || t.code || t;
+                                const isBathing = t.is_bathing === true || (typeof t === 'string' && t.includes('(bathing)'));
+                                return isBathing && !name.includes('(bathing)') ? `${name}(bathing)` : name;
+                            }).join(', ') 
                             : '—'
                     ]);
                     
                     // Generate table for this slot
                     doc.autoTable({
-                        head: [['Patient Name', 'Patient Room', 'Treatment Room', 'Therapy', 'Therapist Assigned']],
+                        head: [['Patient Room', 'Patient Name', 'Treatment Room', 'Therapy', 'Therapist Assigned']],
                         body: tableData,
                         startY: yPos,
                         margin: { left: margin, right: margin },
@@ -1799,8 +1820,8 @@
                 
                 // Prepare table data for nurse treatments
                 const nurseTableData = nurseTreatments.map(item => [
-                    item.patient_name || 'N/A',
                     item.patient_room_no || '—',
+                    item.patient_name || 'N/A',
                     item.therapy_name || 'N/A',
                     item.nurses && item.nurses.length > 0 
                         ? item.nurses.map(n => n.name || n.code || n).join(', ') 
@@ -1809,7 +1830,7 @@
                 
                 // Generate table for nurse treatments
                 doc.autoTable({
-                    head: [['Patient Name', 'Patient Room', 'Treatment Name', 'Nurse Assigned']],
+                    head: [['Patient Room', 'Patient Name', 'Treatment Name', 'Nurse Assigned']],
                     body: nurseTableData,
                     startY: yPos,
                     margin: { left: margin, right: margin },

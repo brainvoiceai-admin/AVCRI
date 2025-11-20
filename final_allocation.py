@@ -223,13 +223,13 @@ def get_treatment_rooms_for_staying_room(patient_staying_room):
     Returns list of treatment room numbers to check based on patient staying room.
     Returns empty list if no match found.
     
-    Rules:
-    - DS-1 to DS-6: TR-1/TR-2, then TR-3/TR-4, then TR-7/TR-8
-    - NR-7 to NR-14: TR-3/TR-4
-    - NR-15 to NR-21: TR-5/TR-6
-    - NR-22 to NR-27: TR-7/TR-8
+    Updated Rules:
+    - DS-1 to DS-6: TR-1/TR-2 → TR-3/TR-4 → TR-7/TR-8
+    - NR-7 to NR-14: TR-3/TR-4 → TR-7/TR-8 → TR-11/TR-12
+    - NR-15 to NR-21: TR-5/TR-6 → TR-7/TR-8 → TR-11/TR-12 → TR-9/TR-14
+    - NR-22 to NR-27: TR-7/TR-8 → TR-5/TR-6 → TR-11/TR-12 → TR-9/TR-14
     - NR-28 to NR-33: TR-15/TR-16
-    - MG-1 to MG-10, CB-1/CB-2, FG-1 to FG-12: TR-9 to TR-14
+    - MG-1 to MG-10, CB-1/CB-2, FG-1 to FG-12: TR-9 to TR-14 → TR-7/TR-8
     - CT-1, CT-2, etc.: TRC-1, TRC-2, etc. (same number)
     """
     if not patient_staying_room:
@@ -249,33 +249,33 @@ def get_treatment_rooms_for_staying_room(patient_staying_room):
     except ValueError:
         return []
     
-    # DS-1 to DS-6: TR-1/TR-2, then TR-3/TR-4, then TR-7/TR-8
+    # DS-1 to DS-6: TR-1/TR-2 → TR-3/TR-4 → TR-7/TR-8
     if prefix == 'DS' and 1 <= room_num <= 6:
         return ['TR-1', 'TR-2', 'TR-3', 'TR-4', 'TR-7', 'TR-8']
     
-    # NR-7 to NR-14: TR-3/TR-4
+    # NR-7 to NR-14: TR-3/TR-4 → TR-7/TR-8 → TR-11/TR-12
     if prefix == 'NR' and 7 <= room_num <= 14:
-        return ['TR-3', 'TR-4']
+        return ['TR-3', 'TR-4', 'TR-7', 'TR-8', 'TR-11', 'TR-12']
     
-    # NR-15 to NR-21: TR-5/TR-6
+    # NR-15 to NR-21: TR-5/TR-6 → TR-7/TR-8 → TR-11/TR-12 → TR-9/TR-14
     if prefix == 'NR' and 15 <= room_num <= 21:
-        return ['TR-5', 'TR-6']
+        return ['TR-5', 'TR-6', 'TR-7', 'TR-8', 'TR-11', 'TR-12', 'TR-9', 'TR-10', 'TR-13', 'TR-14']
     
-    # NR-22 to NR-27: TR-7/TR-8
+    # NR-22 to NR-27: TR-7/TR-8 → TR-5/TR-6 → TR-11/TR-12 → TR-9/TR-14
     if prefix == 'NR' and 22 <= room_num <= 27:
-        return ['TR-7', 'TR-8']
+        return ['TR-7', 'TR-8', 'TR-5', 'TR-6', 'TR-11', 'TR-12', 'TR-9', 'TR-10', 'TR-13', 'TR-14']
     
     # NR-28 to NR-33: TR-15/TR-16
     if prefix == 'NR' and 28 <= room_num <= 33:
         return ['TR-15', 'TR-16']
     
-    # MG-1 to MG-10, CB-1/CB-2, FG-1 to FG-12: TR-9 to TR-14
+    # MG-1 to MG-10, CB-1/CB-2, FG-1 to FG-12: TR-9 to TR-14 → TR-7/TR-8
     if prefix == 'MG' and 1 <= room_num <= 10:
-        return ['TR-9', 'TR-10', 'TR-11', 'TR-12', 'TR-13', 'TR-14']
+        return ['TR-9', 'TR-10', 'TR-11', 'TR-12', 'TR-13', 'TR-14', 'TR-7', 'TR-8']
     if prefix == 'CB' and room_num in [1, 2]:
-        return ['TR-9', 'TR-10', 'TR-11', 'TR-12', 'TR-13', 'TR-14']
+        return ['TR-9', 'TR-10', 'TR-11', 'TR-12', 'TR-13', 'TR-14', 'TR-7', 'TR-8']
     if prefix == 'FG' and 1 <= room_num <= 12:
-        return ['TR-9', 'TR-10', 'TR-11', 'TR-12', 'TR-13', 'TR-14']
+        return ['TR-9', 'TR-10', 'TR-11', 'TR-12', 'TR-13', 'TR-14', 'TR-7', 'TR-8']
     
     # CT-1, CT-2, etc.: TRC-1, TRC-2, etc. (same number)
     if prefix == 'CT':
@@ -745,7 +745,8 @@ def allocate_therapists(date, time_slot, therapy_requirements, last_therapists=N
             candidates_qs = candidates_qs.filter(therapist_gender__istartswith=desired_gender[0])
         
         if needs_bathing:
-            candidates_qs = candidates_qs.filter(is_bathing_therapist=True) | candidates_qs
+            # STRICT: Only return bathing therapists when bathing is required
+            candidates_qs = candidates_qs.filter(is_bathing_therapist=True)
             
         # First, try to find therapists with < 5 sessions
         candidates_list = list(candidates_qs)
@@ -1035,12 +1036,80 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
 
         needs_room_flag = therapy_needs_room(allocation) if therapy_needs_room else bool(getattr(booking, 'room', None))
         needs_bath_flag = therapy_needs_bath(allocation) if therapy_needs_bath else False
+        
+        # Check for previous bathing therapist BEFORE allocating therapists
+        previous_bathing_therapist = None
+        if needs_bath_flag and patient_id:
+            try:
+                from Patient.models import TherapistBooking
+                from masters.models import TherapistMaster, TherapistLeaveMaster, EmergencyLeave
+                from django.db.models import Q
+                # Find most recent TherapistBooking for this patient with is_bathing=True
+                prev_bath_booking = TherapistBooking.objects.filter(
+                    patient_id=patient_id,
+                    is_bathing=True,
+                    status='BOOKED'
+                ).exclude(
+                    visit=allocation  # Exclude current allocation
+                ).select_related('therapist').order_by('-date', '-created_at').first()
+                
+                if prev_bath_booking and prev_bath_booking.therapist:
+                    # Get TherapistMaster for this therapist
+                    previous_bathing_therapist = TherapistMaster.objects.filter(
+                        therapist_code=prev_bath_booking.therapist.therapist_code
+                    ).first()
+                    
+                    # Verify this therapist is still a bathing therapist and available
+                    if previous_bathing_therapist and getattr(previous_bathing_therapist, 'is_bathing_therapist', False):
+                        # Check availability
+                        allocate_slot = slot_master if slot_master else canonical_slot
+                        day_of_week = target_date.weekday()
+                        is_available = True
+                        
+                        # Check if already booked
+                        if TherapistBooking.objects.filter(
+                            therapist=previous_bathing_therapist,
+                            date=target_date,
+                            time_slot=allocate_slot,
+                            status='BOOKED'
+                        ).exists():
+                            is_available = False
+                        
+                        # Check weekly leave
+                        if is_available and TherapistLeaveMaster.objects.filter(
+                            therapist=previous_bathing_therapist,
+                            leave_day=day_of_week
+                        ).exists():
+                            is_available = False
+                        
+                        # Check emergency leave
+                        if is_available and EmergencyLeave.objects.filter(
+                            from_date__lte=target_date,
+                            to_date__gte=target_date
+                        ).filter(
+                            Q(therapist=previous_bathing_therapist) | 
+                            Q(employee_code=previous_bathing_therapist.employee_code)
+                        ).exists():
+                            is_available = False
+                        
+                        if not is_available:
+                            previous_bathing_therapist = None  # Not available, will use different one
+                            print(f"[DEBUG] Previous bathing therapist {prev_bath_booking.therapist.therapist_code} not available for patient {patient_id}")
+                        else:
+                            print(f"[DEBUG] Found previous bathing therapist {previous_bathing_therapist.therapist_code} for patient {patient_id}")
+            except Exception as e:
+                print(f"[DEBUG] Error checking previous bathing therapist: {e}")
+                import traceback
+                traceback.print_exc()
+        
         # allocate therapists - use slot_master if available, otherwise canonical_slot
         allocate_slot = slot_master if slot_master else canonical_slot
         try:
             # Pass patient gender to enforce male-patient→male-therapist and female-patient→female-therapist
             pat_sex = getattr(getattr(allocation, 'patient', None), 'pat_sex', None)
-            candidate_therapists = allocate_therapists(target_date, allocate_slot, therapy_req, None, needs_bath_flag, patient_gender=pat_sex)
+            # Pass previous bathing therapist as last_therapists to prioritize them
+            last_therapists = [previous_bathing_therapist.therapist_code] if previous_bathing_therapist else None
+            candidate_therapists = allocate_therapists(target_date, allocate_slot, therapy_req, last_therapists, needs_bath_flag, patient_gender=pat_sex)
         except Exception:
             candidate_therapists = []
 
@@ -1154,10 +1223,82 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
         # choose single bathing-assigned therapist if bathing required
         assigned_therapists = candidate_therapists[:req_total]
         bath_assigned = None
-        if needs_bath_flag and assigned_therapists:
-            bath_assigned = next((t for t in assigned_therapists if getattr(t, 'is_bathing_therapist', False)), None)
+        
+        # If bathing is required, we MUST have a bathing therapist assigned
+        if needs_bath_flag:
+            if not assigned_therapists:
+                # No therapists assigned at all - this should have been caught earlier, but fail anyway
+                reason = "bathing_therapist_unavailable: No therapists available for bathing therapy"
+                print(f"[DEBUG] FAILING allocation: Therapy requires bathing but no therapists assigned. Patient: {patient_id}, Date: {target_date}")
+                
+                try:
+                    booking.status = 'failed'
+                    booking.save(update_fields=['status', 'updated_at'])
+                except Exception as e:
+                    print(f"Error updating booking {booking_id} to failed: {e}")
+                
+                therapists_for_audit = []
+                if AllocationAttempt:
+                    try:
+                        AllocationAttempt.objects.create(
+                            visit=None, therapy=None, date=target_date,
+                            requested_time_slot=allocate_slot, requested_time_slot_value=requested_slot_value or '',
+                            status='FAILED', reason=reason,
+                            extra={"required": req_total, "found": len(candidate_therapists), "booking_id": booking_id, "therapists": therapists_for_audit, "bathing_required": True}
+                        )
+                    except Exception:
+                        pass
+                tasks.append({
+                    "booking_id": booking_id, "allocation_id": therapy_allocation_id, "date": target_date.isoformat(),
+                    "therapy_name": therapy_name, "slot": requested_slot_value, "status": "FAILED", "reason": reason,
+                    "room_no": getattr(booking.room, 'room_no', None) if getattr(booking, 'room', None) else None, "therapists": therapists_for_audit
+                })
+                continue  # Skip to next booking
+            
+            # Previous bathing therapist should already be prioritized in candidate_therapists
+            # (we passed it as last_therapists to allocate_therapists)
+            # Now check if previous therapist is in assigned list, otherwise pick first from list
+            if previous_bathing_therapist and previous_bathing_therapist in assigned_therapists:
+                # Previous bathing therapist is in assigned list - use them
+                bath_assigned = previous_bathing_therapist
+                print(f"[DEBUG] Using previous bathing therapist {previous_bathing_therapist.therapist_code} for patient {patient_id}")
+            else:
+                # Pick first bathing therapist from assigned list (all should be bathing therapists if needs_bathing=True)
+                bath_assigned = assigned_therapists[0] if assigned_therapists else None
             if not bath_assigned:
-                bath_assigned = assigned_therapists[0]
+                # Find any bathing therapist from assigned list
+                bath_assigned = next((t for t in assigned_therapists if getattr(t, 'is_bathing_therapist', False)), None)
+                
+                # If no bathing therapist available in assigned list, FAIL the allocation
+                if not bath_assigned:
+                    reason = "bathing_therapist_unavailable: No bathing therapist available for this therapy"
+                    print(f"[DEBUG] FAILING allocation: Therapy requires bathing but no bathing therapist available. Patient: {patient_id}, Date: {target_date}")
+                    
+                    # Update booking status to failed
+                    try:
+                        booking.status = 'failed'
+                        booking.save(update_fields=['status', 'updated_at'])
+                    except Exception as e:
+                        print(f"Error updating booking {booking_id} to failed: {e}")
+                    
+                    therapists_for_audit = [therapist_entry(t, False) for t in assigned_therapists]
+                    if AllocationAttempt:
+                        try:
+                            AllocationAttempt.objects.create(
+                                visit=None, therapy=None, date=target_date,
+                                requested_time_slot=allocate_slot, requested_time_slot_value=requested_slot_value or '',
+                                status='FAILED', reason=reason,
+                                extra={"required": req_total, "found": len(candidate_therapists), "booking_id": booking_id, "therapists": therapists_for_audit, "bathing_required": True}
+                            )
+                        except Exception:
+                            pass
+                    tasks.append({
+                        "booking_id": booking_id, "allocation_id": therapy_allocation_id, "date": target_date.isoformat(),
+                        "therapy_name": therapy_name, "slot": requested_slot_value, "status": "FAILED", "reason": reason,
+                        "room_no": getattr(booking.room, 'room_no', None) if getattr(booking, 'room', None) else None, "therapists": therapists_for_audit
+                    })
+                    continue  # Skip to next booking
+        
         # build therapist audit list
         therapists_for_audit = [therapist_entry(t, is_bath=(t == bath_assigned)) for t in assigned_therapists]
         # room allocation - use slot_master if available, otherwise canonical_slot
