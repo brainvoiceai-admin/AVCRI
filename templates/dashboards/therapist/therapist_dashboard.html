@@ -18,6 +18,8 @@
       --border-color: #e0e0e0;
       --text-primary: #202124;
       --text-secondary: #5f6368;
+      --bathing-color: #dc2626;
+      --bathing-bg: #fee2e2;
     }
     
         body {
@@ -91,6 +93,17 @@
       font-weight: 600;
       color: var(--primary-color);
       font-size: 0.9rem;
+    }
+    
+    /* Bathing flag styling */
+    .bathing-flag {
+      color: var(--bathing-color);
+      font-weight: 700;
+      background: var(--bathing-bg);
+      padding: 2px 6px;
+      border-radius: 4px;
+      margin-left: 4px;
+      font-size: 0.85em;
     }
     
     .therapist-header {
@@ -539,7 +552,15 @@
     function setupEventListeners() {
       // Date filter change
       document.getElementById('dateFilter').addEventListener('change', function() {
-        loadSessionsForDate(this.value);
+        const dateValue = this.value;
+        if (dateValue) {
+          loadSessionsForDate(dateValue);
+        } else {
+          // If date is cleared, load today's sessions
+          const today = new Date().toISOString().slice(0, 10);
+          this.value = today;
+          loadSessionsForDate(today);
+        }
       });
 
       // Status filter change
@@ -630,14 +651,28 @@
 
     function renderSessionsForDate(sessions, date) {
       const todayTimeline = document.getElementById('todayTimeline');
-      document.getElementById('todayDate').textContent = new Date(date + 'T00:00:00').toLocaleDateString(undefined, { 
-        weekday: 'long', 
-        year: 'numeric', 
-        month: 'long', 
-        day: 'numeric' 
-      });
+      
+      // Format date for display
+      if (date) {
+        try {
+          document.getElementById('todayDate').textContent = new Date(date + 'T00:00:00').toLocaleDateString(undefined, { 
+            weekday: 'long', 
+            year: 'numeric', 
+            month: 'long', 
+            day: 'numeric' 
+          });
+        } catch (e) {
+          document.getElementById('todayDate').textContent = date;
+        }
+      }
       
       todayTimeline.innerHTML = '';
+      
+      // Check if TREATMENT_SLOTS is defined
+      if (typeof TREATMENT_SLOTS === 'undefined') {
+        todayTimeline.innerHTML = '<div class="text-danger text-center py-4">Error: Treatment slots not defined.</div>';
+        return;
+      }
       
       TREATMENT_SLOTS.forEach(slot => {
         const session = sessions.find(s => s.slot_value === slot.value);
@@ -656,7 +691,9 @@
                       <h6 class="mb-0 fw-semibold me-2">${session.patient_name}</h6>
                       <span class="badge rounded-pill text-bg-${badgeClass(session.status)} status-badge">${session.status}</span>
                     </div>
-                    <div class="small text-muted mb-1">${session.therapy}</div>
+                    <div class="small text-muted mb-1">
+                      ${session.therapy}${session.is_bathing === true ? '<span class="bathing-flag">(bathing)</span>' : ''}
+                    </div>
                     <div class="small">
                       <span><i class="bi bi-geo-alt me-1"></i> ${session.room}</span>
                     </div>
@@ -709,7 +746,9 @@
           <div class="d-flex w-100 justify-content-between align-items-start">
             <div class="flex-grow-1">
               <h6 class="mb-1 fw-semibold">${session.patient_name}</h6>
-              <div class="small text-muted mb-1">${session.therapy}</div>
+                    <div class="small text-muted mb-1">
+                      ${session.therapy}${session.is_bathing === true ? '<span class="bathing-flag">(bathing)</span>' : ''}
+                    </div>
               <div class="small">
                 <span class="me-3"><i class="bi bi-calendar me-1"></i> ${session.date}</span>
                 <span class="me-3"><i class="bi bi-clock me-1"></i> ${session.slot}</span>
@@ -752,7 +791,9 @@
           <td>${session.date}</td>
           <td>${session.slot}</td>
           <td>${session.patient_name} (${session.patient_id})</td>
-          <td>${session.therapy}</td>
+          <td>
+            ${session.therapy}${session.is_bathing === true ? '<span class="bathing-flag">(bathing)</span>' : ''}
+          </td>
           <td>${session.room}</td>
           <td><span class="badge rounded-pill text-bg-${badgeClass(session.status)} status-badge">${session.status}</span></td>
         `;
@@ -854,7 +895,9 @@
             <div class="d-flex justify-content-between align-items-start mb-2">
               <div>
                 <div class="fw-bold">${session.patient_name} (${session.patient_id})</div>
-                <div class="text-muted">${session.therapy}</div>
+                <div class="text-muted">
+                  ${session.therapy}${session.is_bathing === true ? '<span class="bathing-flag">(bathing)</span>' : ''}
+                </div>
                 <div class="text-muted mt-1">
                   <span class="me-3"><i class="bi bi-clock me-1"></i> ${session.slot}</span>
                   <span><i class="bi bi-geo-alt me-1"></i> ${session.room}</span>
@@ -874,13 +917,31 @@
       const statusFilter = document.getElementById('statusFilter').value;
       const dateFilter = document.getElementById('dateFilter').value;
       
+      // Always use the date filter - if empty, use today's date
+      const targetDate = dateFilter || new Date().toISOString().slice(0, 10);
+      
       if (statusFilter) {
-        // Filter by status
-        const filteredSessions = sessionsData.filter(s => s.status === statusFilter);
-        renderSessionsForDate(filteredSessions, dateFilter);
+        // Load sessions for the date first, then filter by status
+        fetch(`/sheduling/therapist/api/sessions-by-date/?date=${targetDate}`)
+          .then(response => response.json())
+          .then(data => {
+            if (data.success) {
+              const sessions = data.sessions || [];
+              const filteredSessions = sessions.filter(s => s.status === statusFilter);
+              renderSessionsForDate(filteredSessions, targetDate);
+            } else {
+              const todayTimeline = document.getElementById('todayTimeline');
+              todayTimeline.innerHTML = '<div class="text-muted text-center py-4">No sessions found for this date.</div>';
+            }
+          })
+          .catch(error => {
+            console.error('Error loading sessions for date:', error);
+            const todayTimeline = document.getElementById('todayTimeline');
+            todayTimeline.innerHTML = '<div class="text-danger text-center py-4">Error loading sessions.</div>';
+          });
       } else {
         // Show all sessions for the date
-        loadSessionsForDate(dateFilter);
+        loadSessionsForDate(targetDate);
       }
     }
 

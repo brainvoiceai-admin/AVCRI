@@ -1434,29 +1434,35 @@ def therapy_entry(request):
             therapists = []
             try:
                 # Pre-fetch all TherapistBooking records to avoid N+1 queries
+                # Use visit (TherapyAllocation) to match TherapistBooking records
                 therapist_bookings = {}
                 try:
                     from Patient.models import TherapistBooking
                     from masters.models import TherapistMaster
+                    # Get allocation (visit) for this booking
+                    allocation = b.allocation
                     # Get all therapist codes for this booking
                     therapist_codes = [a.therapist.therapist_code for a in b.assignments.all()]
                     # Get all TherapistMaster records
                     therapist_masters = {tm.therapist_code: tm for tm in TherapistMaster.objects.filter(
                         therapist_code__in=therapist_codes
                     )}
-                    # Get all TherapistBooking records for these therapists, date, and time slot
-                    if therapist_masters and b.date and b.timeslot:
+                    # Get all TherapistBooking records for this visit and therapists
+                    if therapist_masters and allocation:
                         tb_list = TherapistBooking.objects.filter(
+                            visit=allocation,
                             therapist__in=therapist_masters.values(),
-                            date=b.date,
-                            time_slot=b.timeslot,
                             status='BOOKED'
-                        ).select_related('therapist')
+                        ).select_related('therapist', 'visit')
                         # Create a map: therapist_code -> is_bathing
+                        # ONLY use TherapistBooking.is_bathing field from Patient module
                         for tb in tb_list:
-                            therapist_bookings[tb.therapist.therapist_code] = getattr(tb, 'is_bathing', False)
-                except Exception:
-                    pass
+                            if tb.therapist:
+                                therapist_bookings[tb.therapist.therapist_code] = tb.is_bathing  # Direct access to is_bathing field
+                except Exception as e:
+                    print(f"Error pre-fetching TherapistBooking records: {e}")
+                    import traceback
+                    traceback.print_exc()
                 
                 for a in b.assignments.all():
                     therapist_name = getattr(a.therapist, 'therapist_name', '') or getattr(a.therapist, 'therapist_code', '') or getattr(a.therapist, 'id', '')
@@ -3534,29 +3540,35 @@ def get_therapy_data_api(request):
                     # Get assigned therapists for this booking
                     therapists = []
                     # Pre-fetch all TherapistBooking records for this booking to avoid N+1 queries
+                    # Use visit (TherapyAllocation) to match TherapistBooking records
                     therapist_bookings = {}
                     try:
                         from Patient.models import TherapistBooking
                         from masters.models import TherapistMaster
+                        # Get allocation (visit) for this booking
+                        allocation = booking.allocation
                         # Get all therapist codes for this booking
                         therapist_codes = [a.therapist.therapist_code for a in booking.assignments.all()]
                         # Get all TherapistMaster records
                         therapist_masters = {tm.therapist_code: tm for tm in TherapistMaster.objects.filter(
                             therapist_code__in=therapist_codes
                         )}
-                        # Get all TherapistBooking records for these therapists, date, and time slot
-                        if therapist_masters and booking.date and booking.timeslot:
+                        # Get all TherapistBooking records for this visit and therapists
+                        if therapist_masters and allocation:
                             tb_list = TherapistBooking.objects.filter(
+                                visit=allocation,
                                 therapist__in=therapist_masters.values(),
-                                date=booking.date,
-                                time_slot=booking.timeslot,
                                 status='BOOKED'
-                            ).select_related('therapist')
+                            ).select_related('therapist', 'visit')
                             # Create a map: therapist_code -> is_bathing
+                            # ONLY use TherapistBooking.is_bathing field from Patient module
                             for tb in tb_list:
-                                therapist_bookings[tb.therapist.therapist_code] = getattr(tb, 'is_bathing', False)
+                                if tb.therapist:
+                                    therapist_bookings[tb.therapist.therapist_code] = tb.is_bathing  # Direct access to is_bathing field
                     except Exception as e:
                         print(f"Error pre-fetching TherapistBooking records: {e}")
+                        import traceback
+                        traceback.print_exc()
                     
                     for assignment in booking.assignments.all():
                         # Get is_bathing flag from pre-fetched data

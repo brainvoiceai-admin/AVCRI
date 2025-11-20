@@ -501,10 +501,14 @@ def Manage_user(request):
             user_id = request.POST.get('user_id')
             user = get_object_or_404(CustomUser, id=user_id)
             
+            # Store old role to check if it changed
+            old_role = user.role
+            new_role = request.POST.get('role')
+            
             user.first_name = request.POST.get('first_name')
             user.last_name = request.POST.get('last_name')
             user.email = request.POST.get('email')
-            user.role = request.POST.get('role')
+            user.role = new_role
             mobile = request.POST.get('mobile')
             user.mobile = mobile if mobile else None
             user.gender = request.POST.get('gender', 'male')  # Default to male if not provided
@@ -516,81 +520,124 @@ def Manage_user(request):
                 user.set_password(new_password)
                 messages.info(request, f'Password for "{user.username}" has been updated.')
             
-            # Update role-specific fields
-            patient_registration_number = request.POST.get('patient_registration_number')
-            therapist_code = request.POST.get('therapist_code')
-            employee_code = request.POST.get('employee_code')
-            
-            # Update profile based on role - delete all existing data
-            from authentication.role_change_utils import change_user_role, get_mandatory_fields_for_role
-            
-            # Prepare profile data for new role with only mandatory fields
-            profile_data = {}
-            mandatory_fields = get_mandatory_fields_for_role(user.role)
-            
-            if user.role == 'patient' and patient_registration_number:
-                profile_data['patient_reg_no'] = patient_registration_number
-            elif user.role == 'therapist' and therapist_code:
-                profile_data['therapist_code'] = therapist_code
-                profile_data['employee_code'] = employee_code or f"EMP{user.id:06d}"
-            elif user.role == 'doctor':
-                profile_data['doctor_id'] = request.POST.get('doctor_id', f"DOC{user.id:06d}")
-                profile_data['specialization'] = request.POST.get('specialization', 'General Medicine')
-                profile_data['department'] = request.POST.get('department', 'Medical')
-                profile_data['qualification'] = request.POST.get('qualification', 'MBBS')
-                profile_data['experience_years'] = request.POST.get('experience_years', 0)
-            elif user.role in ['admin', 'super_admin']:
-                profile_data['admin_id'] = request.POST.get('admin_id', f"ADM{user.id:06d}")
-                profile_data['department'] = request.POST.get('department', 'Administration')
-                profile_data['designation'] = request.POST.get('designation', 
-                    'Administrator' if user.role == 'admin' else 'Super Administrator')
-            elif user.role == 'nurse':
-                profile_data['nurse_id'] = request.POST.get('nurse_id', f"NUR{user.id:06d}")
-                profile_data['department'] = request.POST.get('department', 'Nursing')
-                profile_data['qualification'] = request.POST.get('qualification', 'B.Sc Nursing')
-            elif user.role in ['scheduling_staff', 'ip_pharmacy_staff', 'imu_staff', 'finance_staff', 'hr', 'housekeeping_staff']:
-                profile_data['staff_id'] = request.POST.get('staff_id', f"STF{user.id:06d}")
-                # Get department from POST data, especially important for IP Pharmacy Staff
-                department = request.POST.get('department', '')
-                if not department and user.role == 'ip_pharmacy_staff':
-                    # Require department for IP Pharmacy Staff
-                    messages.error(request, 'Department is required for IP Pharmacy Staff.')
-                    return redirect('authentication:Manage_user')
-                if not department:
-                    department = _get_department_for_role(user.role)
-                profile_data['department'] = department
-                profile_data['designation'] = request.POST.get('designation', _get_designation_for_role(user.role))
-            
-            # Change user role - this will delete all existing data
-            success, message, new_profile = change_user_role(user, user.role, profile_data)
-            
-            if not success:
-                messages.error(request, message)
-                return redirect('authentication:Manage_user')
-            else:
-                # Update therapist master if role is therapist
-                if user.role == 'therapist' and new_profile:
-                    from masters.models import TherapistMaster
-                    therapist_master, created = TherapistMaster.objects.get_or_create(
-                        user=user,
-                        defaults={
-                            'therapist_profile': new_profile,
-                            'therapist_code': profile_data.get('therapist_code', f"TH{user.id:06d}"),
-                            'therapist_name': user.get_full_name() or user.username,
-                            'therapist_grade': 'Junior',
-                            'employee_code': profile_data.get('employee_code', f"EMP{user.id:06d}"),
-                            'is_bathing_therapist': True
-                        }
-                    )
-                    if not created:
-                        # Update existing record
-                        therapist_master.therapist_profile = new_profile
-                        therapist_master.therapist_code = profile_data.get('therapist_code', therapist_master.therapist_code)
-                        therapist_master.therapist_name = user.get_full_name() or user.username
-                        therapist_master.employee_code = profile_data.get('employee_code', therapist_master.employee_code)
-                        therapist_master.save()
+            # Only call change_user_role if the role actually changed
+            if old_role != new_role:
+                # Role changed - need to delete old profile and create new one
+                from authentication.role_change_utils import change_user_role, get_mandatory_fields_for_role
                 
-                messages.warning(request, f"Role changed to {user.role}. All previous profile data has been deleted.")
+                # Update role-specific fields
+                patient_registration_number = request.POST.get('patient_registration_number')
+                therapist_code = request.POST.get('therapist_code')
+                employee_code = request.POST.get('employee_code')
+                
+                # Prepare profile data for new role with only mandatory fields
+                profile_data = {}
+                mandatory_fields = get_mandatory_fields_for_role(new_role)
+                
+                if new_role == 'patient' and patient_registration_number:
+                    profile_data['patient_reg_no'] = patient_registration_number
+                elif new_role == 'therapist' and therapist_code:
+                    profile_data['therapist_code'] = therapist_code
+                    profile_data['employee_code'] = employee_code or f"EMP{user.id:06d}"
+                elif new_role == 'doctor':
+                    profile_data['doctor_id'] = request.POST.get('doctor_id', f"DOC{user.id:06d}")
+                    profile_data['specialization'] = request.POST.get('specialization', 'General Medicine')
+                    profile_data['department'] = request.POST.get('department', 'Medical')
+                    profile_data['qualification'] = request.POST.get('qualification', 'MBBS')
+                    profile_data['experience_years'] = request.POST.get('experience_years', 0)
+                elif new_role in ['admin', 'super_admin']:
+                    profile_data['admin_id'] = request.POST.get('admin_id', f"ADM{user.id:06d}")
+                    profile_data['department'] = request.POST.get('department', 'Administration')
+                    profile_data['designation'] = request.POST.get('designation', 
+                        'Administrator' if new_role == 'admin' else 'Super Administrator')
+                elif new_role == 'nurse':
+                    profile_data['nurse_id'] = request.POST.get('nurse_id', f"NUR{user.id:06d}")
+                    profile_data['department'] = request.POST.get('department', 'Nursing')
+                    profile_data['qualification'] = request.POST.get('qualification', 'B.Sc Nursing')
+                elif new_role in ['scheduling_staff', 'ip_pharmacy_staff', 'imu_staff', 'finance_staff', 'hr', 'housekeeping_staff']:
+                    profile_data['staff_id'] = request.POST.get('staff_id', f"STF{user.id:06d}")
+                    # Get department from POST data, especially important for IP Pharmacy Staff
+                    department = request.POST.get('department', '')
+                    if not department and new_role == 'ip_pharmacy_staff':
+                        # Require department for IP Pharmacy Staff
+                        messages.error(request, 'Department is required for IP Pharmacy Staff.')
+                        return redirect('authentication:Manage_user')
+                    if not department:
+                        department = _get_department_for_role(new_role)
+                    profile_data['department'] = department
+                    profile_data['designation'] = request.POST.get('designation', _get_designation_for_role(new_role))
+                
+                # Change user role - this will delete all existing data
+                success, message, new_profile = change_user_role(user, new_role, profile_data)
+                
+                if not success:
+                    messages.error(request, message)
+                    return redirect('authentication:Manage_user')
+                else:
+                    # Update therapist master if role is therapist
+                    if new_role == 'therapist' and new_profile:
+                        from masters.models import TherapistMaster
+                        therapist_master, created = TherapistMaster.objects.get_or_create(
+                            user=user,
+                            defaults={
+                                'therapist_profile': new_profile,
+                                'therapist_code': profile_data.get('therapist_code', f"TH{user.id:06d}"),
+                                'therapist_name': user.get_full_name() or user.username,
+                                'therapist_grade': 'Junior',
+                                'employee_code': profile_data.get('employee_code', f"EMP{user.id:06d}"),
+                                'is_bathing_therapist': True
+                            }
+                        )
+                        if not created:
+                            # Update existing record
+                            therapist_master.therapist_profile = new_profile
+                            therapist_master.therapist_code = profile_data.get('therapist_code', therapist_master.therapist_code)
+                            therapist_master.therapist_name = user.get_full_name() or user.username
+                            therapist_master.employee_code = profile_data.get('employee_code', therapist_master.employee_code)
+                            therapist_master.save()
+                    
+                    messages.warning(request, f"Role changed from {old_role} to {new_role}. All previous profile data has been deleted.")
+            else:
+                # Role hasn't changed - just update profile fields without deleting
+                if user.role == 'therapist':
+                    # Update therapist profile and master without deleting
+                    therapist_code = request.POST.get('therapist_code')
+                    employee_code = request.POST.get('employee_code')
+                    
+                    if hasattr(user, 'therapist_profile'):
+                        # Update existing therapist profile
+                        if therapist_code:
+                            user.therapist_profile.therapist_code = therapist_code
+                        if employee_code:
+                            user.therapist_profile.employee_code = employee_code
+                        user.therapist_profile.save()
+                        
+                        # Update TherapistMaster if it exists
+                        from masters.models import TherapistMaster
+                        try:
+                            therapist_master = TherapistMaster.objects.get(user=user)
+                            if therapist_code:
+                                therapist_master.therapist_code = therapist_code
+                            if employee_code:
+                                therapist_master.employee_code = employee_code
+                            therapist_master.therapist_name = user.get_full_name() or user.username
+                            therapist_master.save()
+                        except TherapistMaster.DoesNotExist:
+                            # Create if doesn't exist
+                            TherapistMaster.objects.create(
+                                user=user,
+                                therapist_profile=user.therapist_profile,
+                                therapist_code=therapist_code or user.therapist_profile.therapist_code,
+                                therapist_name=user.get_full_name() or user.username,
+                                employee_code=employee_code or user.therapist_profile.employee_code,
+                                is_bathing_therapist=True
+                            )
+                elif user.role == 'patient':
+                    patient_registration_number = request.POST.get('patient_registration_number')
+                    if hasattr(user, 'patient_profile') and patient_registration_number:
+                        user.patient_profile.patient_reg_no = patient_registration_number
+                        user.patient_profile.save()
+                # Add similar logic for other roles if needed
             
             # Update custom role
             custom_role_id = request.POST.get('custom_role')

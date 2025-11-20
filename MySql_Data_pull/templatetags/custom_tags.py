@@ -21,26 +21,32 @@ def get_staying_room_display(room_number):
 
 @register.filter
 def get_therapist_bathing_flag(assignment, booking):
-    """Check if therapist has is_bathing=True in TherapistBooking for this booking"""
+    """Check if therapist has is_bathing=True in TherapistBooking for this booking using visit (TherapyAllocation)"""
     try:
         from Patient.models import TherapistBooking
         from masters.models import TherapistMaster
+        # Get allocation (visit) for this booking
+        allocation = booking.allocation if booking else None
+        if not allocation:
+            return False
         # Find TherapistMaster by therapist_code
         therapist_master = TherapistMaster.objects.filter(
             therapist_code=assignment.therapist.therapist_code
         ).first()
-        if therapist_master and booking:
-            # Find TherapistBooking for this therapist, date, and time slot
+        if therapist_master:
+            # Find TherapistBooking for this visit and therapist
             tb = TherapistBooking.objects.filter(
+                visit=allocation,
                 therapist=therapist_master,
-                date=booking.date,
-                time_slot=booking.timeslot,
                 status='BOOKED'
             ).first()
             if tb:
-                return getattr(tb, 'is_bathing', False)
-    except Exception:
-        pass
+                # ONLY use TherapistBooking.is_bathing field from Patient module
+                return tb.is_bathing  # Direct access to is_bathing field
+    except Exception as e:
+        print(f"Error in get_therapist_bathing_flag: {e}")
+        import traceback
+        traceback.print_exc()
     return False
 
 @register.filter
