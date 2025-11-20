@@ -975,34 +975,48 @@ $(function(){
 
   // Patient search with auto-fill functionality
   let searchTimeout;
+  let initialPatientsLoaded = false;
+  
+  // Show 10 active patients when search box is focused/clicked
+  $('#header-patient-select').on('focus', function() {
+    const query = $(this).val().trim();
+    // If search box is empty, show 10 active patients
+    if (query.length === 0 && !initialPatientsLoaded) {
+      searchPatients('', true); // true = initial load (show 10 patients)
+      initialPatientsLoaded = true;
+    }
+  });
   
   $('#header-patient-select').on('input', function() {
     const query = $(this).val().trim();
     
     clearTimeout(searchTimeout);
     
+    // If query is cleared, show initial 10 again
     if (query.length === 0) {
-      $('#search-results').hide();
+      if (initialPatientsLoaded) {
+        searchPatients('', true);
+      } else {
+        $('#search-results').hide();
+      }
       return;
     }
     
-    if (query.length < 3) {
-      $('#search-results').html('<div style="padding:10px;color:#666;">Enter at least 3 characters to search</div>').show();
-      return;
-    }
-
+    // Filter as user types (no minimum character restriction)
     searchTimeout = setTimeout(() => {
-      searchPatients(query);
+      searchPatients(query, false); // false = filtered search
+      initialPatientsLoaded = false; // Reset flag when filtering
     }, 300);
   });
 
-  function searchPatients(query) {
-    if (query.length < 3) {
-      $('#search-results').html('<div style="padding:10px;color:#666;">Enter at least 3 characters to search</div>').show();
-      return;
-    }
+  function searchPatients(query, isInitialLoad = false) {
+    // isInitialLoad: true = show 10 active patients, false = filter based on query
+    // For initial load, pass empty query with a flag
+    const url = isInitialLoad 
+      ? '/authentication/api/search-patients/?q=&initial=true'
+      : '/authentication/api/search-patients/?q=' + encodeURIComponent(query);
     
-    fetch('/search-patients/?q=' + encodeURIComponent(query))
+    fetch(url)
       .then(response => response.json())
       .then(data => {
         // Handle both response formats: {patients: [...]} or [...]
@@ -1020,7 +1034,7 @@ $(function(){
     resultsContainer.empty();
 
     if (patients.length === 0) {
-      resultsContainer.html('<div style="padding:10px;color:#666;">No active patients found for this week</div>').show();
+      resultsContainer.html('<div style="padding:10px;color:#666;">No patients found</div>').show();
       return;
     }
 

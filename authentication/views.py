@@ -997,8 +997,9 @@ def search_patients(request):
         return JsonResponse({'error': 'Only GET method allowed'}, status=405)
     
     query = request.GET.get('q', '').strip()
-    if not query or len(query) < 3:
-        return JsonResponse({'patients': []})
+    is_initial_load = request.GET.get('initial', 'false').lower() == 'true'
+    
+    print(f"[DEBUG] search_patients called - query: '{query}', is_initial_load: {is_initial_load}")
     
     try:
         from MySql_Data_pull.models import Registration, OPMaster
@@ -1008,31 +1009,87 @@ def search_patients(request):
         
         patients = []
         
-        # Calculate this week's date range (Monday to Sunday)
-        today = timezone.now().date()
-        # Get Monday of this week
-        days_since_monday = today.weekday()
-        week_start = today - timedelta(days=days_since_monday)
-        week_end = week_start + timedelta(days=6)
-        
-        # Convert to datetime for comparison with pat_visit_date
-        from datetime import time as dt_time
-        week_start_datetime = timezone.make_aware(datetime.combine(week_start, dt_time(0, 0, 0)))
-        week_end_datetime = timezone.make_aware(datetime.combine(week_end, dt_time(23, 59, 59, 999999)))
-        
         # Search in IP patients (Registration table)
+        # SQL Server doesn't support regex, so we filter in Python after fetching
         try:
-            ip_patients = Registration.objects.using('therapy_db').filter(
-                pat_reg_no__icontains=query,
-                pat_visit_date__gte=week_start_datetime,
-                pat_visit_date__lte=week_end_datetime,
-                pat_status__iexact='Active'
-            ).values(
-                'pat_reg_no', 'pat_name', 'pat_sex', 'pat_age', 'pat_room_no', 
-                'pat_ref_id', 'pat_ph_no', 'pat_email', 'pat_reg_date', 'pat_visit_date'
-            )[:10]  # Limit to 10 results
+            from django.db.models import Q
+            ip_patients_list = []
             
-            for patient in ip_patients:
+            if is_initial_load:
+                # Fetch patients and filter by registration number length in Python
+                try:
+                    # Fetch with status filter first
+                    all_patients = Registration.objects.using('therapy_db').filter(
+                        pat_status__iexact='Active'
+                    ).values(
+                        'pat_reg_no', 'pat_name', 'pat_sex', 'pat_age', 'pat_room_no', 'pat_ref_id', 'pat_visit_date'
+                    ).order_by('-pat_visit_date')[:20]  # Fetch 20, filter to 5 IP patients
+                    
+                    for p in all_patients:
+                        reg_no_str = str(p['pat_reg_no']).strip() if p['pat_reg_no'] else ''
+                        digits_only = ''.join(ch for ch in reg_no_str if ch.isdigit())
+                        # IP patients: NOT 5 digits (OP patients have exactly 5 digits)
+                        if len(digits_only) != 5:
+                            ip_patients_list.append(p)
+                            if len(ip_patients_list) >= 5:
+                                break
+                    
+                    if not ip_patients_list:
+                        # Try without status filter
+                        all_patients = Registration.objects.using('therapy_db').all().values(
+                            'pat_reg_no', 'pat_name', 'pat_sex', 'pat_age', 'pat_room_no', 'pat_ref_id', 'pat_visit_date'
+                        ).order_by('-pat_visit_date')[:20]
+                        for p in all_patients:
+                            reg_no_str = str(p['pat_reg_no']).strip() if p['pat_reg_no'] else ''
+                            digits_only = ''.join(ch for ch in reg_no_str if ch.isdigit())
+                            if len(digits_only) != 5:
+                                ip_patients_list.append(p)
+                                if len(ip_patients_list) >= 5:
+                                    break
+                    
+                    print(f"[DEBUG] Initial load - Found {len(ip_patients_list)} IP patients")
+                except Exception as e:
+                    print(f"[DEBUG] Error in IP query: {e}")
+                    import traceback
+                    traceback.print_exc()
+            elif query:
+                # If query is provided, search by both registration number and patient name
+                try:
+                    all_patients = Registration.objects.using('therapy_db').filter(
+                        Q(pat_reg_no__icontains=query) | Q(pat_name__icontains=query),
+                        pat_status__iexact='Active'
+                    ).values(
+                        'pat_reg_no', 'pat_name', 'pat_sex', 'pat_age', 'pat_room_no', 'pat_ref_id', 'pat_visit_date'
+                    ).order_by('-pat_visit_date')[:100]
+                    
+                    for p in all_patients:
+                        reg_no_str = str(p['pat_reg_no']).strip() if p['pat_reg_no'] else ''
+                        digits_only = ''.join(ch for ch in reg_no_str if ch.isdigit())
+                        if len(digits_only) != 5:  # Not OP (5 digits)
+                            ip_patients_list.append(p)
+                    
+                    if not ip_patients_list:
+                        # Try without status filter
+                        all_patients = Registration.objects.using('therapy_db').filter(
+                            Q(pat_reg_no__icontains=query) | Q(pat_name__icontains=query)
+                        ).values(
+                            'pat_reg_no', 'pat_name', 'pat_sex', 'pat_age', 'pat_room_no', 'pat_ref_id', 'pat_visit_date'
+                        ).order_by('-pat_visit_date')[:100]
+                        for p in all_patients:
+                            reg_no_str = str(p['pat_reg_no']).strip() if p['pat_reg_no'] else ''
+                            digits_only = ''.join(ch for ch in reg_no_str if ch.isdigit())
+                            if len(digits_only) != 5:
+                                ip_patients_list.append(p)
+                    
+                    print(f"[DEBUG] Query search - Found {len(ip_patients_list)} IP patients for query: '{query}'")
+                except Exception as e:
+                    print(f"[DEBUG] Error in IP query search: {e}")
+                    import traceback
+                    traceback.print_exc()
+            else:
+                ip_patients_list = []
+            
+            for patient in ip_patients_list:
                 # Check VIP status
                 vip_status = False
                 try:
@@ -1040,41 +1097,56 @@ def search_patients(request):
                         register_number=patient['pat_reg_no']
                     )
                     vip_status = repeated_visitor.total_visits > 2
-                except Repeated_Visitors.DoesNotExist:
+                except (Repeated_Visitors.DoesNotExist, Exception):
                     vip_status = False
                 
-                # Determine patient type (IP if not 5 digits)
-                patient_type = 'IP' if len(str(patient['pat_reg_no'])) != 5 else 'OP'
+                try:
+                    mapped_room = get_staying_room_display_number(patient['pat_room_no'])
+                except Exception:
+                    mapped_room = patient['pat_room_no'] if patient.get('pat_room_no') else None
                 
-                mapped_room = get_staying_room_display_number(patient['pat_room_no'])
                 patients.append({
                     'registration_number': patient['pat_reg_no'],
                     'patient_name': patient['pat_name'],
                     'sex': patient['pat_sex'],
                     'age': patient['pat_age'],
                     'room_number': mapped_room,
-                    'ip_number': patient['pat_reg_no'],  # IP number same as registration
-                    'pat_ref_id': patient['pat_ref_id'],
-                    'phone': patient['pat_ph_no'],
-                    'email': patient['pat_email'],
-                    'registration_date': patient['pat_reg_date'].strftime('%Y-%m-%d') if patient['pat_reg_date'] else None,
-                    'patient_type': patient_type,
+                    'ip_number': patient['pat_reg_no'],
+                    'pat_ref_id': patient.get('pat_ref_id'),
+                    'phone': None,  # Not fetched
+                    'email': None,  # Not fetched
+                    'registration_date': None,  # Not fetched
+                    'patient_type': 'IP',
                     'is_vip': vip_status,
                     'source': 'IP'
                 })
         except Exception as e:
             print(f"Error searching IP patients: {e}")
+            import traceback
+            traceback.print_exc()
         
         # Search in OP patients (OPMaster table)
-        # Note: OPMaster uses Reg_Date as visit date, filter for this week
+        # Note: OPMaster uses Reg_Date as registration date
         try:
-            op_patients = OPMaster.objects.using('hospital_db').filter(
-                NPat_Reg_No__icontains=query,
-                Reg_Date__gte=week_start_datetime,
-                Reg_Date__lte=week_end_datetime
-            ).values(
-                'NPat_Reg_No', 'NPat_Name', 'NPat_Sex', 'Reg_Date'
-            )[:10]  # Limit to 10 results
+            from django.db.models import Q
+            # If initial load (clicking search bar), show 10 most recent OP patients
+            if is_initial_load:
+                op_patients = OPMaster.objects.using('hospital_db').all().values(
+                    'NPat_Reg_No', 'NPat_Name', 'NPat_Sex', 'Reg_Date'
+                ).order_by('-Reg_Date')[:5]  # Limit to 5 OP patients for initial load (will combine with IP)
+                print(f"[DEBUG] Initial load - Found {len(list(op_patients))} OP patients")
+            elif query:
+                # If query is provided (any length), search by both registration number and patient name
+                op_patients = OPMaster.objects.using('hospital_db').filter(
+                    Q(NPat_Reg_No__icontains=query) | Q(NPat_Name__icontains=query)
+                ).values(
+                    'NPat_Reg_No', 'NPat_Name', 'NPat_Sex', 'Reg_Date'
+                ).order_by('-Reg_Date')[:100]  # Order by most recent, limit to 100
+                print(f"[DEBUG] Query search - Found {len(list(op_patients))} OP patients for query: '{query}'")
+            else:
+                # Empty query (not initial load), return empty
+                op_patients = []
+                print(f"[DEBUG] Empty query (not initial load) - returning empty OP patients")
             
             for patient in op_patients:
                 # Check VIP status
@@ -1087,24 +1159,30 @@ def search_patients(request):
                 except Repeated_Visitors.DoesNotExist:
                     vip_status = False
                 
-                # Determine patient type (OP if 5 digits)
-                patient_type = 'OP' if len(str(patient['NPat_Reg_No'])) == 5 else 'IP'
+                # Determine patient type: OP patients have 5-digit registration numbers
+                reg_no_str = str(patient['NPat_Reg_No']).strip()
+                # Remove any non-digit characters to check length
+                digits_only = ''.join(ch for ch in reg_no_str if ch.isdigit())
+                # OP patients have exactly 5 digits
+                patient_type = 'OP' if len(digits_only) == 5 else 'IP'
                 
-                patients.append({
-                    'registration_number': patient['NPat_Reg_No'],
-                    'patient_name': patient['NPat_Name'],
-                    'sex': patient['NPat_Sex'],
-                    'age': None,  # OP patients don't have age in this table
-                    'room_number': None,  # OP patients don't have room number
-                    'ip_number': None,  # OP patients don't have IP number
-                    'pat_ref_id': None,  # OP patients don't have pat_ref_id
-                    'phone': None,  # OP patients don't have phone in this table
-                    'email': None,  # OP patients don't have email in this table
-                    'registration_date': patient['Reg_Date'].strftime('%Y-%m-%d') if patient['Reg_Date'] else None,
-                    'patient_type': patient_type,
-                    'is_vip': vip_status,
-                    'source': 'OP'
-                })
+                # Only add OP patients (exclude any IP patients that might be in OPMaster table)
+                if patient_type == 'OP':
+                    patients.append({
+                        'registration_number': patient['NPat_Reg_No'],
+                        'patient_name': patient['NPat_Name'],
+                        'sex': patient['NPat_Sex'],
+                        'age': None,  # OP patients don't have age in this table
+                        'room_number': None,  # OP patients don't have room number
+                        'ip_number': None,  # OP patients don't have IP number
+                        'pat_ref_id': None,  # OP patients don't have pat_ref_id
+                        'phone': None,  # OP patients don't have phone in this table
+                        'email': None,  # OP patients don't have email in this table
+                        'registration_date': patient['Reg_Date'].strftime('%Y-%m-%d') if patient['Reg_Date'] else None,
+                        'patient_type': 'OP',
+                        'is_vip': vip_status,
+                        'source': 'OP'
+                    })
         except Exception as e:
             print(f"Error searching OP patients: {e}")
         
@@ -1116,8 +1194,29 @@ def search_patients(request):
                 seen_reg_nos.add(patient['registration_number'])
                 unique_patients.append(patient)
         
+        # Sort combined results by date (most recent first)
+        # Use registration_date or visit_date for sorting
+        def get_sort_date(patient):
+            # Try to get a date for sorting
+            if patient.get('registration_date'):
+                try:
+                    from datetime import datetime
+                    return datetime.strptime(patient['registration_date'], '%Y-%m-%d')
+                except:
+                    pass
+            # Fallback to current date if no date available
+            from datetime import datetime
+            return datetime.now()
+        
+        unique_patients.sort(key=get_sort_date, reverse=True)
+        
+        # For initial load, return exactly 10 patients; otherwise return up to 20
+        limit = 10 if is_initial_load else 20
+        
+        print(f"[DEBUG] Returning {len(unique_patients[:limit])} patients (limit: {limit}, total found: {len(unique_patients)})")
+        
         return JsonResponse({
-            'patients': unique_patients[:20],  # Limit total results to 20
+            'patients': unique_patients[:limit],
             'total_found': len(unique_patients)
         })
         
