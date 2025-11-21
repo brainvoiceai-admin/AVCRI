@@ -546,20 +546,30 @@
         resultDiv.innerHTML = `
           <h3><i class="fas fa-list"></i> Available Therapists (${totalCount})</h3>
           <ul class="therapist-list">
-            ${therapists.map(t => `
+            ${therapists.map(t => {
+              // Get gender from API response (should be 'Male', 'Female', or 'Unknown')
+              const genderLower = (t.gender || '').toLowerCase();
+              const isMale = genderLower === 'male' || genderLower === 'm';
+              const isFemale = genderLower === 'female' || genderLower === 'f';
+              const genderDisplay = isMale ? 'Male' : (isFemale ? 'Female' : (t.gender || 'Unknown'));
+              const genderClass = isMale ? 'male' : (isFemale ? 'female' : 'male'); // Default to male for avatar
+              const gradeDisplay = t.grade || 'N/A';
+              
+              return `
               <li class="therapist-item">
-                <div class="therapist-avatar ${t.gender}">
-                  ${t.gender === 'male' ? 'M' : 'F'}
+                <div class="therapist-avatar ${genderClass}">
+                  ${isMale ? 'M' : 'F'}
                 </div>
                 <div class="therapist-info">
                   <div class="therapist-name">${t.name}</div>
                   <div class="therapist-details">
-                    ${t.gender === 'male' ? 'Male' : 'Female'} Therapist • ${t.grade}
+                    ${genderDisplay} Therapist • ${gradeDisplay}
                     ${t.is_bathing ? ' • <span class="therapist-badge">Bathing Specialist</span>' : ''}
                   </div>
                 </div>
               </li>
-            `).join('')}
+            `;
+            }).join('')}
           </ul>
         `;
         resultDiv.className = 'result success';
@@ -628,21 +638,31 @@
         resultDiv.innerHTML = `
           <h3><i class="fas fa-list"></i> Therapists on Leave (${totalCount})</h3>
           <ul class="therapist-list">
-            ${leaves.map(t => `
+            ${leaves.map(t => {
+              // Get gender from API response (should be 'Male', 'Female', or 'Unknown')
+              const genderLower = (t.gender || '').toLowerCase();
+              const isMale = genderLower === 'male' || genderLower === 'm';
+              const isFemale = genderLower === 'female' || genderLower === 'f';
+              const genderDisplay = isMale ? 'Male' : (isFemale ? 'Female' : (t.gender || 'Unknown'));
+              const genderClass = isMale ? 'male' : (isFemale ? 'female' : 'male'); // Default to male for avatar
+              const gradeDisplay = t.grade || 'N/A';
+              
+              return `
               <li class="therapist-item">
-                <div class="therapist-avatar ${t.gender}">
-                  ${t.gender === 'male' ? 'M' : 'F'}
+                <div class="therapist-avatar ${genderClass}">
+                  ${isMale ? 'M' : 'F'}
                 </div>
                 <div class="therapist-info">
                   <div class="therapist-name">${t.name}</div>
                   <div class="therapist-details">
-                    ${t.gender === 'male' ? 'Male' : 'Female'} Therapist • ${t.grade}
+                    ${genderDisplay} Therapist • ${gradeDisplay}
                     ${t.leave_type ? ` • ${t.leave_type}` : ''}
                     ${t.reason ? ` • ${t.reason}` : ''}
                   </div>
                 </div>
               </li>
-            `).join('')}
+            `;
+            }).join('')}
           </ul>
         `;
         resultDiv.className = 'result';
