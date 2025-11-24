@@ -226,6 +226,10 @@ def get_treatment_rooms_for_staying_room(patient_staying_room):
     if prefix == 'CT':
         return [f'TRC-{room_num}']
     
+    # OP-* prefix: Return empty list (OP patients are handled separately in allocate_treatment_room)
+    if prefix == 'OP':
+        return []
+    
     # No match found
     return []
 
@@ -280,7 +284,15 @@ def allocate_treatment_room(date, time_slot, last_room=None, patient_staying_roo
         return None
     
     # NEW: Primary logic - allocate based on patient staying room
+    # Special handling: If patient_staying_room starts with "OP-", treat it as if there's no staying room
+    # (OP patients are handled in the OP patient fallback logic below)
+    staying_room_upper = None
+    is_op_prefix = False
     if patient_staying_room:
+        staying_room_upper = str(patient_staying_room).strip().upper()
+        is_op_prefix = staying_room_upper.startswith('OP-')
+    
+    if patient_staying_room and not is_op_prefix:
         treatment_rooms = get_treatment_rooms_for_staying_room(patient_staying_room)
         
         if treatment_rooms:
@@ -294,9 +306,9 @@ def allocate_treatment_room(date, time_slot, last_room=None, patient_staying_roo
             return None
     
     # NEW: OP patient fallback logic
-    # Check if patient is OP (outpatient)
+    # Check if patient is OP (outpatient) or if staying room starts with "OP-"
     is_op_patient = False
-    if not patient_staying_room and patient:
+    if (not patient_staying_room or is_op_prefix) and patient:
         try:
             # Check if patient has is_op method (PatientSnapshot)
             if hasattr(patient, 'is_op'):
@@ -308,45 +320,36 @@ def allocate_treatment_room(date, time_slot, last_room=None, patient_staying_roo
         except Exception:
             pass
     
-    # For OP patients, check if they have a staying room from Treatment model
-    # If OP patient has staying room, use it for allocation
-    if is_op_patient and not patient_staying_room and patient:
+    # If staying room starts with "OP-", treat as OP patient
+    if is_op_prefix:
+        is_op_patient = True
+    
+    # For OP patients, check if they have a CT room from Treatment model
+    # If OP patient has CT room, use TRC room; otherwise use TR-1 to TR-16
+    if is_op_patient and patient:
         try:
             # Try to get room number from patient's pat_room_no (should be populated from Treatment model)
             op_staying_room = getattr(patient, 'pat_room_no', None)
             if op_staying_room:
-                patient_staying_room = str(op_staying_room).strip()
+                op_room_upper = str(op_staying_room).strip().upper()
+                # Check if it's a CT room - if yes, apply CT room logic (TRC rooms)
+                if op_room_upper.startswith('CT'):
+                    # Extract CT room number and assign TRC room
+                    import re
+                    match = re.match(r'CT-?(\d+)', op_room_upper)
+                    if match:
+                        try:
+                            ct_room_num = int(match.group(1))
+                            trc_room_no = f'TRC-{ct_room_num}'
+                            room = check_room_availability(trc_room_no)
+                            if room:
+                                return room
+                            # TRC room not available
+                            return None
+                        except (ValueError, AttributeError):
+                            pass
         except Exception:
             pass
-    
-    # If OP patient has staying room (e.g., CT-1), apply staying room rules
-    if is_op_patient and patient_staying_room:
-        # Check if it's a CT room - if yes, apply CT room logic (TRC rooms)
-        staying_room_upper = str(patient_staying_room).strip().upper()
-        if staying_room_upper.startswith('CT'):
-            # Extract CT room number and assign TRC room
-            import re
-            match = re.match(r'CT-?(\d+)', staying_room_upper)
-            if match:
-                try:
-                    ct_room_num = int(match.group(1))
-                    trc_room_no = f'TRC-{ct_room_num}'
-                    room = check_room_availability(trc_room_no)
-                    if room:
-                        return room
-                    # TRC room not available
-                    return None
-                except (ValueError, AttributeError):
-                    pass
-        
-        # For other room types, use staying room rules
-        treatment_rooms = get_treatment_rooms_for_staying_room(patient_staying_room)
-        if treatment_rooms:
-            for room_no in treatment_rooms:
-                room = check_room_availability(room_no)
-                if room:
-                    return room
-            return None
     
     # OP patients with no room or non-CT room: Try TR-1 to TR-16 in order
     if is_op_patient:
@@ -897,12 +900,42 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
         if allocation and hasattr(allocation, 'patient'):
             patient_staying_room = getattr(allocation.patient, 'pat_room_no', None)
             if patient_staying_room:
-                treatment_rooms = get_treatment_rooms_for_staying_room(patient_staying_room)
-                if treatment_rooms:
-                    rooms_list = ', '.join(treatment_rooms)
-                    reason = f"no_room_available: Treatment rooms assigned for staying room {patient_staying_room} ({rooms_list}) are not available"
+                staying_room_upper = str(patient_staying_room).strip().upper()
+                # Check if it's an OP- prefix (not a real staying room)
+                if staying_room_upper.startswith('OP-'):
+                    # This is an OP patient identifier, not a real staying room
+                    # Check if OP patient has CT room
+                    try:
+                        is_op = False
+                        if hasattr(allocation.patient, 'is_op'):
+                            is_op = allocation.patient.is_op()
+                        elif hasattr(allocation.patient, 'pat_reg_no'):
+                            digits = ''.join(ch for ch in str(allocation.patient.pat_reg_no or '') if ch.isdigit())
+                            is_op = len(digits) == 5
+                        
+                        if is_op:
+                            # Check if OP patient has CT room from pat_room_no
+                            op_room = getattr(allocation.patient, 'pat_room_no', None)
+                            if op_room and str(op_room).strip().upper().startswith('CT'):
+                                import re
+                                match = re.match(r'CT-?(\d+)', str(op_room).strip().upper())
+                                if match:
+                                    ct_num = match.group(1)
+                                    reason = f"no_room_available: Treatment room TRC-{ct_num} for OP patient with CT room CT-{ct_num} is not available"
+                                else:
+                                    reason = "no_room_available: No treatment room available for OP patient with CT room"
+                            else:
+                                reason = "no_room_available: No treatment room available for OP patient (TR-1 to TR-16)"
+                    except Exception:
+                        reason = "no_room_available: No treatment room available for OP patient (TR-1 to TR-16)"
                 else:
-                    reason = f"no_room_available: No treatment room assignment rule found for staying room {patient_staying_room}"
+                    # Real staying room - check treatment room assignment
+                    treatment_rooms = get_treatment_rooms_for_staying_room(patient_staying_room)
+                    if treatment_rooms:
+                        rooms_list = ', '.join(treatment_rooms)
+                        reason = f"no_room_available: Treatment rooms assigned for staying room {patient_staying_room} ({rooms_list}) are not available"
+                    else:
+                        reason = f"no_room_available: No treatment room assignment rule found for staying room {patient_staying_room}"
             else:
                 # Check if OP patient
                 try:
