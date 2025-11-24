@@ -1199,7 +1199,7 @@ class TherapistMasterManagementView(ListView):
 
 class TherapistMasterCreateView(CreateView):
     model = TherapistMaster
-    fields = ['therapist_name', 'therapist_grade', 'employee_code', 'is_bathing_therapist', 'is_active']
+    fields = ['therapist_name', 'therapist_grade', 'employee_code', 'therapist_gender', 'is_bathing_therapist', 'is_active']
     template_name = 'masters/therapist_master_form.html'
     success_url = reverse_lazy('therapist_master_manage')
     
@@ -1211,6 +1211,11 @@ class TherapistMasterCreateView(CreateView):
         # Update grade field to use TherapistGrade queryset
         if 'therapist_grade' in form.fields:
             form.fields['therapist_grade'].queryset = TherapistGrade.objects.filter(is_active=True).order_by('display_order', 'name')
+        # Customize gender field to use Select widget
+        if 'therapist_gender' in form.fields:
+            form.fields['therapist_gender'].widget = forms.Select(choices=[('', 'Select Gender'), ('Male', 'Male'), ('Female', 'Female')])
+            form.fields['therapist_gender'].widget.attrs['class'] = 'form-select'
+            form.fields['therapist_gender'].initial = 'Male'
         return form
     
     def get_context_data(self, **kwargs):
@@ -1303,7 +1308,7 @@ class TherapistMasterCreateView(CreateView):
 
 class TherapistMasterUpdateView(UpdateView):
     model = TherapistMaster
-    fields = ['therapist_name', 'therapist_grade', 'employee_code', 'is_bathing_therapist', 'is_active']
+    fields = ['therapist_name', 'therapist_grade', 'employee_code', 'therapist_gender', 'is_bathing_therapist', 'is_active']
     template_name = 'masters/therapist_master_form.html'
     success_url = reverse_lazy('therapist_master_manage')
     
@@ -1315,6 +1320,10 @@ class TherapistMasterUpdateView(UpdateView):
         # Update grade field to use TherapistGrade queryset
         if 'therapist_grade' in form.fields:
             form.fields['therapist_grade'].queryset = TherapistGrade.objects.filter(is_active=True).order_by('display_order', 'name')
+        # Customize gender field to use Select widget
+        if 'therapist_gender' in form.fields:
+            form.fields['therapist_gender'].widget = forms.Select(choices=[('', 'Select Gender'), ('Male', 'Male'), ('Female', 'Female')])
+            form.fields['therapist_gender'].widget.attrs['class'] = 'form-select'
         return form
     
     def get_context_data(self, **kwargs):

@@ -103,6 +103,7 @@
                                 <th>Therapist Name</th>
                                 <th>Grade</th>
                                 <th>Employee Code</th>
+                                <th>Gender</th>
                                 <th>Bathing Therapist</th>
                                 <th>Leave Days</th>
                                 <th>Status</th>
@@ -122,6 +123,9 @@
                                 </td>
                                 <td>
                                     <code>{{ therapist.employee_code }}</code>
+                                </td>
+                                <td>
+                                    <span class="badge bg-primary">{{ therapist.therapist_gender|default:"N/A" }}</span>
                                 </td>
                                 <td>
                                     {% if therapist.is_bathing_therapist %}
@@ -176,7 +180,7 @@
                             </tr>
                             {% empty %}
                             <tr>
-                                <td colspan="8" class="text-center py-4">
+                                <td colspan="10" class="text-center py-4">
                                     <div class="text-muted">
                                         <i class="fas fa-user-md fa-3x mb-3"></i>
                                         <p>No therapists found. <a href="{% url 'therapist_master_add' %}">Add the first therapist</a></p>
