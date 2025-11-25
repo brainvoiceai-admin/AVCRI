@@ -1046,6 +1046,7 @@ $(function(){
       const regNo = patient.pat_reg_no || patient.registration_number;
       const patName = patient.pat_name || patient.patient_name;
       const patientType = patient.patient_type || (patient.source === 'IP' ? 'IP' : 'OP');
+      const roomNo = patient.room_number || patient.pat_room_no || null;
       
       const resultItem = $(`
         <div style="padding:10px;border-bottom:1px solid #eee;cursor:pointer;" class="search-result-item" data-reg-no="${regNo}">
@@ -1053,7 +1054,7 @@ $(function(){
             <div>
               <strong>${patName || 'Unknown'}</strong>
               <div style="font-size:0.9em;color:#666;margin-top:2px;">
-                Reg: ${regNo}
+                Reg: ${regNo}${roomNo ? ' | Room: ' + roomNo : ''}
               </div>
             </div>
             <div>
