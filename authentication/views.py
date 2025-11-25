@@ -1100,10 +1100,29 @@ def search_patients(request):
                     import traceback
                     traceback.print_exc()
             elif query:
-                # If query is provided, search by both registration number and patient name
+                # If query is provided, search by registration number, patient name, and room number
                 try:
+                    # Build Q object for search - always search by name and reg no
+                    search_q = Q(pat_reg_no__icontains=query) | Q(pat_name__icontains=query)
+                    
+                    # Try to search by room number if query is numeric or contains numbers
+                    # Try exact match first (if query is a pure number)
+                    try:
+                        room_query_int = int(query)
+                        search_q |= Q(pat_room_no=room_query_int)
+                    except (ValueError, TypeError):
+                        pass
+                    
+                    # Also try string search on room number (in case it's stored as string in some cases)
+                    # This handles cases where room number might be searched as part of a string
+                    if any(char.isdigit() for char in query):
+                        # If query contains digits, also try to match room number as string
+                        # Note: pat_room_no is IntegerField, so we'll search by converting to string in Python
+                        # But for database query, we'll use the integer approach above
+                        pass
+                    
                     all_patients = Registration.objects.using('therapy_db').filter(
-                        Q(pat_reg_no__icontains=query) | Q(pat_name__icontains=query),
+                        search_q,
                         pat_status__iexact='Active'
                     ).values(
                         'pat_reg_no', 'pat_name', 'pat_sex', 'pat_age', 'pat_room_no', 'pat_ref_id', 'pat_visit_date'
@@ -1117,8 +1136,18 @@ def search_patients(request):
                     
                     if not ip_patients_list:
                         # Try without status filter
+                        # Build Q object for search - always search by name and reg no
+                        search_q = Q(pat_reg_no__icontains=query) | Q(pat_name__icontains=query)
+                        
+                        # Try to search by room number if query is numeric
+                        try:
+                            room_query_int = int(query)
+                            search_q |= Q(pat_room_no=room_query_int)
+                        except (ValueError, TypeError):
+                            pass
+                        
                         all_patients = Registration.objects.using('therapy_db').filter(
-                            Q(pat_reg_no__icontains=query) | Q(pat_name__icontains=query)
+                            search_q
                         ).values(
                             'pat_reg_no', 'pat_name', 'pat_sex', 'pat_age', 'pat_room_no', 'pat_ref_id', 'pat_visit_date'
                         ).order_by('-pat_visit_date')[:100]
