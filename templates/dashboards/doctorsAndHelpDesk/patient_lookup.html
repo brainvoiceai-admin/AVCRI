@@ -186,12 +186,57 @@
             <form id="patient-form" method="POST" action="{% url 'patient:patient_lookup' %}">
                 {% csrf_token %}
                 <h3 class="form-section-title">Patient Search</h3>
-                <div class="row">
-                    <div class="col-md-12">
-                        <div class="form-group">
-                            <label for="patientRegNo">Search by Reg. No. or Name</label>
-                            <select id="patientRegNo" name="reg_number" style="width: 100%;" required>
-                                <option value="">-- Search for a Patient --</option>
+                <input type="hidden" id="selectedRegNumber" name="reg_number" value="">
+                
+                <!-- Search Method Tabs -->
+                <ul class="nav nav-tabs mb-3" id="searchTabs" role="tablist">
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link active" id="name-reg-tab" data-bs-toggle="tab" data-bs-target="#name-reg-search" type="button" role="tab" aria-controls="name-reg-search" aria-selected="true">
+                            <i class="fas fa-user me-2"></i>Search by Name/Reg No
+                        </button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="room-tab" data-bs-toggle="tab" data-bs-target="#room-search" type="button" role="tab" aria-controls="room-search" aria-selected="false">
+                            <i class="fas fa-bed me-2"></i>Search by Room Number
+                        </button>
+                    </li>
+                </ul>
+                
+                <!-- Tab Content -->
+                <div class="tab-content" id="searchTabContent">
+                    <!-- Name/Reg No Search Tab -->
+                    <div class="tab-pane fade show active" id="name-reg-search" role="tabpanel" aria-labelledby="name-reg-tab">
+                        <div class="row">
+                            <div class="col-md-12">
+                                <div class="form-group">
+                                    <label for="patientRegNo">Search by Reg. No. or Name</label>
+                                    <select id="patientRegNo" name="reg_number" style="width: 100%;">
+                                        <option value="">-- Search for a Patient --</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Room Number Search Tab -->
+                    <div class="tab-pane fade" id="room-search" role="tabpanel" aria-labelledby="room-tab">
+                        <div class="row">
+                            <div class="col-md-12">
+                                <div class="form-group">
+                                    <label for="roomNumberSearch">Search by Room Number</label>
+                                    <div class="input-group">
+                                        <input type="text" id="roomNumberSearch" class="form-control" placeholder="Enter room number (e.g., 101)">
+                                        <button type="button" class="btn btn-primary" id="searchByRoomBtn">
+                                            <i class="fas fa-search me-2"></i>Search
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div id="roomSearchResults" class="mt-3" style="display: none;">
+                            <label>Select Patient:</label>
+                            <select id="roomPatientSelect" name="reg_number" style="width: 100%;">
+                                <option value="">-- Select a Patient --</option>
                             </select>
                         </div>
                     </div>
@@ -293,23 +338,24 @@
 
     <script>
         $(document).ready(function() {
-            // Initialize Select2
+            // Initialize Select2 for Name/Reg No search
             $('#patientRegNo').select2({
                 placeholder: 'Search for a Patient by Reg. No. or Name...',
                 minimumInputLength: 3,
                 ajax: {
-                    url: '{% url "patient:search_patients" %}',
+                    url: '{% url "authentication:search_patients" %}',
                     dataType: 'json',
                     delay: 250,
                     data: function(params) {
                         return { q: params.term };
                     },
                     processResults: function (data) {
+                        var patients = data.patients || data || [];
                         return {
-                            results: $.map(data, function (item) {
+                            results: $.map(patients, function (item) {
                                 return {
-                                    text: item.pat_reg_no + ' - ' + item.pat_name,
-                                    id: item.pat_reg_no
+                                    text: (item.pat_reg_no || item.registration_number) + ' - ' + (item.pat_name || item.patient_name),
+                                    id: item.pat_reg_no || item.registration_number
                                 };
                             })
                         };
@@ -318,9 +364,14 @@
                 }
             });
 
-            // Event listener for when a patient is selected
-            $('#patientRegNo').on('change', function() {
-                var patRegNo = $(this).val();
+            // Initialize Select2 for Room search results
+            $('#roomPatientSelect').select2({
+                placeholder: 'Select a Patient...',
+                width: '100%'
+            });
+
+            // Function to load patient details
+            function loadPatientDetails(patRegNo) {
                 if (patRegNo) {
                     $.ajax({
                         url: '{% url "patient:get_patient_details" %}',
@@ -350,8 +401,96 @@
                     $('#roomNumber').val('');
                     $('#uniqueId').val('');
                 }
+            }
+
+            // Event listener for when a patient is selected (Name/Reg No search)
+            $('#patientRegNo').on('change', function() {
+                var regNo = $(this).val();
+                $('#selectedRegNumber').val(regNo);
+                loadPatientDetails(regNo);
             });
-            
+
+            // Event listener for when a patient is selected (Room search)
+            $('#roomPatientSelect').on('change', function() {
+                var regNo = $(this).val();
+                $('#selectedRegNumber').val(regNo);
+                loadPatientDetails(regNo);
+            });
+
+            // Form validation before submission
+            $('#patient-form').on('submit', function(e) {
+                var selectedRegNo = $('#selectedRegNumber').val();
+                if (!selectedRegNo) {
+                    e.preventDefault();
+                    alert('Please select a patient before proceeding.');
+                    return false;
+                }
+            });
+
+            // Room number search functionality
+            $('#searchByRoomBtn').on('click', function() {
+                var roomNumber = $('#roomNumberSearch').val().trim();
+                if (!roomNumber) {
+                    alert('Please enter a room number');
+                    return;
+                }
+
+                // Show loading state
+                $('#roomSearchResults').hide();
+                $('#roomPatientSelect').empty().append('<option value="">Loading...</option>');
+
+                $.ajax({
+                    url: '{% url "authentication:search_patients_by_room" %}',
+                    method: 'GET',
+                    data: { room: roomNumber },
+                    dataType: 'json',
+                    success: function(data) {
+                        $('#roomPatientSelect').empty();
+                        
+                        if (data.patients && data.patients.length > 0) {
+                            $('#roomPatientSelect').append('<option value="">-- Select a Patient --</option>');
+                            $.each(data.patients, function(index, patient) {
+                                var regNo = patient.pat_reg_no || patient.registration_number;
+                                var name = patient.pat_name || patient.patient_name;
+                                var roomNo = patient.room_number || patient.pat_room_no || '';
+                                var displayText = regNo + ' - ' + name;
+                                if (roomNo) {
+                                    displayText += ' (Room: ' + roomNo + ')';
+                                }
+                                $('#roomPatientSelect').append(
+                                    $('<option></option>').val(regNo).text(displayText)
+                                );
+                            });
+                            $('#roomSearchResults').show();
+                        } else {
+                            $('#roomPatientSelect').append('<option value="">No patients found in this room</option>');
+                            $('#roomSearchResults').show();
+                            alert('No patients found in room ' + roomNumber);
+                        }
+                    },
+                    error: function(jqXHR, textStatus, errorThrown) {
+                        console.error("Error searching by room:", textStatus, errorThrown);
+                        alert("Error searching patients by room number. Please try again.");
+                        $('#roomSearchResults').hide();
+                    }
+                });
+            });
+
+            // Allow Enter key to trigger room search
+            $('#roomNumberSearch').on('keypress', function(e) {
+                if (e.which === 13) {
+                    e.preventDefault();
+                    $('#searchByRoomBtn').click();
+                }
+            });
+
+            // Clear room search when switching tabs
+            $('#name-reg-tab').on('click', function() {
+                $('#roomNumberSearch').val('');
+                $('#roomSearchResults').hide();
+                $('#roomPatientSelect').empty();
+            });
+
             // Functions for date calculation
             $('#fromDate, #toDate').on('change', function() {
                 var fromDate = $('#fromDate').val();

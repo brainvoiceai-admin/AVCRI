@@ -1,4 +1,4 @@
-from django.http import JsonResponse
+from django.http import JsonResponse, HttpResponse
 from django.views.decorators.http import require_http_methods
 from django.views.decorators.csrf import csrf_exempt
 from django.contrib.auth.decorators import login_required
@@ -17,6 +17,9 @@ from .models import (
     NurseMaster
 )
 import json
+import pandas as pd
+from datetime import datetime
+from io import BytesIO
 
 @login_required
 @require_http_methods(["GET"])
@@ -1368,6 +1371,87 @@ class TherapistMasterUpdateView(UpdateView):
         
         messages.success(self.request, 'Therapist and leave schedule updated successfully.')
         return response
+
+@login_required
+@super_admin_required
+def therapist_master_export_excel(request):
+    """Export all therapist master data to Excel"""
+    try:
+        # Check if openpyxl is available
+        try:
+            import openpyxl
+        except ImportError:
+            messages.error(request, 'openpyxl is required for Excel export. Please install it: pip install openpyxl')
+            return redirect('therapist_master_manage')
+        
+        # Get all therapists with related data
+        therapists = TherapistMaster.objects.select_related(
+            'therapist_grade', 'user', 'therapist_profile'
+        ).prefetch_related('leaves').all().order_by('therapist_name')
+        
+        # Prepare data for Excel
+        data = []
+        for therapist in therapists:
+            # Get leave days as comma-separated string
+            leave_days = ', '.join([leave.leave_day_name for leave in therapist.leaves.all()]) if therapist.leaves.exists() else 'None'
+            
+            # Get user info if available
+            username = therapist.user.username if therapist.user else 'N/A'
+            email = therapist.user.email if therapist.user else 'N/A'
+            
+            data.append({
+                'Therapist Code': therapist.therapist_code,
+                'Therapist Name': therapist.therapist_name,
+                'Grade': therapist.therapist_grade.name if therapist.therapist_grade else 'N/A',
+                'Employee Code': therapist.employee_code,
+                'Gender': therapist.therapist_gender or 'N/A',
+                'Bathing Therapist': 'Yes' if therapist.is_bathing_therapist else 'No',
+                'Leave Days': leave_days,
+                'Status': 'Active' if therapist.is_active else 'Inactive',
+                'Username': username,
+                'Email': email,
+                'Created At': therapist.created_at.strftime('%Y-%m-%d %H:%M:%S') if therapist.created_at else '',
+                'Updated At': therapist.updated_at.strftime('%Y-%m-%d %H:%M:%S') if therapist.updated_at else '',
+            })
+        
+        # Create DataFrame
+        df = pd.DataFrame(data)
+        
+        # Create Excel file in memory
+        output = BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            df.to_excel(writer, sheet_name='Therapist Master', index=False)
+            
+            # Get the workbook and worksheet
+            workbook = writer.book
+            worksheet = writer.sheets['Therapist Master']
+            
+            # Auto-adjust column widths
+            from openpyxl.utils import get_column_letter
+            for idx, col in enumerate(df.columns, 1):
+                max_length = max(
+                    df[col].astype(str).map(len).max(),
+                    len(col)
+                ) + 2
+                col_letter = get_column_letter(idx)
+                worksheet.column_dimensions[col_letter].width = min(max_length, 50)
+        
+        # Prepare response
+        output.seek(0)
+        response = HttpResponse(
+            output.read(),
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        )
+        filename = f'therapist_master_export_{datetime.now().strftime("%Y%m%d_%H%M%S")}.xlsx'
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        
+        return response
+        
+    except Exception as e:
+        messages.error(request, f'Error exporting data: {str(e)}')
+        import traceback
+        traceback.print_exc()
+        return redirect('therapist_master_manage')
 
 @login_required
 @super_admin_required

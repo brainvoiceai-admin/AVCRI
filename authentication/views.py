@@ -1100,26 +1100,10 @@ def search_patients(request):
                     import traceback
                     traceback.print_exc()
             elif query:
-                # If query is provided, search by registration number, patient name, and room number
+                # If query is provided, search by registration number and patient name only
                 try:
-                    # Build Q object for search - always search by name and reg no
+                    # Build Q object for search - only search by name and reg no
                     search_q = Q(pat_reg_no__icontains=query) | Q(pat_name__icontains=query)
-                    
-                    # Try to search by room number if query is numeric or contains numbers
-                    # Try exact match first (if query is a pure number)
-                    try:
-                        room_query_int = int(query)
-                        search_q |= Q(pat_room_no=room_query_int)
-                    except (ValueError, TypeError):
-                        pass
-                    
-                    # Also try string search on room number (in case it's stored as string in some cases)
-                    # This handles cases where room number might be searched as part of a string
-                    if any(char.isdigit() for char in query):
-                        # If query contains digits, also try to match room number as string
-                        # Note: pat_room_no is IntegerField, so we'll search by converting to string in Python
-                        # But for database query, we'll use the integer approach above
-                        pass
                     
                     all_patients = Registration.objects.using('therapy_db').filter(
                         search_q,
@@ -1136,15 +1120,8 @@ def search_patients(request):
                     
                     if not ip_patients_list:
                         # Try without status filter
-                        # Build Q object for search - always search by name and reg no
+                        # Build Q object for search - only search by name and reg no
                         search_q = Q(pat_reg_no__icontains=query) | Q(pat_name__icontains=query)
-                        
-                        # Try to search by room number if query is numeric
-                        try:
-                            room_query_int = int(query)
-                            search_q |= Q(pat_room_no=room_query_int)
-                        except (ValueError, TypeError):
-                            pass
                         
                         all_patients = Registration.objects.using('therapy_db').filter(
                             search_q
@@ -1294,6 +1271,346 @@ def search_patients(request):
         return JsonResponse({
             'patients': unique_patients[:limit],
             'total_found': len(unique_patients)
+        })
+        
+    except Exception as e:
+        return JsonResponse({
+            'error': f'Search failed: {str(e)}',
+            'patients': []
+        }, status=500)
+
+@login_required
+def search_patients_by_room(request):
+    """API endpoint to search patients by room number"""
+    if request.method != 'GET':
+        return JsonResponse({'error': 'Only GET method allowed'}, status=405)
+    
+    room_query = request.GET.get('room', '').strip()
+    
+    if not room_query:
+        return JsonResponse({
+            'error': 'Room number required',
+            'patients': []
+        }, status=400)
+    
+    print(f"[DEBUG] search_patients_by_room called - room: '{room_query}'")
+    
+    try:
+        from MySql_Data_pull.models import Registration, OPMaster, Treatment
+        from Patient.models import Repeated_Visitors
+        from masters.models import get_staying_room_display_number, StayingRoom
+        
+        patients = []
+        
+        # Try to convert room query to integer for direct match
+        room_query_int = None
+        try:
+            room_query_int = int(room_query)
+        except (ValueError, TypeError):
+            pass
+        
+        # Search in Treatment table first (handles both IP and OP patients with room numbers like "CT-16", "OP-1")
+        treatment_patients = []
+        try:
+            from django.db.models import Q
+            
+            # Search Treatment table by Pat_Room_No (CharField - can store "CT-16", "OP-1" directly)
+            # Treatment table is in iptherapy_db, not therapy_db
+            treatment_records = Treatment.objects.using('iptherapy_db').filter(
+                Pat_Room_No__iexact=room_query
+            ).values('Pat_Reg_No', 'Pat_Room_No', 'Pat_Name', 'Pat_Sex', 'Pat_Age').distinct()[:100]
+            
+            print(f"[DEBUG] Found {len(list(treatment_records))} treatment records for room: '{room_query}'")
+            
+            for treatment in treatment_records:
+                reg_no = treatment['Pat_Reg_No']
+                treatment_patients.append({
+                    'reg_no': reg_no,
+                    'room_no': treatment.get('Pat_Room_No'),
+                    'name': treatment.get('Pat_Name'),
+                    'sex': treatment.get('Pat_Sex'),
+                    'age': treatment.get('Pat_Age'),
+                    'source': 'treatment'
+                })
+        except Exception as e:
+            print(f"[DEBUG] Error searching Treatment table: {e}")
+            import traceback
+            traceback.print_exc()
+        
+        # Also search PatientSnapshot table (has room numbers stored directly as CharField)
+        snapshot_patients = []
+        snapshot_room_numbers_to_search = [room_query]  # Start with the original query
+        
+        # Check if StayingRoom has a mapping (e.g., "OP-1" -> "76")
+        try:
+            staying_room = StayingRoom.objects.filter(
+                room_no__iexact=room_query
+            ).first()
+            
+            if staying_room and staying_room.number:
+                # Add the mapped number to search list
+                snapshot_room_numbers_to_search.append(staying_room.number)
+                print(f"[DEBUG] StayingRoom mapping found: {room_query} -> {staying_room.number}")
+        except Exception:
+            pass
+        
+        try:
+            from Sheduling.models import PatientSnapshot
+            from django.db.models import Q
+            
+            # Search PatientSnapshot by pat_room_no (can store "CT-16", "OP-1" directly or mapped numbers)
+            snapshot_q = Q()
+            for room_num in snapshot_room_numbers_to_search:
+                snapshot_q |= Q(pat_room_no__iexact=room_num)
+            
+            snapshot_records = PatientSnapshot.objects.filter(
+                snapshot_q
+            ).values('pat_reg_no', 'pat_room_no', 'pat_name', 'pat_sex', 'pat_age')[:100]
+            
+            print(f"[DEBUG] Found {len(list(snapshot_records))} PatientSnapshot records for room: '{room_query}'")
+            
+            for snapshot in snapshot_records:
+                reg_no = snapshot['pat_reg_no']
+                # Skip if already in treatment_patients
+                if not any(tp['reg_no'] == reg_no for tp in treatment_patients):
+                    snapshot_patients.append({
+                        'reg_no': reg_no,
+                        'room_no': snapshot.get('pat_room_no'),
+                        'name': snapshot.get('pat_name'),
+                        'sex': snapshot.get('pat_sex'),
+                        'age': snapshot.get('pat_age'),
+                        'source': 'snapshot'
+                    })
+        except Exception as e:
+            print(f"[DEBUG] Error searching PatientSnapshot table: {e}")
+            import traceback
+            traceback.print_exc()
+        
+        # Search in IP patients (Registration table) by room number
+        try:
+            from django.db.models import Q
+            
+            ip_patients_list = []
+            room_numbers_to_search = []
+            
+            # First, try to find StayingRoom by display format (e.g., "CT-16", "OP-1")
+            # This handles searches like "CT-16", "OP-1", etc.
+            staying_room = StayingRoom.objects.filter(
+                room_no__iexact=room_query
+            ).first()
+            
+            if staying_room:
+                # Found a match in StayingRoom, get the number field (stored in DB)
+                try:
+                    room_db_number = int(staying_room.number)
+                    room_numbers_to_search.append(room_db_number)
+                    print(f"[DEBUG] Found StayingRoom: {staying_room.room_no} -> number: {staying_room.number}")
+                except (ValueError, TypeError):
+                    pass
+            
+            # Also try to find by number field directly (in case user searches by the stored number)
+            staying_room_by_number = StayingRoom.objects.filter(
+                number__iexact=room_query
+            ).first()
+            
+            if staying_room_by_number:
+                try:
+                    room_db_number = int(staying_room_by_number.number)
+                    if room_db_number not in room_numbers_to_search:
+                        room_numbers_to_search.append(room_db_number)
+                    print(f"[DEBUG] Found StayingRoom by number: {staying_room_by_number.number}")
+                except (ValueError, TypeError):
+                    pass
+            
+            # If it's a pure integer and not found in StayingRoom, search directly
+            if room_query_int is not None and not room_numbers_to_search:
+                room_numbers_to_search.append(room_query_int)
+            
+            # Build search query
+            if room_numbers_to_search:
+                # Search by all found room numbers - return all patients regardless of status
+                search_q = Q(pat_room_no__in=room_numbers_to_search)
+                
+                # Search all patients (active and inactive) - no status filter
+                ip_patients_list = Registration.objects.using('therapy_db').filter(
+                    search_q
+                ).values(
+                    'pat_reg_no', 'pat_name', 'pat_sex', 'pat_age', 'pat_room_no', 'pat_ref_id', 'pat_visit_date'
+                ).order_by('-pat_visit_date')[:100]
+            else:
+                # No valid room number found
+                ip_patients_list = []
+                print(f"[DEBUG] No matching room found for query: '{room_query}'")
+            
+            for patient in ip_patients_list:
+                # Check VIP status
+                vip_status = False
+                try:
+                    repeated_visitor = Repeated_Visitors.objects.get(
+                        register_number=patient['pat_reg_no']
+                    )
+                    vip_status = repeated_visitor.total_visits > 2
+                except (Repeated_Visitors.DoesNotExist, Exception):
+                    vip_status = False
+                
+                # Get mapped room number for display
+                try:
+                    mapped_room = get_staying_room_display_number(patient['pat_room_no'])
+                except Exception:
+                    mapped_room = patient['pat_room_no'] if patient.get('pat_room_no') else None
+                
+                patients.append({
+                    'registration_number': patient['pat_reg_no'],
+                    'patient_name': patient['pat_name'],
+                    'sex': patient['pat_sex'],
+                    'age': patient['pat_age'],
+                    'room_number': mapped_room,
+                    'ip_number': patient['pat_reg_no'],
+                    'pat_ref_id': patient.get('pat_ref_id'),
+                    'phone': None,
+                    'email': None,
+                    'registration_date': None,
+                    'patient_type': 'IP',
+                    'is_vip': vip_status,
+                    'source': 'IP'
+                })
+        except Exception as e:
+            print(f"Error searching IP patients by room: {e}")
+            import traceback
+            traceback.print_exc()
+        
+        # Process patients from Treatment table and PatientSnapshot (includes both IP and OP)
+        # Get unique registration numbers to avoid duplicates
+        all_patient_sources = treatment_patients + snapshot_patients
+        treatment_reg_nos = set()
+        for tp in all_patient_sources:
+            treatment_reg_nos.add(tp['reg_no'])
+        
+        # Fetch patient details from Registration or OPMaster
+        for reg_no in treatment_reg_nos:
+            # Skip if already added from IP search
+            if any(p.get('registration_number') == reg_no for p in patients):
+                continue
+            
+            try:
+                # Try to find in IP patients (Registration table)
+                ip_patient = None
+                try:
+                    ip_patient = Registration.objects.using('therapy_db').filter(
+                        pat_reg_no=reg_no
+                    ).values(
+                        'pat_reg_no', 'pat_name', 'pat_sex', 'pat_age', 'pat_room_no', 'pat_ref_id', 'pat_visit_date'
+                    ).first()
+                except Exception:
+                    pass
+                
+                if ip_patient:
+                    # IP patient found
+                    vip_status = False
+                    try:
+                        repeated_visitor = Repeated_Visitors.objects.get(
+                            register_number=ip_patient['pat_reg_no']
+                        )
+                        vip_status = repeated_visitor.total_visits > 2
+                    except (Repeated_Visitors.DoesNotExist, Exception):
+                        vip_status = False
+                    
+                    # Get room number from treatment, snapshot, or registration
+                    room_no = None
+                    for tp in all_patient_sources:
+                        if tp['reg_no'] == reg_no:
+                            room_no = tp.get('room_no')
+                            break
+                    
+                    if not room_no:
+                        room_no = ip_patient.get('pat_room_no')
+                    
+                    # Get mapped room number for display
+                    try:
+                        if room_no:
+                            mapped_room = get_staying_room_display_number(room_no)
+                        else:
+                            mapped_room = None
+                    except Exception:
+                        mapped_room = room_no
+                    
+                    patients.append({
+                        'registration_number': ip_patient['pat_reg_no'],
+                        'patient_name': ip_patient['pat_name'],
+                        'sex': ip_patient['pat_sex'],
+                        'age': ip_patient['pat_age'],
+                        'room_number': mapped_room or room_no,
+                        'ip_number': ip_patient['pat_reg_no'],
+                        'pat_ref_id': ip_patient.get('pat_ref_id'),
+                        'phone': None,
+                        'email': None,
+                        'registration_date': None,
+                        'patient_type': 'IP',
+                        'is_vip': vip_status,
+                        'source': 'IP'
+                    })
+                else:
+                    # Try to find in OP patients (OPMaster table)
+                    op_patient = None
+                    try:
+                        op_patient = OPMaster.objects.using('hospital_db').filter(
+                            NPat_Reg_No=reg_no
+                        ).values(
+                            'NPat_Reg_No', 'NPat_Name', 'NPat_Sex', 'Reg_Date'
+                        ).first()
+                    except Exception:
+                        pass
+                    
+                    if op_patient:
+                        # OP patient found
+                        vip_status = False
+                        try:
+                            repeated_visitor = Repeated_Visitors.objects.get(
+                                register_number=op_patient['NPat_Reg_No']
+                            )
+                            vip_status = repeated_visitor.total_visits > 2
+                        except (Repeated_Visitors.DoesNotExist, Exception):
+                            vip_status = False
+                        
+                        # Get room number from treatment or snapshot
+                        room_no = None
+                        for tp in all_patient_sources:
+                            if tp['reg_no'] == reg_no:
+                                room_no = tp.get('room_no')
+                                break
+                        
+                        patients.append({
+                            'registration_number': op_patient['NPat_Reg_No'],
+                            'patient_name': op_patient['NPat_Name'],
+                            'sex': op_patient['NPat_Sex'],
+                            'age': None,
+                            'room_number': room_no,
+                            'ip_number': None,
+                            'pat_ref_id': None,
+                            'phone': None,
+                            'email': None,
+                            'registration_date': op_patient['Reg_Date'].strftime('%Y-%m-%d') if op_patient.get('Reg_Date') else None,
+                            'patient_type': 'OP',
+                            'is_vip': vip_status,
+                            'source': 'OP'
+                        })
+            except Exception as e:
+                print(f"[DEBUG] Error processing treatment patient {reg_no}: {e}")
+                import traceback
+                traceback.print_exc()
+        
+        # Sort by visit date (most recent first)
+        def get_sort_date(patient):
+            from datetime import datetime
+            return datetime.now()  # Use current date as fallback
+        
+        patients.sort(key=get_sort_date, reverse=True)
+        
+        print(f"[DEBUG] Returning {len(patients)} patients for room: '{room_query}'")
+        
+        return JsonResponse({
+            'patients': patients[:20],  # Limit to 20 results
+            'total_found': len(patients)
         })
         
     except Exception as e:
