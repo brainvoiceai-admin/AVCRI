@@ -102,6 +102,37 @@
       flex: 1;
       position: relative;
     }
+    
+    .search-tabs {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 12px;
+      border-bottom: 2px solid var(--border-light);
+    }
+    
+    .search-tab-btn {
+      padding: 8px 16px;
+      border: none;
+      background: none;
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      color: var(--text-medium);
+      font-weight: 500;
+      transition: all 0.3s;
+    }
+    
+    .search-tab-btn:hover {
+      color: var(--primary);
+    }
+    
+    .search-tab-btn.active {
+      border-bottom-color: var(--primary);
+      color: var(--primary);
+    }
+    
+    .search-tab-content {
+      /* Tab content styling */
+    }
 
     .search-input-group {
       display: flex;
@@ -663,12 +694,39 @@
         
         <div class="patient-search-section">
           <div class="patient-search-container">
-            <div class="search-input-group">
-              <input type="text" id="header-patient-select" placeholder="Search patient by name, ID, or registration number...">
-              <button id="clear-patient-btn" class="btn btn-outline">
-                <i class="fas fa-times"></i> Clear
+            <!-- Search Method Tabs -->
+            <div class="search-tabs" style="display: flex; gap: 8px; margin-bottom: 12px; border-bottom: 2px solid var(--border-light);">
+              <button class="search-tab-btn active" data-tab="name-reg" style="padding: 8px 16px; border: none; background: none; cursor: pointer; border-bottom: 2px solid transparent; color: var(--text-medium); font-weight: 500; transition: all 0.3s;">
+                <i class="fas fa-user me-1"></i> Name/Reg No
+              </button>
+              <button class="search-tab-btn" data-tab="room" style="padding: 8px 16px; border: none; background: none; cursor: pointer; border-bottom: 2px solid transparent; color: var(--text-medium); font-weight: 500; transition: all 0.3s;">
+                <i class="fas fa-bed me-1"></i> Room Number
               </button>
             </div>
+            
+            <!-- Name/Reg No Search Tab -->
+            <div id="name-reg-search-tab" class="search-tab-content">
+              <div class="search-input-group">
+                <input type="text" id="header-patient-select" placeholder="Search patient by name or registration number...">
+                <button id="clear-patient-btn" class="btn btn-outline">
+                  <i class="fas fa-times"></i> Clear
+                </button>
+              </div>
+            </div>
+            
+            <!-- Room Number Search Tab -->
+            <div id="room-search-tab" class="search-tab-content" style="display: none;">
+              <div class="search-input-group" style="display: flex; gap: 8px;">
+                <input type="text" id="header-room-search" placeholder="Enter room number (e.g., 101)" style="flex: 1;">
+                <button id="search-room-btn" class="btn btn-outline" style="white-space: nowrap;">
+                  <i class="fas fa-search"></i> Search
+                </button>
+                <button id="clear-room-btn" class="btn btn-outline">
+                  <i class="fas fa-times"></i> Clear
+                </button>
+              </div>
+            </div>
+            
             <div id="search-results"></div>
           </div>
         </div>
@@ -980,7 +1038,33 @@ $(function(){
   let searchTimeout;
   let initialPatientsLoaded = false;
   
-  // Show 10 active patients when search box is focused/clicked
+  // Tab switching functionality
+  $('.search-tab-btn').on('click', function() {
+    const tab = $(this).data('tab');
+    
+    // Update active tab
+    $('.search-tab-btn').removeClass('active').css({
+      'border-bottom-color': 'transparent',
+      'color': 'var(--text-medium)'
+    });
+    $(this).addClass('active').css({
+      'border-bottom-color': 'var(--primary)',
+      'color': 'var(--primary)'
+    });
+    
+    // Show/hide tab content
+    $('.search-tab-content').hide();
+    if (tab === 'name-reg') {
+      $('#name-reg-search-tab').show();
+      $('#header-patient-select').focus();
+    } else if (tab === 'room') {
+      $('#room-search-tab').show();
+      $('#header-room-search').focus();
+      $('#search-results').hide();
+    }
+  });
+  
+  // Show 10 active patients when search box is focused/clicked (Name/Reg No search)
   $('#header-patient-select').on('focus', function() {
     const query = $(this).val().trim();
     // If search box is empty, show 10 active patients
@@ -1011,6 +1095,46 @@ $(function(){
       initialPatientsLoaded = false; // Reset flag when filtering
     }, 300);
   });
+  
+  // Room number search functionality
+  $('#search-room-btn').on('click', function() {
+    const roomNumber = $('#header-room-search').val().trim();
+    if (!roomNumber) {
+      alert('Please enter a room number');
+      return;
+    }
+    searchPatientsByRoom(roomNumber);
+  });
+  
+  // Allow Enter key to trigger room search
+  $('#header-room-search').on('keypress', function(e) {
+    if (e.which === 13) {
+      e.preventDefault();
+      $('#search-room-btn').click();
+    }
+  });
+  
+  // Clear room search
+  $('#clear-room-btn').on('click', function() {
+    $('#header-room-search').val('');
+    $('#search-results').hide();
+  });
+  
+  // Function to search patients by room number
+  function searchPatientsByRoom(roomNumber) {
+    $('#search-results').html('<div style="padding:10px;color:#666;">Searching...</div>').show();
+    
+    fetch('/authentication/api/search-patients-by-room/?room=' + encodeURIComponent(roomNumber))
+      .then(response => response.json())
+      .then(data => {
+        const patients = data.patients || [];
+        displaySearchResults(patients);
+      })
+      .catch(error => {
+        console.error('Room search error:', error);
+        $('#search-results').html('<div style="padding:10px;color:#d9534f;">Error searching patients by room number</div>').show();
+      });
+  }
 
   function searchPatients(query, isInitialLoad = false) {
     // isInitialLoad: true = show 10 active patients, false = filter based on query
@@ -1077,7 +1201,7 @@ $(function(){
 
   // Hide search results when clicking outside
   $(document).on('click', function(e) {
-    if (!$(e.target).closest('#header-patient-select, #search-results').length) {
+    if (!$(e.target).closest('#header-patient-select, #header-room-search, #search-results, #search-room-btn').length) {
       $('#search-results').hide();
     }
   });

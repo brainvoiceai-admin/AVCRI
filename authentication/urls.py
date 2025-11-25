@@ -37,6 +37,7 @@ path('module-management/', views.module_management, name='module_management'),
     path('therapist-schedule/', views.therapist_schedule, name='therapist_schedule'),
     path('add-therapy-autofill/', views.add_therapy_with_autofill, name='add_therapy_with_autofill'),
     path('api/search-patients/', views.search_patients, name='search_patients'),
+    path('api/search-patients-by-room/', views.search_patients_by_room, name='search_patients_by_room'),
     path('api/get-patient-details/', views.get_patient_details, name='get_patient_details'),
     # Role change URLs
     path('confirm-role-change/<int:user_id>/', views.confirm_role_change, name='confirm_role_change'),
