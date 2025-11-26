@@ -710,9 +710,14 @@
                             <div class="card-title">Scheduled Therapies</div>
                             <div class="card-subtitle">Successfully scheduled therapies with therapist and nurse assignments. Use date filter to view schedules for specific dates.</div>
                         </div>
-                        <button class="btn btn-primary" id="print-therapy-pdf" title="Print to PDF" style="background: #2ed573; color: white; font-weight: 600; padding: 12px 24px; display: flex; align-items: center; gap: 8px;">
-                            <span style="font-size: 18px;">🖨️</span> Print to PDF
-                        </button>
+                        <div style="display: flex; gap: 12px; align-items: center;">
+                            <button class="btn btn-primary" id="export-therapy-excel" title="Export to Excel" style="background: #10b981; color: white; font-weight: 600; padding: 12px 24px; display: flex; align-items: center; gap: 8px;">
+                                <span style="font-size: 18px;">📊</span> Export to Excel
+                            </button>
+                            <button class="btn btn-primary" id="print-therapy-pdf" title="Print to PDF" style="background: #2ed573; color: white; font-weight: 600; padding: 12px 24px; display: flex; align-items: center; gap: 8px;">
+                                <span style="font-size: 18px;">🖨️</span> Print to PDF
+                            </button>
+                        </div>
                     </div>
                     
                     <div class="filters">
@@ -937,6 +942,9 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
     
+    <!-- SheetJS Library for Excel Export -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    
     <script>
         // Initialize the dashboard
         document.addEventListener('DOMContentLoaded', function() {
@@ -1022,6 +1030,11 @@
                     applyPatientNameFilter('');
                 });
             }
+            
+            // Export to Excel button
+            document.getElementById('export-therapy-excel').addEventListener('click', function() {
+                exportTherapyScheduleToExcel();
+            });
             
             // Print to PDF button
             document.getElementById('print-therapy-pdf').addEventListener('click', function() {
@@ -1660,6 +1673,138 @@
             if (event.target === rescheduleModal) {
                 closeRescheduleModal();
             }
+        }
+        
+        // Export Therapy Schedule to Excel
+        function exportTherapyScheduleToExcel() {
+            const selectedDate = document.getElementById('scheduled-date').value;
+            const patientFilter = getPatientSearchValue();
+            
+            if (!selectedDate) {
+                alert('Please select a date first using the date filter');
+                return;
+            }
+            
+            // Show loading
+            const exportBtn = document.getElementById('export-therapy-excel');
+            const originalText = exportBtn.innerHTML;
+            exportBtn.disabled = true;
+            exportBtn.innerHTML = '<span>⏳</span> Exporting...';
+            
+            // Fetch scheduled therapies data
+            const patientQuery = patientFilter ? `&patient_name=${encodeURIComponent(patientFilter)}` : '';
+            fetch(`/sheduling/scheduling/api/therapy-data/?status=allocated&date=${selectedDate}${patientQuery}`)
+                .then(response => response.json())
+                .then(data => {
+                    exportBtn.disabled = false;
+                    exportBtn.innerHTML = originalText;
+                    
+                    if (data.success && data.data.length > 0) {
+                        generateTherapyExcel(data.data, selectedDate, patientFilter);
+                    } else {
+                        alert('No scheduled therapies found for the selected date.');
+                    }
+                })
+                .catch(error => {
+                    exportBtn.disabled = false;
+                    exportBtn.innerHTML = originalText;
+                    alert('Error exporting to Excel: ' + error.message);
+                });
+        }
+        
+        function generateTherapyExcel(therapyData, date, patientFilter) {
+            // Separate therapist and nurse treatments
+            const therapistData = [];
+            const nurseData = [];
+            
+            therapyData.forEach(item => {
+                const hasNurses = item.nurses && item.nurses.length > 0;
+                const hasTherapists = item.therapists && item.therapists.length > 0;
+                const isNurseTreatment = hasNurses && !hasTherapists;
+                
+                if (isNurseTreatment) {
+                    nurseData.push(item);
+                } else {
+                    therapistData.push(item);
+                }
+            });
+            
+            // Helper function to format time in 12-hour format
+            function format12Hour(time24) {
+                if (!time24) return '—';
+                const parts = String(time24).split(':');
+                if (parts.length !== 2) return time24;
+                let hours = parseInt(parts[0], 10);
+                const minutes = parts[1];
+                const period = hours >= 12 ? 'PM' : 'AM';
+                hours = hours % 12;
+                hours = hours ? hours : 12;
+                return `${hours}:${minutes} ${period}`;
+            }
+            
+            // Prepare therapist schedule data
+            const therapistRows = therapistData.map(item => {
+                const therapists = item.therapists && item.therapists.length > 0
+                    ? item.therapists.map(t => {
+                        const rawName = t.name || t.code || t;
+                        const cleanedName = rawName.replace(/\(bathing\)/gi, '').replace(/^\*/, '').trim();
+                        const isBathing = t.is_bathing === true || rawName.startsWith('*') || /\(bathing\)/i.test(rawName);
+                        return isBathing ? `*${cleanedName}` : cleanedName;
+                    }).join(', ')
+                    : 'Not assigned';
+                
+                return {
+                    'Patient Name': item.patient_name || '—',
+                    'Patient Reg No': item.patient_reg_no || '—',
+                    'Therapy': item.therapy_name || '—',
+                    'Time Slot': format12Hour(item.timeslot),
+                    'Date': item.date || item.from_date || '—',
+                    'Treatment Room No': item.room_no || '—',
+                    'Patient Room No': item.patient_room_no || '—',
+                    'Therapist Assigned': therapists,
+                    'Scheduled By': item.allocated_by || 'System'
+                };
+            });
+            
+            // Prepare nurse schedule data
+            const nurseRows = nurseData.map(item => {
+                const nurses = item.nurses && item.nurses.length > 0
+                    ? item.nurses.map(n => n.name || n.code || n).join(', ')
+                    : 'Not assigned';
+                
+                return {
+                    'Patient Name': item.patient_name || '—',
+                    'Patient Reg No': item.patient_reg_no || '—',
+                    'Treatment Name': item.therapy_name || '—',
+                    'Patient Room No': item.patient_room_no || '—',
+                    'Nurse Assigned': nurses
+                };
+            });
+            
+            // Create workbook
+            const wb = XLSX.utils.book_new();
+            
+            // Add therapist schedule sheet
+            if (therapistRows.length > 0) {
+                const therapistWs = XLSX.utils.json_to_sheet(therapistRows);
+                XLSX.utils.book_append_sheet(wb, therapistWs, 'Therapist Schedule');
+            }
+            
+            // Add nurse schedule sheet
+            if (nurseRows.length > 0) {
+                const nurseWs = XLSX.utils.json_to_sheet(nurseRows);
+                XLSX.utils.book_append_sheet(wb, nurseWs, 'Nurse Schedule');
+            }
+            
+            // Generate filename
+            let filename = `Therapy_Schedule_${date.replace(/-/g, '_')}`;
+            if (patientFilter) {
+                filename += `_${patientFilter.replace(/[^a-zA-Z0-9]/g, '_')}`;
+            }
+            filename += '.xlsx';
+            
+            // Write and download
+            XLSX.writeFile(wb, filename);
         }
         
         // Print Therapy Schedule to PDF
