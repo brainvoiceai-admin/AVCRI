@@ -4,15 +4,19 @@ from django.contrib.auth.decorators import login_required
 from django.views.decorators.http import require_http_methods
 from django.views.decorators.csrf import csrf_exempt
 from django.db.models import Q
+from django.utils import timezone
 from datetime import datetime, date, timedelta
+from collections import defaultdict
 import json
 
 from .models import (
     TherapyAllocation, Booking, BookingItem, BookingAssignment, 
     PatientSnapshot, PrescriptionScheduling, PrescriptionItem
 )
-from Patient.models import Therapist, TreatmentRoom, TimeSlot
+from Patient.models import Therapist, TreatmentRoom, TimeSlot, TherapyDetails
 from authentication.models import CustomUser
+from authentication.decorators import super_admin_required
+from masters.models import TherapyMaster, TherapistMaster
 
 
 @login_required
@@ -364,3 +368,167 @@ def get_therapist_sessions_by_date_api(request):
     except Exception as e:
         print(f"Error in get_therapist_sessions_by_date_api: {e}")
         return JsonResponse({'error': str(e)}, status=500)
+
+
+@super_admin_required
+def therapist_difficulty_dashboard(request):
+    """
+    Render dashboard for super admins to view therapist workload split by therapy difficulty.
+    """
+    date_param = request.GET.get('date')
+    if date_param:
+        try:
+            parsed_date = datetime.strptime(date_param, '%Y-%m-%d').date()
+            default_date = parsed_date.isoformat()
+        except ValueError:
+            default_date = timezone.localdate().isoformat()
+    else:
+        default_date = timezone.localdate().isoformat()
+    
+    context = {
+        'default_date': default_date,
+    }
+    return render(request, 'dashboards/superadmin/therapist_difficulty_dashboard.html', context)
+
+
+@super_admin_required
+@require_http_methods(["GET"])
+def get_therapist_difficulty_data(request):
+    """
+    Return therapist vs difficulty counts for a selected date.
+    Supports optional gender filter.
+    """
+    date_str = request.GET.get('date')
+    if date_str:
+        try:
+            target_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+        except ValueError:
+            return JsonResponse({'success': False, 'error': 'Invalid date format. Use YYYY-MM-DD.'}, status=400)
+    else:
+        target_date = timezone.localdate()
+        date_str = target_date.isoformat()
+    
+    gender_filter = request.GET.get('gender', '').strip().lower()
+    
+    assignments = (
+        BookingAssignment.objects
+        .filter(
+            booking__date=target_date,
+            status='assigned',
+            booking__status__in=['draft', 'scheduled', 'in_progress']
+        )
+        .select_related('therapist', 'booking__allocation')
+    )
+    
+    therapy_codes = {
+        assignment.booking.allocation.therapy_code
+        for assignment in assignments
+        if assignment.booking and assignment.booking.allocation
+    }
+    
+    therapy_categories = {}
+    if therapy_codes:
+        for tm in TherapyMaster.objects.filter(therapy_code__in=therapy_codes):
+            category = (tm.therapy_category or tm.therapy_group or 'Uncategorized').strip() or 'Uncategorized'
+            therapy_categories[tm.therapy_code] = category
+        missing_codes = therapy_codes - set(therapy_categories.keys())
+        if missing_codes:
+            for legacy in TherapyDetails.objects.filter(therapy_code__in=missing_codes):
+                category = (legacy.therapy_category or legacy.therapy_group or 'Uncategorized').strip() or 'Uncategorized'
+                therapy_categories[legacy.therapy_code] = category
+    
+    # Get therapist codes from assignments to fetch gender info
+    therapist_codes_from_assignments = {
+        assignment.therapist.therapist_code
+        for assignment in assignments
+        if assignment.therapist
+    }
+    
+    # Fetch TherapistMaster records to get gender information
+    from masters.models import TherapistMaster
+    therapist_masters = {}
+    if therapist_codes_from_assignments:
+        for tm in TherapistMaster.objects.filter(therapist_code__in=therapist_codes_from_assignments):
+            therapist_masters[tm.therapist_code] = {
+                'gender': (tm.therapist_gender or 'Male').strip(),
+                'grade': tm.therapist_grade.name if tm.therapist_grade else ''
+            }
+    
+    therapist_map = defaultdict(lambda: {
+        'name': '',
+        'grade': '',
+        'gender': '',
+        'counts': defaultdict(int),
+        'total': 0
+    })
+    difficulties = set()
+    total_assignments = 0
+    
+    for assignment in assignments:
+        therapist = assignment.therapist
+        booking = assignment.booking
+        if not therapist or not booking or not booking.allocation:
+            continue
+        
+        # Get gender from TherapistMaster
+        therapist_code = therapist.therapist_code
+        therapist_info = therapist_masters.get(therapist_code, {})
+        therapist_gender = therapist_info.get('gender', 'Male').strip().lower()
+        
+        # Apply gender filter if specified
+        if gender_filter and therapist_gender != gender_filter:
+            continue
+        
+        difficulty = therapy_categories.get(booking.allocation.therapy_code, 'Uncategorized')
+        difficulty = difficulty.strip() or 'Uncategorized'
+        difficulty = difficulty.title()
+        
+        data = therapist_map[therapist_code]
+        if not data['name']:
+            data['name'] = therapist.therapist_name
+            data['grade'] = therapist_info.get('grade') or getattr(therapist, 'therapist_grade', '')
+            data['gender'] = therapist_info.get('gender', 'Male')
+        data['counts'][difficulty] += 1
+        data['total'] += 1
+        total_assignments += 1
+        difficulties.add(difficulty)
+    
+    preferred_order = ['Critical', 'Hard', 'Medium', 'Easy', 'Simple']
+    order_map = {name: idx for idx, name in enumerate(preferred_order)}
+    difficulties_list = sorted(
+        difficulties,
+        key=lambda name: (0, order_map[name]) if name in order_map else (1, name.lower())
+    )
+    
+    therapists_payload = []
+    for code, data in therapist_map.items():
+        row_counts = {diff: data['counts'].get(diff, 0) for diff in difficulties_list}
+        therapists_payload.append({
+            'therapist_code': code,
+            'therapist_name': data['name'],
+            'therapist_grade': data['grade'],
+            'therapist_gender': data['gender'],
+            'total': data['total'],
+            'counts': row_counts
+        })
+    
+    therapists_payload.sort(key=lambda item: item['total'], reverse=True)
+    
+    difficulty_totals = {
+        diff: sum(row['counts'].get(diff, 0) for row in therapists_payload)
+        for diff in difficulties_list
+    }
+    
+    summary = {
+        'total_assignments': total_assignments,
+        'therapist_count': len(therapists_payload),
+        'difficulty_totals': difficulty_totals
+    }
+    
+    return JsonResponse({
+        'success': True,
+        'date': target_date.isoformat(),
+        'therapists': therapists_payload,
+        'difficulties': difficulties_list,
+        'summary': summary
+    })

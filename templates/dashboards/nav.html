@@ -174,6 +174,11 @@
                             <span>📅</span> Tomorrow's Schedule
                         </a>
                     {% endif %}
+                    {% if request.user.role == "super_admin" %}
+                        <a href="/sheduling/therapist-difficulty/" class="menu-item" data-url="/sheduling/therapist-difficulty/">
+                            <span>📊</span> Therapist Distribution
+                        </a>
+                    {% endif %}
                     {% for module in user_modules %}
                         {% if 'schedule' in module.name|lower or 'schedule' in module.display_name|lower or 'availability' in module.name|lower %}
                             {% if 'master' not in module.name|lower and 'master' not in module.display_name|lower and 'master' not in module.url_name|lower %}
