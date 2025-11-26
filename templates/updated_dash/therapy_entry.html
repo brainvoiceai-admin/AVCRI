@@ -782,8 +782,9 @@
             </div>
 
             <div class="form-group">
-              <label for="therapy-usage-select">Usage</label>
-              <select id="therapy-usage-select" multiple style="width:100%;"></select>
+              <label for="therapy-usage-input">Usage</label>
+              <textarea id="therapy-usage-input" rows="2" placeholder="Enter usage instructions (comma or line separated)"></textarea>
+              <div class="small-muted">Type any usage values; separate multiple entries with commas or new lines.</div>
             </div>
 
             <div class="form-group small">
@@ -970,7 +971,6 @@ $(function(){
 
   // --- config/fallbacks ---
   const API_URL = window.location.pathname;
-  const FALLBACK_USAGE = [{name:'Internal'},{name:'Dispensed'}];
   const FALLBACK_PROCURED = [{name:'IP Pharmacy'},{name:'Kashaya room'}];
   const FALLBACK_OIL = [{name:'Dhara'},{name:'Pizichil'},{name:'Head'}];
   const FALLBACK_SLOTS = [{start_time:'06:30'},{start_time:'08:30'},{start_time:'10:00'},{start_time:'11:30'},{start_time:'14:30'},{start_time:'16:00'},{start_time:'17:30'}];
@@ -983,6 +983,19 @@ $(function(){
   function esc(s){ return String(s||''); }
   function getDateRange(from, to){ const out=[]; let cur=new Date(from+'T00:00:00'), end=new Date(to+'T00:00:00'); while(cur<=end){ out.push(cur.toISOString().slice(0,10)); cur.setDate(cur.getDate()+1);} return out; }
   function getCookie(name) { let v = document.cookie.match('(^|;)\\s*' + name + '\\s*=\\s*([^;]+)'); return v ? v.pop() : ''; }
+  function parseUsageInput(raw) {
+    if (!raw) return [];
+    return raw
+      .split(/[\n,]+/)
+      .map(u => (u || '').trim())
+      .filter(Boolean);
+  }
+  function buildUsageTextFromData(data) {
+    if (!data) return '';
+    if (typeof data === 'string') return data;
+    if (Array.isArray(data)) return data.join(', ');
+    return '';
+  }
 
   // Load UnitNo options from master table
   function loadUnitNumbers() {
@@ -1005,7 +1018,7 @@ $(function(){
   // --- DOM refs ---
   const $patientSelect = $('#header-patient-select');
   const $therapySelect = $('#therapy-select'), $slotSelect = $('#slot-select'), $fromDate = $('#from-date-input'), $toDate = $('#to-date-input'), $daysInput = $('#days-input');
-  const $therapyUsageSelect = $('#therapy-usage-select');
+  const $therapyUsageInput = $('#therapy-usage-input');
   const $procuredSelect = $('#procured-select');
   const $itemBuilder = $('#item-builder-select'), $itemGroupsList = $('#item-groups-list');
   const $itemBuilderOilClass = $('#item-builder-oil-class');
@@ -1319,6 +1332,27 @@ $(function(){
     return `${hours}:${minutes} ${period}`;
   }
 
+  function formatStaffNames(staffList, isTherapist = true) {
+    if (!Array.isArray(staffList) || staffList.length === 0) return '—';
+    const names = staffList.map(entry => {
+      if (!entry) return null;
+      let rawName = '';
+      let isBathing = false;
+      if (typeof entry === 'string') {
+        rawName = entry;
+        const trimmed = rawName.trim();
+        isBathing = trimmed.startsWith('*') || /\(bathing\)/i.test(trimmed);
+      } else if (typeof entry === 'object') {
+        rawName = entry.name || entry.code || '';
+        isBathing = entry.is_bathing === true;
+      }
+      const cleaned = rawName.replace(/\(bathing\)/gi, '').replace(/^\*/, '').trim();
+      if (!cleaned) return null;
+      return (isTherapist && isBathing) ? `*${cleaned}` : cleaned;
+    }).filter(Boolean);
+    return names.length ? names.join(', ') : '—';
+  }
+
   // --- init select2s ---
   $therapySelect.select2({ 
     placeholder:'Search therapy (2+)', 
@@ -1441,48 +1475,8 @@ $(function(){
     }
   });
 
-  // Initialize Select2 for therapy-usage-select multiselect immediately
-  $therapyUsageSelect.select2({
-    placeholder: 'Select Usage (multiple)',
-    allowClear: true,
-    width: '100%',
-    multiple: true,
-    tags: false
-  });
-
   // populate masters & slots with fallback
   function populateMasters(){
-    // Populate therapy-usage-select multiselect (moved from item builder to therapy form)
-    ajax({action:'masters', type:'usagetype'}).then(list => { 
-      // Clear existing options
-      $therapyUsageSelect.empty();
-      
-      // Add options from API
-      if (list && list.length > 0) {
-        list.forEach(x => {
-          const option = new Option(x.name, x.name, false, false);
-          $therapyUsageSelect.append(option);
-        });
-      } else {
-        // Use fallback if API returns empty
-        FALLBACK_USAGE.forEach(x => {
-          const option = new Option(x.name, x.name, false, false);
-          $therapyUsageSelect.append(option);
-        });
-      }
-      
-      // Trigger change to update Select2 display
-      $therapyUsageSelect.trigger('change');
-    }).catch(err => {
-      console.error('Error loading usage types:', err);
-      // Use fallback on error
-      $therapyUsageSelect.empty();
-      FALLBACK_USAGE.forEach(x => {
-        const option = new Option(x.name, x.name, false, false);
-        $therapyUsageSelect.append(option);
-      });
-      $therapyUsageSelect.trigger('change');
-    });
     ajax({action:'masters', type:'procured'}).then(list => { $procuredSelect.empty().append('<option value="">-- Select --</option>'); (list||FALLBACK_PROCURED).forEach(p => $procuredSelect.append(new Option(p.name, p.name))); }).catch(()=>{ $procuredSelect.empty().append('<option value="">-- Select --</option>'); FALLBACK_PROCURED.forEach(p => $procuredSelect.append(new Option(p.name, p.name))); });
     // Populate Oil Class in item builder section
     ajax({action:'masters', type:'oil'}).then(list => { $itemBuilderOilClass.empty().append('<option value="">-- Select --</option>'); (list||FALLBACK_OIL).forEach(o => $itemBuilderOilClass.append(new Option(o.name, o.name))); }).catch(()=>{ $itemBuilderOilClass.empty().append('<option value="">-- Select --</option>'); FALLBACK_OIL.forEach(o => $itemBuilderOilClass.append(new Option(o.name, o.name))); }); 
@@ -1644,6 +1638,9 @@ $(function(){
     // Use pat_reg_no consistently for IP patients (or pat_op_reg_no if pat_reg_no doesn't exist)
     const patientRegNo = selectedPatient.pat_reg_no || selectedPatient.pat_op_reg_no;
     
+    const therapyUsageText = ($therapyUsageInput.val() || '').trim();
+    const therapyUsageArray = parseUsageInput(therapyUsageText);
+
     const therapyData = {
       patient_reg_no: patientRegNo,
       patient_name: selectedPatient.pat_name || '',
@@ -1653,8 +1650,9 @@ $(function(){
       pat_ref_id: selectedPatient.pat_ref_id || '',
       therapy_code: therapy.id,
       therapy_name: therapy.text,
-      usage: $therapyUsageSelect.val() || [], // Therapy-level usage (multiselect)
-      usage_array: $therapyUsageSelect.val() || [],
+      usage: therapyUsageText,
+      usage_array: therapyUsageArray,
+      usage_text: therapyUsageText,
       ext_int: $('#ext-int-select').val(),
       slot: $slotSelect.val() || '',
       from_date: from,
@@ -1704,7 +1702,7 @@ $(function(){
         
         // Reset form
         itemGroups = []; renderItemGroups();
-        $therapySelect.val(null).trigger('change'); $('#ext-int-select').val(''); $slotSelect.val(''); $fromDate.val(''); $toDate.val(''); $daysInput.val(''); $therapyUsageSelect.val(null).trigger('change'); $procuredSelect.val('');
+        $therapySelect.val(null).trigger('change'); $('#ext-int-select').val(''); $slotSelect.val(''); $fromDate.val(''); $toDate.val(''); $daysInput.val(''); $therapyUsageInput.val(''); $procuredSelect.val('');
         
         renderAll();
         
@@ -1755,29 +1753,18 @@ $(function(){
     addedTherapies.forEach((t,i) => {
       // Format therapy-level usage for display
       let therapyUsageDisplay = '—';
-      if (t.usage_array && Array.isArray(t.usage_array) && t.usage_array.length > 0) {
-        therapyUsageDisplay = esc(t.usage_array.join(', '));
-      } else if (t.usage) {
-        let usageArray = [];
-        if (Array.isArray(t.usage)) {
-          usageArray = t.usage;
-        } else if (typeof t.usage === 'string') {
-          // Handle string that might be JSON array or comma-separated
-          const trimmed = t.usage.trim();
-          if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
-            // It's a string representation of an array, parse it
-            try {
-              usageArray = JSON.parse(trimmed);
-            } catch (e) {
-              // If parsing fails, treat as comma-separated string
-              usageArray = trimmed.replace(/^\[|\]$/g, '').split(',').map(u => u.trim().replace(/^["']|["']$/g, '')).filter(u => u);
-            }
-          } else {
-            // Regular comma-separated string
-            usageArray = trimmed.split(',').map(u => u.trim()).filter(u => u);
-          }
-        }
-        therapyUsageDisplay = usageArray.length > 0 ? esc(usageArray.join(', ')) : '—';
+      let usageList = [];
+      if (Array.isArray(t.usage_array) && t.usage_array.length > 0) {
+        usageList = t.usage_array;
+      } else {
+        const usageSource =
+          (t.usage_text && t.usage_text.trim()) ||
+          buildUsageTextFromData(t.usage) ||
+          '';
+        usageList = parseUsageInput(usageSource);
+      }
+      if (usageList.length > 0) {
+        therapyUsageDisplay = esc(usageList.join(', '));
       }
       
       const groupsHtml = (t.items_groups||[]).map(g => {
@@ -1953,8 +1940,8 @@ $(function(){
             
             // Show nurses for nurse treatments, therapists for regular treatments
             const staffNames = isNurseTreatment 
-              ? ((b.nurses||[]).join(', ') || '—')
-              : ((b.therapists||[]).join(', ') || '—');
+              ? formatStaffNames(b.nurses || [], false)
+              : formatStaffNames(b.therapists || [], true);
             
             const $row = $(`
               <div class="status-date-row" data-id="${b.booking_id}">
@@ -2049,35 +2036,11 @@ $(function(){
     $fromDate.val(t.from_date||'').prop('disabled', false);
     $toDate.val(t.to_date||'').prop('disabled', false);
     $daysInput.val(t.days||'');
-    // Load therapy-level usage (multiselect)
-    let usageValues = null;
-    if (t.usage_array && Array.isArray(t.usage_array) && t.usage_array.length > 0) {
-      usageValues = t.usage_array;
-    } else if (t.usage) {
-      if (Array.isArray(t.usage)) {
-        usageValues = t.usage;
-      } else if (typeof t.usage === 'string') {
-        const trimmed = t.usage.trim();
-        if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
-          // It's a string representation of an array, parse it
-          try {
-            usageValues = JSON.parse(trimmed);
-          } catch (e) {
-            // If parsing fails, treat as comma-separated string with brackets
-            usageValues = trimmed.replace(/^\[|\]$/g, '').split(',').map(u => u.trim().replace(/^["']|["']$/g, '')).filter(u => u);
-          }
-        } else {
-          // Regular comma-separated string
-          usageValues = trimmed.split(',').map(u => u.trim()).filter(u => u);
-        }
-      }
-    }
-    
-    if (usageValues && usageValues.length > 0) {
-      $therapyUsageSelect.val(usageValues).trigger('change');
-    } else {
-      $therapyUsageSelect.val(null).trigger('change');
-    }
+    const usageText =
+      (t.usage_text && t.usage_text.trim()) ||
+      buildUsageTextFromData(t.usage) ||
+      buildUsageTextFromData(t.usage_array);
+    $therapyUsageInput.val(usageText);
     $procuredSelect.val(t.procured||'');
     itemGroups = (t.items_groups||[]).map(g=>({ 
       id: Math.random().toString(36).slice(2,9), 
@@ -2104,9 +2067,11 @@ $(function(){
     t.slot = $slotSelect.val() || '';
     t.from_date = $fromDate.val() || t.from_date;
     t.to_date = $toDate.val() || t.to_date;
-    // Update therapy-level usage (multiselect)
-    t.usage = $therapyUsageSelect.val() || [];
-    t.usage_array = $therapyUsageSelect.val() || [];
+    const updatedUsageText = ($therapyUsageInput.val() || '').trim();
+    const updatedUsageArray = parseUsageInput(updatedUsageText);
+    t.usage = updatedUsageText;
+    t.usage_array = updatedUsageArray;
+    t.usage_text = updatedUsageText;
     t.procured = $procuredSelect.val()||'';
     t.items_groups = itemGroups.map(g=>({
       items: g.items||[], 
@@ -2124,6 +2089,8 @@ $(function(){
         from_date: t.from_date,
         to_date: t.to_date,
         ext_int: t.ext_int,
+        usage: updatedUsageText,
+        usage_array: updatedUsageArray,
         items_groups: t.items_groups.map(g => ({ 
           items: g.items || [], 
           dosage: g.dosage, 
@@ -2167,7 +2134,7 @@ $(function(){
     $therapySelect.val(null).trigger('change').prop('disabled', false);
     $slotSelect.val('').prop('disabled', false);
     $('#ext-int-select').val(''); $fromDate.val('').prop('disabled', false); $toDate.val('').prop('disabled', false); $daysInput.val('');
-    $therapyUsageSelect.val(null).trigger('change'); $procuredSelect.val('');
+    $therapyUsageInput.val(''); $procuredSelect.val('');
     itemGroups = []; renderItemGroups();
     $allocateBtn.show(); $updateBtn.hide();
   }

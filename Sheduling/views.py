@@ -1469,11 +1469,11 @@ def therapy_entry(request):
                     # Get is_bathing flag from pre-fetched data
                     is_bathing = therapist_bookings.get(a.therapist.therapist_code, False)
                     
-                    # Add (bathing) suffix if is_bathing is True
-                    if is_bathing:
-                        therapist_name = f"{therapist_name}(bathing)"
-                    
-                    therapists.append(therapist_name)
+                    therapists.append({
+                        'name': therapist_name,
+                        'code': getattr(a.therapist, 'therapist_code', None),
+                        'is_bathing': bool(is_bathing)
+                    })
             except Exception:
                 therapists = []
             
@@ -3511,6 +3511,7 @@ def get_therapy_data_api(request):
         # Get filters
         date_filter = request.GET.get('date')
         status_filter = request.GET.get('status', 'all')
+        patient_name_filter = (request.GET.get('patient_name') or request.GET.get('patient') or '').strip()
         
         data = []
         
@@ -3528,6 +3529,9 @@ def get_therapy_data_api(request):
                 elif status_filter == 'failed':
                     booking_query['status'] = 'failed'
                 # If status_filter is 'all', we'll get all statuses
+                
+                if patient_name_filter:
+                    booking_query['allocation__patient__pat_name__icontains'] = patient_name_filter
                 
                 bookings = Booking.objects.filter(**booking_query).select_related(
                     'allocation__patient', 'allocation', 'timeslot', 'room'
@@ -3575,10 +3579,6 @@ def get_therapy_data_api(request):
                         is_bathing = therapist_bookings.get(assignment.therapist.therapist_code, False)
                         
                         therapist_name = assignment.therapist.therapist_name or assignment.therapist.therapist_code
-                        # Add (bathing) suffix if is_bathing is True
-                        if is_bathing:
-                            therapist_name = f"{therapist_name}(bathing)"
-                        
                         therapists.append({
                             'code': assignment.therapist.therapist_code,
                             'name': therapist_name,
@@ -3686,6 +3686,9 @@ def get_therapy_data_api(request):
             ).prefetch_related(
                 'bookings__assignments__therapist'
             )
+            
+            if patient_name_filter:
+                allocations = allocations.filter(patient__pat_name__icontains=patient_name_filter)
             
             # Convert to JSON format
             for allocation in allocations:
