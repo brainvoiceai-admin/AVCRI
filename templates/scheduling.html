@@ -149,6 +149,37 @@
             color: var(--dark);
         }
         
+        .search-inline {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+        
+        .search-inline input[type="text"] {
+            flex: 1;
+            min-width: 200px;
+        }
+        
+        .patient-name-link {
+            background: none;
+            border: none;
+            padding: 0;
+            margin: 0;
+            text-align: left;
+            width: 100%;
+            cursor: pointer;
+        }
+        
+        .patient-name-link:focus-visible {
+            outline: 2px solid var(--primary);
+            border-radius: 4px;
+        }
+        
+        .patient-name-link:hover div:first-child {
+            text-decoration: underline;
+        }
+        
         input[type="date"], select {
             padding: 10px 12px;
             border-radius: 8px;
@@ -689,6 +720,14 @@
                             <label class="filter-label">Filter by Date</label>
                             <input type="date" id="scheduled-date" value="{{ date_filter }}">
                         </div>
+                        <div class="filter-group" style="flex: 1;">
+                            <label class="filter-label">Search by Patient Name</label>
+                            <div class="search-inline">
+                                <input type="text" id="patient-search" placeholder="Type patient name">
+                                <button class="btn btn-secondary btn-small" id="patient-search-btn" type="button">Search</button>
+                                <button class="btn btn-outline btn-small" id="clear-patient-search" type="button">Clear</button>
+                            </div>
+                        </div>
                     </div>
                     
                     <!-- Therapist Schedule Section -->
@@ -717,8 +756,10 @@
                                         {% for booking in therapist_bookings %}
                                         <tr>
                                             <td>
-                                                <div style="font-weight: 500;">{{ booking.allocation.patient.pat_name }}</div>
-                                                <div style="font-size: 12px; color: var(--gray);">{{ booking.allocation.patient.pat_reg_no }}</div>
+                                                <button type="button" class="patient-name-link" data-patient-name="{{ booking.allocation.patient.pat_name }}" data-schedule-date="{{ booking.date|date:'Y-m-d' }}">
+                                                    <div style="font-weight: 500;">{{ booking.allocation.patient.pat_name }}</div>
+                                                    <div style="font-size: 12px; color: var(--gray);">{{ booking.allocation.patient.pat_reg_no }}</div>
+                                                </button>
                                             </td>
                                             <td>{{ booking.allocation.therapy_name }}</td>
                                             <td>{{ booking.timeslot.slot_time|format_12hour|default:"—" }}</td>
@@ -751,9 +792,11 @@
                                                     {% for assignment in booking.assignments.all %}
                                                         {% with therapist_name=assignment.therapist.therapist_name|default:assignment.therapist.therapist_code %}
                                                             {% with is_bathing=assignment|get_therapist_bathing_flag:booking %}
-                                                                <span class="therapist-badge">
-                                                                    {{ therapist_name }}{% if is_bathing %}(bathing){% endif %}
-                                                                </span>
+                                                                {% with clean_name=therapist_name|cut:"(bathing)" %}
+                                                                    <span class="therapist-badge">
+                                                                        {% if is_bathing %}*{% endif %}{{ clean_name }}
+                                                                    </span>
+                                                                {% endwith %}
                                                             {% endwith %}
                                                         {% endwith %}
                                                     {% empty %}
@@ -799,8 +842,10 @@
                                         {% for booking in nurse_bookings %}
                                         <tr>
                                             <td>
-                                                <div style="font-weight: 500;">{{ booking.allocation.patient.pat_name }}</div>
-                                                <div style="font-size: 12px; color: var(--gray);">{{ booking.allocation.patient.pat_reg_no }}</div>
+                                                <button type="button" class="patient-name-link" data-patient-name="{{ booking.allocation.patient.pat_name }}" data-schedule-date="{{ booking.date|date:'Y-m-d' }}">
+                                                    <div style="font-weight: 500;">{{ booking.allocation.patient.pat_name }}</div>
+                                                    <div style="font-size: 12px; color: var(--gray);">{{ booking.allocation.patient.pat_reg_no }}</div>
+                                                </button>
                                             </td>
                                             <td>{{ booking.allocation.therapy_name }}</td>
                                             <td>
@@ -948,24 +993,35 @@
                 }
             });
             document.getElementById('scheduled-date').addEventListener('change', function() {
-                const selectedDate = this.value;
-                // Ensure scheduled tab is active
-                document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-                document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-                const scheduledTab = document.querySelector('[data-tab="scheduled"]');
-                if (scheduledTab) {
-                    scheduledTab.classList.add('active');
-                    document.getElementById('scheduled').classList.add('active');
-                }
-                
-                if (selectedDate) {
-                    // Call API to load scheduled therapies for the selected date
-                    loadTherapyData('allocated', selectedDate);
-                } else {
-                    // If no date selected, show all scheduled therapies
-                    loadTherapyData('allocated', '');
-                }
+                const selectedDate = this.value || '';
+                activateScheduledTab();
+                const patientFilter = getPatientSearchValue();
+                loadTherapyData('allocated', selectedDate, patientFilter);
             });
+            
+            const patientSearchInput = document.getElementById('patient-search');
+            const patientSearchBtn = document.getElementById('patient-search-btn');
+            const clearPatientSearchBtn = document.getElementById('clear-patient-search');
+            
+            if (patientSearchBtn) {
+                patientSearchBtn.addEventListener('click', () => applyPatientNameFilter());
+            }
+            if (patientSearchInput) {
+                patientSearchInput.addEventListener('keyup', (event) => {
+                    if (event.key === 'Enter') {
+                        event.preventDefault();
+                        applyPatientNameFilter();
+                    }
+                });
+            }
+            if (clearPatientSearchBtn) {
+                clearPatientSearchBtn.addEventListener('click', () => {
+                    if (patientSearchInput) {
+                        patientSearchInput.value = '';
+                    }
+                    applyPatientNameFilter('');
+                });
+            }
             
             // Print to PDF button
             document.getElementById('print-therapy-pdf').addEventListener('click', function() {
@@ -977,12 +1033,66 @@
                 if (e.target.classList.contains('reschedule-single')) {
                     const id = parseInt(e.target.dataset.id);
                     rescheduleSingleFailed(id);
+                    return;
+                }
+                
+                const patientLink = e.target.closest ? e.target.closest('.patient-name-link') : null;
+                if (patientLink) {
+                    const patientName = patientLink.dataset.patientName || '';
+                    const scheduleDate = patientLink.dataset.scheduleDate || '';
+                    if (patientName) {
+                        applyPatientNameFilter(patientName, scheduleDate);
+                    }
                 }
             });
         }
 
-        function loadTherapyData(status, date) {
-            const url = `/sheduling/scheduling/api/therapy-data/?status=${status}&date=${date}`;
+        function getPatientSearchValue() {
+            const input = document.getElementById('patient-search');
+            return input ? input.value.trim() : '';
+        }
+
+        function activateScheduledTab() {
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            const scheduledTab = document.querySelector('[data-tab="scheduled"]');
+            const scheduledContent = document.getElementById('scheduled');
+            if (scheduledTab) {
+                scheduledTab.classList.add('active');
+            }
+            if (scheduledContent) {
+                scheduledContent.classList.add('active');
+            }
+        }
+
+        function applyPatientNameFilter(patientNameOverride = null, scheduleDateOverride = null) {
+            const searchInput = document.getElementById('patient-search');
+            const patientValue = patientNameOverride !== null ? patientNameOverride : getPatientSearchValue();
+            if (patientNameOverride !== null && searchInput) {
+                searchInput.value = patientNameOverride;
+            }
+
+            const dateInput = document.getElementById('scheduled-date');
+            let targetDate = scheduleDateOverride || (dateInput ? dateInput.value : '');
+            if (dateInput && scheduleDateOverride && dateInput.value !== scheduleDateOverride) {
+                dateInput.value = scheduleDateOverride;
+            }
+
+            activateScheduledTab();
+            loadTherapyData('allocated', targetDate, patientValue);
+        }
+
+        function loadTherapyData(status, date, patientName = '') {
+            const params = new URLSearchParams();
+            params.append('status', status || '');
+            if (date) {
+                params.append('date', date);
+            }
+            if (patientName) {
+                params.append('patient_name', patientName);
+            }
+            const queryString = params.toString();
+            const url = `/sheduling/scheduling/api/therapy-data/?${queryString}`;
             
             fetch(url)
                 .then(response => response.json())
@@ -1051,20 +1161,24 @@
                     `;
                 } else {
                     therapistData.forEach(item => {
-                        const therapistsHtml = item.therapists && item.therapists.length > 0 
-                            ? `<div class="therapist-list">${item.therapists.map(t => {
-                                const name = t.name || t.code || t;
-                                const isBathing = t.is_bathing === true || (typeof t === 'string' && t.includes('(bathing)'));
-                                const displayName = isBathing && !name.includes('(bathing)') ? `${name}(bathing)` : name;
-                                return `<span class="therapist-badge">${escapeHtml(displayName)}</span>`;
-                            }).join('')}</div>`
+                        const scheduleDate = item.date || item.from_date || '';
+                const therapistsHtml = item.therapists && item.therapists.length > 0 
+                    ? `<div class="therapist-list">${item.therapists.map(t => {
+                        const rawName = t.name || t.code || t;
+                        const cleanedName = rawName.replace(/\(bathing\)/gi, '').replace(/^\*/, '').trim();
+                        const isBathing = t.is_bathing === true || rawName.startsWith('*') || /\(bathing\)/i.test(rawName);
+                        const displayName = isBathing ? `*${cleanedName}` : cleanedName;
+                        return `<span class="therapist-badge">${escapeHtml(displayName)}</span>`;
+                    }).join('')}</div>`
                             : '<span class="muted">Not assigned</span>';
                         
                         const row = document.createElement('tr');
                         row.innerHTML = `
                             <td>
-                                <div style="font-weight: 500;">${escapeHtml(item.patient_name)}</div>
-                                <div style="font-size: 12px; color: var(--gray);">${escapeHtml(item.patient_reg_no)}</div>
+                                <button type="button" class="patient-name-link" data-patient-name="${escapeHtml(item.patient_name)}" data-schedule-date="${escapeHtml(scheduleDate)}">
+                                    <div style="font-weight: 500;">${escapeHtml(item.patient_name)}</div>
+                                    <div style="font-size: 12px; color: var(--gray);">${escapeHtml(item.patient_reg_no)}</div>
+                                </button>
                             </td>
                             <td>${escapeHtml(item.therapy_name)}</td>
                             <td>${format12Hour(item.timeslot)}</td>
@@ -1091,6 +1205,7 @@
                     `;
                 } else {
                     nurseData.forEach(item => {
+                        const scheduleDate = item.date || item.from_date || '';
                         const nursesHtml = item.nurses && item.nurses.length > 0 
                             ? `<div class="nurse-list">${item.nurses.map(n => `<span class="nurse-badge">${n.name || n.code || n}</span>`).join('')}</div>`
                             : '<span class="muted">Not assigned</span>';
@@ -1098,8 +1213,10 @@
                         const row = document.createElement('tr');
                         row.innerHTML = `
                             <td>
-                                <div style="font-weight: 500;">${escapeHtml(item.patient_name)}</div>
-                                <div style="font-size: 12px; color: var(--gray);">${escapeHtml(item.patient_reg_no)}</div>
+                                <button type="button" class="patient-name-link" data-patient-name="${escapeHtml(item.patient_name)}" data-schedule-date="${escapeHtml(scheduleDate)}">
+                                    <div style="font-weight: 500;">${escapeHtml(item.patient_name)}</div>
+                                    <div style="font-size: 12px; color: var(--gray);">${escapeHtml(item.patient_reg_no)}</div>
+                                </button>
                             </td>
                             <td>${escapeHtml(item.therapy_name)}</td>
                             <td>${escapeHtml(item.patient_room_no || '—')}</td>
@@ -1151,9 +1268,10 @@
                 const row = document.createElement('tr');
                 const therapistsHtml = item.therapists && item.therapists.length > 0 
                     ? `<div class="therapist-list">${item.therapists.map(t => {
-                        const name = t.name || t.code || t;
-                        const isBathing = t.is_bathing === true || (typeof t === 'string' && t.includes('(bathing)'));
-                        const displayName = isBathing && !name.includes('(bathing)') ? `${name}(bathing)` : name;
+                        const rawName = t.name || t.code || t;
+                        const cleanedName = rawName.replace(/\(bathing\)/gi, '').replace(/^\*/, '').trim();
+                        const isBathing = t.is_bathing === true || rawName.startsWith('*') || /\(bathing\)/i.test(rawName);
+                        const displayName = isBathing ? `*${cleanedName}` : cleanedName;
                         return `<span class="therapist-badge">${escapeHtml(displayName)}</span>`;
                     }).join('')}</div>`
                     : '<span class="muted">Not assigned</span>';
@@ -1260,7 +1378,7 @@
                     // Reload the data
                     loadTherapyData('draft', targetDate);
                     loadTherapyData('failed', targetDate);
-                    loadTherapyData('allocated', targetDate);
+                    loadTherapyData('allocated', targetDate, getPatientSearchValue());
                 } else {
                     showAlert('error', data.error || 'Scheduling failed');
                 }
@@ -1318,7 +1436,7 @@
                     // Reload all data
                     loadTherapyData('draft', selectedDate);
                     loadTherapyData('failed', selectedDate);
-                    loadTherapyData('allocated', selectedDate);
+                    loadTherapyData('allocated', selectedDate, getPatientSearchValue());
                 } else {
                     // Check if it's the "already run" error
                     if (data.already_run) {
@@ -1384,7 +1502,7 @@
                     // Reload all data to show updated status
                     loadTherapyData('failed', targetDate);
                     loadTherapyData('draft', targetDate);
-                    loadTherapyData('allocated', targetDate);
+                    loadTherapyData('allocated', targetDate, getPatientSearchValue());
                 } else {
                     showAlert('error', data.error || 'Rescheduling failed');
                     // Reload failed data to show updated status
@@ -1437,7 +1555,7 @@
                     // Reload all data to show updated status
                     loadTherapyData('failed', targetDate);
                     loadTherapyData('draft', targetDate);
-                    loadTherapyData('allocated', targetDate);
+                    loadTherapyData('allocated', targetDate, getPatientSearchValue());
                 } else {
                     showAlert('error', data.error || 'Rescheduling failed');
                     // Reload failed data
@@ -1547,6 +1665,7 @@
         // Print Therapy Schedule to PDF
         function printTherapyScheduleToPDF() {
             const selectedDate = document.getElementById('scheduled-date').value;
+            const patientFilter = getPatientSearchValue();
             
             if (!selectedDate) {
                 alert('Please select a date first using the date filter');
@@ -1560,7 +1679,8 @@
             printBtn.innerHTML = '<span>⏳</span> Generating PDF...';
             
             // Fetch scheduled therapies data
-            fetch(`/sheduling/scheduling/api/therapy-data/?status=allocated&date=${selectedDate}`)
+            const patientQuery = patientFilter ? `&patient_name=${encodeURIComponent(patientFilter)}` : '';
+            fetch(`/sheduling/scheduling/api/therapy-data/?status=allocated&date=${selectedDate}${patientQuery}`)
                 .then(response => response.json())
                 .then(data => {
                     printBtn.disabled = false;
@@ -1746,8 +1866,9 @@
                         item.therapists && item.therapists.length > 0 
                             ? item.therapists.map(t => {
                                 const name = t.name || t.code || t;
-                                const isBathing = t.is_bathing === true || (typeof t === 'string' && t.includes('(bathing)'));
-                                return isBathing && !name.includes('(bathing)') ? `${name}(bathing)` : name;
+                                const cleanedName = name.replace(/\(bathing\)/gi, '').replace(/^\*/, '').trim();
+                                const isBathing = t.is_bathing === true || name.startsWith('*') || /\(bathing\)/i.test(name);
+                                return isBathing ? `*${cleanedName}` : cleanedName;
                             }).join(', ') 
                             : '—'
                     ]);
