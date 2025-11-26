@@ -39,6 +39,8 @@ urlpatterns = [
     path('therapist/api/therapist-data/', therapist_views.get_therapist_data_api, name='get_therapist_data_api'),
     path('therapist/api/sessions-by-date/', therapist_views.get_therapist_sessions_by_date_api, name='get_therapist_sessions_by_date_api'),
     path('therapist/', therapist_views.therapist_dashboard, name='therapist_dashboard'),
+    path('therapist-difficulty/', therapist_views.therapist_difficulty_dashboard, name='therapist_difficulty_dashboard'),
+    path('therapist-difficulty/api/data/', therapist_views.get_therapist_difficulty_data, name='therapist_difficulty_data'),
     
     # Therapist Availability URLs
     path('therapist-availability/', availability_views.therapist_availability_dashboard, name='therapist_availability_dashboard'),

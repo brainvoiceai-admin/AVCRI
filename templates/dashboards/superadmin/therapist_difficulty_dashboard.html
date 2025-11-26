@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Therapist Difficulty Dashboard</title>
+    <style>
+        :root {
+            --primary: #2563eb;
+            --secondary: #14b8a6;
+            --bg: #f3f4f6;
+            --card-bg: #ffffff;
+            --text-dark: #0f172a;
+            --text-muted: #64748b;
+            --border: #e5e7eb;
+        }
+        * {
+            box-sizing: border-box;
+        }
+        body {
+            margin: 0;
+            font-family: 'Segoe UI', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--bg);
+            color: var(--text-dark);
+        }
+        .layout {
+            display: flex;
+            min-height: 100vh;
+        }
+        .sidebar {
+            width: 280px;
+            background: #111827;
+            color: white;
+            min-height: 100vh;
+        }
+        .main-content {
+            flex: 1;
+            padding: 32px;
+            margin-left: 280px;
+        }
+        header h1 {
+            margin: 0;
+            font-size: 28px;
+            font-weight: 700;
+        }
+        header p {
+            margin: 6px 0 0;
+            color: var(--text-muted);
+        }
+        .filters {
+            margin-top: 24px;
+            display: flex;
+            gap: 16px;
+            flex-wrap: wrap;
+            align-items: flex-end;
+        }
+        .filter-group label {
+            font-size: 14px;
+            color: var(--text-muted);
+            display: block;
+            margin-bottom: 6px;
+        }
+        .filter-group input {
+            padding: 10px 12px;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+            min-width: 220px;
+            font-size: 14px;
+        }
+        .btn {
+            padding: 10px 18px;
+            border-radius: 8px;
+            border: none;
+            cursor: pointer;
+            font-weight: 600;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .btn-primary {
+            background: var(--primary);
+            color: white;
+        }
+        .stats-grid {
+            margin-top: 24px;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 16px;
+        }
+        .stat-card {
+            background: var(--card-bg);
+            padding: 20px;
+            border-radius: 16px;
+            border: 1px solid var(--border);
+            box-shadow: 0 10px 30px rgba(15, 23, 42, 0.06);
+        }
+        .stat-label {
+            font-size: 14px;
+            color: var(--text-muted);
+        }
+        .stat-value {
+            font-size: 32px;
+            font-weight: 700;
+            margin-top: 8px;
+        }
+        .card {
+            margin-top: 24px;
+            background: var(--card-bg);
+            border-radius: 18px;
+            border: 1px solid var(--border);
+            padding: 24px;
+            box-shadow: 0 20px 40px rgba(15, 23, 42, 0.08);
+        }
+        .card h3 {
+            margin: 0 0 12px;
+            font-size: 20px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        th, td {
+            padding: 12px 14px;
+            text-align: left;
+            border-bottom: 1px solid var(--border);
+            font-size: 14px;
+        }
+        th {
+            background: #f8fafc;
+            font-weight: 600;
+        }
+        tr:last-child td {
+            border-bottom: none;
+        }
+        .tag {
+            display: inline-flex;
+            align-items: center;
+            padding: 4px 10px;
+            border-radius: 999px;
+            font-size: 12px;
+            background: rgba(37, 99, 235, 0.12);
+            color: var(--primary);
+            font-weight: 600;
+        }
+        .empty-state {
+            text-align: center;
+            padding: 40px 20px;
+            color: var(--text-muted);
+        }
+        .difficulty-pill {
+            display: inline-flex;
+            align-items: center;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+            background: rgba(20, 184, 166, 0.12);
+            color: var(--secondary);
+            margin-right: 8px;
+        }
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 16px;
+            color: var(--text-muted);
+        }
+        .loading.show {
+            display: block;
+        }
+        @media (max-width: 1024px) {
+            .layout {
+                flex-direction: column;
+            }
+            .sidebar {
+                width: 100%;
+                min-height: auto;
+            }
+            .main-content {
+                padding: 20px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="layout">
+        <div class="sidebar">
+            {% include 'dashboards/nav.html' %}
+        </div>
+        <div class="main-content">
+            <header>
+                <h1>Therapist Difficulty Dashboard</h1>
+                <p>Track how therapy difficulty levels are distributed among therapists for a specific date.</p>
+            </header>
+
+            <div class="filters">
+                <div class="filter-group">
+                    <label for="date-filter">Select Date</label>
+                    <input type="date" id="date-filter" value="{{ default_date }}">
+                </div>
+                <div class="filter-group">
+                    <label for="gender-filter">Filter by Gender</label>
+                    <select id="gender-filter" style="padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border); min-width: 220px; font-size: 14px;">
+                        <option value="">All Therapists</option>
+                        <option value="male">Male</option>
+                        <option value="female">Female</option>
+                    </select>
+                </div>
+                <button class="btn btn-primary" id="refresh-btn">
+                    🔄 Refresh Data
+                </button>
+            </div>
+
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-label">Therapists Scheduled</div>
+                    <div class="stat-value" id="stat-therapists">0</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Total Assignments</div>
+                    <div class="stat-value" id="stat-assignments">0</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Top Difficulty</div>
+                    <div class="stat-value" id="stat-top-difficulty">—</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Busiest Therapist</div>
+                    <div class="stat-value" id="stat-top-therapist">—</div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <h3>Therapist Difficulty Mix</h3>
+                </div>
+                <div class="loading" id="loading-indicator">Loading data…</div>
+                <div id="table-wrapper">
+                    <table>
+                        <thead>
+                            <tr id="difficulty-table-head">
+                                <th>Therapist</th>
+                                <th>Total</th>
+                            </tr>
+                        </thead>
+                        <tbody id="difficulty-table-body">
+                            <tr>
+                                <td colspan="2" class="empty-state">Select a date to view data.</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="empty-state" id="empty-state" style="display: none;">
+                    No therapist assignments were found for the selected date.
+                </div>
+            </div>
+
+            <div class="card">
+                <h3>Difficulty Totals</h3>
+                <div id="difficulty-summary"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const dateInput = document.getElementById('date-filter');
+        const genderInput = document.getElementById('gender-filter');
+        const refreshBtn = document.getElementById('refresh-btn');
+        const tableHeadRow = document.getElementById('difficulty-table-head');
+        const tableBody = document.getElementById('difficulty-table-body');
+        const emptyState = document.getElementById('empty-state');
+        const loadingIndicator = document.getElementById('loading-indicator');
+        const statTherapists = document.getElementById('stat-therapists');
+        const statAssignments = document.getElementById('stat-assignments');
+        const statTopDifficulty = document.getElementById('stat-top-difficulty');
+        const statTopTherapist = document.getElementById('stat-top-therapist');
+        const difficultySummary = document.getElementById('difficulty-summary');
+
+        function setLoading(isLoading) {
+            loadingIndicator.classList.toggle('show', isLoading);
+            tableBody.parentElement.style.opacity = isLoading ? 0.4 : 1;
+        }
+
+        function fetchDifficultyData() {
+            const date = dateInput.value;
+            if (!date) {
+                alert('Please select a date first.');
+                return;
+            }
+            const gender = genderInput.value;
+            setLoading(true);
+            let url = `/sheduling/therapist-difficulty/api/data/?date=${date}`;
+            if (gender) {
+                url += `&gender=${encodeURIComponent(gender)}`;
+            }
+            fetch(url)
+                .then(response => response.json())
+                .then(data => {
+                    setLoading(false);
+                    if (!data.success) {
+                        throw new Error(data.error || 'Unable to load data');
+                    }
+                    renderDashboard(data);
+                })
+                .catch(error => {
+                    setLoading(false);
+                    console.error('Error loading difficulty data:', error);
+                    alert('Failed to load data. Please try again.');
+                });
+        }
+
+        function renderDashboard(payload) {
+            const { therapists, difficulties, summary } = payload;
+
+            statTherapists.textContent = summary.therapist_count || 0;
+            statAssignments.textContent = summary.total_assignments || 0;
+
+            const topDifficulty = Object.entries(summary.difficulty_totals || {})
+                .sort((a, b) => b[1] - a[1])[0];
+            statTopDifficulty.textContent = topDifficulty ? `${topDifficulty[0]} (${topDifficulty[1]})` : '—';
+
+            const topTherapist = therapists && therapists.length ? therapists[0] : null;
+            statTopTherapist.textContent = topTherapist ? topTherapist.therapist_name : '—';
+
+            renderTable(therapists, difficulties);
+            renderDifficultySummary(summary.difficulty_totals || {});
+        }
+
+        function renderTable(therapists, difficulties) {
+            tableHeadRow.innerHTML = '<th>Therapist</th><th>Total</th>';
+            difficulties.forEach(diff => {
+                const th = document.createElement('th');
+                th.textContent = diff;
+                tableHeadRow.appendChild(th);
+            });
+
+            tableBody.innerHTML = '';
+            if (!therapists || therapists.length === 0) {
+                emptyState.style.display = 'block';
+                const colspan = 2 + (difficulties ? difficulties.length : 0);
+                tableBody.innerHTML = `<tr><td colspan="${colspan}" class="empty-state">No therapist assignments for this date.</td></tr>`;
+                return;
+            }
+
+            emptyState.style.display = 'none';
+            therapists.forEach(entry => {
+                const tr = document.createElement('tr');
+                const genderDisplay = entry.therapist_gender ? ` • ${entry.therapist_gender}` : '';
+                const nameCell = `
+                    <div style="font-weight:600;">${entry.therapist_name}</div>
+                    <div style="font-size:12px;color:var(--text-muted);">${entry.therapist_code} • ${entry.therapist_grade || 'Grade N/A'}${genderDisplay}</div>
+                `;
+                tr.innerHTML = `<td>${nameCell}</td><td>${entry.total}</td>`;
+                difficulties.forEach(diff => {
+                    tr.innerHTML += `<td>${entry.counts[diff] || 0}</td>`;
+                });
+                tableBody.appendChild(tr);
+            });
+        }
+
+        function renderDifficultySummary(totals) {
+            if (!totals || Object.keys(totals).length === 0) {
+                difficultySummary.innerHTML = '<div class="empty-state">No difficulty distribution available.</div>';
+                return;
+            }
+
+            const fragments = Object.entries(totals)
+                .sort((a, b) => b[1] - a[1])
+                .map(([difficulty, value]) => `
+                    <div class="difficulty-pill">${difficulty}: ${value}</div>
+                `);
+            difficultySummary.innerHTML = fragments.join('');
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            fetchDifficultyData();
+        });
+        refreshBtn.addEventListener('click', fetchDifficultyData);
+        dateInput.addEventListener('change', () => {
+            // Automatically refresh when date is changed
+            fetchDifficultyData();
+        });
+        genderInput.addEventListener('change', () => {
+            // Automatically refresh when gender filter is changed
+            fetchDifficultyData();
+        });
+    </script>
+</body>
+</html>
+
