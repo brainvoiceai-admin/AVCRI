@@ -3539,6 +3539,8 @@ def get_therapy_data_api(request):
                     'assignments__therapist'
                 )
                 
+                from .nurse_allocation import is_nurse_treatment
+                
                 # Convert bookings to JSON format
                 for booking in bookings:
                     # Get assigned therapists for this booking
@@ -3637,6 +3639,11 @@ def get_therapy_data_api(request):
                         # Use the global import from line 15
                         patient_room_no = get_staying_room_display_number(booking.allocation.patient.pat_room_no)
                     
+                    try:
+                        is_nurse_treatment_flag = is_nurse_treatment(booking.allocation.therapy_code, booking.allocation.therapy_name) is not None
+                    except Exception:
+                        is_nurse_treatment_flag = False
+                    
                     data.append({
                         'id': booking.allocation.id,
                         'booking_id': booking.id,
@@ -3654,6 +3661,7 @@ def get_therapy_data_api(request):
                         'timeslot': booking.timeslot.slot_time.strftime('%H:%M') if booking.timeslot else None,
                         'therapists': therapists,
                         'nurses': nurses,
+                        'is_nurse_treatment': is_nurse_treatment_flag,
                         'created_at': booking.allocation.created_at.isoformat(),
                         'allocated_by': booking.allocation.allocated_by.username if booking.allocation.allocated_by else None
                     })
@@ -3691,6 +3699,8 @@ def get_therapy_data_api(request):
                 allocations = allocations.filter(patient__pat_name__icontains=patient_name_filter)
             
             # Convert to JSON format
+            from .nurse_allocation import is_nurse_treatment
+            
             for allocation in allocations:
                     # Get assigned therapists from all bookings
                     therapists = []
@@ -3710,6 +3720,12 @@ def get_therapy_data_api(request):
                                 'code': nurse_assignment.nurse.nurse_code,
                                 'name': nurse_assignment.nurse.nurse_name or nurse_assignment.nurse.nurse_code
                             })
+                    
+                    # Check if this is a nurse treatment
+                    try:
+                        is_nurse_treatment_flag = is_nurse_treatment(allocation.therapy_code, allocation.therapy_name) is not None
+                    except Exception:
+                        is_nurse_treatment_flag = False
                     
                     # Get patient room number (staying room) - mapped from StayingRoom
                     patient_room_no = None
@@ -3731,6 +3747,7 @@ def get_therapy_data_api(request):
                         'timeslot': allocation.timeslot.slot_time.strftime('%H:%M') if allocation.timeslot else None,
                         'therapists': therapists,
                         'nurses': nurses,
+                        'is_nurse_treatment': is_nurse_treatment_flag,
                         'created_at': allocation.created_at.isoformat(),
                         'allocated_by': allocation.allocated_by.username if allocation.allocated_by else None
                     })

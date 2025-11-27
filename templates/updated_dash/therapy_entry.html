@@ -1375,8 +1375,7 @@ $(function(){
     const selectedTherapy = $therapySelect.select2('data');
     if (!selectedTherapy || selectedTherapy.length === 0) {
       // No therapy selected, show all slots
-      populateSlots();
-      return;
+      return populateSlots();
     }
     
     const therapy = selectedTherapy[0];
@@ -1385,16 +1384,25 @@ $(function(){
     // If therapy difficulty is "Hard", filter out 5:30 PM and 11:30 AM slots
     if (therapyCategory.toLowerCase() === 'hard') {
       // Exclude 17:30 (5:30 PM) and 11:30 (11:30 AM) in HH:MM format
-      populateSlots(['17:30', '11:30']);
+      return populateSlots(['17:30', '11:30']);
     } else {
       // Show all slots for other difficulties
-      populateSlots();
+      return populateSlots();
     }
   }
   
+  // Helper function to normalize slot time to HH:MM format
+  function normalizeSlotTime(slotTime) {
+    if (!slotTime) return '';
+    const timeStr = String(slotTime).trim();
+    if (!timeStr.includes(':')) return timeStr;
+    const [hours, minutes] = timeStr.split(':');
+    return `${hours.padStart(2, '0')}:${minutes}`;
+  }
+
   // Function to populate slots with optional exclusion list
   function populateSlots(excludeSlots = []) {
-    ajax({action:'slots'}).then(resp => { 
+    return ajax({action:'slots'}).then(resp => { 
       const slots = (resp && resp.slots) || resp || FALLBACK_SLOTS; 
       $slotSelect.find('option').not(':first').remove(); 
       (slots||FALLBACK_SLOTS).forEach(s => { 
@@ -1402,20 +1410,12 @@ $(function(){
         const slotTime = typeof st === 'string' ? st : (st.strftime ? st.strftime('%H:%M') : String(st));
         
         // Normalize slot time to HH:MM format for comparison
-        let normalizedSlotTime = slotTime;
-        if (slotTime.includes(':')) {
-          const [hours, minutes] = slotTime.split(':');
-          normalizedSlotTime = `${hours.padStart(2, '0')}:${minutes}`;
-        }
+        let normalizedSlotTime = normalizeSlotTime(slotTime);
         
         // Check if this slot should be excluded
         const shouldExclude = excludeSlots.some(exclude => {
           // Normalize exclude time to HH:MM format
-          let normalizedExclude = exclude;
-          if (exclude.includes(':')) {
-            const [h, m] = exclude.split(':');
-            normalizedExclude = `${h.padStart(2, '0')}:${m}`;
-          }
+          let normalizedExclude = normalizeSlotTime(exclude);
           return normalizedSlotTime === normalizedExclude;
         });
         
@@ -1424,6 +1424,7 @@ $(function(){
           $slotSelect.append(`<option value="${slotTime}">${displayText}</option>`);
         }
       }); 
+      return Promise.resolve(); // Return promise for chaining
     }).catch(()=>{ 
       $slotSelect.find('option').not(':first').remove(); 
       FALLBACK_SLOTS.forEach(s => {
@@ -1431,20 +1432,12 @@ $(function(){
         const slotTime = typeof st === 'string' ? st : (st.strftime ? st.strftime('%H:%M') : String(st));
         
         // Normalize slot time to HH:MM format for comparison
-        let normalizedSlotTime = slotTime;
-        if (slotTime.includes(':')) {
-          const [hours, minutes] = slotTime.split(':');
-          normalizedSlotTime = `${hours.padStart(2, '0')}:${minutes}`;
-        }
+        let normalizedSlotTime = normalizeSlotTime(slotTime);
         
         // Check if this slot should be excluded
         const shouldExclude = excludeSlots.some(exclude => {
           // Normalize exclude time to HH:MM format
-          let normalizedExclude = exclude;
-          if (exclude.includes(':')) {
-            const [h, m] = exclude.split(':');
-            normalizedExclude = `${h.padStart(2, '0')}:${m}`;
-          }
+          let normalizedExclude = normalizeSlotTime(exclude);
           return normalizedSlotTime === normalizedExclude;
         });
         
@@ -1453,6 +1446,7 @@ $(function(){
           $slotSelect.append(`<option value="${slotTime}">${displayText}</option>`);
         }
       }); 
+      return Promise.resolve(); // Return promise for chaining
     });
   }
   
@@ -2028,10 +2022,47 @@ $(function(){
     const t = addedTherapies[index]; if(!t) return;
     editTherapyIndex = index;
     $('#form-title').text('Edit Therapy');
+    
+    // Store the slot value to set after slots are populated
+    const savedSlotValue = t.slot || '';
+    const normalizedSavedSlot = normalizeSlotTime(savedSlotValue);
+    
+    // Set therapy first
     const opt = new Option(t.therapy_name, t.therapy_code, true, true);
-    $therapySelect.append(opt).val(t.therapy_code).trigger('change');
+    $therapySelect.append(opt).val(t.therapy_code);
     $therapySelect.prop('disabled', false);
-    $slotSelect.val(t.slot||'').prop('disabled', false);
+    
+    // Populate slots based on therapy, then set the slot value
+    updateSlotsForTherapy().then(() => {
+      // After slots are populated, try to find and set the matching slot
+      if (normalizedSavedSlot) {
+        // Try to find exact match first
+        let foundOption = $slotSelect.find(`option[value="${savedSlotValue}"]`);
+        if (foundOption.length === 0) {
+          // Try to find by normalized value
+          $slotSelect.find('option').each(function() {
+            const optionValue = $(this).val();
+            if (normalizeSlotTime(optionValue) === normalizedSavedSlot) {
+              foundOption = $(this);
+              return false; // break
+            }
+          });
+        }
+        if (foundOption.length > 0) {
+          $slotSelect.val(foundOption.val());
+        } else {
+          // If no exact match found, try to set by value anyway
+          $slotSelect.val(savedSlotValue);
+        }
+      }
+      $slotSelect.prop('disabled', false);
+    });
+    
+    // Trigger change after a small delay to avoid race condition
+    setTimeout(() => {
+      $therapySelect.trigger('change');
+    }, 100);
+    
     $('#ext-int-select').val(t.ext_int||'');
     $fromDate.val(t.from_date||'').prop('disabled', false);
     $toDate.val(t.to_date||'').prop('disabled', false);

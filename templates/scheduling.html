@@ -545,7 +545,7 @@
                     <div class="card-header">
                         <div>
                             <div class="card-title">Draft Therapies</div>
-                            <div class="card-subtitle">Therapies awaiting scheduling. Use date filter to view therapies for specific dates. Click "Schedule" to assign date and run scheduling algorithm.</div>
+                            <div class="card-subtitle">Therapies awaiting scheduling. Use date filter to view therapies for specific dates. Click "Final Schedule" to process therapist treatments first, then nurse treatments.</div>
                         </div>
                     </div>
                     
@@ -566,63 +566,61 @@
                         <div>Processing scheduling algorithm...</div>
                     </div>
                     
-                    <div class="table-container">
-                        <table id="draft-table">
-                            <thead>
-                                <tr>
-                                    <th>Patient</th>
-                                    <th>Therapy</th>
-                                    <th>Date</th>
-                                    <th>Time Slot</th>
-                                    <th>Room</th>
-                                </tr>
-                            </thead>
-                            <tbody id="draft-body">
-                                {% if date_filter %}
-                                    {# Show bookings per date when date filter is applied #}
-                                    {% for booking in draft_bookings %}
+                    <!-- Therapist Treatments Section -->
+                    <div style="margin-bottom: 32px;">
+                        <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px;">
+                            <h3 style="font-size: 18px; font-weight: 600; color: var(--primary); margin: 0;">👨‍⚕️ Therapist Treatments</h3>
+                            <span id="draft-therapist-count" class="badge" style="background: var(--primary-light); color: var(--primary);">0</span>
+                        </div>
+                        <div class="table-container">
+                            <table id="draft-therapist-table">
+                                <thead>
                                     <tr>
-                                        <td>
-                                            <div style="font-weight: 500;">{{ booking.allocation.patient.pat_name }}</div>
-                                            <div style="font-size: 12px; color: var(--gray);">{{ booking.allocation.patient.pat_reg_no }}</div>
-                                        </td>
-                                        <td>{{ booking.allocation.therapy_name }}</td>
-                                        <td>{{ booking.date|date:"Y-m-d" }}</td>
-                                        <td>{{ booking.timeslot.slot_time|format_12hour|default:"—" }}</td>
-                                        <td>{{ booking.room.room_no|default:"—" }}</td>
+                                        <th>Patient</th>
+                                        <th>Therapy</th>
+                                        <th>Date</th>
+                                        <th>Time Slot</th>
+                                        <th>Room</th>
                                     </tr>
-                                    {% empty %}
+                                </thead>
+                                <tbody id="draft-therapist-body">
                                     <tr>
                                         <td colspan="5" class="empty-state">
                                             <div class="empty-state-icon">📋</div>
-                                            <div>No draft therapies found for this date. Create new therapy allocations to schedule them.</div>
+                                            <div>No draft therapist treatments found. Use date filter to view therapies for specific dates.</div>
                                         </td>
                                     </tr>
-                                    {% endfor %}
-                                {% else %}
-                                    {# Show allocations when no date filter #}
-                                    {% for allocation in draft_allocations %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                    
+                    <!-- Nurse Treatments Section -->
+                    <div>
+                        <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px;">
+                            <h3 style="font-size: 18px; font-weight: 600; color: var(--secondary); margin: 0;">👩‍⚕️ Nurse Treatments</h3>
+                            <span id="draft-nurse-count" class="badge" style="background: #d1fae5; color: var(--secondary);">0</span>
+                        </div>
+                        <div class="table-container">
+                            <table id="draft-nurse-table">
+                                <thead>
                                     <tr>
-                                        <td>
-                                            <div style="font-weight: 500;">{{ allocation.patient.pat_name }}</div>
-                                            <div style="font-size: 12px; color: var(--gray);">{{ allocation.patient.pat_reg_no }}</div>
-                                        </td>
-                                        <td>{{ allocation.therapy_name }}</td>
-                                        <td>{{ allocation.from_date|date:"Y-m-d" }} to {{ allocation.to_date|date:"Y-m-d" }}</td>
-                                        <td>{{ allocation.timeslot.slot_time|format_12hour|default:"—" }}</td>
-                                        <td>{{ allocation.room.room_no|default:"—" }}</td>
+                                        <th>Patient</th>
+                                        <th>Therapy</th>
+                                        <th>Date</th>
+                                        <th>Patient Room</th>
                                     </tr>
-                                    {% empty %}
+                                </thead>
+                                <tbody id="draft-nurse-body">
                                     <tr>
-                                        <td colspan="5" class="empty-state">
+                                        <td colspan="4" class="empty-state">
                                             <div class="empty-state-icon">📋</div>
-                                            <div>No draft therapies found. Create new therapy allocations to schedule them.</div>
+                                            <div>No draft nurse treatments found. Use date filter to view therapies for specific dates.</div>
                                         </td>
                                     </tr>
-                                    {% endfor %}
-                                {% endif %}
-                            </tbody>
-                        </table>
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
                 </div>
                 
@@ -1134,6 +1132,97 @@
         }
 
         function updateTable(status, data) {
+            // For draft status, separate into therapist and nurse treatments
+            if (status === 'draft') {
+                const therapistTbody = document.getElementById('draft-therapist-body');
+                const nurseTbody = document.getElementById('draft-nurse-body');
+                
+                if (!therapistTbody || !nurseTbody) {
+                    console.error('Table bodies not found for draft therapies');
+                    return;
+                }
+                
+                // Separate therapist and nurse treatments
+                const therapistData = [];
+                const nurseData = [];
+                
+                data.forEach(item => {
+                    const nurseFlag = typeof item.is_nurse_treatment !== 'undefined'
+                        ? (item.is_nurse_treatment === true || item.is_nurse_treatment === 'true')
+                        : false;
+                    const isNurseTreatment = nurseFlag;
+                    
+                    if (isNurseTreatment) {
+                        nurseData.push(item);
+                    } else {
+                        therapistData.push(item);
+                    }
+                });
+                
+                // Update therapist table
+                therapistTbody.innerHTML = '';
+                if (therapistData.length === 0) {
+                    therapistTbody.innerHTML = `
+                        <tr>
+                            <td colspan="5" class="empty-state">
+                                <div class="empty-state-icon">📋</div>
+                                <div>No draft therapist treatments found for this date.</div>
+                            </td>
+                        </tr>
+                    `;
+                } else {
+                    therapistData.forEach(item => {
+                        const displayDate = item.date || (item.from_date + ' to ' + item.to_date);
+                        const row = document.createElement('tr');
+                        row.innerHTML = `
+                            <td>
+                                <div style="font-weight: 500;">${escapeHtml(item.patient_name)}</div>
+                                <div style="font-size: 12px; color: var(--gray);">${escapeHtml(item.patient_reg_no)}</div>
+                            </td>
+                            <td>${escapeHtml(item.therapy_name)}</td>
+                            <td>${displayDate}</td>
+                            <td>${format12Hour(item.timeslot) || '—'}</td>
+                            <td>${item.room_no || '—'}</td>
+                        `;
+                        therapistTbody.appendChild(row);
+                    });
+                }
+                
+                // Update nurse table
+                nurseTbody.innerHTML = '';
+                if (nurseData.length === 0) {
+                    nurseTbody.innerHTML = `
+                        <tr>
+                            <td colspan="4" class="empty-state">
+                                <div class="empty-state-icon">📋</div>
+                                <div>No draft nurse treatments found for this date.</div>
+                            </td>
+                        </tr>
+                    `;
+                } else {
+                    nurseData.forEach(item => {
+                        const displayDate = item.date || (item.from_date + ' to ' + item.to_date);
+                        const row = document.createElement('tr');
+                        row.innerHTML = `
+                            <td>
+                                <div style="font-weight: 500;">${escapeHtml(item.patient_name)}</div>
+                                <div style="font-size: 12px; color: var(--gray);">${escapeHtml(item.patient_reg_no)}</div>
+                            </td>
+                            <td>${escapeHtml(item.therapy_name)}</td>
+                            <td>${displayDate}</td>
+                            <td>${item.patient_room_no || '—'}</td>
+                        `;
+                        nurseTbody.appendChild(row);
+                    });
+                }
+                
+                // Update counts
+                document.getElementById('draft-therapist-count').textContent = therapistData.length;
+                document.getElementById('draft-nurse-count').textContent = nurseData.length;
+                
+                return;
+            }
+            
             // For scheduled/allocated status, separate into therapist and nurse schedules
             if (status === 'allocated' || status === 'scheduled') {
                 const therapistTbody = document.getElementById('therapist-scheduled-body');
@@ -1149,10 +1238,12 @@
                 const nurseData = [];
                 
                 data.forEach(item => {
-                    // Check if it's a nurse treatment (has nurses but no therapists, or check therapy_category)
                     const hasNurses = item.nurses && item.nurses.length > 0;
                     const hasTherapists = item.therapists && item.therapists.length > 0;
-                    const isNurseTreatment = hasNurses && !hasTherapists;
+                    const nurseFlag = typeof item.is_nurse_treatment !== 'undefined'
+                        ? (item.is_nurse_treatment === true || item.is_nurse_treatment === 'true')
+                        : false;
+                    const isNurseTreatment = nurseFlag || (hasNurses && !hasTherapists);
                     
                     if (isNurseTreatment) {
                         nurseData.push(item);
@@ -1174,6 +1265,15 @@
                     `;
                 } else {
                     therapistData.forEach(item => {
+                        const hasNurses = item.nurses && item.nurses.length > 0;
+                        const hasTherapists = item.therapists && item.therapists.length > 0;
+                        const nurseFlag = typeof item.is_nurse_treatment !== 'undefined'
+                            ? (item.is_nurse_treatment === true || item.is_nurse_treatment === 'true')
+                            : false;
+                        const isNurseTreatment = nurseFlag || (hasNurses && !hasTherapists);
+                        const slotDisplay = (isNurseTreatment && (!item.timeslot || item.timeslot === '00:00'))
+                            ? '—'
+                            : format12Hour(item.timeslot);
                         const scheduleDate = item.date || item.from_date || '';
                 const therapistsHtml = item.therapists && item.therapists.length > 0 
                     ? `<div class="therapist-list">${item.therapists.map(t => {
@@ -1194,7 +1294,7 @@
                                 </button>
                             </td>
                             <td>${escapeHtml(item.therapy_name)}</td>
-                            <td>${format12Hour(item.timeslot)}</td>
+                            <td>${slotDisplay}</td>
                             <td>${item.date || item.from_date}</td>
                             <td>${escapeHtml(item.room_no || '—')}</td>
                             <td>${escapeHtml(item.patient_room_no || '—')}</td>
@@ -1242,7 +1342,7 @@
                 return;
             }
             
-            // For other statuses (draft, failed), use the original logic
+            // For other statuses (failed), use the original logic
             let tbodyId = `${status}-body`;
             const tbody = document.getElementById(tbodyId);
             if (!tbody) {
@@ -1254,11 +1354,8 @@
             
             if (data.length === 0) {
                 let message = '';
-                let colspan = 5;
-                if (status === 'draft') {
-                    message = 'No draft therapies found. Create new therapy allocations to schedule them.';
-                    colspan = 5;
-                } else if (status === 'failed') {
+                let colspan = 7;
+                if (status === 'failed') {
                     message = 'No failed therapies found. Failed therapies will appear here after scheduling attempts.';
                     colspan = 7;
                 } else {
@@ -1289,20 +1386,7 @@
                     }).join('')}</div>`
                     : '<span class="muted">Not assigned</span>';
                 
-                if (status === 'draft') {
-                    // Show booking date if available (when date filter is applied)
-                    const displayDate = item.date || (item.from_date + ' to ' + item.to_date);
-                    row.innerHTML = `
-                        <td>
-                            <div style="font-weight: 500;">${escapeHtml(item.patient_name)}</div>
-                            <div style="font-size: 12px; color: var(--gray);">${escapeHtml(item.patient_reg_no)}</div>
-                        </td>
-                        <td>${escapeHtml(item.therapy_name)}</td>
-                        <td>${displayDate}</td>
-                        <td>${format12Hour(item.timeslot) || '—'}</td>
-                        <td>${item.room_no || '—'}</td>
-                    `;
-                } else if (status === 'failed') {
+                if (status === 'failed') {
                     row.innerHTML = `
                         <td>
                             <div style="font-weight: 500;">${escapeHtml(item.patient_name)}</div>
@@ -1720,7 +1804,10 @@
             therapyData.forEach(item => {
                 const hasNurses = item.nurses && item.nurses.length > 0;
                 const hasTherapists = item.therapists && item.therapists.length > 0;
-                const isNurseTreatment = hasNurses && !hasTherapists;
+                const nurseFlag = typeof item.is_nurse_treatment !== 'undefined'
+                    ? (item.is_nurse_treatment === true || item.is_nurse_treatment === 'true')
+                    : false;
+                const isNurseTreatment = nurseFlag || (hasNurses && !hasTherapists);
                 
                 if (isNurseTreatment) {
                     nurseData.push(item);
@@ -1744,6 +1831,15 @@
             
             // Prepare therapist schedule data
             const therapistRows = therapistData.map(item => {
+                const hasNurses = item.nurses && item.nurses.length > 0;
+                const hasTherapists = item.therapists && item.therapists.length > 0;
+                const nurseFlag = typeof item.is_nurse_treatment !== 'undefined'
+                    ? (item.is_nurse_treatment === true || item.is_nurse_treatment === 'true')
+                    : false;
+                const isNurseTreatment = nurseFlag || (hasNurses && !hasTherapists);
+                const slotDisplay = (isNurseTreatment && (!item.timeslot || item.timeslot === '00:00'))
+                    ? '—'
+                    : format12Hour(item.timeslot);
                 const therapists = item.therapists && item.therapists.length > 0
                     ? item.therapists.map(t => {
                         const rawName = t.name || t.code || t;
@@ -1757,7 +1853,7 @@
                     'Patient Name': item.patient_name || '—',
                     'Patient Reg No': item.patient_reg_no || '—',
                     'Therapy': item.therapy_name || '—',
-                    'Time Slot': format12Hour(item.timeslot),
+                    'Time Slot': slotDisplay,
                     'Date': item.date || item.from_date || '—',
                     'Treatment Room No': item.room_no || '—',
                     'Patient Room No': item.patient_room_no || '—',
@@ -1845,183 +1941,269 @@
         }
         
         function generateTherapyPDF(therapyData, date) {
-            const { jsPDF } = window.jspdf;
-            const doc = new jsPDF('p', 'mm', 'a4');
-            
-            const pageWidth = doc.internal.pageSize.getWidth();
-            const pageHeight = doc.internal.pageSize.getHeight();
-            const margin = 15;
-            const contentWidth = pageWidth - (margin * 2);
-            let yPos = margin;
-            let currentPage = 1;
-            
-            // Remove duplicates based on booking_id
-            const uniqueData = [];
-            const seenBookingIds = new Set();
-            therapyData.forEach(item => {
-                const bookingId = item.booking_id || item.id;
-                if (!seenBookingIds.has(bookingId)) {
-                    seenBookingIds.add(bookingId);
-                    uniqueData.push(item);
+            try {
+                // Check if jsPDF is loaded
+                if (typeof window.jspdf === 'undefined') {
+                    alert('PDF library not loaded. Please refresh the page and try again.');
+                    console.error('jsPDF library not found');
+                    return;
                 }
-            });
-            
-            // Separate therapist and nurse treatments
-            const therapistTreatments = [];
-            const nurseTreatments = [];
-            uniqueData.forEach(item => {
-                // Check if it's a nurse treatment (has nurses but no therapists)
-                const hasNurses = item.nurses && item.nurses.length > 0;
-                const hasTherapists = item.therapists && item.therapists.length > 0;
-                const isNurseTreatment = hasNurses && !hasTherapists;
                 
-                if (isNurseTreatment) {
-                    nurseTreatments.push(item);
-                } else {
-                    therapistTreatments.push(item);
-                }
-            });
-            
-            // Group therapist treatments by time slot
-            const slotGroups = {};
-            therapistTreatments.forEach(item => {
-                const slot = item.timeslot || '00:00';
-                if (!slotGroups[slot]) {
-                    slotGroups[slot] = [];
-                }
-                slotGroups[slot].push(item);
-            });
-            
-            // Helper function to format time in 12-hour format for PDF
-            function format12HourPDF(time24) {
-                if (!time24) return '—';
-                const parts = String(time24).split(':');
-                if (parts.length !== 2) return time24;
-                let hours = parseInt(parts[0], 10);
-                const minutes = parts[1];
-                const period = hours >= 12 ? 'PM' : 'AM';
-                hours = hours % 12;
-                hours = hours ? hours : 12; // 0 should be 12
-                return `${hours}:${minutes} ${period}`;
-            }
-            
-            // Sort slots chronologically (morning to evening)
-            const sortedSlots = Object.keys(slotGroups).sort((a, b) => {
-                const timeA = a.split(':').map(Number);
-                const timeB = b.split(':').map(Number);
-                const minutesA = timeA[0] * 60 + (timeA[1] || 0);
-                const minutesB = timeB[0] * 60 + (timeB[1] || 0);
-                return minutesA - minutesB;
-            });
-            
-            // Sort treatments within each slot by patient name
-            sortedSlots.forEach(slot => {
-                slotGroups[slot].sort((a, b) => {
-                    return (a.patient_name || '').localeCompare(b.patient_name || '');
+                const { jsPDF } = window.jspdf;
+                const doc = new jsPDF('p', 'mm', 'a4');
+                
+                const pageWidth = doc.internal.pageSize.getWidth();
+                const pageHeight = doc.internal.pageSize.getHeight();
+                const margin = 15;
+                const contentWidth = pageWidth - (margin * 2);
+                let yPos = margin;
+                let currentPage = 1;
+                
+                // Remove duplicates based on booking_id
+                const uniqueData = [];
+                const seenBookingIds = new Set();
+                therapyData.forEach(item => {
+                    const bookingId = item.booking_id || item.id;
+                    if (!seenBookingIds.has(bookingId)) {
+                        seenBookingIds.add(bookingId);
+                        uniqueData.push(item);
+                    }
                 });
-            });
-            
-            // Helper function to format date
-            function formatDate(dateStr) {
-                const d = new Date(dateStr + 'T00:00:00');
-                const options = { year: 'numeric', month: 'long', day: 'numeric' };
-                return d.toLocaleDateString('en-US', options);
-            }
-            
-            // Header function
-            function addHeader() {
-                doc.setFontSize(20);
-                doc.setFont(undefined, 'bold');
-                doc.text('Therapy Final Schedule', pageWidth / 2, yPos, { align: 'center' });
-                yPos += 8;
                 
-                doc.setFontSize(16);
-                doc.setFont(undefined, 'bold');
-                doc.text(`Date: ${formatDate(date)}`, pageWidth / 2, yPos, { align: 'center' });
-                yPos += 10;
+                // Separate therapist and nurse treatments
+                const therapistTreatments = [];
+                const nurseTreatments = [];
+                uniqueData.forEach(item => {
+                    const hasNurses = item.nurses && item.nurses.length > 0;
+                    const hasTherapists = item.therapists && item.therapists.length > 0;
+                    const nurseFlag = typeof item.is_nurse_treatment !== 'undefined'
+                        ? (item.is_nurse_treatment === true || item.is_nurse_treatment === 'true')
+                        : false;
+                    const isNurseTreatment = nurseFlag || (hasNurses && !hasTherapists);
+                    
+                    if (isNurseTreatment) {
+                        nurseTreatments.push(item);
+                    } else {
+                        therapistTreatments.push(item);
+                    }
+                });
                 
-                // Draw line
-                doc.setLineWidth(0.5);
-                doc.line(margin, yPos, pageWidth - margin, yPos);
-                yPos += 8;
-            }
-            
-            // Footer function
-            function addFooter(pageNum) {
-                const footerY = pageHeight - 10;
-                doc.setFontSize(8);
-                doc.setFont(undefined, 'normal');
-                doc.text(`Page ${pageNum}`, pageWidth / 2, footerY, { align: 'center' });
-                doc.text(`Date: ${date}`, margin, footerY);
-            }
-            
-            // Check if new page needed
-            function checkNewPage(requiredSpace) {
-                if (yPos + requiredSpace > pageHeight - 20) {
-                    addFooter(currentPage);
-                    doc.addPage();
-                    currentPage++;
-                    yPos = margin;
-                    addHeader();
-                    return true;
+                // Group therapist treatments by time slot
+                const slotGroups = {};
+                therapistTreatments.forEach(item => {
+                    const slot = item.timeslot || '00:00';
+                    if (!slotGroups[slot]) {
+                        slotGroups[slot] = [];
+                    }
+                    slotGroups[slot].push(item);
+                });
+                
+                // Helper function to format time in 12-hour format for PDF
+                function format12HourPDF(time24) {
+                    if (!time24) return '—';
+                    const parts = String(time24).split(':');
+                    if (parts.length !== 2) return time24;
+                    let hours = parseInt(parts[0], 10);
+                    const minutes = parts[1];
+                    const period = hours >= 12 ? 'PM' : 'AM';
+                    hours = hours % 12;
+                    hours = hours ? hours : 12; // 0 should be 12
+                    return `${hours}:${minutes} ${period}`;
                 }
-                return false;
-            }
-            
-            // Add header
-            addHeader();
-            
-            // ========== THERAPIST TREATMENTS SECTION ==========
-            if (therapistTreatments.length > 0) {
-                // Section heading for Therapist Treatments
-                checkNewPage(15);
-                doc.setFontSize(16);
-                doc.setFont(undefined, 'bold');
-                doc.setFillColor(59, 130, 246);
-                doc.rect(margin, yPos - 5, contentWidth, 10, 'F');
-                doc.setTextColor(255, 255, 255);
-                doc.text('Therapist Treatments', margin + 5, yPos + 3);
-                yPos += 12;
-                doc.setTextColor(0, 0, 0);
                 
-                // Process each time slot for therapist treatments
-                sortedSlots.forEach((slot, slotIndex) => {
-                    const treatments = slotGroups[slot];
-                    if (!treatments || treatments.length === 0) return;
+                // Sort slots chronologically (morning to evening)
+                const sortedSlots = Object.keys(slotGroups).sort((a, b) => {
+                    const timeA = a.split(':').map(Number);
+                    const timeB = b.split(':').map(Number);
+                    const minutesA = timeA[0] * 60 + (timeA[1] || 0);
+                    const minutesB = timeB[0] * 60 + (timeB[1] || 0);
+                    return minutesA - minutesB;
+                });
+                
+                // Sort treatments within each slot by patient name
+                sortedSlots.forEach(slot => {
+                    slotGroups[slot].sort((a, b) => {
+                        return (a.patient_name || '').localeCompare(b.patient_name || '');
+                    });
+                });
+                
+                // Helper function to format date
+                function formatDate(dateStr) {
+                    const d = new Date(dateStr + 'T00:00:00');
+                    const options = { year: 'numeric', month: 'long', day: 'numeric' };
+                    return d.toLocaleDateString('en-US', options);
+                }
+                
+                // Header function
+                function addHeader() {
+                    doc.setFontSize(20);
+                    doc.setFont(undefined, 'bold');
+                    doc.text('Therapy Final Schedule', pageWidth / 2, yPos, { align: 'center' });
+                    yPos += 8;
                     
-                    // Check if we need a new page for the slot header
+                    doc.setFontSize(16);
+                    doc.setFont(undefined, 'bold');
+                    doc.text(`Date: ${formatDate(date)}`, pageWidth / 2, yPos, { align: 'center' });
+                    yPos += 10;
+                    
+                    // Draw line
+                    doc.setLineWidth(0.5);
+                    doc.line(margin, yPos, pageWidth - margin, yPos);
+                    yPos += 8;
+                }
+                
+                // Footer function
+                function addFooter(pageNum) {
+                    const footerY = pageHeight - 10;
+                    doc.setFontSize(8);
+                    doc.setFont(undefined, 'normal');
+                    doc.text(`Page ${pageNum}`, pageWidth / 2, footerY, { align: 'center' });
+                    doc.text(`Date: ${date}`, margin, footerY);
+                }
+                
+                // Check if new page needed
+                function checkNewPage(requiredSpace) {
+                    if (yPos + requiredSpace > pageHeight - 20) {
+                        addFooter(currentPage);
+                        doc.addPage();
+                        currentPage++;
+                        yPos = margin;
+                        addHeader();
+                        return true;
+                    }
+                    return false;
+                }
+                
+                // Add header
+                addHeader();
+                
+                // ========== THERAPIST TREATMENTS SECTION ==========
+                if (therapistTreatments.length > 0) {
+                    // Section heading for Therapist Treatments
                     checkNewPage(15);
-                    
-                    // Slot header
-                    doc.setFontSize(14);
+                    doc.setFontSize(16);
                     doc.setFont(undefined, 'bold');
                     doc.setFillColor(59, 130, 246);
-                    doc.rect(margin, yPos - 5, contentWidth, 8, 'F');
+                    doc.rect(margin, yPos - 5, contentWidth, 10, 'F');
                     doc.setTextColor(255, 255, 255);
-                    doc.text(`Time Slot: ${format12HourPDF(slot)}`, margin + 5, yPos);
-                    yPos += 10;
+                    doc.text('Therapist Treatments', margin + 5, yPos + 3);
+                    yPos += 12;
                     doc.setTextColor(0, 0, 0);
                     
-                    // Prepare table data for this slot
-                    const tableData = treatments.map(item => [
+                    // Process each time slot for therapist treatments
+                    sortedSlots.forEach((slot, slotIndex) => {
+                        const treatments = slotGroups[slot];
+                        if (!treatments || treatments.length === 0) return;
+                        
+                        // Check if we need a new page for the slot header
+                        checkNewPage(15);
+                        
+                        // Slot header
+                        doc.setFontSize(14);
+                        doc.setFont(undefined, 'bold');
+                        doc.setFillColor(59, 130, 246);
+                        doc.rect(margin, yPos - 5, contentWidth, 8, 'F');
+                        doc.setTextColor(255, 255, 255);
+                        doc.text(`Time Slot: ${format12HourPDF(slot)}`, margin + 5, yPos);
+                        yPos += 10;
+                        doc.setTextColor(0, 0, 0);
+                        
+                        // Prepare table data for this slot
+                        const tableData = treatments.map(item => [
+                            item.patient_room_no || '—',
+                            item.patient_name || 'N/A',
+                            item.room_no || '—',
+                            item.therapy_name || 'N/A',
+                            item.therapists && item.therapists.length > 0 
+                                ? item.therapists.map(t => {
+                                    const name = t.name || t.code || t;
+                                    const cleanedName = name.replace(/\(bathing\)/gi, '').replace(/^\*/, '').trim();
+                                    const isBathing = t.is_bathing === true || name.startsWith('*') || /\(bathing\)/i.test(name);
+                                    return isBathing ? `*${cleanedName}` : cleanedName;
+                                }).join(', ') 
+                                : '—'
+                        ]);
+                        
+                        // Generate table for this slot
+                        doc.autoTable({
+                            head: [['Patient Room', 'Patient Name', 'Treatment Room', 'Therapy', 'Therapist Assigned']],
+                            body: tableData,
+                            startY: yPos,
+                            margin: { left: margin, right: margin },
+                            styles: {
+                                fontSize: 8,
+                                cellPadding: 2.5,
+                            },
+                            headStyles: {
+                                fillColor: [100, 116, 139],
+                                textColor: 255,
+                                fontStyle: 'bold',
+                                fontSize: 9,
+                            },
+                            alternateRowStyles: {
+                                fillColor: [248, 250, 252],
+                            },
+                            didDrawPage: function(data) {
+                                // Add footer on each page
+                                addFooter(data.pageNumber);
+                                currentPage = data.pageNumber;
+                            },
+                        });
+                        
+                        // Update yPos after table
+                        yPos = doc.lastAutoTable.finalY + 8;
+                        
+                        // Add spacing between slots (except for last slot)
+                        if (slotIndex < sortedSlots.length - 1) {
+                            yPos += 5;
+                            doc.setLineWidth(0.3);
+                            doc.setDrawColor(200, 200, 200);
+                            doc.line(margin, yPos, pageWidth - margin, yPos);
+                            yPos += 8;
+                        }
+                    });
+                }
+                
+                // ========== NURSE TREATMENTS SECTION ==========
+                if (nurseTreatments.length > 0) {
+                    // Add spacing before nurse section
+                    checkNewPage(20);
+                    yPos += 10;
+                    doc.setLineWidth(0.5);
+                    doc.setDrawColor(100, 100, 100);
+                    doc.line(margin, yPos, pageWidth - margin, yPos);
+                    yPos += 10;
+                    
+                    // Section heading for Nurse Treatments
+                    checkNewPage(15);
+                    doc.setFontSize(16);
+                    doc.setFont(undefined, 'bold');
+                    doc.setFillColor(16, 185, 129); // Green color for nurse section
+                    doc.rect(margin, yPos - 5, contentWidth, 10, 'F');
+                    doc.setTextColor(255, 255, 255);
+                    doc.text('Nurse Treatments', margin + 5, yPos + 3);
+                    yPos += 12;
+                    doc.setTextColor(0, 0, 0);
+                    
+                    // Sort nurse treatments by patient name
+                    nurseTreatments.sort((a, b) => {
+                        return (a.patient_name || '').localeCompare(b.patient_name || '');
+                    });
+                    
+                    // Prepare table data for nurse treatments
+                    const nurseTableData = nurseTreatments.map(item => [
                         item.patient_room_no || '—',
                         item.patient_name || 'N/A',
-                        item.room_no || '—',
                         item.therapy_name || 'N/A',
-                        item.therapists && item.therapists.length > 0 
-                            ? item.therapists.map(t => {
-                                const name = t.name || t.code || t;
-                                const cleanedName = name.replace(/\(bathing\)/gi, '').replace(/^\*/, '').trim();
-                                const isBathing = t.is_bathing === true || name.startsWith('*') || /\(bathing\)/i.test(name);
-                                return isBathing ? `*${cleanedName}` : cleanedName;
-                            }).join(', ') 
+                        item.nurses && item.nurses.length > 0 
+                            ? item.nurses.map(n => n.name || n.code || n).join(', ') 
                             : '—'
                     ]);
                     
-                    // Generate table for this slot
+                    // Generate table for nurse treatments
                     doc.autoTable({
-                        head: [['Patient Room', 'Patient Name', 'Treatment Room', 'Therapy', 'Therapist Assigned']],
-                        body: tableData,
+                        head: [['Patient Room', 'Patient Name', 'Treatment Name', 'Nurse Assigned']],
+                        body: nurseTableData,
                         startY: yPos,
                         margin: { left: margin, right: margin },
                         styles: {
@@ -2029,13 +2211,13 @@
                             cellPadding: 2.5,
                         },
                         headStyles: {
-                            fillColor: [100, 116, 139],
+                            fillColor: [16, 185, 129], // Green header for nurse section
                             textColor: 255,
                             fontStyle: 'bold',
                             fontSize: 9,
                         },
                         alternateRowStyles: {
-                            fillColor: [248, 250, 252],
+                            fillColor: [240, 253, 244], // Light green alternate rows
                         },
                         didDrawPage: function(data) {
                             // Add footer on each page
@@ -2046,87 +2228,15 @@
                     
                     // Update yPos after table
                     yPos = doc.lastAutoTable.finalY + 8;
-                    
-                    // Add spacing between slots (except for last slot)
-                    if (slotIndex < sortedSlots.length - 1) {
-                        yPos += 5;
-                        doc.setLineWidth(0.3);
-                        doc.setDrawColor(200, 200, 200);
-                        doc.line(margin, yPos, pageWidth - margin, yPos);
-                        yPos += 8;
-                    }
-                });
+                }
+                
+                // Save PDF
+                const fileName = `Therapy_Schedule_${date.replace(/-/g, '_')}.pdf`;
+                doc.save(fileName);
+            } catch (error) {
+                console.error('Error generating PDF:', error);
+                alert('Error generating PDF: ' + error.message + '\nPlease check the browser console for details.');
             }
-            
-            // ========== NURSE TREATMENTS SECTION ==========
-            if (nurseTreatments.length > 0) {
-                // Add spacing before nurse section
-                checkNewPage(20);
-                yPos += 10;
-                doc.setLineWidth(0.5);
-                doc.setDrawColor(100, 100, 100);
-                doc.line(margin, yPos, pageWidth - margin, yPos);
-                yPos += 10;
-                
-                // Section heading for Nurse Treatments
-                checkNewPage(15);
-                doc.setFontSize(16);
-                doc.setFont(undefined, 'bold');
-                doc.setFillColor(16, 185, 129); // Green color for nurse section
-                doc.rect(margin, yPos - 5, contentWidth, 10, 'F');
-                doc.setTextColor(255, 255, 255);
-                doc.text('Nurse Treatments', margin + 5, yPos + 3);
-                yPos += 12;
-                doc.setTextColor(0, 0, 0);
-                
-                // Sort nurse treatments by patient name
-                nurseTreatments.sort((a, b) => {
-                    return (a.patient_name || '').localeCompare(b.patient_name || '');
-                });
-                
-                // Prepare table data for nurse treatments
-                const nurseTableData = nurseTreatments.map(item => [
-                    item.patient_room_no || '—',
-                    item.patient_name || 'N/A',
-                    item.therapy_name || 'N/A',
-                    item.nurses && item.nurses.length > 0 
-                        ? item.nurses.map(n => n.name || n.code || n).join(', ') 
-                        : '—'
-                ]);
-                
-                // Generate table for nurse treatments
-                doc.autoTable({
-                    head: [['Patient Room', 'Patient Name', 'Treatment Name', 'Nurse Assigned']],
-                    body: nurseTableData,
-                    startY: yPos,
-                    margin: { left: margin, right: margin },
-                    styles: {
-                        fontSize: 8,
-                        cellPadding: 2.5,
-                    },
-                    headStyles: {
-                        fillColor: [16, 185, 129], // Green header for nurse section
-                        textColor: 255,
-                        fontStyle: 'bold',
-                        fontSize: 9,
-                    },
-                    alternateRowStyles: {
-                        fillColor: [240, 253, 244], // Light green alternate rows
-                    },
-                    didDrawPage: function(data) {
-                        // Add footer on each page
-                        addFooter(data.pageNumber);
-                        currentPage = data.pageNumber;
-                    },
-                });
-                
-                // Update yPos after table
-                yPos = doc.lastAutoTable.finalY + 8;
-            }
-            
-            // Save PDF
-            const fileName = `Therapy_Schedule_${date.replace(/-/g, '_')}.pdf`;
-            doc.save(fileName);
         }
     </script>
     </div>
