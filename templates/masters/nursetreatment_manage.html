@@ -47,73 +47,12 @@
         {% endif %}
 
         {# ------------------------------------------------------------------ #}
-        {# --- 1. ADD NEW NURSE TREATMENT FORM (Create View) --- #}
+        {# --- 1. ADD NEW NURSE TREATMENT BUTTON --- #}
         {# ------------------------------------------------------------------ #}
-        <div class="card p-4 mb-4 border-primary">
-            <h4 class="card-title"><i class="fas fa-plus-circle me-2"></i>Add New Nurse Treatment</h4>
-            
-            <form method="post" action="{% url 'nursetreatment_manage' %}" class="row g-3 align-items-end">
-                {% csrf_token %}
-                
-                <div class="col-md-3">
-                    <label for="id_treatment_code" class="form-label">Treatment Code <span class="text-danger">*</span></label>
-                    <input 
-                        type="text" 
-                        name="treatment_code" 
-                        id="id_treatment_code" 
-                        class="form-control"
-                        placeholder="e.g., NT001"
-                        required
-                        maxlength="50"
-                    >
-                </div>
-                
-                <div class="col-md-4">
-                    <label for="id_name" class="form-label">Treatment Name <span class="text-danger">*</span></label>
-                    <input 
-                        type="text" 
-                        name="name" 
-                        id="id_name" 
-                        class="form-control"
-                        placeholder="e.g., Wound Dressing"
-                        required
-                        maxlength="200"
-                    >
-                </div>
-                
-                <div class="col-md-2">
-                    <label for="id_number_of_nurse_required" class="form-label">Nurses Required</label>
-                    <input 
-                        type="number" 
-                        name="number_of_nurse_required" 
-                        id="id_number_of_nurse_required" 
-                        class="form-control"
-                        placeholder="1"
-                        min="1"
-                        value="1"
-                        required
-                    >
-                </div>
-                
-                <div class="col-md-2">
-                    <div class="form-check">
-                        <input 
-                            type="checkbox" 
-                            name="is_active" 
-                            id="id_is_active_new" 
-                            class="form-check-input"
-                            checked
-                        >
-                        <label for="id_is_active_new" class="form-check-label">Active</label>
-                    </div>
-                </div>
-                
-                <div class="col-md-1">
-                    <button type="submit" class="btn btn-primary w-100">
-                        <i class="fas fa-plus me-1"></i>Add
-                    </button>
-                </div>
-            </form>
+        <div class="d-flex justify-content-end mb-3">
+            <a href="{% url 'nursetreatment_add' %}" class="btn btn-primary">
+                <i class="fas fa-plus-circle me-2"></i>Add New Nurse Treatment
+            </a>
         </div>
         
         <hr>

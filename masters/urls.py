@@ -60,7 +60,7 @@ urlpatterns = [
     path('items/', views.ItemMasterManagementView.as_view(), name='item_master_manage'),
     path('items/add/', views.ItemMasterCreateView.as_view(), name='item_master_add'),
     path('items/<int:pk>/update/', views.ItemMasterUpdateView.as_view(), name='item_master_update'),
-    path('items/<int:pk>/delete/', views.ItemMasterDeleteView.as_view(), name='item_master_delete'),
+    path('items/<int:pk>/delete/', views.item_master_delete, name='item_master_delete'),
     # Slot Master CRUD
     path('slots/', views.SlotMasterManagementView.as_view(), name='slot_master_manage'),
     path('slots/add/', views.SlotMasterCreateView.as_view(), name='slot_master_add'),
@@ -93,6 +93,7 @@ urlpatterns = [
     path('therapist-grades/<int:pk>/delete/', views.therapist_grade_delete, name='therapistgrade_delete'),
     # Nurse Treatment Master CRUD
     path('nurse-treatments/', views.NurseTreatmentMasterManagementView.as_view(), name='nursetreatment_manage'),
+    path('nurse-treatments/add/', views.NurseTreatmentMasterCreateView.as_view(), name='nursetreatment_add'),
     path('nurse-treatments/<int:pk>/update/', views.NurseTreatmentMasterUpdateView.as_view(), name='nursetreatment_update'),
     path('nurse-treatments/<int:pk>/delete/', views.nurse_treatment_delete, name='nursetreatment_delete'),
     path('nurse-treatments/<int:pk>/enable/', views.nurse_treatment_enable, name='nursetreatment_enable'),

@@ -297,7 +297,21 @@ class OilClassManagementView(ListView):
     paginate_by = 20
 
     def get_queryset(self):
-        return OilClass.objects.all().order_by('name')
+        queryset = OilClass.objects.all()
+        
+        # Search filter
+        search = self.request.GET.get('search', '')
+        if search:
+            queryset = queryset.filter(name__icontains=search)
+        
+        # Status filter
+        status = self.request.GET.get('status', '')
+        if status == 'active':
+            queryset = queryset.filter(is_active=True)
+        elif status == 'inactive':
+            queryset = queryset.filter(is_active=False)
+        
+        return queryset.order_by('name')
     
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -305,6 +319,8 @@ class OilClassManagementView(ListView):
         context['master_name'] = 'Oil Classes'
         context['required_fields'] = ['name']
         context['optional_fields'] = ['is_active']
+        context['search'] = self.request.GET.get('search', '')
+        context['status_filter'] = self.request.GET.get('status', '')
         return context
     
     def post(self, request, *args, **kwargs):
@@ -374,7 +390,21 @@ class UsageTypeManagementView(ListView):
     paginate_by = 20
 
     def get_queryset(self):
-        return UsageType.objects.all().order_by('name')
+        queryset = UsageType.objects.all()
+        
+        # Search filter
+        search = self.request.GET.get('search', '')
+        if search:
+            queryset = queryset.filter(name__icontains=search)
+        
+        # Status filter
+        status = self.request.GET.get('status', '')
+        if status == 'active':
+            queryset = queryset.filter(is_active=True)
+        elif status == 'inactive':
+            queryset = queryset.filter(is_active=False)
+        
+        return queryset.order_by('name')
     
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -382,6 +412,8 @@ class UsageTypeManagementView(ListView):
         context['master_name'] = 'Usage Types'
         context['required_fields'] = ['name']
         context['optional_fields'] = ['is_active']
+        context['search'] = self.request.GET.get('search', '')
+        context['status_filter'] = self.request.GET.get('status', '')
         return context
     
     def post(self, request, *args, **kwargs):
@@ -453,7 +485,21 @@ class PrescriptionUsageManagementView(ListView):
     paginate_by = 20
 
     def get_queryset(self):
-        return PrescriptionUsage.objects.all().order_by('name')
+        queryset = PrescriptionUsage.objects.all()
+        
+        # Search filter
+        search = self.request.GET.get('search', '')
+        if search:
+            queryset = queryset.filter(name__icontains=search)
+        
+        # Status filter
+        status = self.request.GET.get('status', '')
+        if status == 'active':
+            queryset = queryset.filter(is_active=True)
+        elif status == 'inactive':
+            queryset = queryset.filter(is_active=False)
+        
+        return queryset.order_by('name')
     
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -461,6 +507,8 @@ class PrescriptionUsageManagementView(ListView):
         context['master_name'] = 'Prescription Usage'
         context['required_fields'] = ['name']
         context['optional_fields'] = ['is_active']
+        context['search'] = self.request.GET.get('search', '')
+        context['status_filter'] = self.request.GET.get('status', '')
         return context
     
     def post(self, request, *args, **kwargs):
@@ -533,44 +581,82 @@ class NurseTreatmentMasterManagementView(ListView):
     paginate_by = 20
 
     def get_queryset(self):
-        return NurseTreatmentMaster.objects.all().order_by('treatment_code')
+        queryset = NurseTreatmentMaster.objects.all()
+        
+        # Search filter
+        search = self.request.GET.get('search', '')
+        if search:
+            queryset = queryset.filter(
+                db_models.Q(treatment_code__icontains=search) |
+                db_models.Q(name__icontains=search)
+            )
+        
+        # Status filter
+        status = self.request.GET.get('status', '')
+        if status == 'active':
+            queryset = queryset.filter(is_active=True)
+        elif status == 'inactive':
+            queryset = queryset.filter(is_active=False)
+        
+        return queryset.order_by('treatment_code')
     
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context['master_type'] = 'nursetreatment'
         context['master_name'] = 'Nurse Treatment Master'
-        context['required_fields'] = ['treatment_code', 'name']
+        context['required_fields'] = ['name']
         context['optional_fields'] = ['number_of_nurse_required', 'is_active']
+        context['search'] = self.request.GET.get('search', '')
+        context['status_filter'] = self.request.GET.get('status', '')
         return context
     
-    def post(self, request, *args, **kwargs):
-        """Handle POST requests for creating new nurse treatments"""
-        treatment_code = request.POST.get('treatment_code')
-        name = request.POST.get('name')
-        number_of_nurse_required = request.POST.get('number_of_nurse_required', 1)
-        is_active = request.POST.get('is_active') == 'on'
+@method_decorator(super_admin_required, name='dispatch')
+class NurseTreatmentMasterCreateView(CreateView):
+    model = NurseTreatmentMaster
+    fields = ['name', 'number_of_nurse_required', 'is_active']
+    template_name = 'masters/nursetreatment_form.html'
+    success_url = reverse_lazy('nursetreatment_manage')
+    
+    def form_valid(self, form):
+        # Auto-generate unique treatment code by incrementing from highest existing code
+        # Get all existing treatment codes that start with NT
+        existing_codes = NurseTreatmentMaster.objects.filter(
+            treatment_code__startswith='NT'
+        ).values_list('treatment_code', flat=True)
         
-        # Create new record
-        if treatment_code and name:
+        # Extract numbers from existing codes and find the highest
+        max_number = 0
+        for code in existing_codes:
             try:
-                NurseTreatmentMaster.objects.create(
-                    treatment_code=treatment_code,
-                    name=name,
-                    number_of_nurse_required=int(number_of_nurse_required) if number_of_nurse_required else 1,
-                    is_active=is_active
-                )
-                messages.success(request, f'Nurse treatment "{treatment_code} - {name}" created successfully.')
-            except Exception as e:
-                messages.error(request, f'Error creating nurse treatment: {str(e)}')
-        else:
-            messages.error(request, 'Treatment code and name are required.')
+                # Extract number part after 'NT'
+                number_part = int(code.replace('NT', ''))
+                if number_part > max_number:
+                    max_number = number_part
+            except (ValueError, AttributeError):
+                continue
         
-        return redirect('nursetreatment_manage')
+        # Increment by 1
+        next_number = max_number + 1
+        
+        # Ensure it doesn't exceed 999
+        if next_number > 999:
+            raise ValueError("Maximum treatment code limit reached (NT999)")
+        
+        # Generate new code
+        treatment_code = f"NT{next_number:03d}"
+        
+        # Set the auto-generated code
+        instance = form.save(commit=False)
+        instance.treatment_code = treatment_code
+        instance.save()
+        
+        messages.success(self.request, f'Nurse treatment "{instance.name}" ({treatment_code}) created successfully.')
+        return redirect(self.success_url)
 
 @method_decorator(super_admin_required, name='dispatch')
 class NurseTreatmentMasterUpdateView(UpdateView):
     model = NurseTreatmentMaster
-    fields = ['treatment_code', 'name', 'number_of_nurse_required', 'is_active']
+    fields = ['name', 'number_of_nurse_required', 'is_active']
     template_name = 'masters/nursetreatment_form.html'
     success_url = reverse_lazy('nursetreatment_manage')
     
@@ -617,7 +703,25 @@ class NurseMasterManagementView(ListView):
     paginate_by = 20
 
     def get_queryset(self):
-        return NurseMaster.objects.all().order_by('nurse_code')
+        queryset = NurseMaster.objects.all()
+        
+        # Search filter
+        search = self.request.GET.get('search', '')
+        if search:
+            queryset = queryset.filter(
+                db_models.Q(nurse_code__icontains=search) |
+                db_models.Q(nurse_name__icontains=search) |
+                db_models.Q(designation__icontains=search)
+            )
+        
+        # Status filter
+        status = self.request.GET.get('status', '')
+        if status == 'active':
+            queryset = queryset.filter(is_active=True)
+        elif status == 'inactive':
+            queryset = queryset.filter(is_active=False)
+        
+        return queryset.order_by('nurse_code')
     
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -625,6 +729,8 @@ class NurseMasterManagementView(ListView):
         context['master_name'] = 'Nurse Master'
         context['required_fields'] = ['nurse_code', 'nurse_name']
         context['optional_fields'] = ['designation', 'is_active']
+        context['search'] = self.request.GET.get('search', '')
+        context['status_filter'] = self.request.GET.get('status', '')
         return context
     
     def post(self, request, *args, **kwargs):
@@ -699,7 +805,21 @@ class PrescriptionTimeManagementView(ListView):
     paginate_by = 20
 
     def get_queryset(self):
-        return PrescriptionTime.objects.all().order_by('name')
+        queryset = PrescriptionTime.objects.all()
+        
+        # Search filter
+        search = self.request.GET.get('search', '')
+        if search:
+            queryset = queryset.filter(name__icontains=search)
+        
+        # Status filter
+        status = self.request.GET.get('status', '')
+        if status == 'active':
+            queryset = queryset.filter(is_active=True)
+        elif status == 'inactive':
+            queryset = queryset.filter(is_active=False)
+        
+        return queryset.order_by('name')
     
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -707,6 +827,8 @@ class PrescriptionTimeManagementView(ListView):
         context['master_name'] = 'Prescription Times'
         context['required_fields'] = ['name']
         context['optional_fields'] = ['is_active']
+        context['search'] = self.request.GET.get('search', '')
+        context['status_filter'] = self.request.GET.get('status', '')
         return context
     
     def post(self, request, *args, **kwargs):
@@ -776,7 +898,21 @@ class PrescriptionScopeManagementView(ListView):
     paginate_by = 20
 
     def get_queryset(self):
-        return PrescriptionScope.objects.all().order_by('name')
+        queryset = PrescriptionScope.objects.all()
+        
+        # Search filter
+        search = self.request.GET.get('search', '')
+        if search:
+            queryset = queryset.filter(name__icontains=search)
+        
+        # Status filter
+        status = self.request.GET.get('status', '')
+        if status == 'active':
+            queryset = queryset.filter(is_active=True)
+        elif status == 'inactive':
+            queryset = queryset.filter(is_active=False)
+        
+        return queryset.order_by('name')
     
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -784,6 +920,8 @@ class PrescriptionScopeManagementView(ListView):
         context['master_name'] = 'Prescription Scopes'
         context['required_fields'] = ['name']
         context['optional_fields'] = ['is_active']
+        context['search'] = self.request.GET.get('search', '')
+        context['status_filter'] = self.request.GET.get('status', '')
         return context
     
     def post(self, request, *args, **kwargs):
@@ -854,7 +992,21 @@ class UnitNoListView(ListView):
     paginate_by = 20
 
     def get_queryset(self):
-        return UnitNo.objects.all().order_by('unit_name')
+        queryset = UnitNo.objects.all()
+        
+        # Search filter
+        search = self.request.GET.get('search', '')
+        if search:
+            queryset = queryset.filter(unit_name__icontains=search)
+        
+        # Status filter
+        status = self.request.GET.get('status', '')
+        if status == 'active':
+            queryset = queryset.filter(is_active=True)
+        elif status == 'inactive':
+            queryset = queryset.filter(is_active=False)
+        
+        return queryset.order_by('unit_name')
     
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -862,6 +1014,8 @@ class UnitNoListView(ListView):
         context['master_name'] = 'Unit Numbers'
         context['required_fields'] = ['unit_name']
         context['optional_fields'] = ['is_active']
+        context['search'] = self.request.GET.get('search', '')
+        context['status_filter'] = self.request.GET.get('status', '')
         return context
     
     def post(self, request, *args, **kwargs):
@@ -1199,7 +1353,30 @@ class ItemMasterManagementView(ListView):
     paginate_by = 20
 
     def get_queryset(self):
-        return ItemMaster.objects.all().order_by('item_name')
+        queryset = ItemMaster.objects.all()
+        
+        # Search filter
+        search = self.request.GET.get('search', '')
+        if search:
+            queryset = queryset.filter(
+                db_models.Q(item_code__icontains=search) |
+                db_models.Q(item_name__icontains=search) |
+                db_models.Q(item_category__icontains=search)
+            )
+        
+        # Status filter
+        status = self.request.GET.get('status', '')
+        if status == 'active':
+            queryset = queryset.filter(is_active=True)
+        elif status == 'inactive':
+            queryset = queryset.filter(is_active=False)
+        
+        # Category filter
+        category = self.request.GET.get('category', '')
+        if category:
+            queryset = queryset.filter(item_category=category)
+        
+        return queryset.order_by('item_name')
     
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -1207,6 +1384,9 @@ class ItemMasterManagementView(ListView):
         context['master_name'] = 'Item Master'
         context['required_fields'] = ['item_code', 'item_name']
         context['optional_fields'] = ['item_category', 'unit_of_measure', 'is_active']
+        context['search'] = self.request.GET.get('search', '')
+        context['status_filter'] = self.request.GET.get('status', '')
+        context['category_filter'] = self.request.GET.get('category', '')
         return context
 
 class ItemMasterCreateView(CreateView):
@@ -1229,13 +1409,16 @@ class ItemMasterUpdateView(UpdateView):
         messages.success(self.request, 'Item updated successfully.')
         return super().form_valid(form)
 
-class ItemMasterDeleteView(DeleteView):
-    model = ItemMaster
-    success_url = reverse_lazy('item_master_manage')
-    
-    def delete(self, request, *args, **kwargs):
-        messages.success(request, 'Item deleted successfully.')
-        return super().delete(request, *args, **kwargs)
+@login_required
+@super_admin_required
+def item_master_delete(request, pk):
+    """Delete an item - function-based view to handle GET requests properly"""
+    item = get_object_or_404(ItemMaster, pk=pk)
+    item_name = item.item_name
+    item_code = item.item_code
+    item.delete()
+    messages.success(request, f'Item "{item_name}" ({item_code}) deleted successfully.')
+    return redirect('item_master_manage')
 
 # Slot Master CRUD Views
 class SlotMasterManagementView(ListView):
@@ -1245,7 +1428,24 @@ class SlotMasterManagementView(ListView):
     paginate_by = 20
 
     def get_queryset(self):
-        return SlotMaster.objects.all().order_by('slot_number')
+        queryset = SlotMaster.objects.all()
+        
+        # Search filter
+        search = self.request.GET.get('search', '')
+        if search:
+            queryset = queryset.filter(
+                db_models.Q(slot_number__icontains=search) |
+                db_models.Q(slot_name__icontains=search)
+            )
+        
+        # Status filter
+        status = self.request.GET.get('status', '')
+        if status == 'active':
+            queryset = queryset.filter(is_active=True)
+        elif status == 'inactive':
+            queryset = queryset.filter(is_active=False)
+        
+        return queryset.order_by('slot_number')
     
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -1253,6 +1453,8 @@ class SlotMasterManagementView(ListView):
         context['master_name'] = 'Slot Master'
         context['required_fields'] = ['slot_number', 'slot_time']
         context['optional_fields'] = ['slot_name', 'is_active']
+        context['search'] = self.request.GET.get('search', '')
+        context['status_filter'] = self.request.GET.get('status', '')
         return context
 
 class SlotMasterCreateView(CreateView):
@@ -1293,7 +1495,25 @@ class IngredientMasterManagementView(ListView):
     paginate_by = 20
 
     def get_queryset(self):
-        return IngredientMaster.objects.all().order_by('ingredient_name')
+        queryset = IngredientMaster.objects.all()
+        
+        # Search filter
+        search = self.request.GET.get('search', '')
+        if search:
+            queryset = queryset.filter(
+                db_models.Q(ingredient_code__icontains=search) |
+                db_models.Q(ingredient_name__icontains=search) |
+                db_models.Q(description__icontains=search)
+            )
+        
+        # Status filter
+        status = self.request.GET.get('status', '')
+        if status == 'active':
+            queryset = queryset.filter(is_active=True)
+        elif status == 'inactive':
+            queryset = queryset.filter(is_active=False)
+        
+        return queryset.order_by('ingredient_name')
     
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -1301,6 +1521,8 @@ class IngredientMasterManagementView(ListView):
         context['master_name'] = 'Ingredient Master'
         context['required_fields'] = ['ingredient_name']
         context['optional_fields'] = ['description', 'is_active']
+        context['search'] = self.request.GET.get('search', '')
+        context['status_filter'] = self.request.GET.get('status', '')
         return context
 
 class IngredientMasterCreateView(CreateView):

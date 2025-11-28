@@ -17,6 +17,8 @@ Including another URLconf
 from django.contrib import admin
 from django.urls import path, include
 from django.http import JsonResponse
+from django.conf import settings
+from django.conf.urls.static import static
 
 # Temporary handler for WebSocket notifications endpoint (disabled)
 def ws_notifications_disabled(request):
@@ -34,4 +36,8 @@ urlpatterns = [
       # Temporary route to handle WebSocket notification requests (disabled)
       path('ws/notifications/', ws_notifications_disabled, name='ws_notifications_disabled'),
 ]
+
+# Serve media files during development
+if settings.DEBUG:
+    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
 

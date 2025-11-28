@@ -55,6 +55,8 @@ class CustomUser(AbstractUser):
     custom_role = models.ForeignKey(Role, on_delete=models.SET_NULL, null=True, blank=True, 
                                    help_text="Custom role with specific module permissions")
     mobile = models.CharField(max_length=15, null=True, blank=True)
+    profile_picture = models.ImageField(upload_to='profile_pictures/', null=True, blank=True, 
+                                        help_text="User profile picture")
     
     GENDER_CHOICES = [
         ('male', 'Male'),

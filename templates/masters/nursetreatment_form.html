@@ -60,16 +60,26 @@
                         </h5>
                         
                         <div class="row">
+                            {% if object %}
                             <div class="col-md-4 mb-3">
-                                <label for="id_treatment_code" class="form-label required-field">Treatment Code</label>
-                                <input type="text" class="form-control" id="id_treatment_code" name="treatment_code" 
-                                       value="{{ form.treatment_code.value|default:'' }}" required
-                                       placeholder="e.g., NT001" maxlength="50">
-                                <div class="invalid-feedback">
-                                    Please provide a treatment code.
-                                </div>
-                                <small class="form-text text-muted">Unique code for the treatment</small>
+                                <label for="id_treatment_code" class="form-label">Treatment Code</label>
+                                <input type="text" class="form-control" id="id_treatment_code" 
+                                       value="{{ object.treatment_code }}" readonly
+                                       style="background-color: #e9ecef;">
+                                <small class="form-text text-muted">Auto-generated code (cannot be changed)</small>
                             </div>
+                            {% else %}
+                            <div class="col-md-4 mb-3">
+                                <label for="id_treatment_code" class="form-label">Treatment Code</label>
+                                <input type="text" class="form-control" id="id_treatment_code" 
+                                       value="Auto-generated" readonly
+                                       style="background-color: #e9ecef;">
+                                <div class="alert alert-info mt-2 mb-0" role="alert">
+                                    <i class="fas fa-info-circle me-1"></i>
+                                    Treatment code will be auto-generated (e.g., NT001, NT002)
+                                </div>
+                            </div>
+                            {% endif %}
                             
                             <div class="col-md-8 mb-3">
                                 <label for="id_name" class="form-label required-field">Treatment Name</label>
