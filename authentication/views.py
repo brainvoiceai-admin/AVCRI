@@ -1433,11 +1433,15 @@ def patient_profile(request):
 def user_profile(request):
     """User Profile Dashboard: view and edit basic profile details"""
     user = request.user
+    validation_errors = {}
+    
     if request.method == 'POST':
         first_name = request.POST.get('first_name', '').strip()
         last_name = request.POST.get('last_name', '').strip()
         email = request.POST.get('email', '').strip()
-        mobile = request.POST.get('mobile', '').strip() or None
+        mobile = request.POST.get('mobile', '').strip()
+        # Only set to None if mobile is empty string, otherwise keep the value
+        mobile = mobile if mobile else None
 
         profile_picture_updated = False
         profile_picture_valid = False
@@ -1468,7 +1472,7 @@ def user_profile(request):
 
         # Basic validations
         if not email:
-            messages.error(request, 'Email is required.')
+            validation_errors['email'] = 'Email is required.'
             # If profile picture was uploaded, save it separately
             if profile_picture_valid:
                 try:
@@ -1477,38 +1481,67 @@ def user_profile(request):
                 except Exception as e:
                     messages.error(request, f'Error saving profile picture: {str(e)}')
         else:
-            # Assign and save with model-level validation for unique mobile
-            user.first_name = first_name
-            user.last_name = last_name
-            user.email = email
-            user.mobile = mobile
-            try:
-                user.full_clean()
-                user.save()
-                if profile_picture_updated:
-                    messages.success(request, 'Profile and picture updated successfully.')
-                else:
-                    messages.success(request, 'Profile updated successfully.')
-            except ValidationError as e:
+            # Check if email is being changed and if it already exists
+            if email != user.email:
+                from django.contrib.auth import get_user_model
+                User = get_user_model()
+                if User.objects.filter(email=email).exclude(pk=user.pk).exists():
+                    validation_errors['email'] = 'A user with this email already exists.'
+            
+            # Check if mobile is being changed and if it already exists (only if mobile is provided)
+            if mobile and mobile != user.mobile:
+                from django.contrib.auth import get_user_model
+                User = get_user_model()
+                if User.objects.filter(mobile=mobile).exclude(pk=user.pk).exists():
+                    validation_errors['mobile'] = 'A user with this mobile number already exists.'
+            
+            # If there are validation errors, show them
+            if validation_errors:
+                for field, error_msg in validation_errors.items():
+                    messages.error(request, f"{field.capitalize()}: {error_msg}")
+                
                 # If profile picture was updated but other validations failed, save just the picture
                 if profile_picture_valid:
                     try:
-                        # Save only the profile picture
                         user.save(update_fields=['profile_picture'])
                         messages.warning(request, 'Profile picture updated, but other fields have errors.')
                     except Exception as pic_error:
                         messages.error(request, f'Error saving profile picture: {str(pic_error)}')
-                
-                # Show first error per field
-                for field, errors in e.message_dict.items():
-                    for err in errors:
-                        messages.error(request, f"{field.capitalize()}: {err}")
+            else:
+                # Assign and save with model-level validation for unique mobile
+                user.first_name = first_name
+                user.last_name = last_name
+                user.email = email
+                user.mobile = mobile
+                try:
+                    user.full_clean()
+                    user.save()
+                    if profile_picture_updated:
+                        messages.success(request, 'Profile and picture updated successfully.')
+                    else:
+                        messages.success(request, 'Profile updated successfully.')
+                except ValidationError as e:
+                    # If profile picture was updated but other validations failed, save just the picture
+                    if profile_picture_valid:
+                        try:
+                            # Save only the profile picture
+                            user.save(update_fields=['profile_picture'])
+                            messages.warning(request, 'Profile picture updated, but other fields have errors.')
+                        except Exception as pic_error:
+                            messages.error(request, f'Error saving profile picture: {str(pic_error)}')
+                    
+                    # Show validation errors
+                    for field, errors in e.message_dict.items():
+                        for err in errors:
+                            validation_errors[field] = err
+                            messages.error(request, f"{field.capitalize()}: {err}")
 
     # Refresh user from database to ensure we have the latest data including profile picture
     user.refresh_from_db()
     
     context = {
         'user_obj': user,
+        'validation_errors': validation_errors,
     }
     return render(request, 'dashboards/account/user_profile.html', context)
 
