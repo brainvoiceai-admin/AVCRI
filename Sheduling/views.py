@@ -1457,23 +1457,69 @@ def therapy_entry(request):
                         ).select_related('therapist', 'visit')
                         # Create a map: therapist_code -> is_bathing
                         # ONLY use TherapistBooking.is_bathing field from Patient module
+                        # IMPORTANT: For Dhara & Pizichil and all therapies, ensure only ONE therapist is marked as bathing
+                        bathing_found = False
                         for tb in tb_list:
                             if tb.therapist:
-                                therapist_bookings[tb.therapist.therapist_code] = tb.is_bathing  # Direct access to is_bathing field
+                                therapist_code = tb.therapist.therapist_code
+                                # Only mark as bathing if is_bathing=True AND we haven't already found a bathing therapist
+                                if tb.is_bathing and not bathing_found:
+                                    therapist_bookings[therapist_code] = True
+                                    bathing_found = True
+                                else:
+                                    # If this therapist has is_bathing=True but we already found one, set it to False
+                                    # This ensures only ONE bathing therapist per visit
+                                    therapist_bookings[therapist_code] = False
+                                # If is_bathing is False, explicitly set it
+                                if not tb.is_bathing and therapist_code not in therapist_bookings:
+                                    therapist_bookings[therapist_code] = False
                 except Exception as e:
                     print(f"Error pre-fetching TherapistBooking records: {e}")
                     import traceback
                     traceback.print_exc()
                 
+                # Check if this is Dhara & Pizichil therapy for senior therapist marking
+                # Handle variations: "Dhara & Pizichil", "Dhara and Pizichil", "Dhara Pizichil", etc.
+                is_dhara_pizichil = False
+                if alloc and alloc.therapy_name:
+                    therapy_lower = str(alloc.therapy_name).lower()
+                    # Check for both "dhara" and "pizichil" (or "pizhichil" variant) in the name
+                    has_dhara = 'dhara' in therapy_lower
+                    has_pizichil = 'pizichil' in therapy_lower or 'pizhichil' in therapy_lower
+                    is_dhara_pizichil = has_dhara and has_pizichil
+                
                 for a in b.assignments.all():
-                    therapist_name = getattr(a.therapist, 'therapist_name', '') or getattr(a.therapist, 'therapist_code', '') or getattr(a.therapist, 'id', '')
+                    therapist_code = a.therapist.therapist_code
+                    therapist_name = getattr(a.therapist, 'therapist_name', '') or therapist_code
                     # Get is_bathing flag from pre-fetched data
-                    is_bathing = therapist_bookings.get(a.therapist.therapist_code, False)
+                    is_bathing = therapist_bookings.get(therapist_code, False)
+                    
+                    # Get TherapistMaster to check grade (use TherapistMaster, not Patient.models.Therapist)
+                    therapist_master = None
+                    try:
+                        therapist_master = therapist_masters.get(therapist_code)
+                    except (NameError, AttributeError):
+                        # therapist_masters not available, fetch it
+                        from masters.models import TherapistMaster
+                        try:
+                            therapist_master = TherapistMaster.objects.get(therapist_code=therapist_code)
+                        except TherapistMaster.DoesNotExist:
+                            pass
+                    
+                    # Check if this therapist is senior (for Dhara & Pizichil highlighting)
+                    is_senior = False
+                    if is_dhara_pizichil and therapist_master:
+                        # TherapistMaster has ForeignKey to TherapistGrade
+                        if therapist_master.therapist_grade:
+                            grade_name = getattr(therapist_master.therapist_grade, 'name', '')
+                            if grade_name and 'Senior' in grade_name:
+                                is_senior = True
                     
                     therapists.append({
                         'name': therapist_name,
-                        'code': getattr(a.therapist, 'therapist_code', None),
-                        'is_bathing': bool(is_bathing)
+                        'code': therapist_code,
+                        'is_bathing': bool(is_bathing),
+                        'is_senior': is_senior  # Mark senior therapist for Dhara & Pizichil
                     })
             except Exception:
                 therapists = []
@@ -3591,24 +3637,65 @@ def get_therapy_data_api(request):
                             ).select_related('therapist', 'visit')
                             # Create a map: therapist_code -> is_bathing
                             # ONLY use TherapistBooking.is_bathing field from Patient module
+                            # IMPORTANT: For Dhara & Pizichil, ensure only ONE therapist is marked as bathing
+                            bathing_found = False
                             for tb in tb_list:
                                 if tb.therapist:
-                                    therapist_bookings[tb.therapist.therapist_code] = tb.is_bathing  # Direct access to is_bathing field
+                                    therapist_code = tb.therapist.therapist_code
+                                    # Only mark as bathing if is_bathing=True AND we haven't already found a bathing therapist
+                                    if tb.is_bathing and not bathing_found:
+                                        therapist_bookings[therapist_code] = True
+                                        bathing_found = True
+                                    else:
+                                        # If this therapist has is_bathing=True but we already found one, set it to False
+                                        # This ensures only ONE bathing therapist per visit
+                                        therapist_bookings[therapist_code] = False
+                                    # If is_bathing is False, explicitly set it
+                                    if not tb.is_bathing:
+                                        therapist_bookings[therapist_code] = False
                     except Exception as e:
                         print(f"Error pre-fetching TherapistBooking records: {e}")
                         import traceback
                         traceback.print_exc()
                     
+                    # Check if this is Dhara & Pizichil therapy for senior therapist marking
+                    # Handle variations: "Dhara & Pizichil", "Dhara and Pizichil", "Dhara Pizichil", etc.
+                    is_dhara_pizichil = False
+                    if allocation and allocation.therapy_name:
+                        therapy_lower = str(allocation.therapy_name).lower()
+                        # Check for both "dhara" and "pizichil" (or "pizhichil" variant) in the name
+                        has_dhara = 'dhara' in therapy_lower
+                        has_pizichil = 'pizichil' in therapy_lower or 'pizhichil' in therapy_lower
+                        is_dhara_pizichil = has_dhara and has_pizichil
+                    
                     for assignment in booking.assignments.all():
+                        therapist_code = assignment.therapist.therapist_code
                         # Get is_bathing flag from pre-fetched data
-                        is_bathing = therapist_bookings.get(assignment.therapist.therapist_code, False)
+                        is_bathing = therapist_bookings.get(therapist_code, False)
                         
-                        therapist_name = assignment.therapist.therapist_name or assignment.therapist.therapist_code
+                        # Get TherapistMaster to check grade (use TherapistMaster, not Patient.models.Therapist)
+                        therapist_master = therapist_masters.get(therapist_code)
+                        
+                        # Check if this therapist is senior (for Dhara & Pizichil highlighting)
+                        is_senior = False
+                        if is_dhara_pizichil and therapist_master:
+                            # TherapistMaster has ForeignKey to TherapistGrade
+                            if therapist_master.therapist_grade:
+                                grade_name = getattr(therapist_master.therapist_grade, 'name', '')
+                                if grade_name and 'Senior' in grade_name:
+                                    is_senior = True
+                        
+                        therapist_name = assignment.therapist.therapist_name or therapist_code
+                        grade_display = ''
+                        if therapist_master and therapist_master.therapist_grade:
+                            grade_display = getattr(therapist_master.therapist_grade, 'name', '')
+                        
                         therapists.append({
-                            'code': assignment.therapist.therapist_code,
+                            'code': therapist_code,
                             'name': therapist_name,
-                            'grade': getattr(assignment.therapist.therapist_grade, 'name', '') if assignment.therapist.therapist_grade else '',
-                            'is_bathing': is_bathing
+                            'grade': grade_display,
+                            'is_bathing': is_bathing,
+                            'is_senior': is_senior  # Mark senior therapist for Dhara & Pizichil
                         })
                     
                     # Get assigned nurses for this booking
@@ -3725,14 +3812,56 @@ def get_therapy_data_api(request):
             from .nurse_allocation import is_nurse_treatment
             
             for allocation in allocations:
+                    # Check if this is Dhara & Pizichil therapy for senior therapist marking
+                    # Handle variations: "Dhara & Pizichil", "Dhara and Pizichil", "Dhara Pizichil", etc.
+                    is_dhara_pizichil = False
+                    if allocation and allocation.therapy_name:
+                        therapy_lower = str(allocation.therapy_name).lower()
+                        # Check for both "dhara" and "pizichil" (or "pizhichil" variant) in the name
+                        has_dhara = 'dhara' in therapy_lower
+                        has_pizichil = 'pizichil' in therapy_lower or 'pizhichil' in therapy_lower
+                        is_dhara_pizichil = has_dhara and has_pizichil
+                    
+                    # Get all therapist codes for this allocation to fetch TherapistMaster records
+                    therapist_codes = []
+                    for booking in allocation.bookings.all():
+                        for assignment in booking.assignments.all():
+                            therapist_codes.append(assignment.therapist.therapist_code)
+                    
+                    # Get all TherapistMaster records for this allocation
+                    from masters.models import TherapistMaster
+                    therapist_masters_dict = {}
+                    if therapist_codes:
+                        therapist_masters_dict = {tm.therapist_code: tm for tm in TherapistMaster.objects.filter(
+                            therapist_code__in=therapist_codes
+                        )}
+                    
                     # Get assigned therapists from all bookings
                     therapists = []
                     for booking in allocation.bookings.all():
                         for assignment in booking.assignments.all():
+                            therapist_code = assignment.therapist.therapist_code
+                            # Get TherapistMaster to check grade (use TherapistMaster, not Patient.models.Therapist)
+                            therapist_master = therapist_masters_dict.get(therapist_code)
+                            
+                            # Check if this therapist is senior (for Dhara & Pizichil highlighting)
+                            is_senior = False
+                            if is_dhara_pizichil and therapist_master:
+                                # TherapistMaster has ForeignKey to TherapistGrade
+                                if therapist_master.therapist_grade:
+                                    grade_name = getattr(therapist_master.therapist_grade, 'name', '')
+                                    if grade_name and 'Senior' in grade_name:
+                                        is_senior = True
+                            
+                            grade_display = ''
+                            if therapist_master and therapist_master.therapist_grade:
+                                grade_display = getattr(therapist_master.therapist_grade, 'name', '')
+                            
                             therapists.append({
-                                'code': assignment.therapist.therapist_code,
-                                'name': assignment.therapist.therapist_name or assignment.therapist.therapist_code,
-                                'grade': getattr(assignment.therapist.therapist_grade, 'name', '') if assignment.therapist.therapist_grade else ''
+                                'code': therapist_code,
+                                'name': assignment.therapist.therapist_name or therapist_code,
+                                'grade': grade_display,
+                                'is_senior': is_senior  # Mark senior therapist for Dhara & Pizichil
                             })
                     
                     # Get assigned nurses from all bookings

@@ -350,6 +350,30 @@
             background: #e0f2fe;
             color: #0369a1;
             padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 13px;
+            font-weight: 500;
+        }
+        
+        .therapist-badge.senior-therapist {
+            background: #fef3c7;
+            color: #92400e;
+            border: 2px solid #fbbf24;
+            font-weight: 600;
+            position: relative;
+        }
+        
+        
+        .therapist-badge.bathing-therapist {
+            background: #dbeafe;
+            color: #1e40af;
+        }
+        
+        .therapist-badge.senior-therapist.bathing-therapist {
+            background: #fef3c7;
+            color: #92400e;
+            border: 2px solid #fbbf24;
+        }
             border-radius: 12px;
             font-size: 12px;
             font-weight: 500;
@@ -795,10 +819,18 @@
                                                     {% for assignment in booking.assignments.all %}
                                                         {% with therapist_name=assignment.therapist.therapist_name|default:assignment.therapist.therapist_code %}
                                                             {% with is_bathing=assignment|get_therapist_bathing_flag:booking %}
-                                                                {% with clean_name=therapist_name|cut:"(bathing)" %}
-                                                                    <span class="therapist-badge">
-                                                                        {% if is_bathing %}*{% endif %}{{ clean_name }}
-                                                                    </span>
+                                                                {% with is_senior=assignment|is_senior_therapist_for_dhara:booking %}
+                                                                    {% with clean_name=therapist_name|cut:"(bathing)" %}
+                                                                        {% if is_senior %}
+                                                                            <span class="therapist-badge senior-therapist">
+                                                                                {% if is_bathing %}*{% endif %}{{ clean_name }} (senior)
+                                                                            </span>
+                                                                        {% else %}
+                                                                            <span class="therapist-badge{% if is_bathing %} bathing-therapist{% endif %}">
+                                                                                {% if is_bathing %}*{% endif %}{{ clean_name }}
+                                                                            </span>
+                                                                        {% endif %}
+                                                                    {% endwith %}
                                                                 {% endwith %}
                                                             {% endwith %}
                                                         {% endwith %}
@@ -1280,8 +1312,23 @@
                         const rawName = t.name || t.code || t;
                         const cleanedName = rawName.replace(/\(bathing\)/gi, '').replace(/^\*/, '').trim();
                         const isBathing = t.is_bathing === true || rawName.startsWith('*') || /\(bathing\)/i.test(rawName);
-                        const displayName = isBathing ? `*${cleanedName}` : cleanedName;
-                        return `<span class="therapist-badge">${escapeHtml(displayName)}</span>`;
+                        const isSenior = t.is_senior === true;
+                        let displayName = cleanedName;
+                        // Add (senior) prefix for Dhara & Pizichil senior therapists
+                        if (isSenior) {
+                            displayName = `${cleanedName} (senior)`;
+                        }
+                        if (isBathing) {
+                            displayName = `*${displayName}`;
+                        }
+                        let badgeClass = 'therapist-badge';
+                        if (isSenior) {
+                            badgeClass += ' senior-therapist';
+                        }
+                        if (isBathing) {
+                            badgeClass += ' bathing-therapist';
+                        }
+                        return `<span class="${badgeClass}">${escapeHtml(displayName)}</span>`;
                     }).join('')}</div>`
                             : '<span class="muted">Not assigned</span>';
                         
@@ -1381,8 +1428,23 @@
                         const rawName = t.name || t.code || t;
                         const cleanedName = rawName.replace(/\(bathing\)/gi, '').replace(/^\*/, '').trim();
                         const isBathing = t.is_bathing === true || rawName.startsWith('*') || /\(bathing\)/i.test(rawName);
-                        const displayName = isBathing ? `*${cleanedName}` : cleanedName;
-                        return `<span class="therapist-badge">${escapeHtml(displayName)}</span>`;
+                        const isSenior = t.is_senior === true;
+                        let displayName = cleanedName;
+                        // Add (senior) prefix for Dhara & Pizichil senior therapists
+                        if (isSenior) {
+                            displayName = `${cleanedName} (senior)`;
+                        }
+                        if (isBathing) {
+                            displayName = `*${displayName}`;
+                        }
+                        let badgeClass = 'therapist-badge';
+                        if (isSenior) {
+                            badgeClass += ' senior-therapist';
+                        }
+                        if (isBathing) {
+                            badgeClass += ' bathing-therapist';
+                        }
+                        return `<span class="${badgeClass}">${escapeHtml(displayName)}</span>`;
                     }).join('')}</div>`
                     : '<span class="muted">Not assigned</span>';
                 
@@ -1845,7 +1907,16 @@
                         const rawName = t.name || t.code || t;
                         const cleanedName = rawName.replace(/\(bathing\)/gi, '').replace(/^\*/, '').trim();
                         const isBathing = t.is_bathing === true || rawName.startsWith('*') || /\(bathing\)/i.test(rawName);
-                        return isBathing ? `*${cleanedName}` : cleanedName;
+                        const isSenior = t.is_senior === true;
+                        let displayName = cleanedName;
+                        // Add (senior) prefix for Dhara & Pizichil senior therapists
+                        if (isSenior) {
+                            displayName = `${cleanedName} (senior)`;
+                        }
+                        if (isBathing) {
+                            displayName = `*${displayName}`;
+                        }
+                        return displayName;
                     }).join(', ')
                     : 'Not assigned';
                 
@@ -2109,22 +2180,57 @@
                         doc.setTextColor(0, 0, 0);
                         
                         // Prepare table data for this slot
-                        const tableData = treatments.map(item => [
-                            item.patient_room_no || '—',
-                            item.patient_name || 'N/A',
-                            item.room_no || '—',
-                            item.therapy_name || 'N/A',
-                            item.therapists && item.therapists.length > 0 
-                                ? item.therapists.map(t => {
+                        const tableData = treatments.map(item => {
+                            // Build therapist string with senior highlighting
+                            let therapistStr = '—';
+                            if (item.therapists && item.therapists.length > 0) {
+                                therapistStr = item.therapists.map(t => {
                                     const name = t.name || t.code || t;
                                     const cleanedName = name.replace(/\(bathing\)/gi, '').replace(/^\*/, '').trim();
                                     const isBathing = t.is_bathing === true || name.startsWith('*') || /\(bathing\)/i.test(name);
-                                    return isBathing ? `*${cleanedName}` : cleanedName;
-                                }).join(', ') 
-                                : '—'
-                        ]);
+                                    const isSenior = t.is_senior === true;
+                                    let displayName = cleanedName;
+                                    // Add (senior) prefix for Dhara & Pizichil senior therapists
+                                    if (isSenior) {
+                                        displayName = `${cleanedName} (senior)`;
+                                    }
+                                    if (isBathing) {
+                                        displayName = `*${displayName}`;
+                                    }
+                                    return displayName;
+                                }).join(', ');
+                            }
+                            
+                            return [
+                                item.patient_room_no || '—',
+                                item.patient_name || 'N/A',
+                                item.room_no || '—',
+                                item.therapy_name || 'N/A',
+                                therapistStr
+                            ];
+                        });
                         
-                        // Generate table for this slot
+                        // Generate table for this slot with custom cell styling for senior therapists
+                        const columnStyles = {
+                            4: { // Therapist Assigned column
+                                cellWidth: 50,
+                            }
+                        };
+                        
+                        // Custom cell styling function to highlight senior therapists
+                        const didParseCell = function(data) {
+                            // Check if this cell contains (senior) marker
+                            if (data.column.index === 4 && data.cell.text && data.cell.text[0]) {
+                                const cellText = data.cell.text[0];
+                                if (typeof cellText === 'string' && cellText.includes('(senior)')) {
+                                    // Highlight senior therapist cells with yellow background
+                                    data.cell.styles.fillColor = [254, 243, 199]; // Light yellow/amber
+                                    data.cell.styles.textColor = [146, 64, 14]; // Dark brown text
+                                    data.cell.styles.fontStyle = 'bold';
+                                }
+                            }
+                        };
+                        
                         doc.autoTable({
                             head: [['Patient Room', 'Patient Name', 'Treatment Room', 'Therapy', 'Therapist Assigned']],
                             body: tableData,
@@ -2143,6 +2249,8 @@
                             alternateRowStyles: {
                                 fillColor: [248, 250, 252],
                             },
+                            columnStyles: columnStyles,
+                            didParseCell: didParseCell,
                             didDrawPage: function(data) {
                                 // Add footer on each page
                                 addFooter(data.pageNumber);

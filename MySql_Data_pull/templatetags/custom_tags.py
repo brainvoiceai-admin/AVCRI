@@ -50,6 +50,47 @@ def get_therapist_bathing_flag(assignment, booking):
     return False
 
 @register.filter
+def is_senior_therapist_for_dhara(assignment, booking):
+    """Check if therapist is senior and therapy is Dhara & Pizichil for highlighting"""
+    try:
+        allocation = booking.allocation if booking else None
+        if not allocation or not allocation.therapy_name:
+            return False
+        
+        # Check if this is Dhara & Pizichil therapy
+        # Handle variations: "Dhara & Pizichil", "Dhara and Pizichil", "Dhara Pizichil", etc.
+        therapy_lower = str(allocation.therapy_name).lower()
+        has_dhara = 'dhara' in therapy_lower
+        has_pizichil = 'pizichil' in therapy_lower or 'pizhichil' in therapy_lower
+        is_dhara_pizichil = has_dhara and has_pizichil
+        
+        if not is_dhara_pizichil:
+            return False
+        
+        # Check if therapist is senior using TherapistMaster (not Patient.models.Therapist)
+        if assignment.therapist:
+            try:
+                from masters.models import TherapistMaster
+                therapist_master = TherapistMaster.objects.filter(
+                    therapist_code=assignment.therapist.therapist_code
+                ).first()
+                
+                if therapist_master and therapist_master.therapist_grade:
+                    # TherapistMaster has ForeignKey to TherapistGrade
+                    grade_name = getattr(therapist_master.therapist_grade, 'name', '')
+                    if grade_name and 'Senior' in grade_name:
+                        return True
+            except Exception as e:
+                print(f"Error checking TherapistMaster in is_senior_therapist_for_dhara: {e}")
+                import traceback
+                traceback.print_exc()
+    except Exception as e:
+        print(f"Error in is_senior_therapist_for_dhara: {e}")
+        import traceback
+        traceback.print_exc()
+    return False
+
+@register.filter
 def format_12hour(time_value):
     """Convert 24-hour time to 12-hour format (e.g., 14:30 -> 2:30 PM)"""
     if not time_value:
