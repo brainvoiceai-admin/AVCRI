@@ -998,6 +998,11 @@
                             return `<span class="tag" style="display:inline-block;padding:4px 8px;margin:2px;background:${isPrepared ? '#d4edda' : '#e3ebf6'};border-radius:4px;font-size:0.9em;">${escapeHtml(it.item_name)}${it.quantity ? ` (Qty: ${escapeHtml(it.quantity)})` : ''}</span>`;
                         }).join(' ');
                         
+                        // Display ingredients if available
+                        const ingredientsHtml = (group.ingredients && group.ingredients.length > 0)
+                            ? group.ingredients.map(ing => `<span class="tag" style="display:inline-block;padding:4px 8px;margin:2px;background:#e8f5e9;border-radius:4px;font-size:0.9em;">${escapeHtml(ing.ingredient_name || ing.text || '')}</span>`).join(' ')
+                            : '<span class="text-muted" style="font-size:0.9em;">No ingredients</span>';
+                        
                         // Single dosage, usage, time, UNO, and internal/external for the entire group
                         const dosage = group.dose || items[0]?.dose || 'N/A';
                         // Handle usage - can be string or array
@@ -1021,6 +1026,9 @@
                                 <div class="medicine-details" style="flex:1;">
                                     <div style="margin-bottom:8px;">
                                         ${itemsHtml}
+                                    </div>
+                                    <div style="margin-bottom:8px;font-size:0.9em;">
+                                        <strong>Ingredients:</strong> ${ingredientsHtml}
                                     </div>
                                     <div class="medicine-meta" style="font-size:0.9em;color:#666;display:flex;flex-wrap:wrap;gap:12px;">
                                         ${dosage !== 'N/A' ? `<span><strong>Dosage:</strong> ${escapeHtml(dosage)}</span>` : ''}

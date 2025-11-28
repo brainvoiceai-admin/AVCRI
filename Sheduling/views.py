@@ -189,6 +189,7 @@ OilClass = get_model_safe('masters', 'OilClass')
 UsageType = get_model_safe('masters', 'UsageType')
 PrescriptionTime = get_model_safe('masters', 'PrescriptionTime')
 PrescriptionScope = get_model_safe('masters', 'PrescriptionScope')
+IngredientMaster = get_model_safe('masters', 'IngredientMaster')
 
 # New scheduling models (expected to be in 'therapies' app)
 TherapyAllocation = get_model_safe('Sheduling', 'TherapyAllocation')
@@ -2032,6 +2033,17 @@ def prescription_entry_page(request):
                         results.append({'name': getattr(s, 'name', '')})
                 except Exception:
                     pass
+        elif master_type == 'ingredient':
+            if IngredientMaster is not None:
+                try:
+                    for ing in IngredientMaster.objects.filter(is_active=True).order_by('ingredient_name')[:200]:
+                        results.append({
+                            'id': ing.id,
+                            'ingredient_name': getattr(ing, 'ingredient_name', ''),
+                            'ingredient_code': getattr(ing, 'ingredient_code', '')
+                        })
+                except Exception:
+                    pass
         
         return JsonResponse(results, safe=False)
     
@@ -2490,6 +2502,17 @@ def prescription_entry_page(request):
                 try:
                     for s in PrescriptionScope.objects.filter(is_active=True)[:20]:
                         results.append({'name': getattr(s, 'name', '')})
+                except Exception:
+                    pass
+        elif master_type == 'ingredient':
+            if IngredientMaster is not None:
+                try:
+                    for ing in IngredientMaster.objects.filter(is_active=True).order_by('ingredient_name')[:200]:
+                        results.append({
+                            'id': ing.id,
+                            'ingredient_name': getattr(ing, 'ingredient_name', ''),
+                            'ingredient_code': getattr(ing, 'ingredient_code', '')
+                        })
                 except Exception:
                     pass
         return JsonResponse(results, safe=False)

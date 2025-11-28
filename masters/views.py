@@ -14,7 +14,7 @@ from .models import (
     Procured, OilClass, UsageType, PrescriptionUsage, PrescriptionTime, 
     PrescriptionScope, UnitNo, TherapyMaster, ItemMaster, SlotMaster,
     TherapistGrade, TherapistMaster, TherapistLeaveMaster, NurseTreatmentMaster,
-    NurseMaster
+    NurseMaster, IngredientMaster
 )
 import json
 import pandas as pd
@@ -118,6 +118,13 @@ def create_master_item(request):
                 slot_time=slot_time,
                 slot_name=data.get('slot_name', '')
             )
+        elif master_type == 'ingredient':
+            item = IngredientMaster.objects.create(
+                ingredient_code=data['ingredient_code'],
+                ingredient_name=data['ingredient_name'],
+                description=data.get('description', ''),
+                is_active=data.get('is_active', True)
+            )
         else:
             return JsonResponse({'error': 'Invalid master type'}, status=400)
         
@@ -161,6 +168,12 @@ def update_master_item(request, item_id):
                 else:
                     item.slot_time = slot_time
             item.is_active = data.get('is_active', item.is_active)
+        elif master_type == 'ingredient':
+            item = IngredientMaster.objects.get(id=item_id)
+            item.ingredient_code = data.get('ingredient_code', item.ingredient_code)
+            item.ingredient_name = data.get('ingredient_name', item.ingredient_name)
+            item.description = data.get('description', item.description)
+            item.is_active = data.get('is_active', item.is_active)
         else:
             return JsonResponse({'error': 'Invalid master type'}, status=400)
         
@@ -186,6 +199,8 @@ def delete_master_item(request, item_id):
             item = ItemMaster.objects.get(id=item_id)
         elif master_type == 'slot':
             item = SlotMaster.objects.get(id=item_id)
+        elif master_type == 'ingredient':
+            item = IngredientMaster.objects.get(id=item_id)
         else:
             return JsonResponse({'error': 'Invalid master type'}, status=400)
         
@@ -929,6 +944,14 @@ def master_management_dashboard(request):
                 'count': UnitNo.objects.count(),
                 'active_count': UnitNo.objects.filter(is_active=True).count(),
             },
+            {
+                'name': 'Ingredient Master',
+                'model': 'IngredientMaster',
+                'url': 'ingredient_master_manage',
+                'description': 'Manage ingredients used in prescriptions',
+                'count': IngredientMaster.objects.count(),
+                'active_count': IngredientMaster.objects.filter(is_active=True).count(),
+            },
         ]
     }
     return render(request, 'masters/master_management_dashboard.html', context)
@@ -1158,6 +1181,115 @@ def slot_master_delete(request, pk):
     slot.delete()
     messages.success(request, f'Slot {slot_number} deleted successfully.')
     return redirect('slot_master_manage')
+
+# Ingredient Master CRUD Views
+class IngredientMasterManagementView(ListView):
+    model = IngredientMaster
+    template_name = 'masters/ingredient_master_manage.html'
+    context_object_name = 'ingredient_list'
+    paginate_by = 20
+
+    def get_queryset(self):
+        return IngredientMaster.objects.all().order_by('ingredient_name')
+
+class IngredientMasterCreateView(CreateView):
+    model = IngredientMaster
+    fields = ['ingredient_name', 'description', 'is_active']
+    template_name = 'masters/ingredient_master_form.html'
+    success_url = reverse_lazy('ingredient_master_manage')
+    
+    def form_valid(self, form):
+        # Auto-generate unique ingredient code by incrementing from highest existing code
+        # Get all existing ingredient codes that start with ING
+        existing_codes = IngredientMaster.objects.filter(
+            ingredient_code__startswith='ING'
+        ).values_list('ingredient_code', flat=True)
+        
+        # Extract numbers from existing codes and find the highest
+        max_number = 0
+        for code in existing_codes:
+            try:
+                # Extract number part after 'ING'
+                number_part = int(code.replace('ING', ''))
+                if number_part > max_number:
+                    max_number = number_part
+            except (ValueError, AttributeError):
+                continue
+        
+        # Increment by 1
+        next_number = max_number + 1
+        
+        # Ensure it doesn't exceed 999
+        if next_number > 999:
+            raise ValueError("Maximum ingredient code limit reached (ING999)")
+        
+        # Generate new code
+        ingredient_code = f"ING{next_number:03d}"
+        
+        # Set the auto-generated code
+        instance = form.save(commit=False)
+        instance.ingredient_code = ingredient_code
+        instance.save()
+        
+        messages.success(self.request, f'Ingredient "{instance.ingredient_name}" ({ingredient_code}) created successfully.')
+        return redirect(self.success_url)
+
+class IngredientMasterUpdateView(UpdateView):
+    model = IngredientMaster
+    fields = ['ingredient_name', 'description', 'is_active']
+    template_name = 'masters/ingredient_master_form.html'
+    success_url = reverse_lazy('ingredient_master_manage')
+    
+    def form_valid(self, form):
+        # Preserve the existing ingredient_code (it's auto-generated and shouldn't be changed)
+        instance = form.save(commit=False)
+        if not instance.ingredient_code:
+            # If somehow code is missing, generate one (shouldn't happen)
+            existing_codes = IngredientMaster.objects.filter(
+                ingredient_code__startswith='ING'
+            ).values_list('ingredient_code', flat=True)
+            max_number = 0
+            for code in existing_codes:
+                try:
+                    number_part = int(code.replace('ING', ''))
+                    if number_part > max_number:
+                        max_number = number_part
+                except (ValueError, AttributeError):
+                    continue
+            instance.ingredient_code = f"ING{max_number + 1:03d}"
+        instance.save()
+        messages.success(self.request, f'Ingredient "{instance.ingredient_name}" updated successfully.')
+        return redirect(self.success_url)
+
+@login_required
+@super_admin_required
+def ingredient_master_delete(request, pk):
+    """Delete an ingredient - function-based view to handle GET requests properly"""
+    ingredient = get_object_or_404(IngredientMaster, pk=pk)
+    ingredient_name = ingredient.ingredient_name
+    ingredient.delete()
+    messages.success(request, f'Ingredient {ingredient_name} deleted successfully.')
+    return redirect('ingredient_master_manage')
+
+@login_required
+@super_admin_required
+def ingredient_master_enable(request, pk):
+    """Enable an ingredient"""
+    ingredient = get_object_or_404(IngredientMaster, pk=pk)
+    ingredient.is_active = True
+    ingredient.save()
+    messages.success(request, f'Ingredient {ingredient.ingredient_name} enabled successfully.')
+    return redirect('ingredient_master_manage')
+
+@login_required
+@super_admin_required
+def ingredient_master_disable(request, pk):
+    """Disable an ingredient"""
+    ingredient = get_object_or_404(IngredientMaster, pk=pk)
+    ingredient.is_active = False
+    ingredient.save()
+    messages.success(request, f'Ingredient {ingredient.ingredient_name} disabled successfully.')
+    return redirect('ingredient_master_manage')
 
 # Therapist Master CRUD Views
 class TherapistMasterManagementView(ListView):

@@ -223,6 +223,24 @@ class SlotMaster(models.Model):
         verbose_name_plural = "Slot Masters"
         ordering = ["slot_number"]
 
+# Ingredient Master
+class IngredientMaster(models.Model):
+    """Master list of ingredients used in prescriptions."""
+    ingredient_code = models.CharField(max_length=20, unique=True, verbose_name="Ingredient Code")
+    ingredient_name = models.CharField(max_length=255, verbose_name="Ingredient Name")
+    description = models.TextField(null=True, blank=True, verbose_name="Description")
+    is_active = models.BooleanField(default=True, verbose_name="Active")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Created At")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="Updated At")
+
+    def __str__(self):
+        return f"{self.ingredient_code} - {self.ingredient_name}"
+
+    class Meta:
+        verbose_name = "Ingredient Master"
+        verbose_name_plural = "Ingredient Masters"
+        ordering = ["ingredient_name"]
+
 # Therapist Grade Master
 class TherapistGrade(models.Model):
     """Master list of therapist grades/levels."""

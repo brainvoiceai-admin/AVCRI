@@ -707,6 +707,10 @@
                 <label for="item-builder-select">Select Medications</label>
                 <select id="item-builder-select" multiple="multiple"></select>
               </div>
+              <div class="form-group">
+                <label for="item-builder-ingredients">Ingredients</label>
+                <select id="item-builder-ingredients" multiple="multiple" style="width:100%;"></select>
+              </div>
               <div class="form-group small">
                 <label for="item-builder-dosage">Dosage <span style="color:var(--danger);">*</span></label>
                 <input id="item-builder-dosage" type="text" placeholder="e.g. 2 tsp" required>
@@ -1188,6 +1192,42 @@ $(function(){
       }
     }).catch(()=>{});
     ajax({action:'masters', type:'prescriptiontime'}).then(list => { const $t=$('#item-builder-time'); $t.empty().append('<option value="">Select Time</option>'); (list||[]).forEach(x => $t.append(new Option(x.name, x.name))); }).catch(()=>{});
+    
+    // Populate ingredients
+    ajax({action:'masters', type:'ingredient'}).then(list => {
+      const $ing = $('#item-builder-ingredients');
+      if ($ing.length) {
+        // Clear any existing options
+        $ing.empty();
+        
+        // Add options from API response
+        (list || []).forEach(i => {
+          const text = i.ingredient_name || i.ingredient_code || 'N/A';
+          $ing.append(new Option(text, i.id, false, false));
+        });
+        
+        // Initialize Select2 for multiselect
+        if (!$ing.hasClass('select2-hidden-accessible')) {
+          $ing.select2({
+            placeholder: 'Select Ingredients (multiple)',
+            allowClear: true,
+            multiple: true,
+            width: '100%'
+          });
+        }
+      }
+    }).catch(() => {
+      // Initialize empty select2 if API fails
+      const $ing = $('#item-builder-ingredients');
+      if ($ing.length && !$ing.hasClass('select2-hidden-accessible')) {
+        $ing.select2({
+          placeholder: 'Select Ingredients (multiple)',
+          allowClear: true,
+          multiple: true,
+          width: '100%'
+        });
+      }
+    });
   }
   populateMasters();
 
@@ -1215,6 +1255,10 @@ $(function(){
     const usage = usageValues.join(', '); // Join with comma and space
     const time = $('#item-builder-time').val().trim();
     const uno = $('#item-builder-uno').val().trim();
+    const ingredientSelect = $('#item-builder-ingredients');
+    const ingredientData = ingredientSelect.select2('data') || [];
+    const ingredients = ingredientData.map(i => ({ id: i.id, ingredient_name: i.text || i.id }));
+    const ingredientIds = ingredientData.map(i => i.id);
     
     // Validate mandatory fields
     if (!dosage) {
@@ -1234,13 +1278,14 @@ $(function(){
     }
     
     const items = selected.length > 0 ? selected.map(s => ({ item_code: s.id, item_name: s.text || s.id })) : [];
-    const grp = { id: Math.random().toString(36).slice(2,9), items, dosage, usage, usage_array: usageValues, time, uno };
+    const grp = { id: Math.random().toString(36).slice(2,9), items, dosage, usage, usage_array: usageValues, time, uno, ingredients, ingredient_ids: ingredientIds };
     itemGroups.push(grp);
     $itemBuilder.val(null).trigger('change');
     $('#item-builder-dosage').val('');
     usageSelect.val(null).trigger('change');
     $('#item-builder-time').val('');
     $('#item-builder-uno').val('');
+    ingredientSelect.val(null).trigger('change');
     renderItemGroups();
   });
 
@@ -1257,11 +1302,17 @@ $(function(){
     }
     itemGroups.forEach((g,i) => {
       const itemsHtml = g.items.map(it => `<span class="tag">${esc(it.item_name)}</span>`).join(' ');
+      const ingredientsHtml = (g.ingredients && g.ingredients.length > 0) 
+        ? g.ingredients.map(ing => `<span class="tag" style="background:#e8f5e9;">${esc(ing.ingredient_name)}</span>`).join(' ')
+        : '<span class="text-muted">No ingredients</span>';
       const $div = $(`
         <div style="padding:12px;border:1px solid var(--border-light);margin-bottom:12px;border-radius:8px;display:flex;justify-content:space-between;align-items:center;background:white;">
           <div style="flex:1;">
             <div style="font-weight:600;color:var(--text-dark);margin-bottom:6px;">Group ${i+1}</div>
             <div style="margin-bottom:6px;">${itemsHtml}</div>
+            <div style="margin-bottom:6px;font-size:0.9em;">
+              <strong>Ingredients:</strong> ${ingredientsHtml}
+            </div>
             <div class="small-muted">Dosage: ${esc(g.dosage||'—')} • Usage: ${esc(g.usage||'—')} • Time: ${esc(g.time||'—')} • UNO: ${esc(g.uno||'—')}</div>
           </div>
           <div>
@@ -1308,6 +1359,13 @@ $(function(){
     }
     $('#item-builder-time').val(g.time||''); 
     $('#item-builder-uno').val(g.uno||''); 
+    // Handle ingredients
+    const ingredientSelect = $('#item-builder-ingredients');
+    if (g.ingredient_ids && Array.isArray(g.ingredient_ids) && g.ingredient_ids.length > 0) {
+      ingredientSelect.val(g.ingredient_ids).trigger('change');
+    } else {
+      ingredientSelect.val(null).trigger('change');
+    }
     itemGroups = itemGroups.filter(x=>x.id!==id); 
     renderItemGroups(); 
   });
@@ -1353,7 +1411,9 @@ $(function(){
         usage: g.usage || (g.usage_array ? g.usage_array.join(', ') : ''), 
         usage_array: g.usage_array || (g.usage ? g.usage.split(',').map(u => u.trim()) : []),
         time: g.time, 
-        uno: g.uno 
+        uno: g.uno,
+        ingredient_ids: g.ingredient_ids || [],
+        ingredients: g.ingredients || []
       })),
       notes: ''
     };
@@ -1441,7 +1501,13 @@ $(function(){
         } else if (Array.isArray(g.usage_array) && g.usage_array.length > 0) {
           usageDisplay = esc(g.usage_array.join(', '));
         }
-        return (g.items||[]).map(it => `<span class="tag">${esc(it.item_name)}</span>`).join(' ') + `<div class="small-muted">Dosage:${esc(g.dosage||'—')} • Usage:${usageDisplay} • Time:${esc(g.time||'—')} • UNO:${esc(g.uno||'—')}</div>`;
+        // Format ingredients
+        const ingredientsDisplay = (g.ingredients && g.ingredients.length > 0)
+          ? g.ingredients.map(ing => esc(ing.ingredient_name || ing.text || '')).join(', ')
+          : '—';
+        return (g.items||[]).map(it => `<span class="tag">${esc(it.item_name)}</span>`).join(' ') + 
+          `<div class="small-muted">Dosage:${esc(g.dosage||'—')} • Usage:${usageDisplay} • Time:${esc(g.time||'—')} • UNO:${esc(g.uno||'—')}</div>` +
+          `<div class="small-muted" style="margin-top:4px;">Ingredients: ${ingredientsDisplay}</div>`;
       }).join('<hr style="margin:8px 0;border:none;border-top:1px solid var(--border-light);"/>');
       
       // Status logic - show counts if available, format: "2 Draft / 3 Active"
@@ -1546,7 +1612,9 @@ $(function(){
       usage: g.usage||'', 
       usage_array: g.usage_array || (g.usage ? g.usage.split(',').map(u => u.trim()) : []),
       time: g.time||'', 
-      uno: g.uno||'' 
+      uno: g.uno||'',
+      ingredient_ids: g.ingredient_ids || [],
+      ingredients: g.ingredients || []
     }));
     renderItemGroups();
     $allocateBtn.hide(); $updateBtn.show(); window.scrollTo({top:0, behavior:'smooth'});
@@ -1559,6 +1627,10 @@ $(function(){
     p.procured_from = $procuredSelect.val()||'';
     p.scope = $scopeSelect.val()||'';
     p.items_groups = itemGroups.map(g=>({
+      ingredient_ids: g.ingredient_ids || [],
+      ingredients: g.ingredients || [],
+      ingredient_ids: g.ingredient_ids || [],
+      ingredients: g.ingredients || [],
       items: g.items, 
       dosage: g.dosage, 
       usage: g.usage || (g.usage_array ? g.usage_array.join(', ') : ''), 

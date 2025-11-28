@@ -480,6 +480,8 @@ def get_prescription_details_api(request):
                         'usage_array': group.get('usage_array', []),
                         'internal_external': group.get('internal_external', ''),
                         'notes': group.get('uno', ''),
+                        'ingredients': group.get('ingredients', []),
+                        'ingredient_ids': group.get('ingredient_ids', []),
                         'items': group_items,
                         'is_cancelled': allocation.status == 'cancelled',
                         'is_group': True

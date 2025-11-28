@@ -306,6 +306,8 @@ def get_prescription_details_api(request):
                         'usage_array': group.get('usage_array', []),
                         'internal_external': group.get('internal_external', ''),
                         'notes': group.get('uno', ''),
+                        'ingredients': group.get('ingredients', []),
+                        'ingredient_ids': group.get('ingredient_ids', []),
                         'items': group_items,
                         'is_cancelled': allocation.status == 'cancelled',
                         'is_group': True
@@ -326,6 +328,8 @@ def get_prescription_details_api(request):
                         'usage': getattr(item, 'usage', '') or '',
                         'internal_external': getattr(item, 'internal_external', '') or '',
                         'notes': item.notes or '',
+                        'ingredients': [],
+                        'ingredient_ids': [],
                         'items': [{
                             'id': f'prescription_{item.id}',
                             'type': 'prescription',

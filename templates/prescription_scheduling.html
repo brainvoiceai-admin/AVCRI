@@ -1020,11 +1020,19 @@
                         const uno = group.notes || group.uno || items[0]?.notes || 'N/A';
                         const internalExternal = group.internal_external || items[0]?.internal_external || 'N/A';
                         
+                        // Display ingredients if available
+                        const ingredientsHtml = (group.ingredients && group.ingredients.length > 0)
+                            ? group.ingredients.map(ing => `<span class="tag" style="display:inline-block;padding:4px 8px;margin:2px;background:#e8f5e9;border-radius:4px;font-size:0.9em;">${escapeHtml(ing.ingredient_name || ing.text || '')}</span>`).join(' ')
+                            : '<span class="text-muted" style="font-size:0.9em;">No ingredients</span>';
+                        
                         itemCard.innerHTML = `
                             <div style="display:flex;align-items:flex-start;gap:12px;">
                                 <div class="medicine-details" style="flex:1;">
                                     <div style="margin-bottom:8px;">
                                         ${itemsHtml}
+                                    </div>
+                                    <div style="margin-bottom:8px;font-size:0.9em;">
+                                        <strong>Ingredients:</strong> ${ingredientsHtml}
                                     </div>
                                     <div class="medicine-meta" style="font-size:0.9em;color:#666;display:flex;flex-wrap:wrap;gap:12px;">
                                         ${dosage !== 'N/A' ? `<span><strong>Dosage:</strong> ${escapeHtml(dosage)}</span>` : ''}
@@ -1532,7 +1540,18 @@
                             const itemNames = items.map(it => it.item_name || 'N/A').join(', ');
                             const itemNamesLines = doc.splitTextToSize(itemNames, pageWidth - margin * 2 - 10);
                             doc.text(itemNamesLines, margin + 5, yPos);
-                            yPos += itemNamesLines.length * 4 + 4;
+                            yPos += itemNamesLines.length * 4 + 3;
+                            
+                            // Display ingredients if available
+                            if (group.ingredients && group.ingredients.length > 0) {
+                                doc.setFontSize(8);
+                                doc.setFont(undefined, 'normal');
+                                doc.setTextColor(73, 80, 87);
+                                const ingredientNames = group.ingredients.map(ing => ing.ingredient_name || ing.text || 'N/A').join(', ');
+                                const ingredientLines = doc.splitTextToSize(`Ingredients: ${ingredientNames}`, pageWidth - margin * 2 - 10);
+                                doc.text(ingredientLines, margin + 5, yPos);
+                                yPos += ingredientLines.length * 4 + 2;
+                            }
                             
                             // Display shared details: dosage, usage, time, UNO, Ext/Int
                             doc.setFontSize(8);
