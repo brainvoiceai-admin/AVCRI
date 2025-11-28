@@ -1447,13 +1447,26 @@ $(function(){
       return response.json();
     }).then(j => {
       if (j.allocation_id || j.status === 'ok') {
+        // Add to local list immediately with server response (like therapy page does)
+        const newPrescription = {
+          ...prescriptionData,
+          prescription_name: 'Prescription', // Default name (server also uses this default)
+          allocation_id: j.allocation_id,
+          id: j.allocation_id,
+          status: 'draft', // Default status
+          status_counts: {},
+          status_summary: { draft: 1 } // Initial status summary
+        };
+        addedPrescriptions.push(newPrescription);
+        
         // Reset form
         itemGroups = []; renderItemGroups();
         $fromDate.val(''); $toDate.val(''); $daysInput.val(''); $procuredSelect.val(''); $scopeSelect.val('');
         
+        // Render immediately so user sees the new prescription
         renderAll();
         
-        // Reload patient prescriptions from server to get status counts
+        // Reload patient prescriptions from server to get accurate status counts
         if (selectedPatient) {
           const patientRegNo = selectedPatient.pat_reg_no || selectedPatient.pat_op_reg_no;
           ajax({action:'patient_prescriptions', patient_reg_no: patientRegNo}).then(list => {
@@ -1505,8 +1518,12 @@ $(function(){
         const ingredientsDisplay = (g.ingredients && g.ingredients.length > 0)
           ? g.ingredients.map(ing => esc(ing.ingredient_name || ing.text || '')).join(', ')
           : '—';
+        // Combine dosage and UNO for better readability
+        const dosageDisplay = (g.dosage && g.uno) 
+          ? `${esc(g.dosage)} (${esc(g.uno)})`
+          : (g.dosage ? esc(g.dosage) : '—') + (g.uno ? ` (${esc(g.uno)})` : '');
         return (g.items||[]).map(it => `<span class="tag">${esc(it.item_name)}</span>`).join(' ') + 
-          `<div class="small-muted">Dosage:${esc(g.dosage||'—')} • Usage:${usageDisplay} • Time:${esc(g.time||'—')} • UNO:${esc(g.uno||'—')}</div>` +
+          `<div class="small-muted">Dosage: ${dosageDisplay} • Usage:${usageDisplay} • Time:${esc(g.time||'—')}</div>` +
           `<div class="small-muted" style="margin-top:4px;">Ingredients: ${ingredientsDisplay}</div>`;
       }).join('<hr style="margin:8px 0;border:none;border-top:1px solid var(--border-light);"/>');
       
