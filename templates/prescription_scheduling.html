@@ -891,7 +891,7 @@
                 .then(response => response.json())
                 .then(data => {
                     if (data.success) {
-                        showPrescriptionModal(data.patient_info, data.prescription_items);
+                        showPrescriptionModal(data.patient_info, data.prescription_groups || [], data.therapy_items || []);
                     } else {
                         alert('Error loading prescription details: ' + data.error);
                     }
@@ -901,7 +901,7 @@
                 });
         }
         
-        function showPrescriptionModal(patientInfo, prescriptionItems) {
+        function showPrescriptionModal(patientInfo, prescriptionGroups, therapyItems) {
             const modal = document.getElementById('prescriptionModal');
             const patientInfoDiv = document.getElementById('patient-info');
             const prescriptionItemsDiv = document.getElementById('prescription-items');
@@ -911,27 +911,274 @@
                 <h4>${escapeHtml(patientInfo.name)}</h4>
                 <p><strong>Registration No:</strong> ${escapeHtml(patientInfo.registration_no)}</p>
                 <p><strong>Room No:</strong> ${escapeHtml(patientInfo.room_no || 'N/A')}</p>
-                <p><strong>Doctor:</strong> ${escapeHtml(patientInfo.doctor_name)}</p>
+                <p><strong>Doctor:</strong> ${escapeHtml(patientInfo.doctor_name || 'N/A')}</p>
             `;
             
-            // Update prescription items
+            // Clear and render prescription items in grouped format (like procurement dashboard)
             prescriptionItemsDiv.innerHTML = '';
-            prescriptionItems.forEach(item => {
-                const itemDiv = document.createElement('div');
-                itemDiv.className = 'prescription-item';
-                itemDiv.innerHTML = `
-                    <div class="item-details">
-                        <div class="item-name">${escapeHtml(item.name)}</div>
-                        <div class="item-meta">
-                            <span>Dose: ${escapeHtml(item.dose)}</span>
-                            <span>Time: ${escapeHtml(item.time)}</span>
-                            <span>Notes: ${escapeHtml(item.notes || 'None')}</span>
-                        </div>
-                    </div>
-                    <div class="item-qty">Qty: ${item.quantity}</div>
-                `;
-                prescriptionItemsDiv.appendChild(itemDiv);
-            });
+            
+            // Render prescription items section - grouped by allocation (like prescription entry page)
+            if (prescriptionGroups.length > 0) {
+                const prescriptionSection = document.createElement('div');
+                prescriptionSection.className = 'items-section';
+                prescriptionSection.innerHTML = '<h3 style="margin: 0 0 15px 0; color: #333;">Prescription Items</h3>';
+                
+                // Group prescription groups by allocation_id (extract from group_id)
+                // Handle both "prescription_group_{allocation_id}_{group_idx}" and "prescription_item_{item_id}" formats
+                const groupsByAllocation = {};
+                prescriptionGroups.forEach(group => {
+                    let allocationId = 'unknown';
+                    // Try to extract allocation_id from group_id
+                    const groupMatch = group.group_id.match(/prescription_group_(\d+)_/);
+                    if (groupMatch) {
+                        allocationId = groupMatch[1];
+                    } else {
+                        // For prescription_item format, use item_id as allocation key (each item is its own "allocation")
+                        const itemMatch = group.group_id.match(/prescription_item_(\d+)/);
+                        if (itemMatch) {
+                            allocationId = `item_${itemMatch[1]}`;
+                        }
+                    }
+                    if (!groupsByAllocation[allocationId]) {
+                        groupsByAllocation[allocationId] = [];
+                    }
+                    groupsByAllocation[allocationId].push(group);
+                });
+                
+                // Render each allocation as a single entry (like prescription entry page)
+                const allocationIds = Object.keys(groupsByAllocation);
+                allocationIds.forEach((allocationId, entryIndex) => {
+                    const allocationGroups = groupsByAllocation[allocationId];
+                    const allocationIsCancelled = allocationGroups.every(g => g.is_cancelled);
+                    
+                    // Entry number header (one per PrescriptionAllocation)
+                    const entryHeader = document.createElement('div');
+                    entryHeader.style.fontSize = '14px';
+                    entryHeader.style.fontWeight = '600';
+                    entryHeader.style.color = '#333';
+                    entryHeader.style.marginBottom = '12px';
+                    entryHeader.style.paddingBottom = '8px';
+                    entryHeader.style.borderBottom = '2px solid #2c7be5';
+                    entryHeader.innerHTML = `Entry ${entryIndex + 1}`;
+                    if (allocationIsCancelled) {
+                        entryHeader.innerHTML += ' <span style="color: #e63757; font-weight: bold; margin-left: 8px;">[CANCELLED]</span>';
+                    }
+                    prescriptionSection.appendChild(entryHeader);
+                    
+                    // Single container for all groups from this allocation
+                    const allocationDiv = document.createElement('div');
+                    allocationDiv.style.marginBottom = '25px';
+                    allocationDiv.style.border = allocationIsCancelled ? '2px solid #e63757' : '1px solid #e3ebf6';
+                    allocationDiv.style.borderRadius = '8px';
+                    allocationDiv.style.padding = '15px';
+                    allocationDiv.style.backgroundColor = allocationIsCancelled ? '#fff5f5' : '#f9fafd';
+                    if (allocationIsCancelled) {
+                        allocationDiv.style.opacity = '0.7';
+                    }
+                    
+                    // Render all groups from this allocation, separated by horizontal rules (no numbering within entry)
+                    allocationGroups.forEach((group, groupIndex) => {
+                        const items = group.items || [];
+                        
+                        // Skip empty groups
+                        if (items.length === 0) return;
+                        
+                        // Add horizontal rule between groups (except first one)
+                        if (groupIndex > 0) {
+                            const hr = document.createElement('hr');
+                            hr.style.margin = '15px 0';
+                            hr.style.border = 'none';
+                            hr.style.borderTop = '2px solid #e3ebf6';
+                            allocationDiv.appendChild(hr);
+                        }
+                        
+                        // Display as single group with multiple items (like prescription entry page)
+                        const itemCard = document.createElement('div');
+                        itemCard.className = 'medicine-card';
+                        itemCard.style.borderLeft = allocationIsCancelled ? '4px solid #e63757' : '4px solid #2c7be5';
+                        itemCard.style.marginBottom = '8px';
+                        itemCard.style.padding = '12px';
+                        itemCard.style.backgroundColor = '#fff';
+                        itemCard.style.borderRadius = '6px';
+                        
+                        // Display multiple item names as tags
+                        const itemsHtml = items.map(it => {
+                            return `<span class="tag" style="display:inline-block;padding:4px 8px;margin:2px;background:#e3ebf6;border-radius:4px;font-size:0.9em;">${escapeHtml(it.item_name)}${it.quantity ? ` (Qty: ${escapeHtml(it.quantity)})` : ''}</span>`;
+                        }).join(' ');
+                        
+                        // Single dosage, usage, time, UNO, and internal/external for the entire group
+                        const dosage = group.dose || items[0]?.dose || 'N/A';
+                        let usage = 'N/A';
+                        if (group.usage) {
+                            usage = group.usage;
+                        } else if (group.usage_array && Array.isArray(group.usage_array) && group.usage_array.length > 0) {
+                            usage = group.usage_array.join(', ');
+                        } else if (items[0]?.usage) {
+                            usage = items[0].usage;
+                        }
+                        const time = group.time || items[0]?.time || 'N/A';
+                        const uno = group.notes || group.uno || items[0]?.notes || 'N/A';
+                        const internalExternal = group.internal_external || items[0]?.internal_external || 'N/A';
+                        
+                        // Display ingredients if available
+                        const ingredientsHtml = (group.ingredients && group.ingredients.length > 0)
+                            ? group.ingredients.map(ing => `<span class="tag" style="display:inline-block;padding:4px 8px;margin:2px;background:#e8f5e9;border-radius:4px;font-size:0.9em;">${escapeHtml(ing.ingredient_name || ing.text || '')}</span>`).join(' ')
+                            : '<span class="text-muted" style="font-size:0.9em;">No ingredients</span>';
+                        
+                        itemCard.innerHTML = `
+                            <div style="display:flex;align-items:flex-start;gap:12px;">
+                                <div class="medicine-details" style="flex:1;">
+                                    <div style="margin-bottom:8px;">
+                                        ${itemsHtml}
+                                    </div>
+                                    <div style="margin-bottom:8px;font-size:0.9em;">
+                                        <strong>Ingredients:</strong> ${ingredientsHtml}
+                                    </div>
+                                    <div class="medicine-meta" style="font-size:0.9em;color:#666;display:flex;flex-wrap:wrap;gap:12px;">
+                                        ${dosage !== 'N/A' ? `<span><strong>Dosage:</strong> ${escapeHtml(dosage)}</span>` : ''}
+                                        ${usage !== 'N/A' ? `<span><strong>Usage:</strong> ${escapeHtml(usage)}</span>` : ''}
+                                        ${time !== 'N/A' ? `<span><strong>Time:</strong> ${escapeHtml(time)}</span>` : ''}
+                                        ${uno !== 'N/A' ? `<span><strong>UNO:</strong> ${escapeHtml(uno)}</span>` : ''}
+                                        ${internalExternal !== 'N/A' ? `<span><strong>Ext/Int:</strong> ${escapeHtml(internalExternal)}</span>` : ''}
+                                    </div>
+                                </div>
+                            </div>
+                        `;
+                        
+                        allocationDiv.appendChild(itemCard);
+                    });
+                    
+                    prescriptionSection.appendChild(allocationDiv);
+                });
+                
+                prescriptionItemsDiv.appendChild(prescriptionSection);
+            }
+            
+            // Render therapy items section - grouped by therapy
+            if (therapyItems.length > 0) {
+                const therapySection = document.createElement('div');
+                therapySection.className = 'items-section';
+                therapySection.style.marginTop = '20px';
+                therapySection.innerHTML = '<h3 style="margin: 0 0 15px 0; color: #333;">Therapy Items</h3>';
+                
+                // Group therapy items by therapy_name
+                const therapyGroups = {};
+                therapyItems.forEach(item => {
+                    if (item.is_group && item.items) {
+                        const therapyKey = item.therapy_name || 'Unknown Therapy';
+                        if (!therapyGroups[therapyKey]) {
+                            therapyGroups[therapyKey] = [];
+                        }
+                        therapyGroups[therapyKey].push(item);
+                    }
+                });
+                
+                // Render each therapy group
+                Object.keys(therapyGroups).forEach(therapyName => {
+                    const therapyGroupsList = therapyGroups[therapyName];
+                    const therapyIsCancelled = therapyGroupsList.some(group => group.booking_is_cancelled);
+                    
+                    const therapyGroupDiv = document.createElement('div');
+                    therapyGroupDiv.style.marginBottom = '20px';
+                    therapyGroupDiv.style.border = therapyIsCancelled ? '2px solid #e63757' : '1px solid #e3ebf6';
+                    therapyGroupDiv.style.borderRadius = '8px';
+                    therapyGroupDiv.style.padding = '15px';
+                    therapyGroupDiv.style.backgroundColor = therapyIsCancelled ? '#fff5f5' : '#f9fafd';
+                    
+                    const therapyTitle = document.createElement('div');
+                    therapyTitle.style.fontSize = '16px';
+                    therapyTitle.style.fontWeight = '600';
+                    therapyTitle.style.color = '#333';
+                    therapyTitle.style.marginBottom = '10px';
+                    therapyTitle.innerHTML = therapyName;
+                    if (therapyIsCancelled) {
+                        therapyTitle.innerHTML += ' <span style="color: #e63757; font-weight: bold; margin-left: 8px;">[CANCELLED]</span>';
+                    }
+                    therapyGroupDiv.appendChild(therapyTitle);
+                    
+                    // Render each dosage group within this therapy
+                    therapyGroupsList.forEach(group => {
+                        const items = group.items || [];
+                        if (items.length === 0) return;
+                        
+                        const groupIsCancelled = group.booking_is_cancelled;
+                        
+                        // Show dosage if available
+                        if (group.dosage) {
+                            const dosageLabel = document.createElement('div');
+                            dosageLabel.style.fontSize = '14px';
+                            dosageLabel.style.fontWeight = '500';
+                            dosageLabel.style.color = '#666';
+                            dosageLabel.style.marginTop = '10px';
+                            dosageLabel.style.marginBottom = '8px';
+                            dosageLabel.textContent = `Dosage: ${escapeHtml(group.dosage)}`;
+                            if (groupIsCancelled) {
+                                dosageLabel.style.opacity = '0.7';
+                            }
+                            therapyGroupDiv.appendChild(dosageLabel);
+                        }
+                        
+                        // Render items as single group
+                        const itemCard = document.createElement('div');
+                        itemCard.className = 'medicine-card';
+                        itemCard.style.borderLeft = groupIsCancelled ? '4px solid #e63757' : '4px solid #4CAF50';
+                        itemCard.style.marginBottom = '8px';
+                        itemCard.style.padding = '12px';
+                        itemCard.style.backgroundColor = '#fff';
+                        itemCard.style.borderRadius = '6px';
+                        if (groupIsCancelled) {
+                            itemCard.style.opacity = '0.7';
+                        }
+                        
+                        // Display multiple item names as tags
+                        const itemsHtml = items.map(it => {
+                            const isRemoved = it.is_removed || it.status === 'removed';
+                            const removedBadge = isRemoved ? '<span style="color: #f6c343; font-weight: bold; margin-left: 4px;">[REMOVED]</span>' : '';
+                            return `<span class="tag" style="display:inline-block;padding:4px 8px;margin:2px;background:${isRemoved ? '#fff3cd' : '#e3ebf6'};border-radius:4px;font-size:0.9em;">${escapeHtml(it.item_name)}${removedBadge}</span>`;
+                        }).join(' ');
+                        
+                        // Single dosage, usage, UNO, and internal/external for the entire group
+                        const dosage = group.dosage || items[0]?.dose || 'N/A';
+                        let usage = 'N/A';
+                        if (group.usage) {
+                            usage = group.usage;
+                        } else if (group.usage_array && Array.isArray(group.usage_array) && group.usage_array.length > 0) {
+                            usage = group.usage_array.join(', ');
+                        } else if (items[0]?.usage) {
+                            usage = items[0].usage;
+                        }
+                        const uno = group.uno || items[0]?.notes || 'N/A';
+                        const internalExternal = group.internal_external || items[0]?.internal_external || 'N/A';
+                        
+                        itemCard.innerHTML = `
+                            <div style="display:flex;align-items:flex-start;gap:12px;">
+                                <div class="medicine-details" style="flex:1;">
+                                    <div style="margin-bottom:8px;">
+                                        ${itemsHtml}
+                                    </div>
+                                    <div class="medicine-meta" style="font-size:0.9em;color:#666;display:flex;flex-wrap:wrap;gap:12px;">
+                                        ${dosage !== 'N/A' ? `<span><strong>Dosage:</strong> ${escapeHtml(dosage)}</span>` : ''}
+                                        ${usage !== 'N/A' ? `<span><strong>Usage:</strong> ${escapeHtml(usage)}</span>` : ''}
+                                        ${uno !== 'N/A' ? `<span><strong>UNO:</strong> ${escapeHtml(uno)}</span>` : ''}
+                                        ${internalExternal !== 'N/A' ? `<span><strong>Ext/Int:</strong> ${escapeHtml(internalExternal)}</span>` : ''}
+                                        ${items[0]?.item_code ? `<span><strong>Item Code:</strong> ${escapeHtml(items[0].item_code)}</span>` : ''}
+                                    </div>
+                                </div>
+                            </div>
+                        `;
+                        
+                        therapyGroupDiv.appendChild(itemCard);
+                    });
+                    
+                    therapySection.appendChild(therapyGroupDiv);
+                });
+                
+                prescriptionItemsDiv.appendChild(therapySection);
+            }
+            
+            if (prescriptionGroups.length === 0 && therapyItems.length === 0) {
+                prescriptionItemsDiv.innerHTML = '<p style="color: #666; font-style: italic; padding: 20px;">No prescription or therapy items found for this patient on the selected date.</p>';
+            }
             
             modal.style.display = 'block';
         }
@@ -1118,31 +1365,44 @@
             
             // Header function
             function addHeader() {
-                doc.setFontSize(18);
+                // Colored header bar like therapy scheduling
+                doc.setFillColor(59, 130, 246); // Blue
+                doc.rect(margin, yPos - 5, pageWidth - margin * 2, 12, 'F');
+                
+                doc.setFontSize(16);
                 doc.setFont(undefined, 'bold');
-                doc.text('Prescription Scheduling Report', margin, yPos);
-                yPos += 8;
-                
-                doc.setFontSize(12);
-                doc.setFont(undefined, 'normal');
-                doc.text(`Date: ${date}`, margin, yPos);
-                yPos += 6;
-                
-                doc.setFontSize(10);
-                doc.text(`Generated: ${new Date().toLocaleString()}`, margin, yPos);
+                doc.setTextColor(255, 255, 255);
+                doc.text('Prescription Scheduling Report', margin + 5, yPos + 4);
                 yPos += 10;
                 
-                // Draw line
-                doc.setLineWidth(0.5);
-                doc.line(margin, yPos, pageWidth - margin, yPos);
+                doc.setFontSize(10);
+                doc.setFont(undefined, 'normal');
+                doc.setTextColor(0, 0, 0);
+                doc.text(`Date: ${date}`, margin, yPos);
+                doc.setFontSize(9);
+                doc.setTextColor(108, 117, 125);
+                doc.text(`Generated: ${new Date().toLocaleString()}`, pageWidth - margin, yPos, { align: 'right' });
                 yPos += 8;
+                
+                // Separator line
+                doc.setLineWidth(0.5);
+                doc.setDrawColor(200, 200, 200);
+                doc.line(margin, yPos, pageWidth - margin, yPos);
+                yPos += 10;
             }
             
             // Footer function
             function addFooter(pageNum) {
                 const footerY = pageHeight - 10;
+                
+                // Subtle footer line
+                doc.setDrawColor(230, 230, 230);
+                doc.setLineWidth(0.3);
+                doc.line(margin, footerY - 5, pageWidth - margin, footerY - 5);
+                
                 doc.setFontSize(8);
                 doc.setFont(undefined, 'normal');
+                doc.setTextColor(108, 117, 125);
                 doc.text(`Page ${pageNum}`, pageWidth / 2, footerY, { align: 'center' });
                 doc.text(`Date: ${date}`, margin, footerY);
             }
@@ -1170,127 +1430,312 @@
                     doctor_name: item.doctor_name
                 };
                 
-                const prescriptionItems = item.details?.prescription_items || [];
-                const therapyItems = item.therapy_items || [];
+                const prescriptionGroups = item.details?.prescription_groups || [];
+                const therapyItems = item.details?.therapy_items || [];
                 
-                // Estimate required height (patient info + items tables + spacing)
-                const estimatedHeight = 35 + (prescriptionItems.length * 8) + (therapyItems.length * 8) + 30;
+                // Calculate estimated height based on groups
+                let estimatedHeight = 35;
+                prescriptionGroups.forEach(group => {
+                    estimatedHeight += 15 + (group.items?.length || 0) * 5;
+                });
+                therapyItems.forEach(item => {
+                    estimatedHeight += 15 + (item.items?.length || 0) * 5;
+                });
+                estimatedHeight += 30;
                 checkNewPage(estimatedHeight);
                 
-                // Patient Information Section
-                doc.setFontSize(14);
+                // Patient Information Section - Colored header bar like therapy scheduling
+                doc.setFillColor(100, 116, 139); // Slate gray
+                doc.rect(margin, yPos - 3, pageWidth - margin * 2, 8, 'F');
+                
+                doc.setFontSize(13);
                 doc.setFont(undefined, 'bold');
-                doc.text(`Patient ${index + 1}: ${patientInfo.name}`, margin, yPos);
-                yPos += 7;
+                doc.setTextColor(255, 255, 255);
+                doc.text(patientInfo.name, margin + 5, yPos + 2);
+                yPos += 10;
                 
                 doc.setFontSize(10);
                 doc.setFont(undefined, 'normal');
+                doc.setTextColor(0, 0, 0);
                 doc.text(`Registration No: ${patientInfo.registration_no}`, margin, yPos);
                 yPos += 5;
                 doc.text(`Room No: ${patientInfo.room_no}`, margin, yPos);
                 yPos += 5;
-                doc.text(`Doctor: ${patientInfo.doctor_name}`, margin, yPos);
+                doc.text(`Doctor: ${patientInfo.doctor_name || 'N/A'}`, margin, yPos);
                 yPos += 8;
                 
-                // Prescription Items Table
-                if (prescriptionItems.length > 0) {
-                    doc.setFontSize(11);
+                // Prescription Items - Grouped Format with colored header bar
+                if (prescriptionGroups.length > 0) {
+                    checkNewPage(10);
+                    doc.setFillColor(59, 130, 246); // Blue
+                    doc.rect(margin, yPos - 3, pageWidth - margin * 2, 8, 'F');
+                    
+                    doc.setFontSize(12);
                     doc.setFont(undefined, 'bold');
-                    doc.text('Prescription Items:', margin, yPos);
-                    yPos += 6;
+                    doc.setTextColor(255, 255, 255);
+                    doc.text('Prescription Items', margin + 5, yPos + 2);
+                    yPos += 10;
+                    doc.setTextColor(0, 0, 0);
                     
-                    const tableData = prescriptionItems.map(item => [
-                        item.name || 'N/A',
-                        item.dose || '—',
-                        item.time || '—',
-                        item.quantity || '—',
-                        item.notes || '—'
-                    ]);
-                    
-                    doc.autoTable({
-                        head: [['Item Name', 'Dose', 'Time', 'Quantity', 'Notes']],
-                        body: tableData,
-                        startY: yPos,
-                        margin: { left: margin, right: margin },
-                        styles: {
-                            fontSize: 8,
-                            cellPadding: 2,
-                        },
-                        headStyles: {
-                            fillColor: [59, 130, 246],
-                            textColor: 255,
-                            fontStyle: 'bold',
-                        },
-                        alternateRowStyles: {
-                            fillColor: [245, 247, 250],
-                        },
-                        didDrawPage: function(data) {
-                            // Update yPos after table is drawn
-                            yPos = data.cursor.y + 5;
-                            // Add footer
-                            addFooter(data.pageNumber);
-                            currentPage = data.pageNumber;
-                        },
+                    // Group prescription groups by allocation_id (extract from group_id)
+                    // Handle both "prescription_group_{allocation_id}_{group_idx}" and "prescription_item_{item_id}" formats
+                    const groupsByAllocation = {};
+                    prescriptionGroups.forEach(group => {
+                        let allocationId = 'unknown';
+                        // Try to extract allocation_id from group_id
+                        const groupMatch = group.group_id.match(/prescription_group_(\d+)_/);
+                        if (groupMatch) {
+                            allocationId = groupMatch[1];
+                        } else {
+                            // For prescription_item format, use item_id as allocation key (each item is its own "allocation")
+                            const itemMatch = group.group_id.match(/prescription_item_(\d+)/);
+                            if (itemMatch) {
+                                allocationId = `item_${itemMatch[1]}`;
+                            }
+                        }
+                        if (!groupsByAllocation[allocationId]) {
+                            groupsByAllocation[allocationId] = [];
+                        }
+                        groupsByAllocation[allocationId].push(group);
                     });
                     
-                    yPos = doc.lastAutoTable.finalY + 8;
+                    // Render each allocation as a single entry (like prescription entry page)
+                    const allocationIds = Object.keys(groupsByAllocation);
+                    allocationIds.forEach((allocationId, entryIndex) => {
+                        const allocationGroups = groupsByAllocation[allocationId];
+                        
+                        checkNewPage(25);
+                        
+                        // Entry number header - Colored bar like therapy scheduling
+                        doc.setFillColor(148, 163, 184); // Lighter slate
+                        doc.rect(margin, yPos - 2, pageWidth - margin * 2, 6, 'F');
+                        
+                        doc.setFontSize(10);
+                        doc.setFont(undefined, 'bold');
+                        doc.setTextColor(255, 255, 255);
+                        doc.text(`Entry ${entryIndex + 1}`, margin + 5, yPos + 2);
+                        
+                        yPos += 8;
+                        doc.setTextColor(0, 0, 0);
+                        
+                        // Render all groups from this allocation, separated by horizontal rules (no numbering within entry)
+                        allocationGroups.forEach((group, groupIndex) => {
+                            const items = group.items || [];
+                            if (items.length === 0) return;
+                            
+                            checkNewPage(20);
+                            
+                            // Add separator line between groups (except first one)
+                            if (groupIndex > 0) {
+                                doc.setLineWidth(0.3);
+                                doc.setDrawColor(220, 220, 220);
+                                doc.line(margin, yPos, pageWidth - margin, yPos);
+                                yPos += 6;
+                            }
+                            
+                            // Display multiple items as comma-separated list
+                            doc.setFontSize(9);
+                            doc.setFont(undefined, 'bold');
+                            doc.setTextColor(0, 0, 0);
+                            const itemNames = items.map(it => it.item_name || 'N/A').join(', ');
+                            const itemNamesLines = doc.splitTextToSize(itemNames, pageWidth - margin * 2 - 10);
+                            doc.text(itemNamesLines, margin + 5, yPos);
+                            yPos += itemNamesLines.length * 4 + 3;
+                            
+                            // Display ingredients if available
+                            if (group.ingredients && group.ingredients.length > 0) {
+                                doc.setFontSize(8);
+                                doc.setFont(undefined, 'normal');
+                                doc.setTextColor(73, 80, 87);
+                                const ingredientNames = group.ingredients.map(ing => ing.ingredient_name || ing.text || 'N/A').join(', ');
+                                const ingredientLines = doc.splitTextToSize(`Ingredients: ${ingredientNames}`, pageWidth - margin * 2 - 10);
+                                doc.text(ingredientLines, margin + 5, yPos);
+                                yPos += ingredientLines.length * 4 + 2;
+                            }
+                            
+                            // Display shared details: dosage, usage, time, UNO, Ext/Int
+                            doc.setFontSize(8);
+                            doc.setFont(undefined, 'normal');
+                            doc.setTextColor(73, 80, 87);
+                            
+                            const details = [];
+                            if (group.dose && group.dose !== 'N/A') {
+                                details.push(`Dosage: ${group.dose}`);
+                            }
+                            // Handle usage - can be string or array
+                            let usage = 'N/A';
+                            if (group.usage) {
+                                usage = group.usage;
+                            } else if (group.usage_array && Array.isArray(group.usage_array) && group.usage_array.length > 0) {
+                                usage = group.usage_array.join(', ');
+                            }
+                            if (usage !== 'N/A') {
+                                details.push(`Usage: ${usage}`);
+                            }
+                            if (group.time && group.time !== 'N/A') {
+                                details.push(`Time: ${group.time}`);
+                            }
+                            if (group.notes && group.notes !== 'N/A') {
+                                details.push(`UNO: ${group.notes}`);
+                            }
+                            if (group.internal_external && group.internal_external !== 'N/A') {
+                                details.push(`Ext/Int: ${group.internal_external}`);
+                            }
+                            
+                            if (details.length > 0) {
+                                const detailsText = details.join('  •  ');
+                                const detailsLines = doc.splitTextToSize(detailsText, pageWidth - margin * 2 - 10);
+                                doc.text(detailsLines, margin + 5, yPos);
+                                yPos += detailsLines.length * 4 + 3;
+                            }
+                            
+                            // Show quantities if available
+                            const quantities = items.filter(it => it.quantity).map(it => `${it.item_name}: ${it.quantity}`);
+                            if (quantities.length > 0) {
+                                doc.setFontSize(8);
+                                doc.setFont(undefined, 'italic');
+                                doc.setTextColor(108, 117, 125);
+                                const qtyText = `Quantities: ${quantities.join(', ')}`;
+                                const qtyLines = doc.splitTextToSize(qtyText, pageWidth - margin * 2 - 10);
+                                doc.text(qtyLines, margin + 5, yPos);
+                                yPos += qtyLines.length * 4;
+                            }
+                            
+                            yPos += 4; // Space between groups
+                            doc.setTextColor(0, 0, 0);
+                        });
+                        
+                        yPos += 3; // Space between allocations
+                    });
+                    
+                    yPos += 5; // Space after prescription section
                 } else {
+                    // No prescription items
                     doc.setFontSize(10);
                     doc.setFont(undefined, 'italic');
+                    doc.setTextColor(0, 0, 0);
                     doc.text('No prescription items found.', margin, yPos);
                     yPos += 8;
                 }
                 
-                // Therapy Items Table
+                // Therapy Items - Grouped Format with colored header bar
                 if (therapyItems.length > 0) {
-                    checkNewPage(15 + (therapyItems.length * 8));
+                    checkNewPage(15);
+                    doc.setFillColor(16, 185, 129); // Green like therapy scheduling
+                    doc.rect(margin, yPos - 3, pageWidth - margin * 2, 8, 'F');
                     
-                    doc.setFontSize(11);
+                    doc.setFontSize(12);
                     doc.setFont(undefined, 'bold');
-                    doc.text('Therapy Items:', margin, yPos);
-                    yPos += 6;
+                    doc.setTextColor(255, 255, 255);
+                    doc.text('Therapy Items', margin + 5, yPos + 2);
+                    yPos += 10;
+                    doc.setTextColor(0, 0, 0);
                     
-                    const therapyTableData = therapyItems.map(therapy => [
-                        therapy.therapy_name || 'N/A',
-                        therapy.timeslot || '—',
-                        therapy.room_no || '—',
-                        therapy.therapists && therapy.therapists.length > 0 
-                            ? therapy.therapists.map(t => t.code).join(', ') 
-                            : '—'
-                    ]);
-                    
-                    doc.autoTable({
-                        head: [['Therapy Name', 'Time', 'Room', 'Therapist']],
-                        body: therapyTableData,
-                        startY: yPos,
-                        margin: { left: margin, right: margin },
-                        styles: {
-                            fontSize: 8,
-                            cellPadding: 2,
-                        },
-                        headStyles: {
-                            fillColor: [16, 185, 129],
-                            textColor: 255,
-                            fontStyle: 'bold',
-                        },
-                        alternateRowStyles: {
-                            fillColor: [245, 247, 250],
-                        },
-                        didDrawPage: function(data) {
-                            yPos = data.cursor.y + 5;
-                            addFooter(data.pageNumber);
-                            currentPage = data.pageNumber;
-                        },
+                    // Group therapy items by therapy_name
+                    const therapyGroups = {};
+                    therapyItems.forEach(item => {
+                        if (item.is_group && item.items) {
+                            const therapyKey = item.therapy_name || 'Unknown Therapy';
+                            if (!therapyGroups[therapyKey]) {
+                                therapyGroups[therapyKey] = [];
+                            }
+                            therapyGroups[therapyKey].push(item);
+                        }
                     });
                     
-                    yPos = doc.lastAutoTable.finalY + 8;
+                    // Render each therapy group
+                    Object.keys(therapyGroups).forEach(therapyName => {
+                        const therapyGroupsList = therapyGroups[therapyName];
+                        
+                        checkNewPage(15);
+                        
+                        // Therapy name - Colored bar like therapy scheduling
+                        doc.setFillColor(52, 211, 153); // Lighter green
+                        doc.rect(margin, yPos - 2, pageWidth - margin * 2, 6, 'F');
+                        
+                        doc.setFontSize(10);
+                        doc.setFont(undefined, 'bold');
+                        doc.setTextColor(255, 255, 255);
+                        doc.text(therapyName, margin + 5, yPos + 2);
+                        
+                        yPos += 8;
+                        doc.setTextColor(0, 0, 0);
+                        
+                        // Render each dosage group within this therapy
+                        therapyGroupsList.forEach(group => {
+                            const items = group.items || [];
+                            if (items.length === 0) return;
+                            
+                            checkNewPage(20);
+                            
+                            // Dosage if available
+                            if (group.dosage) {
+                                doc.setFontSize(9);
+                                doc.setFont(undefined, 'bold');
+                                doc.setTextColor(0, 0, 0);
+                                doc.text(`Dosage: ${group.dosage}`, margin + 5, yPos);
+                                yPos += 5;
+                            }
+                            
+                            // Display multiple items as comma-separated list
+                            doc.setFontSize(9);
+                            doc.setFont(undefined, 'bold');
+                            doc.setTextColor(0, 0, 0);
+                            const itemNames = items.map(it => {
+                                const name = it.item_name || 'N/A';
+                                const isRemoved = it.is_removed || it.status === 'removed';
+                                return isRemoved ? `${name} [REMOVED]` : name;
+                            }).join(', ');
+                            const itemNamesLines = doc.splitTextToSize(itemNames, pageWidth - margin * 2 - 10);
+                            doc.text(itemNamesLines, margin + 5, yPos);
+                            yPos += itemNamesLines.length * 4 + 4;
+                            
+                            // Display shared details: usage, UNO, Ext/Int
+                            doc.setFontSize(8);
+                            doc.setFont(undefined, 'normal');
+                            doc.setTextColor(73, 80, 87);
+                            
+                            const details = [];
+                            // Handle usage
+                            let usage = 'N/A';
+                            if (group.usage) {
+                                usage = group.usage;
+                            } else if (group.usage_array && Array.isArray(group.usage_array) && group.usage_array.length > 0) {
+                                usage = group.usage_array.join(', ');
+                            }
+                            if (usage !== 'N/A') {
+                                details.push(`Usage: ${usage}`);
+                            }
+                            if (group.uno && group.uno !== 'N/A') {
+                                details.push(`UNO: ${group.uno}`);
+                            }
+                            if (group.internal_external && group.internal_external !== 'N/A') {
+                                details.push(`Ext/Int: ${group.internal_external}`);
+                            }
+                            
+                            if (details.length > 0) {
+                                const detailsText = details.join('  •  ');
+                                const detailsLines = doc.splitTextToSize(detailsText, pageWidth - margin * 2 - 10);
+                                doc.text(detailsLines, margin + 5, yPos);
+                                yPos += detailsLines.length * 4 + 3;
+                            }
+                            
+                            yPos += 4; // Space between groups
+                            doc.setTextColor(0, 0, 0);
+                        });
+                        
+                        yPos += 3; // Space between therapies
+                    });
+                    
+                    yPos += 5; // Space after therapy section
                 }
                 
-                // Add spacing between patients
-                yPos += 5;
-                doc.setLineWidth(0.3);
-                doc.line(margin, yPos, pageWidth - margin, yPos);
+                // Add spacing between patients with separator line
                 yPos += 8;
+                doc.setDrawColor(200, 200, 200);
+                doc.setLineWidth(0.5);
+                doc.line(margin, yPos, pageWidth - margin, yPos);
+                yPos += 12;
             });
             
             // Add final footer

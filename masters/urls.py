@@ -66,6 +66,13 @@ urlpatterns = [
     path('slots/add/', views.SlotMasterCreateView.as_view(), name='slot_master_add'),
     path('slots/<int:pk>/update/', views.SlotMasterUpdateView.as_view(), name='slot_master_update'),
     path('slots/<int:pk>/delete/', views.slot_master_delete, name='slot_master_delete'),
+    # Ingredient Master CRUD
+    path('ingredients/', views.IngredientMasterManagementView.as_view(), name='ingredient_master_manage'),
+    path('ingredients/add/', views.IngredientMasterCreateView.as_view(), name='ingredient_master_add'),
+    path('ingredients/<int:pk>/update/', views.IngredientMasterUpdateView.as_view(), name='ingredient_master_update'),
+    path('ingredients/<int:pk>/delete/', views.ingredient_master_delete, name='ingredient_master_delete'),
+    path('ingredients/<int:pk>/enable/', views.ingredient_master_enable, name='ingredient_master_enable'),
+    path('ingredients/<int:pk>/disable/', views.ingredient_master_disable, name='ingredient_master_disable'),
     # Therapist Master CRUD
     path('therapists/', views.TherapistMasterManagementView.as_view(), name='therapist_master_manage'),
     path('therapists/add/', views.TherapistMasterCreateView.as_view(), name='therapist_master_add'),
