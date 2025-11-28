@@ -142,6 +142,18 @@ def create_therapist_booking_safe(therapist, date, time_slot, therapy_name, pati
             # persist is_bathing if model supports it and we either created or it's not set
             try:
                 if is_bathing and hasattr(tb, 'is_bathing'):
+                    # CRITICAL: Before setting this therapist as bathing, ensure NO OTHER therapist for this visit is marked as bathing
+                    # This ensures only ONE bathing therapist per visit (especially important for Dhara & Pizichil)
+                    if visit:
+                        # Set all other TherapistBooking records for this visit to is_bathing=False
+                        TherapistBooking.objects.filter(
+                            visit=visit,
+                            status='BOOKED'
+                        ).exclude(
+                            pk=tb.pk  # Exclude current record
+                        ).update(is_bathing=False)
+                        print(f"[DEBUG create_therapist_booking_safe] Cleared is_bathing for other therapists in visit {visit.pk}")
+                    
                     if getattr(tb, 'is_bathing', False) != bool(is_bathing):
                         tb.is_bathing = bool(is_bathing)
                         tb.save(update_fields=['is_bathing'])
@@ -153,6 +165,17 @@ def create_therapist_booking_safe(therapist, date, time_slot, therapy_name, pati
         # attempt to mark is_bathing if possible (best-effort, non-fatal)
         try:
             if tb and is_bathing and hasattr(tb, 'is_bathing'):
+                # CRITICAL: Before setting this therapist as bathing, ensure NO OTHER therapist for this visit is marked as bathing
+                if visit and tb.visit:
+                    # Set all other TherapistBooking records for this visit to is_bathing=False
+                    TherapistBooking.objects.filter(
+                        visit=tb.visit,
+                        status='BOOKED'
+                    ).exclude(
+                        pk=tb.pk  # Exclude current record
+                    ).update(is_bathing=False)
+                    print(f"[DEBUG create_therapist_booking_safe] Cleared is_bathing for other therapists in visit {tb.visit.pk}")
+                
                 if not tb.is_bathing:
                     tb.is_bathing = True
                     tb.save(update_fields=['is_bathing'])
@@ -835,6 +858,24 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
     # choose bathing assignee
     assigned_therapists = candidate_therapists[:req_total]
     bath_assigned = None
+    
+    # Check if this is Dhara & Pizichil therapy for special senior therapist handling
+    is_dhara_pizichil = False
+    senior_therapist = None
+    if therapy_name:
+        therapy_lower = str(therapy_name).lower()
+        is_dhara_pizichil = 'dhara' in therapy_lower and 'pizichil' in therapy_lower
+    
+    # For Dhara & Pizichil: Identify the senior therapist from assigned therapists
+    if is_dhara_pizichil:
+        # Find senior therapist (Senior Therapist or Super Senior Therapist)
+        for t in assigned_therapists:
+            grade_name = getattr(getattr(t, 'therapist_grade', None), 'name', '') if hasattr(t, 'therapist_grade') else ''
+            if 'Senior' in grade_name:
+                senior_therapist = t
+                print(f"[DEBUG] Dhara & Pizichil: Identified senior therapist {t.therapist_code} (grade: {grade_name})")
+                break
+    
     if needs_bath_flag and assigned_therapists:
         # First, check if this patient had a previous bathing therapist assignment
         previous_bathing_therapist = None
@@ -890,47 +931,147 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
             import traceback
             traceback.print_exc()
         
-        # If no previous bathing therapist found or not available, pick from assigned therapists
-        if not bath_assigned:
-            # Find any bathing therapist from assigned list
-            bath_assigned = next((t for t in assigned_therapists if getattr(t, 'is_bathing_therapist', False)), None)
+        # For Dhara & Pizichil: Senior therapist should NOT be the bathing therapist
+        if is_dhara_pizichil and senior_therapist:
+            # Exclude senior therapist from bathing assignment
+            bathing_candidates = [t for t in assigned_therapists if t != senior_therapist and getattr(t, 'is_bathing_therapist', False)]
             
-            # If no bathing therapist available in assigned list, FAIL the allocation
-            if not bath_assigned:
-                reason = "bathing_therapist_unavailable: No bathing therapist available for this therapy"
-                print(f"[DEBUG] FAILING allocation: Therapy requires bathing but no bathing therapist available. Patient: {patient_id}, Date: {date}")
+            if previous_bathing_therapist and previous_bathing_therapist in bathing_candidates:
+                # Previous bathing therapist is available and not the senior - use them
+                bath_assigned = previous_bathing_therapist
+                print(f"[DEBUG] Dhara & Pizichil: Using previous bathing therapist {previous_bathing_therapist.therapist_code} (senior {senior_therapist.therapist_code} excluded)")
+            elif bathing_candidates:
+                # Pick first available bathing therapist (excluding senior)
+                bath_assigned = bathing_candidates[0]
+                print(f"[DEBUG] Dhara & Pizichil: Assigned bathing therapist {bath_assigned.therapist_code} (senior {senior_therapist.therapist_code} excluded)")
+            else:
+                # No bathing therapist available except senior - need to find another senior or fail
+                # Try to find next available senior therapist who is also a bathing therapist
+                print(f"[DEBUG] Dhara & Pizichil: Senior {senior_therapist.therapist_code} is the only bathing therapist. Looking for alternative senior...")
                 
-                # Update booking status to failed
-                try:
-                    booking.status = 'failed'
-                    booking.save(update_fields=['status', 'updated_at'])
-                except Exception as e:
-                    print(f"Error updating booking {booking_id} to failed: {e}")
+                # Get all available senior therapists (excluding current senior)
+                alternative_seniors = TherapistMaster.objects.filter(
+                    therapist_grade__name__in=['Senior Therapist', 'Super Senior Therapist']
+                ).exclude(
+                    therapist_code=senior_therapist.therapist_code
+                )
                 
-                therapists_for_audit = [{"therapist_code": getattr(t,'therapist_code',str(t)), "is_bathing": False} for t in assigned_therapists]
-                if AllocationAttempt:
+                # Filter by gender if needed
+                pat_sex = getattr(getattr(allocation, 'patient', None), 'pat_sex', None)
+                if pat_sex:
+                    desired_gender = 'female' if str(pat_sex).strip().lower().startswith('f') else 'male'
+                    alternative_seniors = alternative_seniors.filter(therapist_gender__istartswith=desired_gender[0])
+                
+                # Filter by bathing therapist requirement
+                alternative_seniors = alternative_seniors.filter(is_bathing_therapist=True)
+                
+                # Exclude those on leave or booked
+                day_of_week = date.weekday()
+                for alt_senior in alternative_seniors:
+                    if TherapistBooking.objects.filter(therapist=alt_senior, date=date, time_slot=canonical_slot, status='BOOKED').exists():
+                        continue
+                    if TherapistLeaveMaster.objects.filter(therapist=alt_senior, leave_day=day_of_week).exists():
+                        continue
+                    # Check emergency leave
+                    if EmergencyLeave.objects.filter(
+                        from_date__lte=date, to_date__gte=date
+                    ).filter(
+                        Q(therapist=alt_senior) | Q(employee_code=alt_senior.employee_code)
+                    ).exists():
+                        continue
+                    
+                    # Found alternative senior - replace current senior and use this one for bathing
+                    print(f"[DEBUG] Dhara & Pizichil: Found alternative senior {alt_senior.therapist_code} who can be bathing therapist")
+                    # Replace senior in assigned list
+                    assigned_therapists = [alt_senior if t == senior_therapist else t for t in assigned_therapists]
+                    senior_therapist = alt_senior
+                    bath_assigned = alt_senior
+                    break
+                
+                if not bath_assigned:
+                    # No alternative senior found - fail allocation
+                    reason = "bathing_therapist_unavailable: Senior therapist for Dhara & Pizichil cannot be bathing therapist, and no alternative senior available"
+                    print(f"[DEBUG] FAILING allocation: Dhara & Pizichil - Senior {senior_therapist.therapist_code} is only bathing therapist and no alternative found. Patient: {patient_id}, Date: {date}")
+                    
                     try:
-                        AllocationAttempt.objects.create(
-                            visit=None, therapy=None, date=date,
-                            requested_time_slot=canonical_slot, requested_time_slot_value=requested_slot_value or '',
-                            status='FAILED', reason=reason,
-                            extra={"required": req_total, "found": len(candidate_therapists), "booking_id": booking_id, "therapists": therapists_for_audit, "bathing_required": True}
-                        )
-                    except Exception:
-                        pass
-                return ({
-                    "booking_id": booking_id,
-                    "allocation_id": allocation.pk,
-                    "date": date.isoformat(),
-                    "therapy_name": therapy_name,
-                    "slot": requested_slot_value,
-                    "status": "FAILED",
-                    "reason": reason,
-                    "room_no": getattr(booking.room, 'room_no', None) if getattr(booking,'room',None) else None,
-                    "therapists": therapists_for_audit
-                }, False, reason)
+                        booking.status = 'failed'
+                        booking.save(update_fields=['status', 'updated_at'])
+                    except Exception as e:
+                        print(f"Error updating booking {booking_id} to failed: {e}")
+                    
+                    therapists_for_audit = [{"therapist_code": getattr(t,'therapist_code',str(t)), "is_bathing": False} for t in assigned_therapists]
+                    if AllocationAttempt:
+                        try:
+                            AllocationAttempt.objects.create(
+                                visit=None, therapy=None, date=date,
+                                requested_time_slot=canonical_slot, requested_time_slot_value=requested_slot_value or '',
+                                status='FAILED', reason=reason,
+                                extra={"required": req_total, "found": len(candidate_therapists), "booking_id": booking_id, "therapists": therapists_for_audit, "bathing_required": True, "senior_therapist": senior_therapist.therapist_code if senior_therapist else None}
+                            )
+                        except Exception:
+                            pass
+                    return ({
+                        "booking_id": booking_id,
+                        "allocation_id": allocation.pk,
+                        "date": date.isoformat(),
+                        "therapy_name": therapy_name,
+                        "slot": requested_slot_value,
+                        "status": "FAILED",
+                        "reason": reason,
+                        "room_no": getattr(booking.room, 'room_no', None) if getattr(booking,'room',None) else None,
+                        "therapists": therapists_for_audit
+                    }, False, reason)
+        else:
+            # Not Dhara & Pizichil or no senior therapist - use normal logic
+            # If no previous bathing therapist found or not available, pick from assigned therapists
+            if not bath_assigned:
+                # Find any bathing therapist from assigned list
+                bath_assigned = next((t for t in assigned_therapists if getattr(t, 'is_bathing_therapist', False)), None)
+                
+                # If no bathing therapist available in assigned list, FAIL the allocation
+                if not bath_assigned:
+                    reason = "bathing_therapist_unavailable: No bathing therapist available for this therapy"
+                    print(f"[DEBUG] FAILING allocation: Therapy requires bathing but no bathing therapist available. Patient: {patient_id}, Date: {date}")
+                    
+                    # Update booking status to failed
+                    try:
+                        booking.status = 'failed'
+                        booking.save(update_fields=['status', 'updated_at'])
+                    except Exception as e:
+                        print(f"Error updating booking {booking_id} to failed: {e}")
+                    
+                    therapists_for_audit = [{"therapist_code": getattr(t,'therapist_code',str(t)), "is_bathing": False} for t in assigned_therapists]
+                    if AllocationAttempt:
+                        try:
+                            AllocationAttempt.objects.create(
+                                visit=None, therapy=None, date=date,
+                                requested_time_slot=canonical_slot, requested_time_slot_value=requested_slot_value or '',
+                                status='FAILED', reason=reason,
+                                extra={"required": req_total, "found": len(candidate_therapists), "booking_id": booking_id, "therapists": therapists_for_audit, "bathing_required": True}
+                            )
+                        except Exception:
+                            pass
+                    return ({
+                        "booking_id": booking_id,
+                        "allocation_id": allocation.pk,
+                        "date": date.isoformat(),
+                        "therapy_name": therapy_name,
+                        "slot": requested_slot_value,
+                        "status": "FAILED",
+                        "reason": reason,
+                        "room_no": getattr(booking.room, 'room_no', None) if getattr(booking,'room',None) else None,
+                        "therapists": therapists_for_audit
+                    }, False, reason)
 
-    therapists_for_audit = [{"therapist_code": getattr(t,'therapist_code',str(t)), "is_bathing": (t==bath_assigned)} for t in assigned_therapists]
+    # build therapist audit list - mark senior therapist for Dhara & Pizichil
+    therapists_for_audit = []
+    for t in assigned_therapists:
+        is_bath = (t == bath_assigned)
+        is_senior = (is_dhara_pizichil and t == senior_therapist)
+        therapist_dict = {"therapist_code": getattr(t,'therapist_code',str(t)), "is_bathing": is_bath}
+        if is_senior:
+            therapist_dict["is_senior"] = True  # Mark senior therapist for UI highlighting
+        therapists_for_audit.append(therapist_dict)
 
     # room allocation if needed
     room_candidate = getattr(booking, 'room', None)

@@ -1839,6 +1839,10 @@ def search_patients_by_room(request):
         except (ValueError, TypeError):
             pass
         
+        # Get current date for filtering active patients only
+        from datetime import date
+        today = date.today()
+        
         # Search in Treatment table first (handles both IP and OP patients with room numbers like "CT-16", "OP-1")
         treatment_patients = []
         try:
@@ -1846,9 +1850,19 @@ def search_patients_by_room(request):
             
             # Search Treatment table by Pat_Room_No (CharField - can store "CT-16", "OP-1" directly)
             # Treatment table is in iptherapy_db, not therapy_db
+            # Filter only active patients for current date:
+            # - Pat_DoD (Date of Discharge) is null (not discharged) OR Pat_DoD >= today (discharged today or future)
+            # - DOA (Date of Admission) <= today (admitted today or earlier)
+            from datetime import datetime
+            today_start = datetime.combine(today, datetime.min.time())
+            
             treatment_records = Treatment.objects.using('iptherapy_db').filter(
                 Pat_Room_No__iexact=room_query
-            ).values('Pat_Reg_No', 'Pat_Room_No', 'Pat_Name', 'Pat_Sex', 'Pat_Age').distinct()[:100]
+            ).filter(
+                Q(Pat_DoD__isnull=True) | Q(Pat_DoD__date__gte=today)
+            ).filter(
+                Q(DOA__isnull=True) | Q(DOA__date__lte=today)
+            ).values('Pat_Reg_No', 'Pat_Room_No', 'Pat_Name', 'Pat_Sex', 'Pat_Age', 'DOA', 'Pat_DoD').distinct()[:100]
             
             print(f"[DEBUG] Found {len(list(treatment_records))} treatment records for room: '{room_query}'")
             
@@ -1893,13 +1907,61 @@ def search_patients_by_room(request):
             for room_num in snapshot_room_numbers_to_search:
                 snapshot_q |= Q(pat_room_no__iexact=room_num)
             
-            snapshot_records = PatientSnapshot.objects.filter(
+            snapshot_records_list = list(PatientSnapshot.objects.filter(
                 snapshot_q
-            ).values('pat_reg_no', 'pat_room_no', 'pat_name', 'pat_sex', 'pat_age')[:100]
+            ).values('pat_reg_no', 'pat_room_no', 'pat_name', 'pat_sex', 'pat_age')[:100])
             
-            print(f"[DEBUG] Found {len(list(snapshot_records))} PatientSnapshot records for room: '{room_query}'")
+            # Filter snapshot records to include patients currently in room
+            # by cross-referencing with Registration table (IP) or OPMaster (OP)
+            active_snapshot_records = []
+            from datetime import timedelta
+            thirty_days_ago = today - timedelta(days=30)
             
-            for snapshot in snapshot_records:
+            for snapshot in snapshot_records_list:
+                reg_no = snapshot['pat_reg_no']
+                is_active = False
+                
+                # Determine if patient is OP (5-digit registration number) or IP
+                reg_no_str = str(reg_no).strip()
+                digits_only = ''.join(ch for ch in reg_no_str if ch.isdigit())
+                is_op_patient = len(digits_only) == 5
+                
+                try:
+                    if is_op_patient:
+                        # OP patient - check OPMaster table
+                        # OP patients don't have visit dates, so check if they exist and have recent registration
+                        op_patient = OPMaster.objects.using('hospital_db').filter(
+                            NPat_Reg_No=reg_no
+                        ).first()
+                        
+                        if op_patient:
+                            # Check if registration date is within last 30 days (recent OP patient)
+                            if op_patient.Reg_Date:
+                                reg_date = op_patient.Reg_Date.date() if hasattr(op_patient.Reg_Date, 'date') else op_patient.Reg_Date
+                                if reg_date >= thirty_days_ago:
+                                    is_active = True
+                            else:
+                                # If no registration date, include them (they might be active)
+                                is_active = True
+                    else:
+                        # IP patient - check Registration table
+                        active_reg = Registration.objects.using('therapy_db').filter(
+                            pat_reg_no=reg_no,
+                            pat_visit_date__date__gte=thirty_days_ago  # Patients who visited within last 30 days
+                        ).exists()
+                        if active_reg:
+                            is_active = True
+                except Exception as e:
+                    # If can't check, skip it (only show active patients)
+                    print(f"[DEBUG] Error checking patient {reg_no}: {e}")
+                    pass
+                
+                if is_active:
+                    active_snapshot_records.append(snapshot)
+            
+            print(f"[DEBUG] Found {len(active_snapshot_records)} active PatientSnapshot records for room: '{room_query}' (filtered for recent visits - includes OP and IP)")
+            
+            for snapshot in active_snapshot_records:
                 reg_no = snapshot['pat_reg_no']
                 # Skip if already in treatment_patients
                 if not any(tp['reg_no'] == reg_no for tp in treatment_patients):
@@ -1958,15 +2020,92 @@ def search_patients_by_room(request):
             
             # Build search query
             if room_numbers_to_search:
-                # Search by all found room numbers - return all patients regardless of status
+                # Search by all found room numbers - show patients currently in the room
                 search_q = Q(pat_room_no__in=room_numbers_to_search)
                 
-                # Search all patients (active and inactive) - no status filter
+                # Show patients who are currently in the room (not just visited today)
+                # Criteria: 
+                # 1. Has room number assigned
+                # 2. Visit date is within last 30 days (reasonable stay period) OR
+                # 3. Has active therapies/bookings for today or future
+                from datetime import datetime, timedelta
+                from django.db.models import Q
+                
+                # Get date range for recent visits (last 30 days to cover current stays)
+                thirty_days_ago = today - timedelta(days=30)
+                
+                # Filter: visit date within last 30 days (covers patients currently staying)
+                search_q &= Q(pat_visit_date__date__gte=thirty_days_ago)
+                
                 ip_patients_list = Registration.objects.using('therapy_db').filter(
                     search_q
                 ).values(
-                    'pat_reg_no', 'pat_name', 'pat_sex', 'pat_age', 'pat_room_no', 'pat_ref_id', 'pat_visit_date'
-                ).order_by('-pat_visit_date')[:100]
+                    'pat_reg_no', 'pat_name', 'pat_sex', 'pat_age', 'pat_room_no', 'pat_ref_id', 'pat_visit_date', 'pat_room_date'
+                ).order_by('-pat_visit_date', '-pat_room_date')[:100]
+                
+                # Further filter: Check if patients have active therapies/bookings for today or future
+                # This ensures we show patients who are actively being treated
+                from Sheduling.models import TherapyAllocation, Booking
+                active_patient_reg_nos = set()
+                
+                # Check TherapyAllocation for active therapies (covering today or future)
+                try:
+                    active_therapies = TherapyAllocation.objects.filter(
+                        from_date__lte=today,  # Therapy started on or before today
+                        to_date__gte=today,    # Therapy ends on or after today
+                        status__in=['allocated', 'draft']  # Active statuses
+                    ).select_related('patient')
+                    
+                    for therapy in active_therapies:
+                        if therapy.patient and therapy.patient.pat_reg_no:
+                            # Add both as string and as-is to handle different formats
+                            reg_no_str = str(therapy.patient.pat_reg_no)
+                            active_patient_reg_nos.add(reg_no_str)
+                            # Also add the original value in case it's stored differently
+                            try:
+                                if hasattr(therapy.patient.pat_reg_no, '__str__'):
+                                    active_patient_reg_nos.add(therapy.patient.pat_reg_no)
+                            except:
+                                pass
+                except Exception as e:
+                    print(f"[DEBUG] Error checking active therapies: {e}")
+                    pass
+                
+                # Check Booking for active bookings (today or future)
+                try:
+                    active_bookings = Booking.objects.filter(
+                        date__gte=today,
+                        status__in=['scheduled', 'draft']
+                    ).select_related('allocation__patient')
+                    
+                    for booking in active_bookings:
+                        if booking.allocation and booking.allocation.patient and booking.allocation.patient.pat_reg_no:
+                            # Add both as string and as-is to handle different formats
+                            reg_no_str = str(booking.allocation.patient.pat_reg_no)
+                            active_patient_reg_nos.add(reg_no_str)
+                            # Also add the original value in case it's stored differently
+                            try:
+                                if hasattr(booking.allocation.patient.pat_reg_no, '__str__'):
+                                    active_patient_reg_nos.add(booking.allocation.patient.pat_reg_no)
+                            except:
+                                pass
+                except Exception as e:
+                    print(f"[DEBUG] Error checking active bookings: {e}")
+                    pass
+                
+                # Convert ip_patients_list to list for manipulation
+                ip_patients_list = list(ip_patients_list)
+                
+                # Prioritize patients with active therapies/bookings, then show most recent
+                if active_patient_reg_nos:
+                    # Separate into active and others
+                    active_patients = [p for p in ip_patients_list if str(p['pat_reg_no']) in active_patient_reg_nos]
+                    other_patients = [p for p in ip_patients_list if str(p['pat_reg_no']) not in active_patient_reg_nos]
+                    # Show active patients first, then most recent others
+                    ip_patients_list = active_patients + other_patients[:50]
+                else:
+                    # No active therapies found, show most recent patients in room (already ordered by -pat_visit_date)
+                    ip_patients_list = ip_patients_list[:50]
             else:
                 # No valid room number found
                 ip_patients_list = []
@@ -2023,14 +2162,19 @@ def search_patients_by_room(request):
                 continue
             
             try:
-                # Try to find in IP patients (Registration table)
+                # Try to find in IP patients (Registration table) - show patients currently in room
                 ip_patient = None
                 try:
+                    from datetime import timedelta
+                    thirty_days_ago = today - timedelta(days=30)
+                    
+                    # Show patients with visit date within last 30 days (currently staying)
                     ip_patient = Registration.objects.using('therapy_db').filter(
-                        pat_reg_no=reg_no
+                        pat_reg_no=reg_no,
+                        pat_visit_date__date__gte=thirty_days_ago  # Patients who visited within last 30 days
                     ).values(
                         'pat_reg_no', 'pat_name', 'pat_sex', 'pat_age', 'pat_room_no', 'pat_ref_id', 'pat_visit_date'
-                    ).first()
+                    ).order_by('-pat_visit_date').first()
                 except Exception:
                     pass
                 
