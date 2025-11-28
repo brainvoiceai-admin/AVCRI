@@ -892,74 +892,85 @@
                 return;
             }
             
-            // Render prescription items section - grouped like therapy items
+            // Render prescription items section - grouped by allocation (like prescription entry page)
             if (prescriptionGroups.length > 0) {
                 const prescriptionSection = document.createElement('div');
                 prescriptionSection.className = 'items-section';
                 prescriptionSection.innerHTML = '<h3 style="margin: 0 0 15px 0; color: #333;">Prescription Items</h3>';
                 
-                // Section is cancelled only if ALL groups are cancelled
-                const prescriptionIsCancelled = prescriptionGroups.every(g => g.is_cancelled);
-                
-                if (prescriptionIsCancelled) {
-                    prescriptionSection.style.border = '2px solid #e63757';
-                    prescriptionSection.style.borderRadius = '8px';
-                    prescriptionSection.style.padding = '15px';
-                    prescriptionSection.style.backgroundColor = '#fff5f5';
-                    const title = prescriptionSection.querySelector('h3');
-                    if (title) {
-                        title.innerHTML += ' <span style="color: #e63757; font-weight: bold; margin-left: 8px;">[CANCELLED]</span>';
-                    }
-                }
-                
-                // Render each prescription group
+                // Group prescription groups by allocation_id (extract from group_id)
+                // Handle both "prescription_group_{allocation_id}_{group_idx}" and "prescription_item_{item_id}" formats
+                const groupsByAllocation = {};
                 prescriptionGroups.forEach(group => {
-                    const items = group.items || [];
-                    // Show all groups, even if empty (to show all groups)
-                    
-                    const groupDiv = document.createElement('div');
-                    groupDiv.style.marginBottom = '20px';
-                    const groupIsCancelled = !!group.is_cancelled;
-                    groupDiv.style.border = groupIsCancelled ? '2px solid #e63757' : '1px solid #e3ebf6';
-                    groupDiv.style.borderRadius = '8px';
-                    groupDiv.style.padding = '15px';
-                    groupDiv.style.backgroundColor = groupIsCancelled ? '#fff5f5' : '#f9fafd';
-                    if (groupIsCancelled) {
-                        groupDiv.style.opacity = '0.7';
-                    }
-                    
-                    // Group header with time and dose
-                    const groupHeader = document.createElement('div');
-                    groupHeader.style.fontSize = '14px';
-                    groupHeader.style.fontWeight = '600';
-                    groupHeader.style.color = '#333';
-                    groupHeader.style.marginBottom = '10px';
-                    
-                    // Show the actual time as-is (no normalization)
-                    const timeLabel = group.time || 'M';
-                    
-                    groupHeader.innerHTML = `<strong>Time: ${escapeHtml(timeLabel)}</strong>`;
-                    if (group.dose) {
-                        groupHeader.innerHTML += ` - Dosage: <strong>${escapeHtml(group.dose)}</strong>`;
-                    }
-                    if (group.notes) {
-                        groupHeader.innerHTML += ` <span style="color: #666; font-size: 0.9em;">(${escapeHtml(group.notes)})</span>`;
-                    }
-                    groupDiv.appendChild(groupHeader);
-                    
-                    // Render items in this group (or show empty message)
-                    if (items.length === 0) {
-                        const emptyMsg = document.createElement('div');
-                        emptyMsg.style.color = '#666';
-                        emptyMsg.style.fontStyle = 'italic';
-                        emptyMsg.style.padding = '10px';
-                        emptyMsg.textContent = 'No items in this group';
-                        groupDiv.appendChild(emptyMsg);
+                    let allocationId = 'unknown';
+                    // Try to extract allocation_id from group_id
+                    const groupMatch = group.group_id.match(/prescription_group_(\d+)_/);
+                    if (groupMatch) {
+                        allocationId = groupMatch[1];
                     } else {
+                        // For prescription_item format, use item_id as allocation key (each item is its own "allocation")
+                        const itemMatch = group.group_id.match(/prescription_item_(\d+)/);
+                        if (itemMatch) {
+                            allocationId = `item_${itemMatch[1]}`;
+                        }
+                    }
+                    if (!groupsByAllocation[allocationId]) {
+                        groupsByAllocation[allocationId] = [];
+                    }
+                    groupsByAllocation[allocationId].push(group);
+                });
+                
+                // Render each allocation as a single entry (like prescription entry page)
+                const allocationIds = Object.keys(groupsByAllocation);
+                allocationIds.forEach((allocationId, entryIndex) => {
+                    const allocationGroups = groupsByAllocation[allocationId];
+                    const allocationIsCancelled = allocationGroups.every(g => g.is_cancelled);
+                    
+                    // Entry number header (one per PrescriptionAllocation)
+                    const entryHeader = document.createElement('div');
+                    entryHeader.style.fontSize = '14px';
+                    entryHeader.style.fontWeight = '600';
+                    entryHeader.style.color = '#333';
+                    entryHeader.style.marginBottom = '12px';
+                    entryHeader.style.paddingBottom = '8px';
+                    entryHeader.style.borderBottom = '2px solid #2c7be5';
+                    entryHeader.innerHTML = `Entry ${entryIndex + 1}`;
+                    if (allocationIsCancelled) {
+                        entryHeader.innerHTML += ' <span style="color: #e63757; font-weight: bold; margin-left: 8px;">[CANCELLED]</span>';
+                    }
+                    prescriptionSection.appendChild(entryHeader);
+                    
+                    // Single container for all groups from this allocation
+                    const allocationDiv = document.createElement('div');
+                    allocationDiv.style.marginBottom = '25px';
+                    allocationDiv.style.border = allocationIsCancelled ? '2px solid #e63757' : '1px solid #e3ebf6';
+                    allocationDiv.style.borderRadius = '8px';
+                    allocationDiv.style.padding = '15px';
+                    allocationDiv.style.backgroundColor = allocationIsCancelled ? '#fff5f5' : '#f9fafd';
+                    if (allocationIsCancelled) {
+                        allocationDiv.style.opacity = '0.7';
+                    }
+                    
+                    // Render all groups from this allocation, separated by horizontal rules (no numbering within entry)
+                    allocationGroups.forEach((group, groupIndex) => {
+                        const items = group.items || [];
+                        
+                        // Skip empty groups
+                        if (items.length === 0) return;
+                        
+                        // Add horizontal rule between groups (except first one)
+                        if (groupIndex > 0) {
+                            const hr = document.createElement('hr');
+                            hr.style.margin = '15px 0';
+                            hr.style.border = 'none';
+                            hr.style.borderTop = '2px solid #e3ebf6';
+                            allocationDiv.appendChild(hr);
+                        }
+                        
                         // Display as single group with multiple items (like prescription entry page)
                         const itemCard = document.createElement('div');
                         itemCard.className = 'medicine-card';
-                        itemCard.style.borderLeft = groupIsCancelled ? '4px solid #e63757' : '4px solid #2c7be5';
+                        itemCard.style.borderLeft = allocationIsCancelled ? '4px solid #e63757' : '4px solid #2c7be5';
                         itemCard.style.marginBottom = '8px';
                         itemCard.style.padding = '12px';
                         itemCard.style.backgroundColor = '#fff';
@@ -1005,7 +1016,7 @@
                         itemCard.innerHTML = `
                             <div style="display:flex;align-items:flex-start;gap:12px;">
                                 <div class="medicine-checkbox" style="flex-shrink:0;padding-top:4px;">
-                                    <input type="checkbox" id="med-group-${group.group_id}" ${allPrepared ? 'checked' : ''} ${prescriptionIsCancelled ? 'disabled' : ''}>
+                                    <input type="checkbox" id="med-group-${group.group_id}" ${allPrepared ? 'checked' : ''} ${allocationIsCancelled ? 'disabled' : ''}>
                                 </div>
                                 <div class="medicine-details" style="flex:1;">
                                     <div style="margin-bottom:8px;">
@@ -1023,7 +1034,7 @@
                         `;
                         
                         // Add event listener for checkbox (only if prescription not cancelled)
-                        if (!prescriptionIsCancelled) {
+                        if (!allocationIsCancelled) {
                             const checkbox = itemCard.querySelector('input[type="checkbox"]');
                             checkbox.addEventListener('change', function() {
                                 // Toggle all items in the group
@@ -1047,10 +1058,10 @@
                             });
                         }
                         
-                        groupDiv.appendChild(itemCard);
-                    }
+                        allocationDiv.appendChild(itemCard);
+                    });
                     
-                    prescriptionSection.appendChild(groupDiv);
+                    prescriptionSection.appendChild(allocationDiv);
                 });
                 
                 pvContent.appendChild(prescriptionSection);
