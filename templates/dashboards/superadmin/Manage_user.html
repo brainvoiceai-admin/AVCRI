@@ -47,6 +47,13 @@
     .btn-sm {
       margin: 2px;
     }
+    .is-invalid {
+      border-color: #dc3545;
+    }
+    .is-invalid:focus {
+      border-color: #dc3545;
+      box-shadow: 0 0 0 0.2rem rgba(220, 53, 69, 0.25);
+    }
     @media (max-width: 768px) {
       .sidebar {
         position: static;
@@ -88,10 +95,62 @@
           {% endfor %}
         {% endif %}
 
+        <!-- Search and Filter Section -->
+        <div class="card mb-4">
+          <div class="card-body">
+            <form method="get" action="{% url 'authentication:Manage_user' %}" id="filterForm">
+              <div class="row g-3">
+                <div class="col-md-4">
+                  <label for="search" class="form-label">Search</label>
+                  <input type="text" class="form-control" id="search" name="search" 
+                         placeholder="Search by username, email, name, or mobile..." 
+                         value="{{ request.GET.search|default:'' }}">
+                </div>
+                <div class="col-md-3">
+                  <label for="status" class="form-label">Status</label>
+                  <select class="form-select" id="status" name="status">
+                    <option value="">All Status</option>
+                    <option value="active" {% if request.GET.status == 'active' %}selected{% endif %}>Active</option>
+                    <option value="inactive" {% if request.GET.status == 'inactive' %}selected{% endif %}>Inactive</option>
+                  </select>
+                </div>
+                <div class="col-md-3">
+                  <label for="role" class="form-label">Role</label>
+                  <select class="form-select" id="role" name="role">
+                    <option value="">All Roles</option>
+                    <option value="super_admin" {% if request.GET.role == 'super_admin' %}selected{% endif %}>Super Admin</option>
+                    <option value="admin" {% if request.GET.role == 'admin' %}selected{% endif %}>Admin</option>
+                    <option value="doctor" {% if request.GET.role == 'doctor' %}selected{% endif %}>Doctor</option>
+                    <option value="scheduling_staff" {% if request.GET.role == 'scheduling_staff' %}selected{% endif %}>Scheduling Staff</option>
+                    <option value="therapist" {% if request.GET.role == 'therapist' %}selected{% endif %}>Therapist</option>
+                    <option value="nurse" {% if request.GET.role == 'nurse' %}selected{% endif %}>Nurse</option>
+                    <option value="patient" {% if request.GET.role == 'patient' %}selected{% endif %}>Patient</option>
+                    <option value="ip_pharmacy_staff" {% if request.GET.role == 'ip_pharmacy_staff' %}selected{% endif %}>IP Pharmacy Staff</option>
+                    <option value="imu_staff" {% if request.GET.role == 'imu_staff' %}selected{% endif %}>IMU Staff</option>
+                    <option value="finance_staff" {% if request.GET.role == 'finance_staff' %}selected{% endif %}>Finance Staff</option>
+                    <option value="hr" {% if request.GET.role == 'hr' %}selected{% endif %}>HR</option>
+                    <option value="housekeeping_staff" {% if request.GET.role == 'housekeeping_staff' %}selected{% endif %}>Housekeeping Staff</option>
+                  </select>
+                </div>
+                <div class="col-md-2 d-flex align-items-end">
+                  <button type="submit" class="btn btn-primary w-100 me-2">
+                    <i class="fas fa-search"></i> Filter
+                  </button>
+                  <a href="{% url 'authentication:Manage_user' %}" class="btn btn-secondary w-100">
+                    <i class="fas fa-times"></i> Clear
+                  </a>
+                </div>
+              </div>
+            </form>
+          </div>
+        </div>
+
         <!-- User Table -->
         <div class="card">
-          <div class="card-header">
-            <h5 class="mb-0">System Users</h5>
+          <div class="card-header d-flex justify-content-between align-items-center">
+            <h5 class="mb-0">System Users 
+              <span class="badge bg-primary ms-2">{{ users|length }}</span>
+            </h5>
           </div>
           <div class="card-body p-0">
             <div class="table-responsive">
@@ -111,7 +170,7 @@
                 </thead>
                 <tbody>
                   {% for user in users %}
-                  <tr>
+                  <tr {% if not user.is_active %}class="table-secondary" style="opacity: 0.7;"{% endif %}>
                     <td>{{ user.username }}</td>
                     <td>{{ user.get_full_name }}</td>
                     <td>{{ user.email }}</td>
@@ -146,6 +205,11 @@
                       <button class="btn btn-sm btn-warning" data-bs-toggle="modal" 
                               data-bs-target="#editUserModal{{ user.id }}">Edit</button>
                       <button class="btn btn-sm btn-info" onclick="changeRole({{ user.id }}, '{{ user.username }}', '{{ user.role }}')">Change Role</button>
+                      {% if user.is_active %}
+                      <button class="btn btn-sm btn-secondary" onclick="toggleUserStatus({{ user.id }}, '{{ user.username }}', false)">Deactivate</button>
+                      {% else %}
+                      <button class="btn btn-sm btn-success" onclick="toggleUserStatus({{ user.id }}, '{{ user.username }}', true)">Activate</button>
+                      {% endif %}
                       <button class="btn btn-sm btn-danger" onclick="deleteUser({{ user.id }}, '{{ user.username }}')">Delete</button>
                     </td>
                   </tr>
@@ -180,12 +244,14 @@
                 <div class="mb-3">
                   <label for="username" class="form-label">Username *</label>
                   <input type="text" class="form-control" id="username" name="username" required>
+                  <div id="username-error" class="text-danger small mt-1" style="display: none;"></div>
                 </div>
               </div>
               <div class="col-md-6">
                 <div class="mb-3">
                   <label for="email" class="form-label">Email *</label>
                   <input type="email" class="form-control" id="email" name="email" required>
+                  <div id="email-error" class="text-danger small mt-1" style="display: none;"></div>
                 </div>
               </div>
             </div>
@@ -499,6 +565,223 @@
         form.submit();
       }
     }
+
+    function toggleUserStatus(userId, username, activate) {
+      const action = activate ? 'activate' : 'deactivate';
+      const confirmMsg = activate 
+        ? `Are you sure you want to activate user "${username}"?`
+        : `Are you sure you want to deactivate user "${username}"?`;
+      
+      if (confirm(confirmMsg)) {
+        const form = document.createElement('form');
+        form.method = 'POST';
+        form.innerHTML = `
+          {% csrf_token %}
+          <input type="hidden" name="action" value="toggle_user_status">
+          <input type="hidden" name="user_id" value="${userId}">
+          <input type="hidden" name="is_active" value="${activate ? 'true' : 'false'}">
+        `;
+        document.body.appendChild(form);
+        form.submit();
+      }
+    }
+
+    // Validation for add user form
+    let usernameCheckTimeout;
+    let emailCheckTimeout;
+    
+    document.addEventListener('DOMContentLoaded', function() {
+      const usernameInput = document.getElementById('username');
+      const emailInput = document.getElementById('email');
+      const usernameError = document.getElementById('username-error');
+      const emailError = document.getElementById('email-error');
+      const addUserForm = document.querySelector('#addUserModal form');
+      
+      // Check username availability
+      if (usernameInput) {
+        usernameInput.addEventListener('input', function() {
+          clearTimeout(usernameCheckTimeout);
+          const username = this.value.trim();
+          
+          if (username.length < 3) {
+            usernameError.style.display = 'none';
+            return;
+          }
+          
+          usernameCheckTimeout = setTimeout(function() {
+            checkUsernameExists(username);
+          }, 500); // Debounce for 500ms
+        });
+      }
+      
+      // Check email availability
+      if (emailInput) {
+        emailInput.addEventListener('blur', function() {
+          const email = this.value.trim();
+          if (email) {
+            checkEmailExists(email);
+          }
+        });
+        
+        emailInput.addEventListener('input', function() {
+          clearTimeout(emailCheckTimeout);
+          const email = this.value.trim();
+          
+          if (!email) {
+            emailError.style.display = 'none';
+            return;
+          }
+          
+          // Basic email validation
+          const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+          if (!emailRegex.test(email)) {
+            emailError.textContent = 'Please enter a valid email address.';
+            emailError.style.display = 'block';
+            emailInput.classList.add('is-invalid');
+            return;
+          } else {
+            emailError.style.display = 'none';
+            emailInput.classList.remove('is-invalid');
+          }
+          
+          emailCheckTimeout = setTimeout(function() {
+            checkEmailExists(email);
+          }, 500); // Debounce for 500ms
+        });
+      }
+      
+      // Prevent form submission if validation fails
+      if (addUserForm) {
+        addUserForm.addEventListener('submit', function(e) {
+          const username = usernameInput.value.trim();
+          const email = emailInput.value.trim();
+          
+          // Check if there are any visible errors
+          if (usernameError.style.display === 'block' || emailError.style.display === 'block') {
+            e.preventDefault();
+            alert('Please fix the errors before submitting the form.');
+            return false;
+          }
+          
+          // Final synchronous check before submission
+          if (username && email) {
+            e.preventDefault();
+            
+            // Show loading state
+            const submitBtn = addUserForm.querySelector('button[type="submit"]');
+            const originalText = submitBtn.innerHTML;
+            submitBtn.disabled = true;
+            submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Checking...';
+            
+            checkUserExistsSync(username, email, function(result) {
+              submitBtn.disabled = false;
+              submitBtn.innerHTML = originalText;
+              
+              if (result.username_exists || result.email_exists) {
+                if (result.username_exists) {
+                  usernameError.textContent = result.username_message;
+                  usernameError.style.display = 'block';
+                  usernameInput.classList.add('is-invalid');
+                }
+                if (result.email_exists) {
+                  emailError.textContent = result.email_message;
+                  emailError.style.display = 'block';
+                  emailInput.classList.add('is-invalid');
+                }
+                alert('Username or email already exists. Please use different values.');
+                return false;
+              } else {
+                // No errors, allow submission
+                addUserForm.submit();
+              }
+            });
+            return false;
+          }
+        });
+      }
+    });
+    
+    function checkUsernameExists(username) {
+      if (!username || username.length < 3) return;
+      
+      fetch(`{% url 'authentication:Manage_user' %}?action=check_user_exists&username=${encodeURIComponent(username)}`)
+        .then(response => response.json())
+        .then(data => {
+          const usernameInput = document.getElementById('username');
+          const usernameError = document.getElementById('username-error');
+          
+          if (data.username_exists) {
+            usernameError.textContent = data.username_message;
+            usernameError.style.display = 'block';
+            usernameInput.classList.add('is-invalid');
+          } else {
+            usernameError.style.display = 'none';
+            usernameInput.classList.remove('is-invalid');
+          }
+        })
+        .catch(error => {
+          console.error('Error checking username:', error);
+        });
+    }
+    
+    function checkEmailExists(email) {
+      if (!email) return;
+      
+      // Basic email validation
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(email)) {
+        return;
+      }
+      
+      fetch(`{% url 'authentication:Manage_user' %}?action=check_user_exists&email=${encodeURIComponent(email)}`)
+        .then(response => response.json())
+        .then(data => {
+          const emailInput = document.getElementById('email');
+          const emailError = document.getElementById('email-error');
+          
+          if (data.email_exists) {
+            emailError.textContent = data.email_message;
+            emailError.style.display = 'block';
+            emailInput.classList.add('is-invalid');
+          } else {
+            emailError.style.display = 'none';
+            emailInput.classList.remove('is-invalid');
+          }
+        })
+        .catch(error => {
+          console.error('Error checking email:', error);
+        });
+    }
+    
+    function checkUserExistsSync(username, email, callback) {
+      fetch(`{% url 'authentication:Manage_user' %}?action=check_user_exists&username=${encodeURIComponent(username)}&email=${encodeURIComponent(email)}`)
+        .then(response => response.json())
+        .then(data => {
+          callback(data);
+        })
+        .catch(error => {
+          console.error('Error checking user exists:', error);
+          callback({username_exists: false, email_exists: false});
+        });
+    }
+    
+    // Clear errors when modal is closed
+    document.addEventListener('DOMContentLoaded', function() {
+      const addUserModal = document.getElementById('addUserModal');
+      if (addUserModal) {
+        addUserModal.addEventListener('hidden.bs.modal', function() {
+          // Clear form and errors
+          const form = this.querySelector('form');
+          if (form) {
+            form.reset();
+          }
+          document.getElementById('username-error').style.display = 'none';
+          document.getElementById('email-error').style.display = 'none';
+          document.getElementById('username').classList.remove('is-invalid');
+          document.getElementById('email').classList.remove('is-invalid');
+        });
+      }
+    });
 
     // Handle role-specific fields
     function toggleRoleSpecificFields(roleSelectId) {

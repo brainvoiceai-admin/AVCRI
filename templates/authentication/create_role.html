@@ -106,17 +106,49 @@
                             </div>
 
                             <div class="mb-3">
-                                <label class="form-label">Select Modules for this Role</label>
-                                <div class="row">
-                                    {% for module in modules %}
-                                    <div class="col-md-4">
-                                        <div class="form-check">
-                                            <input class="form-check-input" type="checkbox" name="modules" value="{{ module.id }}" id="module_{{ module.id }}">
-                                            <label class="form-check-label" for="module_{{ module.id }}">
-                                                {{ module.icon }} {{ module.display_name }}
-                                            </label>
+                                <div class="d-flex justify-content-between align-items-center mb-3">
+                                    <label class="form-label mb-0">Select Modules for this Role</label>
+                                    <div>
+                                        <button type="button" class="btn btn-sm btn-outline-primary" id="selectAllBtn">Select All</button>
+                                        <button type="button" class="btn btn-sm btn-outline-secondary" id="deselectAllBtn">Deselect All</button>
+                                    </div>
+                                </div>
+                                
+                                <!-- Search Box -->
+                                <div class="mb-3">
+                                    <input type="text" class="form-control" id="moduleSearch" placeholder="Search modules...">
+                                </div>
+                                
+                                <!-- Grouped Modules -->
+                                <div id="modulesContainer">
+                                    {% for category, category_modules in modules_by_category.items %}
+                                    <div class="module-category mb-4" data-category="{{ category }}">
+                                        <div class="card border-primary">
+                                            <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+                                                <h6 class="mb-0">{{ category }}</h6>
+                                                <div>
+                                                    <button type="button" class="btn btn-sm btn-light select-category-all" data-category="{{ category }}">Select All</button>
+                                                    <button type="button" class="btn btn-sm btn-light deselect-category-all" data-category="{{ category }}">Deselect All</button>
+                                                </div>
+                                            </div>
+                                            <div class="card-body">
+                                                <div class="row module-list">
+                                                    {% for module in category_modules %}
+                                                    <div class="col-md-4 mb-2 module-item" data-module-name="{{ module.display_name|lower }}" data-module-desc="{{ module.description|lower }}">
+                                                        <div class="form-check">
+                                                            <input class="form-check-input module-checkbox" type="checkbox" name="modules" value="{{ module.id }}" id="module_{{ module.id }}">
+                                                            <label class="form-check-label" for="module_{{ module.id }}">
+                                                                {{ module.icon }} {{ module.display_name }}
+                                                            </label>
+                                                        </div>
+                                                    </div>
+                                                    {% endfor %}
+                                                </div>
+                                            </div>
                                         </div>
                                     </div>
+                                    {% empty %}
+                                    <div class="alert alert-info">No modules available.</div>
                                     {% endfor %}
                                 </div>
                             </div>
@@ -133,6 +165,118 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    
+    <!-- Toast Container -->
+    <div class="toast-container position-fixed top-0 end-0 p-3" style="z-index: 9999;">
+        <div id="successToast" class="toast" role="alert" aria-live="assertive" aria-atomic="true">
+            <div class="toast-header bg-success text-white">
+                <strong class="me-auto">Success</strong>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="toast" aria-label="Close"></button>
+            </div>
+            <div class="toast-body">
+                Role created successfully
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // Module Search Functionality
+        document.getElementById('moduleSearch').addEventListener('input', function(e) {
+            const searchTerm = e.target.value.toLowerCase();
+            const moduleItems = document.querySelectorAll('.module-item');
+            
+            moduleItems.forEach(item => {
+                const moduleName = item.getAttribute('data-module-name');
+                const moduleDesc = item.getAttribute('data-module-desc') || '';
+                const matches = moduleName.includes(searchTerm) || moduleDesc.includes(searchTerm);
+                
+                if (matches) {
+                    item.style.display = '';
+                } else {
+                    item.style.display = 'none';
+                }
+            });
+            
+            // Hide/show entire categories if all items are hidden
+            document.querySelectorAll('.module-category').forEach(category => {
+                const visibleItems = category.querySelectorAll('.module-item[style=""]').length;
+                const totalItems = category.querySelectorAll('.module-item').length;
+                const categoryCard = category.querySelector('.card');
+                
+                if (visibleItems === 0 && searchTerm !== '') {
+                    categoryCard.style.display = 'none';
+                } else {
+                    categoryCard.style.display = '';
+                }
+            });
+        });
+        
+        // Select All / Deselect All for all modules
+        document.getElementById('selectAllBtn').addEventListener('click', function() {
+            document.querySelectorAll('.module-checkbox').forEach(checkbox => {
+                if (!checkbox.closest('.module-item').style.display || checkbox.closest('.module-item').style.display !== 'none') {
+                    checkbox.checked = true;
+                }
+            });
+        });
+        
+        document.getElementById('deselectAllBtn').addEventListener('click', function() {
+            document.querySelectorAll('.module-checkbox').forEach(checkbox => {
+                checkbox.checked = false;
+            });
+        });
+        
+        // Select All / Deselect All for category
+        document.querySelectorAll('.select-category-all').forEach(btn => {
+            btn.addEventListener('click', function() {
+                const category = this.getAttribute('data-category');
+                const categoryDiv = document.querySelector(`.module-category[data-category="${category}"]`);
+                categoryDiv.querySelectorAll('.module-checkbox').forEach(checkbox => {
+                    if (!checkbox.closest('.module-item').style.display || checkbox.closest('.module-item').style.display !== 'none') {
+                        checkbox.checked = true;
+                    }
+                });
+            });
+        });
+        
+        document.querySelectorAll('.deselect-category-all').forEach(btn => {
+            btn.addEventListener('click', function() {
+                const category = this.getAttribute('data-category');
+                const categoryDiv = document.querySelector(`.module-category[data-category="${category}"]`);
+                categoryDiv.querySelectorAll('.module-checkbox').forEach(checkbox => {
+                    checkbox.checked = false;
+                });
+            });
+        });
+        
+        // Show toast on form submission success
+        document.querySelector('form').addEventListener('submit', function(e) {
+            // Let the form submit normally
+            // The toast will be shown on the role_management page after redirect
+        });
+        
+        // Check for success message in URL or messages
+        const urlParams = new URLSearchParams(window.location.search);
+        if (urlParams.get('created') === '1') {
+            const toastElement = document.getElementById('successToast');
+            if (toastElement) {
+                const toast = new bootstrap.Toast(toastElement);
+                toast.show();
+            }
+        }
+        
+        {% if messages %}
+            {% for message in messages %}
+                {% if message.tags == 'success' %}
+                    const toastElement = document.getElementById('successToast');
+                    if (toastElement) {
+                        const toast = new bootstrap.Toast(toastElement);
+                        toast.show();
+                    }
+                {% endif %}
+            {% endfor %}
+        {% endif %}
+    </script>
 </body>
 </html>
 
