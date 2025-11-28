@@ -24,6 +24,11 @@
         <div class="d-flex justify-content-between align-items-center mb-4">
             <h2><i class="fas fa-box text-primary"></i> Item Master Management</h2>
             <div>
+                {% if master_type %}
+                <button type="button" class="btn btn-info" data-bs-toggle="modal" data-bs-target="#bulkUploadModal">
+                    <i class="fas fa-file-excel me-2"></i>Bulk Upload Excel
+                </button>
+                {% endif %}
                 <a href="{% url 'item_master_add' %}" class="btn btn-success">
                     <i class="fas fa-plus me-2"></i>Add New Item
                 </a>
@@ -255,5 +260,8 @@
             filterTable();
         }
     </script>
+    {% if master_type %}
+    {% include 'masters/bulk_upload_modal.html' %}
+    {% endif %}
 </body>
 </html>

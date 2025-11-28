@@ -25,6 +25,16 @@
     <div class="main-content container mt-4">
         <div class="d-flex justify-content-between align-items-center mb-4">
             <h2><i class="fas fa-ruler text-primary"></i> Unit Master (ml, cm, kg)</h2>
+            <div>
+                {% if master_type %}
+                <button type="button" class="btn btn-info" data-bs-toggle="modal" data-bs-target="#bulkUploadModal">
+                    <i class="fas fa-file-excel me-2"></i>Bulk Upload Excel
+                </button>
+                {% endif %}
+                <a href="{% url 'master_management_dashboard' %}" class="btn btn-secondary">
+                    <i class="fas fa-arrow-left me-2"></i>Back to Dashboard
+                </a>
+            </div>
         </div>
         
         {# Display messages - only show messages for this page #}
@@ -223,10 +233,16 @@
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous"></script>
     <script>
-        // Auto-dismiss messages after 5 seconds
+        // Auto-dismiss messages after 5 seconds (exclude alerts inside modals)
         document.addEventListener('DOMContentLoaded', function() {
             const alerts = document.querySelectorAll('.alert');
             alerts.forEach(function(alert) {
+                // Skip alerts inside modals or with data-no-auto-dismiss attribute
+                const modal = alert.closest('.modal');
+                const noAutoDismiss = alert.hasAttribute('data-no-auto-dismiss');
+                if (modal || noAutoDismiss) {
+                    return;
+                }
                 setTimeout(function() {
                     const bsAlert = new bootstrap.Alert(alert);
                     bsAlert.close();
@@ -301,5 +317,8 @@
             filterTable();
         }
     </script>
+    {% if master_type %}
+    {% include 'masters/bulk_upload_modal.html' %}
+    {% endif %}
 </body>
 </html>
