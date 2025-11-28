@@ -1439,9 +1439,43 @@ def user_profile(request):
         email = request.POST.get('email', '').strip()
         mobile = request.POST.get('mobile', '').strip() or None
 
+        profile_picture_updated = False
+        profile_picture_valid = False
+        
+        # Handle profile picture upload (process separately so it can be saved even if other validations fail)
+        if 'profile_picture' in request.FILES:
+            profile_picture = request.FILES['profile_picture']
+            # Validate file size (max 5MB)
+            if profile_picture.size > 5 * 1024 * 1024:
+                messages.error(request, 'Profile picture size should be less than 5MB.')
+            else:
+                # Validate file type
+                allowed_types = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif']
+                if profile_picture.content_type not in allowed_types:
+                    messages.error(request, 'Invalid file type. Please upload a JPEG, PNG, or GIF image.')
+                else:
+                    # Delete old profile picture if exists
+                    if user.profile_picture:
+                        try:
+                            import os
+                            if os.path.isfile(user.profile_picture.path):
+                                os.remove(user.profile_picture.path)
+                        except Exception:
+                            pass  # Ignore errors when deleting old file
+                    user.profile_picture = profile_picture
+                    profile_picture_updated = True
+                    profile_picture_valid = True
+
         # Basic validations
         if not email:
             messages.error(request, 'Email is required.')
+            # If profile picture was uploaded, save it separately
+            if profile_picture_valid:
+                try:
+                    user.save(update_fields=['profile_picture'])
+                    messages.success(request, 'Profile picture updated successfully.')
+                except Exception as e:
+                    messages.error(request, f'Error saving profile picture: {str(e)}')
         else:
             # Assign and save with model-level validation for unique mobile
             user.first_name = first_name
@@ -1451,13 +1485,28 @@ def user_profile(request):
             try:
                 user.full_clean()
                 user.save()
-                messages.success(request, 'Profile updated successfully.')
+                if profile_picture_updated:
+                    messages.success(request, 'Profile and picture updated successfully.')
+                else:
+                    messages.success(request, 'Profile updated successfully.')
             except ValidationError as e:
+                # If profile picture was updated but other validations failed, save just the picture
+                if profile_picture_valid:
+                    try:
+                        # Save only the profile picture
+                        user.save(update_fields=['profile_picture'])
+                        messages.warning(request, 'Profile picture updated, but other fields have errors.')
+                    except Exception as pic_error:
+                        messages.error(request, f'Error saving profile picture: {str(pic_error)}')
+                
                 # Show first error per field
                 for field, errors in e.message_dict.items():
                     for err in errors:
                         messages.error(request, f"{field.capitalize()}: {err}")
 
+    # Refresh user from database to ensure we have the latest data including profile picture
+    user.refresh_from_db()
+    
     context = {
         'user_obj': user,
     }

@@ -50,26 +50,31 @@
         <!-- Search and Filter Section -->
         <div class="card mb-4">
             <div class="card-body">
-                <div class="row">
-                    <div class="col-md-4">
-                        <input type="text" class="form-control" id="searchInput" placeholder="Search slots...">
+                <form method="get" action="{% url 'slot_master_manage' %}" id="filterForm">
+                    <div class="row">
+                        <div class="col-md-4">
+                            <input type="text" class="form-control" name="search" id="searchInput" 
+                                   placeholder="Search slots..." value="{{ search }}">
+                        </div>
+                        <div class="col-md-3">
+                            <select class="form-select" name="status" id="statusFilter">
+                                <option value="">All Status</option>
+                                <option value="active" {% if status_filter == 'active' %}selected{% endif %}>Active</option>
+                                <option value="inactive" {% if status_filter == 'inactive' %}selected{% endif %}>Inactive</option>
+                            </select>
+                        </div>
+                        <div class="col-md-3">
+                            <button type="submit" class="btn btn-primary w-100">
+                                <i class="fas fa-search"></i> Filter
+                            </button>
+                        </div>
+                        <div class="col-md-2">
+                            <a href="{% url 'slot_master_manage' %}" class="btn btn-outline-secondary w-100">
+                                <i class="fas fa-times"></i> Clear
+                            </a>
+                        </div>
                     </div>
-                    <div class="col-md-3">
-                        <select class="form-select" id="statusFilter">
-                            <option value="">All Status</option>
-                            <option value="active">Active</option>
-                            <option value="inactive">Inactive</option>
-                        </select>
-                    </div>
-                    <div class="col-md-3">
-                        <input type="time" class="form-control" id="timeFilter" placeholder="Filter by time">
-                    </div>
-                    <div class="col-md-2">
-                        <button class="btn btn-outline-primary w-100" onclick="clearFilters()">
-                            <i class="fas fa-times"></i> Clear
-                        </button>
-                    </div>
-                </div>
+                </form>
             </div>
         </div>
 
@@ -151,10 +156,10 @@
             <ul class="pagination justify-content-center">
                 {% if page_obj.has_previous %}
                     <li class="page-item">
-                        <a class="page-link" href="?page=1">&laquo; First</a>
+                        <a class="page-link" href="?page=1{% if search %}&search={{ search }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}">&laquo; First</a>
                     </li>
                     <li class="page-item">
-                        <a class="page-link" href="?page={{ page_obj.previous_page_number }}">Previous</a>
+                        <a class="page-link" href="?page={{ page_obj.previous_page_number }}{% if search %}&search={{ search }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}">Previous</a>
                     </li>
                 {% endif %}
 
@@ -166,10 +171,10 @@
 
                 {% if page_obj.has_next %}
                     <li class="page-item">
-                        <a class="page-link" href="?page={{ page_obj.next_page_number }}">Next</a>
+                        <a class="page-link" href="?page={{ page_obj.next_page_number }}{% if search %}&search={{ search }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}">Next</a>
                     </li>
                     <li class="page-item">
-                        <a class="page-link" href="?page={{ page_obj.paginator.num_pages }}">Last &raquo;</a>
+                        <a class="page-link" href="?page={{ page_obj.paginator.num_pages }}{% if search %}&search={{ search }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}">Last &raquo;</a>
                     </li>
                 {% endif %}
             </ul>
@@ -196,21 +201,19 @@
             });
         });
 
-        // Search functionality
-        document.getElementById('searchInput').addEventListener('input', function() {
-            filterTable();
-        });
-
-        // Filter functionality
+        // Auto-submit form on filter change
         document.getElementById('statusFilter').addEventListener('change', function() {
-            filterTable();
+            document.getElementById('filterForm').submit();
         });
 
-        document.getElementById('timeFilter').addEventListener('change', function() {
-            filterTable();
+        // Optional: Auto-submit on search after debounce
+        let searchTimeout;
+        document.getElementById('searchInput').addEventListener('input', function() {
+            clearTimeout(searchTimeout);
+            searchTimeout = setTimeout(function() {
+                document.getElementById('filterForm').submit();
+            }, 500); // Submit after 500ms of no typing
         });
-
-        function filterTable() {
             const searchTerm = document.getElementById('searchInput').value.toLowerCase();
             const statusFilter = document.getElementById('statusFilter').value;
             const timeFilter = document.getElementById('timeFilter').value;
