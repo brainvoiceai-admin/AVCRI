@@ -73,6 +73,13 @@ urlpatterns = [
     path('ingredients/<int:pk>/delete/', views.ingredient_master_delete, name='ingredient_master_delete'),
     path('ingredients/<int:pk>/enable/', views.ingredient_master_enable, name='ingredient_master_enable'),
     path('ingredients/<int:pk>/disable/', views.ingredient_master_disable, name='ingredient_master_disable'),
+    # Treatment Room Master CRUD
+    path('treatment-rooms/', views.TreatmentRoomManagementView.as_view(), name='treatment_room_master_manage'),
+    path('treatment-rooms/add/', views.TreatmentRoomCreateView.as_view(), name='treatment_room_master_add'),
+    path('treatment-rooms/<str:pk>/update/', views.TreatmentRoomUpdateView.as_view(), name='treatment_room_master_update'),
+    path('treatment-rooms/<str:pk>/delete/', views.treatment_room_master_delete, name='treatment_room_master_delete'),
+    path('treatment-rooms/<str:pk>/enable/', views.treatment_room_master_enable, name='treatment_room_master_enable'),
+    path('treatment-rooms/<str:pk>/disable/', views.treatment_room_master_disable, name='treatment_room_master_disable'),
     # Therapist Master CRUD
     path('therapists/', views.TherapistMasterManagementView.as_view(), name='therapist_master_manage'),
     path('therapists/add/', views.TherapistMasterCreateView.as_view(), name='therapist_master_add'),

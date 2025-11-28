@@ -81,6 +81,8 @@
                                 <i class="fas fa-ruler"></i>
                             {% elif table.model == 'IngredientMaster' %}
                                 <i class="fas fa-flask"></i>
+                            {% elif table.model == 'TreatmentRoom' %}
+                                <i class="fas fa-door-open"></i>
                             {% else %}
                                 <i class="fas fa-database"></i>
                             {% endif %}
@@ -147,6 +149,11 @@
                             <div class="col-md-3 mb-3">
                                 <a href="{% url 'ingredient_master_add' %}" class="btn btn-outline-primary w-100">
                                     <i class="fas fa-plus me-2"></i>Add Ingredient
+                                </a>
+                            </div>
+                            <div class="col-md-3 mb-3">
+                                <a href="{% url 'treatment_room_master_add' %}" class="btn btn-outline-info w-100">
+                                    <i class="fas fa-plus me-2"></i>Add Treatment Room
                                 </a>
                             </div>
                         </div>
