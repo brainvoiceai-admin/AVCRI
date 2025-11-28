@@ -233,7 +233,7 @@ def get_treatment_rooms_for_staying_room(patient_staying_room):
     # No match found
     return []
 
-def allocate_treatment_room(date, time_slot, last_room=None, patient_staying_room=None, patient=None):
+def allocate_treatment_room(date, time_slot, last_room=None, therapy_name=None, patient_id=None, patient_staying_room=None, patient=None):
     """
     Allocate treatment room based on patient staying room rules.
     
@@ -251,12 +251,16 @@ def allocate_treatment_room(date, time_slot, last_room=None, patient_staying_roo
     - If not available, try TR-5, TR-6, TR-7
     - If still not available, return None (allocation fails)
     
+    SPECIAL: For 'Dhara & Pizichil' therapies, tries to use previous room assignment first.
+    
     If no room available from the list, returns None (allocation will fail).
     
     Args:
         date: Date for allocation
         time_slot: Time slot for allocation
         last_room: Preferred room number (string) or room object (legacy, kept for compatibility)
+        therapy_name: Name of the therapy (for Dhara & Pizichil special handling)
+        patient_id: Patient ID (for Dhara & Pizichil special handling)
         patient_staying_room: Patient staying room number (e.g., 'DS-1', 'NR-7', 'CT-1')
         patient: Patient object (PatientSnapshot) to check if OP (optional)
     
@@ -367,6 +371,50 @@ def allocate_treatment_room(date, time_slot, last_room=None, patient_staying_roo
         
         # No room available for OP patient - DO NOT fall through to legacy logic
         return None
+    
+    # SPECIAL: Check if this is a 'Dhara & Pizichil' therapy - try to use previous room first
+    is_dhara_pizichil = False
+    if therapy_name:
+        therapy_lower = str(therapy_name).lower()
+        is_dhara_pizichil = 'dhara' in therapy_lower and 'pizichil' in therapy_lower
+    
+    # For 'Dhara & Pizichil', try to find previous room assignment
+    previous_room_no = None
+    if is_dhara_pizichil and patient_id:
+        try:
+            from django.db.models import Q
+            previous_bookings = RoomBooking.objects.filter(
+                patient_id=patient_id,
+                status='BOOKED'
+            ).exclude(
+                date=date,
+                time_slot=time_slot
+            ).order_by('-date', '-time_slot').select_related('room')
+            
+            for booking in previous_bookings:
+                therapy_name_lower = str(booking.therapy_name or '').lower()
+                if 'dhara' in therapy_name_lower and 'pizichil' in therapy_name_lower:
+                    if booking.room:
+                        previous_room_no = booking.room.room_no
+                        break
+        except Exception as e:
+            print(f"[DEBUG allocate_treatment_room] Error finding previous room: {e}")
+            previous_room_no = None
+    
+    # If we have a previous room for 'Dhara & Pizichil', try to use it first
+    if is_dhara_pizichil and previous_room_no:
+        try:
+            previous_room = TreatmentRoom.objects.get(room_no=previous_room_no)
+            if not RoomBooking.objects.filter(
+                room=previous_room,
+                date=date,
+                time_slot=time_slot,
+                status='BOOKED'
+            ).exists():
+                print(f"[DEBUG allocate_treatment_room] Using previous Dhara & Pizichil room: {previous_room_no}")
+                return previous_room
+        except TreatmentRoom.DoesNotExist:
+            pass
     
     # FALLBACK: Legacy logic if patient_staying_room is not provided and not OP
     if last_room:
@@ -513,6 +561,9 @@ def allocate_therapists(date, time_slot, therapy_requirements, last_therapists=N
                     t_gender = get_therapist_gender(t)
                     if t_gender != desired_gender:
                         continue
+                # Check bathing requirement: if bathing is required, therapist must be a bathing therapist
+                if needs_bathing and not getattr(t, 'is_bathing_therapist', False):
+                    continue
                 if therapist_on_leave(t):
                     continue
                 if TherapistBooking.objects.filter(therapist=t, date=date, time_slot=time_slot, status='BOOKED').exists():
@@ -544,6 +595,10 @@ def allocate_therapists(date, time_slot, therapy_requirements, last_therapists=N
 
         candidates_qs = TherapistMaster.objects.filter(therapist_grade__name=current_grade_search)
         
+        # STRICT GENDER FILTER - apply in query for efficiency
+        if desired_gender:
+            candidates_qs = candidates_qs.filter(therapist_gender__istartswith=desired_gender[0])
+        
         # STRICT: Only return bathing therapists when bathing is required
         if needs_bathing:
             candidates_qs = candidates_qs.filter(is_bathing_therapist=True)
@@ -563,7 +618,7 @@ def allocate_therapists(date, time_slot, therapy_requirements, last_therapists=N
             if TherapistBooking.objects.filter(therapist=t, date=date, time_slot=time_slot, status='BOOKED').exists():
                 continue
             
-            # Enforce gender match
+            # Double-check gender match (should already be filtered in query, but safety check)
             if desired_gender:
                 t_gender = get_therapist_gender(t)
                 if t_gender != desired_gender:
@@ -884,10 +939,13 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
             # Get patient staying room from allocation
             patient_staying_room = getattr(allocation.patient, 'pat_room_no', None) if allocation and hasattr(allocation, 'patient') else None
             patient_obj = allocation.patient if allocation and hasattr(allocation, 'patient') else None
+            # Pass therapy_name and patient_id for Dhara & Pizichil special handling
             room_candidate = allocate_treatment_room(
                 date, 
                 canonical_slot, 
                 last_allocation.get("last_t_room"),
+                therapy_name=therapy_name,
+                patient_id=patient_id,
                 patient_staying_room=patient_staying_room,
                 patient=patient_obj
             )
@@ -897,6 +955,24 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
     if needs_room_flag and not room_candidate:
         # Build detailed error message based on patient staying room or OP status
         reason = "no_room_available"
+        # Check if this is Dhara & Pizichil and we had a previous room that's unavailable
+        therapy_lower = str(therapy_name or '').lower()
+        is_dhara_pizichil = 'dhara' in therapy_lower and 'pizichil' in therapy_lower
+        if is_dhara_pizichil and patient_id:
+            # Try to find previous room to show in error message
+            try:
+                from Patient.models import RoomBooking
+                previous_booking = RoomBooking.objects.filter(
+                    patient_id=patient_id,
+                    status='BOOKED'
+                ).exclude(date=date).order_by('-date', '-time_slot').select_related('room').first()
+                if previous_booking:
+                    prev_therapy_lower = str(previous_booking.therapy_name or '').lower()
+                    if 'dhara' in prev_therapy_lower and 'pizichil' in prev_therapy_lower:
+                        if previous_booking.room:
+                            reason = f"previous_room_unavailable: Previous room {previous_booking.room.room_no} for Dhara & Pizichil is unavailable at this slot"
+            except Exception:
+                pass
         if allocation and hasattr(allocation, 'patient'):
             patient_staying_room = getattr(allocation.patient, 'pat_room_no', None)
             if patient_staying_room:

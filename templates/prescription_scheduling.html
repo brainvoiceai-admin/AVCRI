@@ -891,7 +891,7 @@
                 .then(response => response.json())
                 .then(data => {
                     if (data.success) {
-                        showPrescriptionModal(data.patient_info, data.prescription_items);
+                        showPrescriptionModal(data.patient_info, data.prescription_groups || [], data.therapy_items || []);
                     } else {
                         alert('Error loading prescription details: ' + data.error);
                     }
@@ -901,7 +901,7 @@
                 });
         }
         
-        function showPrescriptionModal(patientInfo, prescriptionItems) {
+        function showPrescriptionModal(patientInfo, prescriptionGroups, therapyItems) {
             const modal = document.getElementById('prescriptionModal');
             const patientInfoDiv = document.getElementById('patient-info');
             const prescriptionItemsDiv = document.getElementById('prescription-items');
@@ -911,27 +911,251 @@
                 <h4>${escapeHtml(patientInfo.name)}</h4>
                 <p><strong>Registration No:</strong> ${escapeHtml(patientInfo.registration_no)}</p>
                 <p><strong>Room No:</strong> ${escapeHtml(patientInfo.room_no || 'N/A')}</p>
-                <p><strong>Doctor:</strong> ${escapeHtml(patientInfo.doctor_name)}</p>
+                <p><strong>Doctor:</strong> ${escapeHtml(patientInfo.doctor_name || 'N/A')}</p>
             `;
             
-            // Update prescription items
+            // Clear and render prescription items in grouped format (like procurement dashboard)
             prescriptionItemsDiv.innerHTML = '';
-            prescriptionItems.forEach(item => {
-                const itemDiv = document.createElement('div');
-                itemDiv.className = 'prescription-item';
-                itemDiv.innerHTML = `
-                    <div class="item-details">
-                        <div class="item-name">${escapeHtml(item.name)}</div>
-                        <div class="item-meta">
-                            <span>Dose: ${escapeHtml(item.dose)}</span>
-                            <span>Time: ${escapeHtml(item.time)}</span>
-                            <span>Notes: ${escapeHtml(item.notes || 'None')}</span>
-                        </div>
-                    </div>
-                    <div class="item-qty">Qty: ${item.quantity}</div>
-                `;
-                prescriptionItemsDiv.appendChild(itemDiv);
-            });
+            
+            // Render prescription items section - grouped like procurement dashboard
+            if (prescriptionGroups.length > 0) {
+                const prescriptionSection = document.createElement('div');
+                prescriptionSection.className = 'items-section';
+                prescriptionSection.innerHTML = '<h3 style="margin: 0 0 15px 0; color: #333;">Prescription Items</h3>';
+                
+                // Section is cancelled only if ALL groups are cancelled
+                const prescriptionIsCancelled = prescriptionGroups.every(g => g.is_cancelled);
+                
+                if (prescriptionIsCancelled) {
+                    prescriptionSection.style.border = '2px solid #e63757';
+                    prescriptionSection.style.borderRadius = '8px';
+                    prescriptionSection.style.padding = '15px';
+                    prescriptionSection.style.backgroundColor = '#fff5f5';
+                    const title = prescriptionSection.querySelector('h3');
+                    if (title) {
+                        title.innerHTML += ' <span style="color: #e63757; font-weight: bold; margin-left: 8px;">[CANCELLED]</span>';
+                    }
+                }
+                
+                // Render each prescription group
+                prescriptionGroups.forEach(group => {
+                    const items = group.items || [];
+                    
+                    const groupDiv = document.createElement('div');
+                    groupDiv.style.marginBottom = '20px';
+                    const groupIsCancelled = !!group.is_cancelled;
+                    groupDiv.style.border = groupIsCancelled ? '2px solid #e63757' : '1px solid #e3ebf6';
+                    groupDiv.style.borderRadius = '8px';
+                    groupDiv.style.padding = '15px';
+                    groupDiv.style.backgroundColor = groupIsCancelled ? '#fff5f5' : '#f9fafd';
+                    if (groupIsCancelled) {
+                        groupDiv.style.opacity = '0.7';
+                    }
+                    
+                    // Group header with time and dose
+                    const groupHeader = document.createElement('div');
+                    groupHeader.style.fontSize = '14px';
+                    groupHeader.style.fontWeight = '600';
+                    groupHeader.style.color = '#333';
+                    groupHeader.style.marginBottom = '10px';
+                    
+                    const timeLabel = group.time || 'M';
+                    groupHeader.innerHTML = `<strong>Time: ${escapeHtml(timeLabel)}</strong>`;
+                    if (group.dose) {
+                        groupHeader.innerHTML += ` - Dosage: <strong>${escapeHtml(group.dose)}</strong>`;
+                    }
+                    if (group.notes) {
+                        groupHeader.innerHTML += ` <span style="color: #666; font-size: 0.9em;">(${escapeHtml(group.notes)})</span>`;
+                    }
+                    groupDiv.appendChild(groupHeader);
+                    
+                    // Render items in this group as single group with multiple items
+                    if (items.length === 0) {
+                        const emptyMsg = document.createElement('div');
+                        emptyMsg.style.color = '#666';
+                        emptyMsg.style.fontStyle = 'italic';
+                        emptyMsg.style.padding = '10px';
+                        emptyMsg.textContent = 'No items in this group';
+                        groupDiv.appendChild(emptyMsg);
+                    } else {
+                        const itemCard = document.createElement('div');
+                        itemCard.className = 'medicine-card';
+                        itemCard.style.borderLeft = groupIsCancelled ? '4px solid #e63757' : '4px solid #2c7be5';
+                        itemCard.style.marginBottom = '8px';
+                        itemCard.style.padding = '12px';
+                        itemCard.style.backgroundColor = '#fff';
+                        itemCard.style.borderRadius = '6px';
+                        
+                        // Display multiple item names as tags
+                        const itemsHtml = items.map(it => {
+                            return `<span class="tag" style="display:inline-block;padding:4px 8px;margin:2px;background:#e3ebf6;border-radius:4px;font-size:0.9em;">${escapeHtml(it.item_name)}${it.quantity ? ` (Qty: ${escapeHtml(it.quantity)})` : ''}</span>`;
+                        }).join(' ');
+                        
+                        // Single dosage, usage, time, UNO, and internal/external for the entire group
+                        const dosage = group.dose || items[0]?.dose || 'N/A';
+                        let usage = 'N/A';
+                        if (group.usage) {
+                            usage = group.usage;
+                        } else if (group.usage_array && Array.isArray(group.usage_array) && group.usage_array.length > 0) {
+                            usage = group.usage_array.join(', ');
+                        } else if (items[0]?.usage) {
+                            usage = items[0].usage;
+                        }
+                        const time = group.time || items[0]?.time || 'N/A';
+                        const uno = group.notes || group.uno || items[0]?.notes || 'N/A';
+                        const internalExternal = group.internal_external || items[0]?.internal_external || 'N/A';
+                        
+                        itemCard.innerHTML = `
+                            <div style="display:flex;align-items:flex-start;gap:12px;">
+                                <div class="medicine-details" style="flex:1;">
+                                    <div style="margin-bottom:8px;">
+                                        ${itemsHtml}
+                                    </div>
+                                    <div class="medicine-meta" style="font-size:0.9em;color:#666;display:flex;flex-wrap:wrap;gap:12px;">
+                                        ${dosage !== 'N/A' ? `<span><strong>Dosage:</strong> ${escapeHtml(dosage)}</span>` : ''}
+                                        ${usage !== 'N/A' ? `<span><strong>Usage:</strong> ${escapeHtml(usage)}</span>` : ''}
+                                        ${time !== 'N/A' ? `<span><strong>Time:</strong> ${escapeHtml(time)}</span>` : ''}
+                                        ${uno !== 'N/A' ? `<span><strong>UNO:</strong> ${escapeHtml(uno)}</span>` : ''}
+                                        ${internalExternal !== 'N/A' ? `<span><strong>Ext/Int:</strong> ${escapeHtml(internalExternal)}</span>` : ''}
+                                    </div>
+                                </div>
+                            </div>
+                        `;
+                        
+                        groupDiv.appendChild(itemCard);
+                    }
+                    
+                    prescriptionSection.appendChild(groupDiv);
+                });
+                
+                prescriptionItemsDiv.appendChild(prescriptionSection);
+            }
+            
+            // Render therapy items section - grouped by therapy
+            if (therapyItems.length > 0) {
+                const therapySection = document.createElement('div');
+                therapySection.className = 'items-section';
+                therapySection.style.marginTop = '20px';
+                therapySection.innerHTML = '<h3 style="margin: 0 0 15px 0; color: #333;">Therapy Items</h3>';
+                
+                // Group therapy items by therapy_name
+                const therapyGroups = {};
+                therapyItems.forEach(item => {
+                    if (item.is_group && item.items) {
+                        const therapyKey = item.therapy_name || 'Unknown Therapy';
+                        if (!therapyGroups[therapyKey]) {
+                            therapyGroups[therapyKey] = [];
+                        }
+                        therapyGroups[therapyKey].push(item);
+                    }
+                });
+                
+                // Render each therapy group
+                Object.keys(therapyGroups).forEach(therapyName => {
+                    const therapyGroupsList = therapyGroups[therapyName];
+                    const therapyIsCancelled = therapyGroupsList.some(group => group.booking_is_cancelled);
+                    
+                    const therapyGroupDiv = document.createElement('div');
+                    therapyGroupDiv.style.marginBottom = '20px';
+                    therapyGroupDiv.style.border = therapyIsCancelled ? '2px solid #e63757' : '1px solid #e3ebf6';
+                    therapyGroupDiv.style.borderRadius = '8px';
+                    therapyGroupDiv.style.padding = '15px';
+                    therapyGroupDiv.style.backgroundColor = therapyIsCancelled ? '#fff5f5' : '#f9fafd';
+                    
+                    const therapyTitle = document.createElement('div');
+                    therapyTitle.style.fontSize = '16px';
+                    therapyTitle.style.fontWeight = '600';
+                    therapyTitle.style.color = '#333';
+                    therapyTitle.style.marginBottom = '10px';
+                    therapyTitle.innerHTML = therapyName;
+                    if (therapyIsCancelled) {
+                        therapyTitle.innerHTML += ' <span style="color: #e63757; font-weight: bold; margin-left: 8px;">[CANCELLED]</span>';
+                    }
+                    therapyGroupDiv.appendChild(therapyTitle);
+                    
+                    // Render each dosage group within this therapy
+                    therapyGroupsList.forEach(group => {
+                        const items = group.items || [];
+                        if (items.length === 0) return;
+                        
+                        const groupIsCancelled = group.booking_is_cancelled;
+                        
+                        // Show dosage if available
+                        if (group.dosage) {
+                            const dosageLabel = document.createElement('div');
+                            dosageLabel.style.fontSize = '14px';
+                            dosageLabel.style.fontWeight = '500';
+                            dosageLabel.style.color = '#666';
+                            dosageLabel.style.marginTop = '10px';
+                            dosageLabel.style.marginBottom = '8px';
+                            dosageLabel.textContent = `Dosage: ${escapeHtml(group.dosage)}`;
+                            if (groupIsCancelled) {
+                                dosageLabel.style.opacity = '0.7';
+                            }
+                            therapyGroupDiv.appendChild(dosageLabel);
+                        }
+                        
+                        // Render items as single group
+                        const itemCard = document.createElement('div');
+                        itemCard.className = 'medicine-card';
+                        itemCard.style.borderLeft = groupIsCancelled ? '4px solid #e63757' : '4px solid #4CAF50';
+                        itemCard.style.marginBottom = '8px';
+                        itemCard.style.padding = '12px';
+                        itemCard.style.backgroundColor = '#fff';
+                        itemCard.style.borderRadius = '6px';
+                        if (groupIsCancelled) {
+                            itemCard.style.opacity = '0.7';
+                        }
+                        
+                        // Display multiple item names as tags
+                        const itemsHtml = items.map(it => {
+                            const isRemoved = it.is_removed || it.status === 'removed';
+                            const removedBadge = isRemoved ? '<span style="color: #f6c343; font-weight: bold; margin-left: 4px;">[REMOVED]</span>' : '';
+                            return `<span class="tag" style="display:inline-block;padding:4px 8px;margin:2px;background:${isRemoved ? '#fff3cd' : '#e3ebf6'};border-radius:4px;font-size:0.9em;">${escapeHtml(it.item_name)}${removedBadge}</span>`;
+                        }).join(' ');
+                        
+                        // Single dosage, usage, UNO, and internal/external for the entire group
+                        const dosage = group.dosage || items[0]?.dose || 'N/A';
+                        let usage = 'N/A';
+                        if (group.usage) {
+                            usage = group.usage;
+                        } else if (group.usage_array && Array.isArray(group.usage_array) && group.usage_array.length > 0) {
+                            usage = group.usage_array.join(', ');
+                        } else if (items[0]?.usage) {
+                            usage = items[0].usage;
+                        }
+                        const uno = group.uno || items[0]?.notes || 'N/A';
+                        const internalExternal = group.internal_external || items[0]?.internal_external || 'N/A';
+                        
+                        itemCard.innerHTML = `
+                            <div style="display:flex;align-items:flex-start;gap:12px;">
+                                <div class="medicine-details" style="flex:1;">
+                                    <div style="margin-bottom:8px;">
+                                        ${itemsHtml}
+                                    </div>
+                                    <div class="medicine-meta" style="font-size:0.9em;color:#666;display:flex;flex-wrap:wrap;gap:12px;">
+                                        ${dosage !== 'N/A' ? `<span><strong>Dosage:</strong> ${escapeHtml(dosage)}</span>` : ''}
+                                        ${usage !== 'N/A' ? `<span><strong>Usage:</strong> ${escapeHtml(usage)}</span>` : ''}
+                                        ${uno !== 'N/A' ? `<span><strong>UNO:</strong> ${escapeHtml(uno)}</span>` : ''}
+                                        ${internalExternal !== 'N/A' ? `<span><strong>Ext/Int:</strong> ${escapeHtml(internalExternal)}</span>` : ''}
+                                        ${items[0]?.item_code ? `<span><strong>Item Code:</strong> ${escapeHtml(items[0].item_code)}</span>` : ''}
+                                    </div>
+                                </div>
+                            </div>
+                        `;
+                        
+                        therapyGroupDiv.appendChild(itemCard);
+                    });
+                    
+                    therapySection.appendChild(therapyGroupDiv);
+                });
+                
+                prescriptionItemsDiv.appendChild(therapySection);
+            }
+            
+            if (prescriptionGroups.length === 0 && therapyItems.length === 0) {
+                prescriptionItemsDiv.innerHTML = '<p style="color: #666; font-style: italic; padding: 20px;">No prescription or therapy items found for this patient on the selected date.</p>';
+            }
             
             modal.style.display = 'block';
         }

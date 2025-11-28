@@ -956,43 +956,98 @@
                         emptyMsg.textContent = 'No items in this group';
                         groupDiv.appendChild(emptyMsg);
                     } else {
+                        // Display as single group with multiple items (like prescription entry page)
+                        const itemCard = document.createElement('div');
+                        itemCard.className = 'medicine-card';
+                        itemCard.style.borderLeft = groupIsCancelled ? '4px solid #e63757' : '4px solid #2c7be5';
+                        itemCard.style.marginBottom = '8px';
+                        itemCard.style.padding = '12px';
+                        itemCard.style.backgroundColor = '#fff';
+                        itemCard.style.borderRadius = '6px';
+                        
+                        // Check if all items in this group are prepared
+                        let allPrepared = true;
+                        const medicineIds = [];
                         items.forEach(item => {
-                            const itemCard = document.createElement('div');
-                            itemCard.className = 'medicine-card';
-                            itemCard.style.borderLeft = groupIsCancelled ? '4px solid #e63757' : '4px solid #2c7be5';
-                            itemCard.style.marginBottom = '8px';
-                            
                             const medicineId = `${currentPatient.patient_id}_${item.id}_${currentDate}`;
-                            const isPrepared = preparedMedicines.has(medicineId);
-                            
-                            if (isPrepared) {
-                                itemCard.classList.add('prepared');
+                            medicineIds.push(medicineId);
+                            if (!preparedMedicines.has(medicineId)) {
+                                allPrepared = false;
                             }
-                            
-                            itemCard.innerHTML = `
-                                <div class="medicine-checkbox">
-                                    <input type="checkbox" id="med-${medicineId}" ${isPrepared ? 'checked' : ''} ${prescriptionIsCancelled ? 'disabled' : ''}>
+                        });
+                        
+                        if (allPrepared && items.length > 0) {
+                            itemCard.classList.add('prepared');
+                        }
+                        
+                        // Display multiple item names as tags (like prescription entry)
+                        const itemsHtml = items.map(it => {
+                            const medicineId = `${currentPatient.patient_id}_${it.id}_${currentDate}`;
+                            const isPrepared = preparedMedicines.has(medicineId);
+                            return `<span class="tag" style="display:inline-block;padding:4px 8px;margin:2px;background:${isPrepared ? '#d4edda' : '#e3ebf6'};border-radius:4px;font-size:0.9em;">${escapeHtml(it.item_name)}${it.quantity ? ` (Qty: ${escapeHtml(it.quantity)})` : ''}</span>`;
+                        }).join(' ');
+                        
+                        // Single dosage, usage, time, UNO, and internal/external for the entire group
+                        const dosage = group.dose || items[0]?.dose || 'N/A';
+                        // Handle usage - can be string or array
+                        let usage = 'N/A';
+                        if (group.usage) {
+                            usage = group.usage;
+                        } else if (group.usage_array && Array.isArray(group.usage_array) && group.usage_array.length > 0) {
+                            usage = group.usage_array.join(', ');
+                        } else if (items[0]?.usage) {
+                            usage = items[0].usage;
+                        }
+                        const time = group.time || items[0]?.time || 'N/A';
+                        const uno = group.notes || group.uno || items[0]?.notes || 'N/A';
+                        const internalExternal = group.internal_external || items[0]?.internal_external || 'N/A';
+                        
+                        itemCard.innerHTML = `
+                            <div style="display:flex;align-items:flex-start;gap:12px;">
+                                <div class="medicine-checkbox" style="flex-shrink:0;padding-top:4px;">
+                                    <input type="checkbox" id="med-group-${group.group_id}" ${allPrepared ? 'checked' : ''} ${prescriptionIsCancelled ? 'disabled' : ''}>
                                 </div>
-                                <div class="medicine-details">
-                                    <div class="medicine-name">${escapeHtml(item.item_name)}</div>
-                                    <div class="medicine-meta">
-                                        <span>Dose: ${escapeHtml(item.dose || group.dose || 'N/A')}</span>
-                                        <span>Notes: ${escapeHtml(item.notes || group.notes || 'None')}</span>
+                                <div class="medicine-details" style="flex:1;">
+                                    <div style="margin-bottom:8px;">
+                                        ${itemsHtml}
+                                    </div>
+                                    <div class="medicine-meta" style="font-size:0.9em;color:#666;display:flex;flex-wrap:wrap;gap:12px;">
+                                        ${dosage !== 'N/A' ? `<span><strong>Dosage:</strong> ${escapeHtml(dosage)}</span>` : ''}
+                                        ${usage !== 'N/A' ? `<span><strong>Usage:</strong> ${escapeHtml(usage)}</span>` : ''}
+                                        ${time !== 'N/A' ? `<span><strong>Time:</strong> ${escapeHtml(time)}</span>` : ''}
+                                        ${uno !== 'N/A' ? `<span><strong>UNO:</strong> ${escapeHtml(uno)}</span>` : ''}
+                                        ${internalExternal !== 'N/A' ? `<span><strong>Ext/Int:</strong> ${escapeHtml(internalExternal)}</span>` : ''}
                                     </div>
                                 </div>
-                                <div class="medicine-qty">Qty: ${item.quantity || 'N/A'}</div>
-                            `;
-                            
-                            // Add event listener for checkbox (only if prescription not cancelled)
-                            if (!prescriptionIsCancelled) {
-                                const checkbox = itemCard.querySelector('input[type="checkbox"]');
-                                checkbox.addEventListener('change', function() {
-                                    toggleMedicinePreparation(medicineId, this.checked);
+                            </div>
+                        `;
+                        
+                        // Add event listener for checkbox (only if prescription not cancelled)
+                        if (!prescriptionIsCancelled) {
+                            const checkbox = itemCard.querySelector('input[type="checkbox"]');
+                            checkbox.addEventListener('change', function() {
+                                // Toggle all items in the group
+                                medicineIds.forEach(medId => {
+                                    toggleMedicinePreparation(medId, this.checked);
                                 });
-                            }
-                            
-                            groupDiv.appendChild(itemCard);
-                        });
+                                // Update visual state
+                                if (this.checked) {
+                                    itemCard.classList.add('prepared');
+                                    // Update tag backgrounds
+                                    itemCard.querySelectorAll('.tag').forEach(tag => {
+                                        tag.style.background = '#d4edda';
+                                    });
+                                } else {
+                                    itemCard.classList.remove('prepared');
+                                    // Update tag backgrounds
+                                    itemCard.querySelectorAll('.tag').forEach(tag => {
+                                        tag.style.background = '#e3ebf6';
+                                    });
+                                }
+                            });
+                        }
+                        
+                        groupDiv.appendChild(itemCard);
                     }
                     
                     prescriptionSection.appendChild(groupDiv);
@@ -1074,55 +1129,120 @@
                             therapyGroupDiv.appendChild(dosageLabel);
                         }
                         
-                        // Render items in this group
-                        items.forEach(item => {
+                        // Render items in this group - display as single group with multiple items
+                        if (items.length > 0) {
                             const itemCard = document.createElement('div');
                             itemCard.className = 'medicine-card';
                             itemCard.style.borderLeft = groupIsCancelled ? '4px solid #e63757' : '4px solid #4CAF50';
                             itemCard.style.marginBottom = '8px';
+                            itemCard.style.padding = '12px';
+                            itemCard.style.backgroundColor = '#fff';
+                            itemCard.style.borderRadius = '6px';
                             if (groupIsCancelled) {
                                 itemCard.style.opacity = '0.7';
                             }
                             
-                            const medicineId = `${currentPatient.patient_id}_${item.id}_${currentDate}`;
-                            const isPrepared = preparedMedicines.has(medicineId);
-                            const isRemoved = item.is_removed || item.status === 'removed';
+                            // Check if all items in this group are prepared
+                            let allPrepared = true;
+                            const medicineIds = [];
+                            const removedItems = [];
+                            items.forEach(item => {
+                                const medicineId = `${currentPatient.patient_id}_${item.id}_${currentDate}`;
+                                medicineIds.push(medicineId);
+                                const isRemoved = item.is_removed || item.status === 'removed';
+                                if (isRemoved) {
+                                    removedItems.push(item);
+                                }
+                                if (!preparedMedicines.has(medicineId)) {
+                                    allPrepared = false;
+                                }
+                            });
                             
-                            if (isPrepared) {
+                            if (allPrepared && items.length > 0) {
                                 itemCard.classList.add('prepared');
                             }
-                            if (isRemoved) {
-                                itemCard.style.borderLeft = '4px solid #f6c343';
-                                itemCard.style.opacity = '0.6';
+                            
+                            // Display multiple item names as tags (like prescription entry)
+                            const itemsHtml = items.map(it => {
+                                const medicineId = `${currentPatient.patient_id}_${it.id}_${currentDate}`;
+                                const isPrepared = preparedMedicines.has(medicineId);
+                                const isRemoved = it.is_removed || it.status === 'removed';
+                                const removedBadge = isRemoved ? '<span style="color: #f6c343; font-weight: bold; margin-left: 4px;">[REMOVED]</span>' : '';
+                                return `<span class="tag" style="display:inline-block;padding:4px 8px;margin:2px;background:${isPrepared ? '#d4edda' : isRemoved ? '#fff3cd' : '#e3ebf6'};border-radius:4px;font-size:0.9em;">${escapeHtml(it.item_name)}${removedBadge}</span>`;
+                            }).join(' ');
+                            
+                            // Single dosage, usage, time, UNO, and internal/external for the entire group
+                            const dosage = group.dosage || items[0]?.dose || 'N/A';
+                            // Handle usage - can be string or array
+                            let usage = 'N/A';
+                            if (group.usage) {
+                                usage = group.usage;
+                            } else if (group.usage_array && Array.isArray(group.usage_array) && group.usage_array.length > 0) {
+                                usage = group.usage_array.join(', ');
+                            } else if (items[0]?.usage) {
+                                usage = items[0].usage;
                             }
+                            const uno = group.uno || items[0]?.notes || 'N/A';
+                            const internalExternal = group.internal_external || items[0]?.internal_external || 'N/A';
                             
                             itemCard.innerHTML = `
-                                <div class="medicine-checkbox">
-                                    <input type="checkbox" id="med-${medicineId}" ${isPrepared ? 'checked' : ''} ${(groupIsCancelled || isRemoved) ? 'disabled' : ''}>
-                                </div>
-                                <div class="medicine-details">
-                                    <div class="medicine-name">
-                                        ${escapeHtml(item.item_name)}
-                                        ${isRemoved ? '<span style="color: #f6c343; font-weight: bold; margin-left: 8px;">[REMOVED]</span>' : ''}
+                                <div style="display:flex;align-items:flex-start;gap:12px;">
+                                    <div class="medicine-checkbox" style="flex-shrink:0;padding-top:4px;">
+                                        <input type="checkbox" id="med-group-${group.group_id}" ${allPrepared ? 'checked' : ''} ${(groupIsCancelled || removedItems.length === items.length) ? 'disabled' : ''}>
                                     </div>
-                                    <div class="medicine-meta">
-                                        ${item.item_code ? `<span>Item Code: ${escapeHtml(item.item_code)}</span>` : ''}
-                                        ${item.dose ? `<span>Dose: ${escapeHtml(item.dose)}</span>` : ''}
-                                        ${item.notes ? `<span>Notes: ${escapeHtml(item.notes)}</span>` : ''}
+                                    <div class="medicine-details" style="flex:1;">
+                                        <div style="margin-bottom:8px;">
+                                            ${itemsHtml}
+                                        </div>
+                                        <div class="medicine-meta" style="font-size:0.9em;color:#666;display:flex;flex-wrap:wrap;gap:12px;">
+                                            ${dosage !== 'N/A' ? `<span><strong>Dosage:</strong> ${escapeHtml(dosage)}</span>` : ''}
+                                            ${usage !== 'N/A' ? `<span><strong>Usage:</strong> ${escapeHtml(usage)}</span>` : ''}
+                                            ${uno !== 'N/A' ? `<span><strong>UNO:</strong> ${escapeHtml(uno)}</span>` : ''}
+                                            ${internalExternal !== 'N/A' ? `<span><strong>Ext/Int:</strong> ${escapeHtml(internalExternal)}</span>` : ''}
+                                            ${items[0]?.item_code ? `<span><strong>Item Code:</strong> ${escapeHtml(items[0].item_code)}</span>` : ''}
+                                        </div>
                                     </div>
                                 </div>
                             `;
                             
                             // Add event listener for checkbox (only if not cancelled/removed)
-                            if (!groupIsCancelled && !isRemoved) {
+                            if (!groupIsCancelled && removedItems.length < items.length) {
                                 const checkbox = itemCard.querySelector('input[type="checkbox"]');
                                 checkbox.addEventListener('change', function() {
-                                    toggleMedicinePreparation(medicineId, this.checked);
+                                    // Toggle all non-removed items in the group
+                                    items.forEach((it, idx) => {
+                                        const isRemoved = it.is_removed || it.status === 'removed';
+                                        if (!isRemoved) {
+                                            toggleMedicinePreparation(medicineIds[idx], this.checked);
+                                        }
+                                    });
+                                    // Update visual state
+                                    if (this.checked) {
+                                        itemCard.classList.add('prepared');
+                                        // Update tag backgrounds for non-removed items
+                                        itemCard.querySelectorAll('.tag').forEach((tag, idx) => {
+                                            const it = items[idx];
+                                            const isRemoved = it.is_removed || it.status === 'removed';
+                                            if (!isRemoved) {
+                                                tag.style.background = '#d4edda';
+                                            }
+                                        });
+                                    } else {
+                                        itemCard.classList.remove('prepared');
+                                        // Update tag backgrounds for non-removed items
+                                        itemCard.querySelectorAll('.tag').forEach((tag, idx) => {
+                                            const it = items[idx];
+                                            const isRemoved = it.is_removed || it.status === 'removed';
+                                            if (!isRemoved) {
+                                                tag.style.background = '#e3ebf6';
+                                            }
+                                        });
+                                    }
                                 });
                             }
                             
                             therapyGroupDiv.appendChild(itemCard);
-                        });
+                        }
                     });
                     
                     therapySection.appendChild(therapyGroupDiv);
