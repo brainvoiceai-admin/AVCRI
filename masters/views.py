@@ -16,6 +16,7 @@ from .models import (
     TherapistGrade, TherapistMaster, TherapistLeaveMaster, NurseTreatmentMaster,
     NurseMaster, IngredientMaster
 )
+from Patient.models import TreatmentRoom
 import json
 import pandas as pd
 from datetime import datetime
@@ -952,6 +953,14 @@ def master_management_dashboard(request):
                 'count': IngredientMaster.objects.count(),
                 'active_count': IngredientMaster.objects.filter(is_active=True).count(),
             },
+            {
+                'name': 'Treatment Room Master',
+                'model': 'TreatmentRoom',
+                'url': 'treatment_room_master_manage',
+                'description': 'Manage treatment rooms for therapy allocation',
+                'count': TreatmentRoom.objects.count(),
+                'active_count': TreatmentRoom.objects.filter(is_active=True).count(),
+            },
         ]
     }
     return render(request, 'masters/master_management_dashboard.html', context)
@@ -1290,6 +1299,91 @@ def ingredient_master_disable(request, pk):
     ingredient.save()
     messages.success(request, f'Ingredient {ingredient.ingredient_name} disabled successfully.')
     return redirect('ingredient_master_manage')
+
+# Treatment Room Master CRUD Views
+@method_decorator(login_required, name='dispatch')
+@method_decorator(super_admin_required, name='dispatch')
+class TreatmentRoomManagementView(ListView):
+    model = TreatmentRoom
+    template_name = 'masters/treatment_room_master_manage.html'
+    context_object_name = 'treatment_room_list'
+    paginate_by = 20
+
+    def get_queryset(self):
+        queryset = TreatmentRoom.objects.all()
+        
+        # Search filter
+        search = self.request.GET.get('search', '')
+        if search:
+            queryset = queryset.filter(
+                db_models.Q(room_no__icontains=search) |
+                db_models.Q(tr_code__icontains=search) |
+                db_models.Q(floor__icontains=search) |
+                db_models.Q(description__icontains=search)
+            )
+        
+        # Status filter
+        status = self.request.GET.get('status', '')
+        if status == 'active':
+            queryset = queryset.filter(is_active=True)
+        elif status == 'inactive':
+            queryset = queryset.filter(is_active=False)
+        
+        return queryset.order_by('room_no')
+
+@method_decorator(login_required, name='dispatch')
+@method_decorator(super_admin_required, name='dispatch')
+class TreatmentRoomCreateView(CreateView):
+    model = TreatmentRoom
+    fields = ['room_no', 'floor', 'description', 'tr_code', 'is_active']
+    template_name = 'masters/treatment_room_master_form.html'
+    success_url = reverse_lazy('treatment_room_master_manage')
+    
+    def form_valid(self, form):
+        messages.success(self.request, 'Treatment room created successfully.')
+        return super().form_valid(form)
+
+@method_decorator(login_required, name='dispatch')
+@method_decorator(super_admin_required, name='dispatch')
+class TreatmentRoomUpdateView(UpdateView):
+    model = TreatmentRoom
+    fields = ['room_no', 'floor', 'description', 'tr_code', 'is_active']
+    template_name = 'masters/treatment_room_master_form.html'
+    success_url = reverse_lazy('treatment_room_master_manage')
+    
+    def form_valid(self, form):
+        messages.success(self.request, 'Treatment room updated successfully.')
+        return super().form_valid(form)
+
+@login_required
+@super_admin_required
+def treatment_room_master_delete(request, pk):
+    """Delete a treatment room - function-based view to handle GET requests properly"""
+    room = get_object_or_404(TreatmentRoom, pk=pk)
+    room_no = room.room_no
+    room.delete()
+    messages.success(request, f'Treatment room {room_no} deleted successfully.')
+    return redirect('treatment_room_master_manage')
+
+@login_required
+@super_admin_required
+def treatment_room_master_enable(request, pk):
+    """Enable a treatment room"""
+    room = get_object_or_404(TreatmentRoom, pk=pk)
+    room.is_active = True
+    room.save()
+    messages.success(request, f'Treatment room {room.room_no} enabled successfully.')
+    return redirect('treatment_room_master_manage')
+
+@login_required
+@super_admin_required
+def treatment_room_master_disable(request, pk):
+    """Disable a treatment room"""
+    room = get_object_or_404(TreatmentRoom, pk=pk)
+    room.is_active = False
+    room.save()
+    messages.success(request, f'Treatment room {room.room_no} disabled successfully.')
+    return redirect('treatment_room_master_manage')
 
 # Therapist Master CRUD Views
 class TherapistMasterManagementView(ListView):
