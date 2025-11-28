@@ -87,11 +87,58 @@
                         </div>
                     {% endfor %}
                 {% endif %}
+                
+                <!-- Toast Container for Success Messages -->
+                <div class="toast-container position-fixed top-0 end-0 p-3" style="z-index: 9999;">
+                    <div id="successToast" class="toast" role="alert" aria-live="assertive" aria-atomic="true">
+                        <div class="toast-header bg-success text-white">
+                            <strong class="me-auto">Success</strong>
+                            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="toast" aria-label="Close"></button>
+                        </div>
+                        <div class="toast-body" id="toastMessage">
+                            Role created successfully
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Search and Filter Section -->
+                <div class="card mb-4">
+                    <div class="card-body">
+                        <form method="get" action="{% url 'authentication:role_management' %}" id="filterForm">
+                            <div class="row g-3">
+                                <div class="col-md-6">
+                                    <label for="search" class="form-label">Search</label>
+                                    <input type="text" class="form-control" id="search" name="search" 
+                                           placeholder="Search by name, display name, or description..." 
+                                           value="{{ request.GET.search|default:'' }}">
+                                </div>
+                                <div class="col-md-3">
+                                    <label for="status" class="form-label">Status</label>
+                                    <select class="form-select" id="status" name="status">
+                                        <option value="">All Status</option>
+                                        <option value="active" {% if request.GET.status == 'active' %}selected{% endif %}>Active</option>
+                                        <option value="inactive" {% if request.GET.status == 'inactive' %}selected{% endif %}>Inactive</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-3 d-flex align-items-end">
+                                    <button type="submit" class="btn btn-primary w-100 me-2">
+                                        <i class="fas fa-search"></i> Filter
+                                    </button>
+                                    <a href="{% url 'authentication:role_management' %}" class="btn btn-secondary w-100">
+                                        <i class="fas fa-times"></i> Clear
+                                    </a>
+                                </div>
+                            </div>
+                        </form>
+                    </div>
+                </div>
 
                 <!-- Roles Table -->
                 <div class="card">
-                    <div class="card-header">
-                        <h5 class="mb-0">Existing Roles</h5>
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">Existing Roles 
+                            <span class="badge bg-primary ms-2">{{ roles|length }}</span>
+                        </h5>
                     </div>
                     <div class="card-body p-0">
                         <div class="table-responsive">
@@ -109,7 +156,7 @@
                                 </thead>
                                 <tbody>
                                     {% for role in roles %}
-                                    <tr>
+                                    <tr {% if not role.is_active %}class="table-secondary" style="opacity: 0.7;"{% endif %}>
                                         <td>{{ role.name }}</td>
                                         <td>{{ role.display_name }}</td>
                                         <td>{{ role.description|truncatechars:50 }}</td>
@@ -149,6 +196,44 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const toastElement = document.getElementById('successToast');
+            const toastMessage = document.getElementById('toastMessage');
+            
+            if (toastElement && toastMessage) {
+                let shouldShowToast = false;
+                
+                // Check for success messages first (most reliable)
+                {% if messages %}
+                    {% for message in messages %}
+                        {% if message.tags == 'success' %}
+                            toastMessage.textContent = '{{ message|escapejs }}';
+                            shouldShowToast = true;
+                        {% endif %}
+                    {% endfor %}
+                {% endif %}
+                
+                // If no message but URL parameter exists, use default message
+                if (!shouldShowToast) {
+                    if (urlParams.get('updated') === '1') {
+                        toastMessage.textContent = 'Role updated successfully';
+                        shouldShowToast = true;
+                    } else if (urlParams.get('created') === '1') {
+                        toastMessage.textContent = 'Role created successfully';
+                        shouldShowToast = true;
+                    }
+                }
+                
+                // Show toast if we have a message
+                if (shouldShowToast) {
+                    const toast = new bootstrap.Toast(toastElement);
+                    toast.show();
+                }
+            }
+        });
+    </script>
 </body>
 </html>
 

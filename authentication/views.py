@@ -53,6 +53,24 @@ def get_client_ip(request):
 def role_management(request):
     """View for Super Admin to manage roles and module permissions"""
     roles = Role.objects.all().order_by('name')
+    
+    # Apply filters from GET parameters
+    search_query = request.GET.get('search', '').strip()
+    status_filter = request.GET.get('status', '').strip()
+    
+    if search_query:
+        from django.db.models import Q
+        roles = roles.filter(
+            Q(name__icontains=search_query) |
+            Q(display_name__icontains=search_query) |
+            Q(description__icontains=search_query)
+        )
+    
+    if status_filter == 'active':
+        roles = roles.filter(is_active=True)
+    elif status_filter == 'inactive':
+        roles = roles.filter(is_active=False)
+    
     modules = Module.objects.filter(is_active=True).order_by('order', 'name')
     
     context = {
@@ -60,6 +78,39 @@ def role_management(request):
         'modules': modules,
     }
     return render(request, 'authentication/role_management.html', context)
+
+def categorize_modules(modules):
+    """Group modules by category based on their names and display names"""
+    categories = {
+        'Patient Management': [],
+        'Therapist Management': [],
+        'Pharmacy': [],
+        'Masters & Settings': [],
+        'Other': []
+    }
+    
+    for module in modules:
+        name_lower = module.name.lower()
+        display_lower = module.display_name.lower()
+        
+        # Categorize based on keywords
+        if any(keyword in name_lower or keyword in display_lower 
+               for keyword in ['patient', 'registration', 'visit', 'session', 'feedback']):
+            categories['Patient Management'].append(module)
+        elif any(keyword in name_lower or keyword in display_lower 
+                 for keyword in ['therapist', 'therapy', 'schedule', 'booking', 'allocation']):
+            categories['Therapist Management'].append(module)
+        elif any(keyword in name_lower or keyword in display_lower 
+                 for keyword in ['pharmacy', 'prescription', 'procurement', 'medicine', 'medicin']):
+            categories['Pharmacy'].append(module)
+        elif any(keyword in name_lower or keyword in display_lower 
+                 for keyword in ['master', 'role', 'user', 'module', 'audit', 'admin', 'management', 'dashboard']):
+            categories['Masters & Settings'].append(module)
+        else:
+            categories['Other'].append(module)
+    
+    # Remove empty categories
+    return {k: v for k, v in categories.items() if v}
 
 @login_required
 @super_admin_required
@@ -73,11 +124,11 @@ def create_role(request):
         
         if not name or not display_name:
             messages.error(request, 'Name and Display Name are required.')
-            return redirect('authentication:role_management')
+            return redirect('authentication:create_role')
         
         if Role.objects.filter(name=name).exists():
             messages.error(request, 'A role with this name already exists.')
-            return redirect('authentication:role_management')
+            return redirect('authentication:create_role')
         
         role = Role.objects.create(
             name=name,
@@ -91,12 +142,17 @@ def create_role(request):
             role.modules.set(modules)
         
         messages.success(request, f'Role "{role.display_name}" created successfully.')
-        return redirect('authentication:role_management')
+        # Redirect with success parameter to show toast
+        from django.urls import reverse
+        return redirect(reverse('authentication:role_management') + '?created=1')
     
     # GET request - show create role form
     modules = Module.objects.filter(is_active=True).order_by('order', 'name')
+    modules_by_category = categorize_modules(modules)
+    
     context = {
         'modules': modules,
+        'modules_by_category': modules_by_category,
     }
     return render(request, 'authentication/create_role.html', context)
 
@@ -119,7 +175,9 @@ def edit_role(request, role_id):
         role.save()
         
         messages.success(request, f'Role "{role.display_name}" updated successfully.')
-        return redirect('authentication:role_management')
+        # Redirect with update parameter to show correct toast
+        from django.urls import reverse
+        return redirect(reverse('authentication:role_management') + '?updated=1')
     
     modules = Module.objects.filter(is_active=True).order_by('order', 'name')
     context = {
@@ -148,8 +206,37 @@ def delete_role(request, role_id):
 @super_admin_required
 def user_role_assignment(request):
     """View for Super Admin to assign custom roles to users"""
-    users = CustomUser.objects.filter(is_active=True).order_by('username')
+    users = CustomUser.objects.all().order_by('username')
     roles = Role.objects.filter(is_active=True).order_by('name')
+    
+    # Apply filters from GET parameters
+    search_query = request.GET.get('search', '').strip()
+    status_filter = request.GET.get('status', '').strip()
+    default_role_filter = request.GET.get('default_role', '').strip()
+    custom_role_filter = request.GET.get('custom_role', '').strip()
+    
+    if search_query:
+        from django.db.models import Q
+        users = users.filter(
+            Q(username__icontains=search_query) |
+            Q(email__icontains=search_query) |
+            Q(first_name__icontains=search_query) |
+            Q(last_name__icontains=search_query)
+        )
+    
+    if status_filter == 'active':
+        users = users.filter(is_active=True)
+    elif status_filter == 'inactive':
+        users = users.filter(is_active=False)
+    
+    if default_role_filter:
+        users = users.filter(role=default_role_filter)
+    
+    if custom_role_filter:
+        if custom_role_filter == 'none':
+            users = users.filter(custom_role__isnull=True)
+        else:
+            users = users.filter(custom_role_id=custom_role_filter)
     
     if request.method == 'POST':
         user_id = request.POST.get('user_id')
@@ -162,7 +249,27 @@ def user_role_assignment(request):
         user.save()
         
         messages.success(request, f'Role assignment updated for {user.username}.')
-        return redirect('authentication:user_role_assignment')
+        
+        # Preserve filter parameters in redirect
+        from django.urls import reverse
+        from urllib.parse import urlencode
+        
+        filter_params = {}
+        if request.GET.get('search'):
+            filter_params['search'] = request.GET.get('search')
+        if request.GET.get('status'):
+            filter_params['status'] = request.GET.get('status')
+        if request.GET.get('default_role'):
+            filter_params['default_role'] = request.GET.get('default_role')
+        if request.GET.get('custom_role'):
+            filter_params['custom_role'] = request.GET.get('custom_role')
+        
+        if filter_params:
+            redirect_url = reverse('authentication:user_role_assignment') + '?' + urlencode(filter_params)
+        else:
+            redirect_url = reverse('authentication:user_role_assignment')
+        
+        return redirect(redirect_url)
     
     context = {
         'users': users,
@@ -357,7 +464,32 @@ def medicin_prescription_table(request):
 @super_admin_required
 def Manage_user(request):
     """Enhanced user management view with module permissions"""
-    users = CustomUser.objects.filter(is_active=True).order_by('username')
+    # Get all users (both active and inactive) for management
+    users = CustomUser.objects.all().order_by('username')
+    
+    # Apply filters from GET parameters
+    search_query = request.GET.get('search', '').strip()
+    status_filter = request.GET.get('status', '').strip()
+    role_filter = request.GET.get('role', '').strip()
+    
+    if search_query:
+        from django.db.models import Q
+        users = users.filter(
+            Q(username__icontains=search_query) |
+            Q(email__icontains=search_query) |
+            Q(first_name__icontains=search_query) |
+            Q(last_name__icontains=search_query) |
+            Q(mobile__icontains=search_query)
+        )
+    
+    if status_filter == 'active':
+        users = users.filter(is_active=True)
+    elif status_filter == 'inactive':
+        users = users.filter(is_active=False)
+    
+    if role_filter:
+        users = users.filter(role=role_filter)
+    
     roles = Role.objects.filter(is_active=True).order_by('name')
     modules = Module.objects.filter(is_active=True).order_by('order', 'name')
     
@@ -679,7 +811,69 @@ def Manage_user(request):
                 request=request
             )
         
-        return redirect('authentication:Manage_user')
+        elif action == 'toggle_user_status':
+            user_id = request.POST.get('user_id')
+            user = get_object_or_404(CustomUser, id=user_id)
+            is_active = request.POST.get('is_active') == 'true'
+            user.is_active = is_active
+            user.save()
+            
+            status_text = 'activated' if is_active else 'deactivated'
+            messages.success(request, f'User "{user.username}" {status_text} successfully.')
+            
+            # Log user status change
+            log_audit_event(
+                user=request.user,
+                action='update',
+                description=f'{status_text.capitalize()} user: {user.username}',
+                status='success',
+                object_type='User',
+                object_id=str(user_id),
+                request=request
+            )
+        
+        # Preserve filter parameters in redirect
+        from django.urls import reverse
+        from urllib.parse import urlencode
+        
+        filter_params = {}
+        if request.GET.get('search'):
+            filter_params['search'] = request.GET.get('search')
+        if request.GET.get('status'):
+            filter_params['status'] = request.GET.get('status')
+        if request.GET.get('role'):
+            filter_params['role'] = request.GET.get('role')
+        
+        if filter_params:
+            redirect_url = reverse('authentication:Manage_user') + '?' + urlencode(filter_params)
+        else:
+            redirect_url = reverse('authentication:Manage_user')
+        
+        return redirect(redirect_url)
+    
+    # Handle AJAX validation requests
+    if request.method == 'GET' and request.GET.get('action') == 'check_user_exists':
+        username = request.GET.get('username', '').strip()
+        email = request.GET.get('email', '').strip()
+        
+        result = {
+            'username_exists': False,
+            'email_exists': False,
+            'username_message': '',
+            'email_message': ''
+        }
+        
+        if username:
+            if CustomUser.objects.filter(username=username).exists():
+                result['username_exists'] = True
+                result['username_message'] = f'Username "{username}" already exists.'
+        
+        if email:
+            if CustomUser.objects.filter(email=email).exists():
+                result['email_exists'] = True
+                result['email_message'] = f'Email "{email}" already exists.'
+        
+        return JsonResponse(result)
     
     context = {
         'users': users,
@@ -772,8 +966,16 @@ def Audit_Log(request):
     date_from = request.GET.get('date_from', '')
     date_to = request.GET.get('date_to', '')
     
-    # Start with all audit logs
-    audit_logs = AuditLog.objects.all()
+    # Check if any filters are applied
+    has_filters = any([action_filter, status_filter, user_filter, search_query, date_from, date_to])
+    
+    # Start with all audit logs, but default to today's logs if no filters
+    if not has_filters:
+        # Default: Show only today's logs
+        today = timezone.now().date()
+        audit_logs = AuditLog.objects.filter(timestamp__date=today)
+    else:
+        audit_logs = AuditLog.objects.all()
     
     # Apply filters
     if action_filter:
@@ -843,6 +1045,113 @@ def Audit_Log(request):
     }
     
     return render(request, 'dashboards/superadmin/Audit_Log.html', context)
+
+@login_required
+@super_admin_required
+def audit_log_api(request):
+    """API endpoint to get all filtered audit logs for PDF generation"""
+    from django.http import JsonResponse
+    from django.core import serializers
+    import json
+    
+    # Get filter parameters (same as Audit_Log view)
+    action_filter = request.GET.get('action', '')
+    status_filter = request.GET.get('status', '')
+    user_filter = request.GET.get('user', '')
+    search_query = request.GET.get('search', '')
+    date_from = request.GET.get('date_from', '')
+    date_to = request.GET.get('date_to', '')
+    
+    # Check if any filters are applied
+    has_filters = any([action_filter, status_filter, user_filter, search_query, date_from, date_to])
+    
+    # Start with all audit logs, but default to today's logs if no filters
+    if not has_filters:
+        # Default: Show only today's logs
+        today = timezone.now().date()
+        audit_logs = AuditLog.objects.filter(timestamp__date=today)
+    else:
+        audit_logs = AuditLog.objects.all()
+    
+    # Apply filters (same logic as Audit_Log view)
+    if action_filter:
+        audit_logs = audit_logs.filter(action=action_filter)
+    
+    if status_filter:
+        audit_logs = audit_logs.filter(status=status_filter)
+    
+    if user_filter:
+        audit_logs = audit_logs.filter(user__username__icontains=user_filter)
+    
+    if search_query:
+        audit_logs = audit_logs.filter(
+            models.Q(description__icontains=search_query) |
+            models.Q(user__username__icontains=search_query) |
+            models.Q(object_type__icontains=search_query)
+        )
+    
+    if date_from:
+        try:
+            from datetime import datetime
+            date_from_obj = datetime.strptime(date_from, '%Y-%m-%d')
+            audit_logs = audit_logs.filter(timestamp__date__gte=date_from_obj.date())
+        except ValueError:
+            pass
+    
+    if date_to:
+        try:
+            from datetime import datetime
+            date_to_obj = datetime.strptime(date_to, '%Y-%m-%d')
+            audit_logs = audit_logs.filter(timestamp__date__lte=date_to_obj.date())
+        except ValueError:
+            pass
+    
+    # Get all logs (no pagination for API)
+    logs_data = []
+    for log in audit_logs.select_related('user'):
+        # Format additional_data for display
+        additional_info = ''
+        if log.additional_data:
+            try:
+                if isinstance(log.additional_data, dict):
+                    if log.action == 'allocate_therapy':
+                        additional_info = f"Patient: {log.additional_data.get('patient_reg_no', 'N/A')}, Therapy: {log.additional_data.get('therapy_name', 'N/A')}"
+                    elif log.action == 'cancel_therapy':
+                        additional_info = f"Patient: {log.additional_data.get('patient_reg_no', 'N/A')}, Therapy: {log.additional_data.get('therapy_name', 'N/A')}"
+                    elif log.action == 'resume_therapy':
+                        additional_info = f"Patient: {log.additional_data.get('patient_reg_no', 'N/A')}, Therapy: {log.additional_data.get('therapy_name', 'N/A')}"
+                    elif log.action == 'update_therapy':
+                        additional_info = f"Patient: {log.additional_data.get('patient_reg_no', 'N/A')}, Therapy: {log.additional_data.get('therapy_name', 'N/A')}"
+                    elif log.action == 'remove_item':
+                        additional_info = f"Patient: {log.additional_data.get('patient_reg_no', 'N/A')}, Therapy: {log.additional_data.get('therapy_name', 'N/A')}"
+            except:
+                pass
+        
+        object_info = ''
+        if log.object_type:
+            object_info = log.object_type
+            if log.object_id:
+                object_info += f" ({log.object_id})"
+        
+        logs_data.append({
+            'id': log.id,
+            'user': log.user.username if log.user else 'System',
+            'user_role': log.user.get_role_display() if log.user else 'System',
+            'action': log.get_action_display(),
+            'description': log.description[:100] if log.description else '',  # Limit description length
+            'object': object_info,
+            'timestamp': log.timestamp.strftime('%b %d, %Y'),
+            'time': log.timestamp.strftime('%H:%M:%S'),
+            'ip_address': log.ip_address or '-',
+            'status': log.get_status_display(),
+            'additional_info': additional_info
+        })
+    
+    return JsonResponse({
+        'success': True,
+        'data': logs_data,
+        'count': len(logs_data)
+    })
 
 @login_required
 @super_admin_required
