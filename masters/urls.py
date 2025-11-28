@@ -103,4 +103,8 @@ urlpatterns = [
     path('nurses/<int:pk>/delete/', views.nurse_master_delete, name='nursemaster_delete'),
     path('nurses/<int:pk>/enable/', views.nurse_master_enable, name='nursemaster_enable'),
     path('nurses/<int:pk>/disable/', views.nurse_master_disable, name='nursemaster_disable'),
+    # Bulk Upload
+    path('bulk-upload/', views.bulk_upload_master, name='bulk_upload_master'),
+    # Download Template
+    path('download-template/<str:master_type>/', views.download_master_template, name='download_master_template'),
 ]

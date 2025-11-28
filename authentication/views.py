@@ -1254,8 +1254,147 @@ def therapist_feedback_form(request):
 
 @login_required
 def Therapy_Report(request):
-    """Therapy report view"""
-    return render(request, 'dashboards/reports/therapy_report.html')
+    """Reports & Analytics view with therapy and prescription insights"""
+    from Sheduling.models import TherapyAllocation, PrescriptionAllocation, Booking
+    from Patient.models import TherapistBooking, RoomBooking
+    from django.db.models import Count, Q, Sum, Avg
+    from django.utils import timezone
+    from datetime import timedelta, datetime
+    import json
+    
+    # Get date range from request (default to last 30 days)
+    end_date = timezone.now().date()
+    start_date = end_date - timedelta(days=30)
+    
+    if request.GET.get('start_date'):
+        try:
+            start_date = datetime.strptime(request.GET.get('start_date'), '%Y-%m-%d').date()
+        except:
+            pass
+    
+    if request.GET.get('end_date'):
+        try:
+            end_date = datetime.strptime(request.GET.get('end_date'), '%Y-%m-%d').date()
+        except:
+            pass
+    
+    # Therapy Allocation Statistics
+    therapy_allocations = TherapyAllocation.objects.filter(
+        from_date__lte=end_date,
+        to_date__gte=start_date
+    )
+    
+    total_therapies = therapy_allocations.count()
+    active_therapies = therapy_allocations.filter(status='allocated').count()
+    cancelled_therapies = therapy_allocations.filter(status='cancelled').count()
+    
+    # Therapy by status
+    therapy_by_status = therapy_allocations.values('status').annotate(count=Count('id')).order_by('status')
+    therapy_status_data = {item['status']: item['count'] for item in therapy_by_status}
+    
+    # Top therapies
+    top_therapies = therapy_allocations.values('therapy_name').annotate(
+        count=Count('id')
+    ).order_by('-count')[:10]
+    
+    # Therapy bookings statistics
+    bookings = Booking.objects.filter(
+        date__gte=start_date,
+        date__lte=end_date
+    )
+    total_bookings = bookings.count()
+    completed_bookings = bookings.filter(status='completed').count()
+    cancelled_bookings = bookings.filter(status__in=['cancelled', 'partially_cancelled']).count()
+    
+    # Daily therapy bookings trend
+    daily_bookings = bookings.values('date').annotate(count=Count('id')).order_by('date')
+    daily_bookings_data = {
+        'dates': [str(item['date']) for item in daily_bookings],
+        'counts': [item['count'] for item in daily_bookings]
+    }
+    
+    # Prescription Allocation Statistics
+    prescription_allocations = PrescriptionAllocation.objects.filter(
+        from_date__lte=end_date,
+        to_date__gte=start_date
+    )
+    
+    total_prescriptions = prescription_allocations.count()
+    active_prescriptions = prescription_allocations.filter(status='active').count()
+    cancelled_prescriptions = prescription_allocations.filter(status='cancelled').count()
+    
+    # Prescription by status
+    prescription_by_status = prescription_allocations.values('status').annotate(count=Count('id')).order_by('status')
+    prescription_status_data = {item['status']: item['count'] for item in prescription_by_status}
+    
+    # Therapist utilization
+    therapist_bookings = TherapistBooking.objects.filter(
+        date__gte=start_date,
+        date__lte=end_date,
+        status='BOOKED'
+    )
+    therapist_utilization = therapist_bookings.values('therapist__therapist_name').annotate(
+        count=Count('id')
+    ).order_by('-count')[:10]
+    
+    # Room utilization
+    room_bookings = RoomBooking.objects.filter(
+        date__gte=start_date,
+        date__lte=end_date,
+        status='BOOKED'
+    )
+    room_utilization = room_bookings.values('room__room_no').annotate(
+        count=Count('id')
+    ).order_by('-count')[:10]
+    
+    # Monthly trends (using Django's date truncation)
+    from django.db.models.functions import TruncMonth
+    monthly_therapy = therapy_allocations.annotate(
+        month=TruncMonth('from_date')
+    ).values('month').annotate(count=Count('id')).order_by('month')
+    
+    monthly_prescription = prescription_allocations.annotate(
+        month=TruncMonth('from_date')
+    ).values('month').annotate(count=Count('id')).order_by('month')
+    
+    # Average therapy duration
+    avg_therapy_duration = therapy_allocations.aggregate(
+        avg_days=Avg('days')
+    )['avg_days'] or 0
+    
+    # Average prescription duration
+    avg_prescription_duration = prescription_allocations.aggregate(
+        avg_days=Avg('days')
+    )['avg_days'] or 0
+    
+    # Convert QuerySets to lists for JSON serialization
+    top_therapies_list = [{'therapy_name': t['therapy_name'], 'count': t['count']} for t in top_therapies]
+    therapist_util_list = [{'therapist__therapist_name': t['therapist__therapist_name'] or 'Unknown', 'count': t['count']} for t in therapist_utilization]
+    room_util_list = [{'room__room_no': r['room__room_no'] or 'Unknown', 'count': r['count']} for r in room_utilization]
+    
+    context = {
+        'start_date': start_date,
+        'end_date': end_date,
+        'total_therapies': total_therapies,
+        'active_therapies': active_therapies,
+        'cancelled_therapies': cancelled_therapies,
+        'therapy_status_data': json.dumps(therapy_status_data),
+        'top_therapies': json.dumps(top_therapies_list),
+        'total_bookings': total_bookings,
+        'completed_bookings': completed_bookings,
+        'cancelled_bookings': cancelled_bookings,
+        'daily_bookings_data': json.dumps(daily_bookings_data),
+        'total_prescriptions': total_prescriptions,
+        'active_prescriptions': active_prescriptions,
+        'cancelled_prescriptions': cancelled_prescriptions,
+        'prescription_status_data': json.dumps(prescription_status_data),
+        'therapist_utilization': json.dumps(therapist_util_list),
+        'room_utilization': json.dumps(room_util_list),
+        'avg_therapy_duration': round(avg_therapy_duration, 1),
+        'avg_prescription_duration': round(avg_prescription_duration, 1),
+    }
+    
+    return render(request, 'dashboards/reports/therapy_report.html', context)
 
 @login_required
 @role_required(['housekeeping_staff'])
