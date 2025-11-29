@@ -28,6 +28,7 @@ path("ip_pharmacy/dashboard/", views.ip_pharmacy, name="ip_pharmacy"),
 path("prescription_dash/dashboard/", views.prescription_dash, name="prescription_dash"),
 path("patient_profile/dashboard/", views.patient_profile, name="patient_profile"),
 path("profile/", views.user_profile, name="user_profile"),
+path("test/", views.user_profile, name="test"),
 # Role and Module Management URLs
 path('role-management/', views.role_management, name='role_management'),
 path('create-role/', views.create_role, name='create_role'),

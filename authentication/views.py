@@ -195,8 +195,22 @@ def delete_role(request, role_id):
     # Check if any users are using this role
     users_with_role = CustomUser.objects.filter(custom_role=role)
     if users_with_role.exists():
-        messages.error(request, f'Cannot delete role "{role.display_name}" because {users_with_role.count()} user(s) are assigned to it.')
-        return redirect('authentication:role_management')
+        # Option 1: Reassign users to a default role or remove custom_role
+        force_delete = request.POST.get('force_delete', 'false') == 'true'
+        
+        if not force_delete:
+            # Show confirmation page with option to reassign or force delete
+            from django.urls import reverse
+            context = {
+                'role': role,
+                'users_count': users_with_role.count(),
+                'users': users_with_role[:10],  # Show first 10 users
+            }
+            return render(request, 'authentication/confirm_role_delete.html', context)
+        
+        # Force delete: Remove custom_role from all users
+        users_with_role.update(custom_role=None)
+        messages.warning(request, f'Removed role assignment from {users_with_role.count()} user(s) before deleting role.')
     
     role.delete()
     messages.success(request, f'Role "{role.display_name}" deleted successfully.')
@@ -330,13 +344,16 @@ def module_management(request):
             module_id = request.POST.get('module_id')
             module = get_object_or_404(Module, id=module_id)
             
-            # Check if module is used by any roles
+            # Remove module from all roles first, then delete
             roles_using_module = Role.objects.filter(modules=module)
             if roles_using_module.exists():
-                messages.error(request, f'Cannot delete module "{module.display_name}" because it is used by {roles_using_module.count()} role(s).')
-        else:
-                module.delete()
-                messages.success(request, f'Module "{module.display_name}" deleted successfully.')
+                # Remove module from all roles
+                for role in roles_using_module:
+                    role.modules.remove(module)
+                messages.warning(request, f'Module "{module.display_name}" was removed from {roles_using_module.count()} role(s) before deletion.')
+            
+            module.delete()
+            messages.success(request, f'Module "{module.display_name}" deleted successfully.')
         
         return redirect('authentication:module_management')
     
@@ -517,12 +534,24 @@ def Manage_user(request):
                 messages.error(request, f'Email "{email}" already exists.')
             else:
                 # Check for unique constraints on role-specific fields
-                if role == 'patient' and patient_registration_number:
+                # Also check custom_role name if assigned
+                custom_role_name = None
+                if custom_role_id:
+                    try:
+                        custom_role = Role.objects.get(id=custom_role_id)
+                        custom_role_name = custom_role.name.lower()
+                    except Role.DoesNotExist:
+                        pass
+                
+                is_patient = role == 'patient' or (custom_role_name and 'patient' in custom_role_name)
+                is_therapist = role == 'therapist' or (custom_role_name and 'therapist' in custom_role_name)
+                
+                if is_patient and patient_registration_number:
                     from authentication.models import PatientProfile
                     if PatientProfile.objects.filter(patient_reg_no=patient_registration_number).exists():
                         messages.error(request, f'Patient registration number "{patient_registration_number}" already exists.')
                         return redirect('authentication:Manage_user')
-                elif role == 'therapist' and therapist_code:
+                elif is_therapist and therapist_code:
                     from authentication.models import TherapistProfile
                     if TherapistProfile.objects.filter(therapist_code=therapist_code).exists():
                         messages.error(request, f'Therapist code "{therapist_code}" already exists.')
@@ -550,12 +579,24 @@ def Manage_user(request):
                 # Create appropriate profile based on role
                 from authentication.models import PatientProfile, TherapistProfile, DoctorProfile, AdminProfile, NurseProfile, StaffProfile
                 
-                if role == 'patient' and patient_registration_number:
+                # Check custom_role name if assigned
+                custom_role_name = None
+                if custom_role_id:
+                    try:
+                        custom_role_obj = Role.objects.get(id=custom_role_id)
+                        custom_role_name = custom_role_obj.name.lower()
+                    except Role.DoesNotExist:
+                        pass
+                
+                is_patient = role == 'patient' or (custom_role_name and 'patient' in custom_role_name)
+                is_therapist = role == 'therapist' or (custom_role_name and 'therapist' in custom_role_name)
+                
+                if is_patient and patient_registration_number:
                     PatientProfile.objects.create(
                         user=user,
                         patient_reg_no=patient_registration_number
                     )
-                elif role == 'therapist' and therapist_code:
+                elif is_therapist and therapist_code:
                     # Create therapist profile
                     therapist_profile = TherapistProfile.objects.create(
                         user=user,
@@ -646,11 +687,27 @@ def Manage_user(request):
             user.gender = request.POST.get('gender', 'male')  # Default to male if not provided
             user.is_active = request.POST.get('is_active') == 'on'
             
+            # Update custom_role if provided
+            custom_role_id = request.POST.get('custom_role')
+            if custom_role_id:
+                try:
+                    custom_role_obj = Role.objects.get(id=custom_role_id)
+                    user.custom_role = custom_role_obj
+                except Role.DoesNotExist:
+                    user.custom_role = None
+            else:
+                user.custom_role = None
+            
             # Update password if provided
             new_password = request.POST.get('password')
             if new_password and new_password.strip():
                 user.set_password(new_password)
                 messages.info(request, f'Password for "{user.username}" has been updated.')
+            
+            # Check custom_role name for therapist/patient detection
+            custom_role_name = None
+            if user.custom_role:
+                custom_role_name = user.custom_role.name.lower()
             
             # Only call change_user_role if the role actually changed
             if old_role != new_role:
@@ -666,9 +723,13 @@ def Manage_user(request):
                 profile_data = {}
                 mandatory_fields = get_mandatory_fields_for_role(new_role)
                 
-                if new_role == 'patient' and patient_registration_number:
+                # Check if custom_role indicates therapist or patient
+                is_therapist_role = new_role == 'therapist' or (custom_role_name and 'therapist' in custom_role_name)
+                is_patient_role = new_role == 'patient' or (custom_role_name and 'patient' in custom_role_name)
+                
+                if is_patient_role and patient_registration_number:
                     profile_data['patient_reg_no'] = patient_registration_number
-                elif new_role == 'therapist' and therapist_code:
+                elif is_therapist_role and therapist_code:
                     profile_data['therapist_code'] = therapist_code
                     profile_data['employee_code'] = employee_code or f"EMP{user.id:06d}"
                 elif new_role == 'doctor':
@@ -706,8 +767,9 @@ def Manage_user(request):
                     messages.error(request, message)
                     return redirect('authentication:Manage_user')
                 else:
-                    # Update therapist master if role is therapist
-                    if new_role == 'therapist' and new_profile:
+                    # Update therapist master if role is therapist (check both role and custom_role)
+                    is_therapist_role = new_role == 'therapist' or (custom_role_name and 'therapist' in custom_role_name)
+                    if is_therapist_role and new_profile:
                         from masters.models import TherapistMaster
                         therapist_master, created = TherapistMaster.objects.get_or_create(
                             user=user,
@@ -731,7 +793,9 @@ def Manage_user(request):
                     messages.warning(request, f"Role changed from {old_role} to {new_role}. All previous profile data has been deleted.")
             else:
                 # Role hasn't changed - just update profile fields without deleting
-                if user.role == 'therapist':
+                # Check both role and custom_role for therapist
+                is_therapist = user.role == 'therapist' or (user.custom_role and 'therapist' in user.custom_role.name.lower())
+                if is_therapist:
                     # Update therapist profile and master without deleting
                     therapist_code = request.POST.get('therapist_code')
                     employee_code = request.POST.get('employee_code')
@@ -771,14 +835,7 @@ def Manage_user(request):
                         user.patient_profile.save()
                 # Add similar logic for other roles if needed
             
-            # Update custom role
-            custom_role_id = request.POST.get('custom_role')
-            if custom_role_id:
-                custom_role = get_object_or_404(Role, id=custom_role_id)
-                user.custom_role = custom_role
-            else:
-                user.custom_role = None
-            
+            # Note: custom_role is already updated above, no need to update again
             user.save()
             messages.success(request, f'User "{user.username}" updated successfully.')
             

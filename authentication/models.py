@@ -73,10 +73,12 @@ class CustomUser(AbstractUser):
         """Get modules accessible to this user"""
         if self.role == "super_admin":
             # Super admin has access to all modules
-            return Module.objects.filter(is_active=True)
+            return Module.objects.filter(is_active=True).order_by('order', 'name')
         elif self.custom_role:
             # User has a custom role with specific module permissions
-            return self.custom_role.modules.filter(is_active=True)
+            # Ensure we get all active modules from the role
+            modules = self.custom_role.modules.filter(is_active=True).order_by('order', 'name')
+            return modules
         else:
             # Use default role-based module access
             return self.get_default_modules_for_role()

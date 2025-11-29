@@ -1835,14 +1835,14 @@ $(function(){
           <button class="update-therapy action-btn btn btn-success" data-i="${i}" style="display:none">
             <i class="fas fa-sync-alt"></i> Update
           </button>
-          ${t.status === 'cancelled' ? 
+          ${(t.status_summary && t.status_summary.cancelled > 0) ? 
             `<button class="resume-therapy action-btn btn btn-success" data-i="${i}">
               <i class="fas fa-play-circle"></i> Resume
-            </button>` : 
-            `<button class="cancel-therapy action-btn btn btn-warning" data-i="${i}">
-              <i class="fas fa-ban"></i> Cancel
-            </button>`
+            </button>` : ''
           }
+          <button class="cancel-therapy action-btn btn btn-warning" data-i="${i}">
+            <i class="fas fa-ban"></i> Cancel
+          </button>
         </td>
       </tr>`;
       $therapiesTableBody.append(row);
@@ -1993,13 +1993,50 @@ $(function(){
         body: JSON.stringify({ allocation_id: t.allocation_id, cancel_from: cfrom, cancel_to: cto, reason: reason })
       }).then(r => r.json()).then(j => {
         if (j.status === 'ok') {
-          t.status = 'cancelled';
-          t.cancelled_date_from = cfrom;
-          t.cancelled_date_to = cto;
-          t.cancellation_reason = reason;
-          alert('Therapy cancelled successfully.');
-          $cancelModal.hide();
-          renderAll();
+          // Reload therapies from server to get updated status_summary
+          if (selectedPatient) {
+            const patientRegNo = selectedPatient.pat_reg_no || selectedPatient.pat_op_reg_no;
+            ajax({action:'patient_therapies', patient_reg_no: patientRegNo}).then(list => {
+              addedTherapies = list || [];
+              bookings = [];
+              addedTherapies.forEach((t, idx) => {
+                if (t.from_date && t.to_date) getDateRange(t.from_date, t.to_date).forEach(d => bookings.push({ id: Math.random().toString(36).slice(2,9), allocation_id: t.allocation_id || t.allocation_id || t.allocation_id, therapyIndex: idx, date:d, slot: t.slot||'', room: t.room||'', therapist: t.therapist||'', status: 'scheduled' }));
+              });
+              alert('Therapy cancelled successfully.');
+              $cancelModal.hide();
+              renderAll();
+            }).catch(() => {
+              // Fallback: update locally
+              t.status = 'cancelled';
+              t.cancelled_date_from = cfrom;
+              t.cancelled_date_to = cto;
+              t.cancellation_reason = reason;
+              // Initialize status_summary if it doesn't exist
+              if (!t.status_summary) {
+                t.status_summary = {};
+              }
+              // Update cancelled count (estimate based on date range)
+              const cancelledDays = Math.ceil((new Date(cto).getTime() - new Date(cfrom).getTime()) / (1000 * 60 * 60 * 24)) + 1;
+              t.status_summary.cancelled = (t.status_summary.cancelled || 0) + cancelledDays;
+              alert('Therapy cancelled successfully.');
+              $cancelModal.hide();
+              renderAll();
+            });
+          } else {
+            // Fallback: update locally if no patient selected
+            t.status = 'cancelled';
+            t.cancelled_date_from = cfrom;
+            t.cancelled_date_to = cto;
+            t.cancellation_reason = reason;
+            if (!t.status_summary) {
+              t.status_summary = {};
+            }
+            const cancelledDays = Math.ceil((new Date(cto).getTime() - new Date(cfrom).getTime()) / (1000 * 60 * 60 * 24)) + 1;
+            t.status_summary.cancelled = (t.status_summary.cancelled || 0) + cancelledDays;
+            alert('Therapy cancelled successfully.');
+            $cancelModal.hide();
+            renderAll();
+          }
         } else {
           alert('Failed: ' + JSON.stringify(j));
         }
@@ -2212,14 +2249,50 @@ $(function(){
         body: JSON.stringify({ allocation_id: therapy.allocation_id, resume_from: from, resume_to: to })
       }).then(r => r.json()).then(j => {
         if (j.status === 'ok') {
-          therapy.status = 'draft';
-          therapy.cancelled_date_from = null;
-          therapy.cancelled_date_to = null;
-          therapy.cancellation_reason = '';
-          alert('Therapy resumed successfully.');
-          $resumeModal.hide();
-          resumingTherapyIndex = null;
-          renderAll();
+          // Reload therapies from server to get updated status_summary
+          if (selectedPatient) {
+            const patientRegNo = selectedPatient.pat_reg_no || selectedPatient.pat_op_reg_no;
+            ajax({action:'patient_therapies', patient_reg_no: patientRegNo}).then(list => {
+              addedTherapies = list || [];
+              bookings = [];
+              addedTherapies.forEach((t, idx) => {
+                if (t.from_date && t.to_date) getDateRange(t.from_date, t.to_date).forEach(d => bookings.push({ id: Math.random().toString(36).slice(2,9), allocation_id: t.allocation_id || t.allocation_id || t.allocation_id, therapyIndex: idx, date:d, slot: t.slot||'', room: t.room||'', therapist: t.therapist||'', status: 'scheduled' }));
+              });
+              alert('Therapy resumed successfully.');
+              $resumeModal.hide();
+              resumingTherapyIndex = null;
+              renderAll();
+            }).catch(() => {
+              // Fallback: update locally
+              therapy.status = 'draft';
+              therapy.cancelled_date_from = null;
+              therapy.cancelled_date_to = null;
+              therapy.cancellation_reason = '';
+              // Update status_summary: decrement cancelled count if it exists
+              if (therapy.status_summary && therapy.status_summary.cancelled > 0) {
+                const resumedDays = Math.ceil((new Date(to).getTime() - new Date(from).getTime()) / (1000 * 60 * 60 * 24)) + 1;
+                therapy.status_summary.cancelled = Math.max(0, therapy.status_summary.cancelled - resumedDays);
+              }
+              alert('Therapy resumed successfully.');
+              $resumeModal.hide();
+              resumingTherapyIndex = null;
+              renderAll();
+            });
+          } else {
+            // Fallback: update locally if no patient selected
+            therapy.status = 'draft';
+            therapy.cancelled_date_from = null;
+            therapy.cancelled_date_to = null;
+            therapy.cancellation_reason = '';
+            if (therapy.status_summary && therapy.status_summary.cancelled > 0) {
+              const resumedDays = Math.ceil((new Date(to).getTime() - new Date(from).getTime()) / (1000 * 60 * 60 * 24)) + 1;
+              therapy.status_summary.cancelled = Math.max(0, therapy.status_summary.cancelled - resumedDays);
+            }
+            alert('Therapy resumed successfully.');
+            $resumeModal.hide();
+            resumingTherapyIndex = null;
+            renderAll();
+          }
         } else {
           alert('Failed: ' + JSON.stringify(j));
         }

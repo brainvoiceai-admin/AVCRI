@@ -1595,14 +1595,14 @@ $(function(){
           <button class="update-prescription action-btn btn btn-success" data-i="${i}" style="display:none">
             <i class="fas fa-sync-alt"></i> Update
           </button>
-          ${p.status === 'cancelled' ? 
+          ${(p.status_summary && p.status_summary.cancelled > 0) ? 
             `<button class="resume-prescription action-btn btn btn-success" data-i="${i}">
               <i class="fas fa-play-circle"></i> Resume
-            </button>` : 
-            `<button class="cancel-prescription action-btn btn" data-i="${i}" style="background:var(--warning);">
-              <i class="fas fa-ban"></i> Cancel
-            </button>`
+            </button>` : ''
           }
+          <button class="cancel-prescription action-btn btn" data-i="${i}" style="background:var(--warning);">
+            <i class="fas fa-ban"></i> Cancel
+          </button>
         </td>
       </tr>`;
       $prescriptionsTableBody.append(row);
@@ -1749,13 +1749,46 @@ $(function(){
         return response.json();
       }).then(j => {
         if (j.status === 'ok') {
-          p.status = 'cancelled';
-          p.cancelled_date_from = cfrom;
-          p.cancelled_date_to = cto;
-          p.cancellation_reason = reason;
-          alert('Prescription cancelled successfully.');
-          $cancelModal.hide();
-          renderAll();
+          // Reload prescriptions from server to get updated status_summary
+          if (selectedPatient) {
+            const patientRegNo = selectedPatient.pat_reg_no || selectedPatient.pat_op_reg_no;
+            ajax({action:'patient_prescriptions', patient_reg_no: patientRegNo}).then(list => {
+              addedPrescriptions = list || [];
+              alert('Prescription cancelled successfully.');
+              $cancelModal.hide();
+              renderAll();
+            }).catch(() => {
+              // Fallback: update locally
+              p.status = 'cancelled';
+              p.cancelled_date_from = cfrom;
+              p.cancelled_date_to = cto;
+              p.cancellation_reason = reason;
+              // Initialize status_summary if it doesn't exist
+              if (!p.status_summary) {
+                p.status_summary = {};
+              }
+              // Update cancelled count (estimate based on date range)
+              const cancelledDays = Math.ceil((new Date(cto).getTime() - new Date(cfrom).getTime()) / (1000 * 60 * 60 * 24)) + 1;
+              p.status_summary.cancelled = (p.status_summary.cancelled || 0) + cancelledDays;
+              alert('Prescription cancelled successfully.');
+              $cancelModal.hide();
+              renderAll();
+            });
+          } else {
+            // Fallback: update locally if no patient selected
+            p.status = 'cancelled';
+            p.cancelled_date_from = cfrom;
+            p.cancelled_date_to = cto;
+            p.cancellation_reason = reason;
+            if (!p.status_summary) {
+              p.status_summary = {};
+            }
+            const cancelledDays = Math.ceil((new Date(cto).getTime() - new Date(cfrom).getTime()) / (1000 * 60 * 60 * 24)) + 1;
+            p.status_summary.cancelled = (p.status_summary.cancelled || 0) + cancelledDays;
+            alert('Prescription cancelled successfully.');
+            $cancelModal.hide();
+            renderAll();
+          }
         } else {
           alert('Failed: ' + (j.error || JSON.stringify(j)));
         }
@@ -1827,14 +1860,46 @@ $(function(){
         return response.json();
       }).then(j => {
         if (j.status === 'ok') {
-          prescription.status = 'draft';
-          prescription.cancelled_date_from = null;
-          prescription.cancelled_date_to = null;
-          prescription.cancellation_reason = '';
-          alert('Prescription resumed successfully and set to Draft status.');
-          $resumeModal.hide();
-          resumingPrescriptionIndex = null;
-          renderAll();
+          // Reload prescriptions from server to get updated status_summary
+          if (selectedPatient) {
+            const patientRegNo = selectedPatient.pat_reg_no || selectedPatient.pat_op_reg_no;
+            ajax({action:'patient_prescriptions', patient_reg_no: patientRegNo}).then(list => {
+              addedPrescriptions = list || [];
+              alert('Prescription resumed successfully and set to Draft status.');
+              $resumeModal.hide();
+              resumingPrescriptionIndex = null;
+              renderAll();
+            }).catch(() => {
+              // Fallback: update locally
+              prescription.status = 'draft';
+              prescription.cancelled_date_from = null;
+              prescription.cancelled_date_to = null;
+              prescription.cancellation_reason = '';
+              // Update status_summary: decrement cancelled count if it exists
+              if (prescription.status_summary && prescription.status_summary.cancelled > 0) {
+                const resumedDays = Math.ceil((new Date(to).getTime() - new Date(from).getTime()) / (1000 * 60 * 60 * 24)) + 1;
+                prescription.status_summary.cancelled = Math.max(0, prescription.status_summary.cancelled - resumedDays);
+              }
+              alert('Prescription resumed successfully and set to Draft status.');
+              $resumeModal.hide();
+              resumingPrescriptionIndex = null;
+              renderAll();
+            });
+          } else {
+            // Fallback: update locally if no patient selected
+            prescription.status = 'draft';
+            prescription.cancelled_date_from = null;
+            prescription.cancelled_date_to = null;
+            prescription.cancellation_reason = '';
+            if (prescription.status_summary && prescription.status_summary.cancelled > 0) {
+              const resumedDays = Math.ceil((new Date(to).getTime() - new Date(from).getTime()) / (1000 * 60 * 60 * 24)) + 1;
+              prescription.status_summary.cancelled = Math.max(0, prescription.status_summary.cancelled - resumedDays);
+            }
+            alert('Prescription resumed successfully and set to Draft status.');
+            $resumeModal.hide();
+            resumingPrescriptionIndex = null;
+            renderAll();
+          }
         } else {
           alert('Failed: ' + (j.error || JSON.stringify(j)));
         }

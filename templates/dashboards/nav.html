@@ -43,7 +43,7 @@
                     <a href="{% url 'therapistgrade_manage' %}" class="menu-item" data-url="{% url 'therapistgrade_manage' %}">
                         <span>🎓</span> Therapist Grades
                     </a>
-                    <a href="{% url 'procured_manage' %}" class="menu-item" data-url="{% url 'procured_manage' %}">
+                    <a href="/Masters/procured" class="menu-item" data-url="/Masters/procured">
                         <span>🛒</span> Procurement Sources
                     </a>
                     <a href="{% url 'oilclass_manage' %}" class="menu-item" data-url="{% url 'oilclass_manage' %}">
@@ -358,6 +358,107 @@
                             <span>📋</span> Module Management
                         </a>
                     {% endif %}
+                </div>
+            </div>
+            {% endif %}
+
+            {# All Modules Section - Display ALL modules assigned to the user's role (for debugging and completeness) #}
+            {% if user_modules %}
+            <div class="menu-section">
+                <div class="menu-section-header" onclick="toggleSection('all-modules-section')">
+                    <span class="section-icon">📋</span>
+                    <span class="section-title">All Modules ({{ user_modules|length }})</span>
+                    <span class="section-arrow" id="all-modules-section-arrow">▼</span>
+                </div>
+                <div class="menu-subsection" id="all-modules-section">
+                    {% for module in user_modules %}
+                        {% if 'master' not in module.name|lower and 'master' not in module.display_name|lower and 'master' not in module.url_name|lower and module.url_name != 'user_profile' and module.url_name != 'logout' and module.url_name != 'login' %}
+                            {% if ':' in module.url_name %}
+                                {# Already namespaced URL #}
+                                <a href="{% url module.url_name %}" class="menu-item" data-url="{% url module.url_name %}">
+                                    <span>{{ module.icon }}</span> {{ module.display_name }}
+                                </a>
+                            {% elif module.url_name == 'patient_therapy' or 'add therapy' in module.display_name|lower or 'therapy entry' in module.display_name|lower %}
+                                {# Therapy entry - use sheduling namespace #}
+                                <a href="/sheduling/therapy-entry/" class="menu-item" data-url="/sheduling/therapy-entry/">
+                                    <span>{{ module.icon }}</span> {{ module.display_name }}
+                                </a>
+                            {% elif module.url_name == 'prescription_entry_page' or 'add prescription' in module.display_name|lower or 'prescription entry' in module.display_name|lower %}
+                                {# Prescription entry - use sheduling namespace #}
+                                <a href="/sheduling/prescriptions/" class="menu-item" data-url="/sheduling/prescriptions/">
+                                    <span>{{ module.icon }}</span> {{ module.display_name }}
+                                </a>
+                            {% elif module.url_name == 'scheduling_dashboard' %}
+                                <a href="/sheduling/scheduling/" class="menu-item" data-url="/sheduling/scheduling/">
+                                    <span>{{ module.icon }}</span> {{ module.display_name }}
+                                </a>
+                            {% elif module.url_name == 'prescription_scheduling_dashboard' %}
+                                <a href="/sheduling/prescription-scheduling/" class="menu-item" data-url="/sheduling/prescription-scheduling/">
+                                    <span>{{ module.icon }}</span> {{ module.display_name }}
+                                </a>
+                            {% elif module.url_name == 'therapist_availability_dashboard' %}
+                                <a href="/sheduling/therapist-availability/" class="menu-item" data-url="/sheduling/therapist-availability/">
+                                    <span>{{ module.icon }}</span> {{ module.display_name }}
+                                </a>
+                            {% elif module.url_name == 'procurement_dashboard' %}
+                                <a href="/sheduling/procurement/" class="menu-item" data-url="/sheduling/procurement/">
+                                    <span>{{ module.icon }}</span> {{ module.display_name }}
+                                </a>
+                            {% elif module.url_name == 'therapist_dashboard' %}
+                                <a href="/sheduling/therapist/" class="menu-item" data-url="/sheduling/therapist/">
+                                    <span>{{ module.icon }}</span> {{ module.display_name }}
+                                </a>
+                            {% elif module.url_name == 'patient_dashboard' %}
+                                <a href="/sheduling/patient/" class="menu-item" data-url="/sheduling/patient/">
+                                    <span>{{ module.icon }}</span> {{ module.display_name }}
+                                </a>
+                            {% elif module.url_name == 'procured_manage' or module.url_name == 'oilclass_manage' or module.url_name == 'usagetype_manage' or module.url_name == 'prescriptionusage_manage' or module.url_name == 'prestime_manage' or module.url_name == 'prescope_manage' or module.url_name == 'unit_list' or module.url_name == 'therapy_master_manage' or module.url_name == 'item_master_manage' or module.url_name == 'slot_master_manage' or module.url_name == 'therapist_master_manage' or module.url_name == 'therapistgrade_manage' or module.url_name == 'nursetreatment_manage' or module.url_name == 'ingredient_master_manage' or module.url_name == 'treatment_room_master_manage' or module.url_name == 'nursemaster_manage' or module.url_name == 'master_management_dashboard' %}
+                                {# Master management URLs - use /Masters/ prefix #}
+                                {% if module.url_name == 'procured_manage' %}
+                                    <a href="/Masters/procured" class="menu-item" data-url="/Masters/procured">
+                                {% elif module.url_name == 'oilclass_manage' %}
+                                    <a href="/Masters/oils/" class="menu-item" data-url="/Masters/oils/">
+                                {% elif module.url_name == 'usagetype_manage' %}
+                                    <a href="/Masters/usages/" class="menu-item" data-url="/Masters/usages/">
+                                {% elif module.url_name == 'prescriptionusage_manage' %}
+                                    <a href="/Masters/prescription-usages/" class="menu-item" data-url="/Masters/prescription-usages/">
+                                {% elif module.url_name == 'prestime_manage' %}
+                                    <a href="/Masters/times/" class="menu-item" data-url="/Masters/times/">
+                                {% elif module.url_name == 'prescope_manage' %}
+                                    <a href="/Masters/prescopes/" class="menu-item" data-url="/Masters/prescopes/">
+                                {% elif module.url_name == 'unit_list' %}
+                                    <a href="/Masters/units/" class="menu-item" data-url="/Masters/units/">
+                                {% elif module.url_name == 'therapy_master_manage' %}
+                                    <a href="/Masters/therapy/" class="menu-item" data-url="/Masters/therapy/">
+                                {% elif module.url_name == 'item_master_manage' %}
+                                    <a href="/Masters/items/" class="menu-item" data-url="/Masters/items/">
+                                {% elif module.url_name == 'slot_master_manage' %}
+                                    <a href="/Masters/slots/" class="menu-item" data-url="/Masters/slots/">
+                                {% elif module.url_name == 'therapist_master_manage' %}
+                                    <a href="/Masters/therapists/" class="menu-item" data-url="/Masters/therapists/">
+                                {% elif module.url_name == 'therapistgrade_manage' %}
+                                    <a href="/Masters/therapist-grades/" class="menu-item" data-url="/Masters/therapist-grades/">
+                                {% elif module.url_name == 'nursetreatment_manage' %}
+                                    <a href="/Masters/nurse-treatments/" class="menu-item" data-url="/Masters/nurse-treatments/">
+                                {% elif module.url_name == 'ingredient_master_manage' %}
+                                    <a href="/Masters/ingredients/" class="menu-item" data-url="/Masters/ingredients/">
+                                {% elif module.url_name == 'treatment_room_master_manage' %}
+                                    <a href="/Masters/treatment-rooms/" class="menu-item" data-url="/Masters/treatment-rooms/">
+                                {% elif module.url_name == 'nursemaster_manage' %}
+                                    <a href="/Masters/nurses/" class="menu-item" data-url="/Masters/nurses/">
+                                {% elif module.url_name == 'master_management_dashboard' %}
+                                    <a href="/Masters/dashboard/" class="menu-item" data-url="/Masters/dashboard/">
+                                {% endif %}
+                                    <span>{{ module.icon }}</span> {{ module.display_name }}
+                                </a>
+                            {% else %}
+                                {# Try authentication namespace first, fallback to direct URL #}
+                                <a href="{% url 'authentication:'|add:module.url_name %}" class="menu-item" data-url="{% url 'authentication:'|add:module.url_name %}">
+                                    <span>{{ module.icon }}</span> {{ module.display_name }}
+                                </a>
+                            {% endif %}
+                        {% endif %}
+                    {% endfor %}
                 </div>
             </div>
             {% endif %}
