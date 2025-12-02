@@ -2235,6 +2235,10 @@
                             }
                         };
                         
+                        // Store the starting page number before this table
+                        // Get current page number from the document
+                        const tableStartPage = doc.internal.getNumberOfPages();
+                        
                         doc.autoTable({
                             head: [['Patient Room', 'Patient Name', 'Treatment Room', 'Therapy', 'Therapist Assigned']],
                             body: tableData,
@@ -2256,14 +2260,21 @@
                             columnStyles: columnStyles,
                             didParseCell: didParseCell,
                             didDrawPage: function(data) {
-                                // Add footer on each page
-                                addFooter(data.pageNumber);
-                                currentPage = data.pageNumber;
+                                // Calculate actual page number: tableStartPage is the page we're starting on
+                                // data.pageNumber is 1-based relative to the table start
+                                // So actual page = tableStartPage + data.pageNumber - 1
+                                const actualPageNumber = tableStartPage + data.pageNumber - 1;
+                                // Add footer on each page with correct page number
+                                addFooter(actualPageNumber);
+                                // Update currentPage to the last page of this table
+                                currentPage = actualPageNumber;
                             },
                         });
                         
                         // Update yPos after table
                         yPos = doc.lastAutoTable.finalY + 8;
+                        // Update currentPage to reflect the actual number of pages after this table
+                        currentPage = doc.internal.getNumberOfPages();
                         
                         // Add spacing between slots (except for last slot)
                         if (slotIndex < sortedSlots.length - 1) {
@@ -2312,6 +2323,10 @@
                             : '—'
                     ]);
                     
+                    // Store the starting page number before this table
+                    // Get current page number from the document
+                    const nurseTableStartPage = doc.internal.getNumberOfPages();
+                    
                     // Generate table for nurse treatments
                     doc.autoTable({
                         head: [['Patient Room', 'Patient Name', 'Treatment Name', 'Nurse Assigned']],
@@ -2332,14 +2347,21 @@
                             fillColor: [240, 253, 244], // Light green alternate rows
                         },
                         didDrawPage: function(data) {
-                            // Add footer on each page
-                            addFooter(data.pageNumber);
-                            currentPage = data.pageNumber;
+                            // Calculate actual page number: nurseTableStartPage is the page we're starting on
+                            // data.pageNumber is 1-based relative to the table start
+                            // So actual page = nurseTableStartPage + data.pageNumber - 1
+                            const actualPageNumber = nurseTableStartPage + data.pageNumber - 1;
+                            // Add footer on each page with correct page number
+                            addFooter(actualPageNumber);
+                            // Update currentPage to the last page of this table
+                            currentPage = actualPageNumber;
                         },
                     });
                     
                     // Update yPos after table
                     yPos = doc.lastAutoTable.finalY + 8;
+                    // Update currentPage to reflect the actual number of pages after this table
+                    currentPage = doc.internal.getNumberOfPages();
                 }
                 
                 // Save PDF
