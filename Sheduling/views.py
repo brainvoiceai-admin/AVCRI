@@ -81,6 +81,74 @@ def log_therapy_audit(user, action, therapy_allocation=None, description="", add
         # Don't let audit logging break the main functionality
         print(f"Therapy audit logging error: {e}")
 
+def is_treatment_requiring_senior_tag(therapy_name):
+    """
+    Check if a treatment requires special senior tag handling.
+    Returns True if the therapy name matches any of the specified treatments.
+    """
+    if not therapy_name:
+        return False
+    
+    # List of treatments that require senior tag (only one senior, not bathing)
+    special_treatments = [
+        'dhara & abh(3)',
+        'dhara& pizhichil (4)',
+        'dhara & pizhichil (5)',
+        'dhara & pizhichil (6)',
+        'dhara & pizhichil (7)',
+        'dhara & abyangam ( 3 t)',
+        'dhara & sudhikalpana dhara (5t)',
+        'dhara ( 2 t)',
+        'thakradhara & abhyangam (4)',
+        'thakradhara & pizichil(6)',
+        'thakradhara ( 2 t)',
+        'thakradhara&fbkadee kizhi (5 t)',
+        'thakradhara& thakrapizhichil(7)',
+    ]
+    
+    therapy_lower = str(therapy_name).lower().strip()
+    
+    # Check if therapy name contains key patterns
+    # Match treatments containing "dhara" or "thakradhara" with variations
+    has_dhara = 'dhara' in therapy_lower
+    has_thakradhara = 'thakradhara' in therapy_lower
+    
+    if not (has_dhara or has_thakradhara):
+        return False
+    
+    # Check for specific patterns in the treatment name
+    # Match treatments with "pizhichil", "pizichil", "abh", "abyangam", "abhyangam", "sudhikalpana", "fbkadee kizhi", "thakrapizhichil"
+    has_pizhichil = 'pizhichil' in therapy_lower or 'pizichil' in therapy_lower
+    has_abh = 'abh' in therapy_lower and 'abhyangam' not in therapy_lower
+    has_abyangam = 'abyangam' in therapy_lower or 'abhyangam' in therapy_lower
+    has_sudhikalpana = 'sudhikalpana' in therapy_lower
+    has_fbkadee = 'fbkadee kizhi' in therapy_lower or 'fbkadee' in therapy_lower
+    has_thakrapizhichil = 'thakrapizhichil' in therapy_lower
+    
+    # Check if it matches any of the special treatment patterns
+    if has_dhara:
+        if has_pizhichil or has_abh or has_abyangam or has_sudhikalpana:
+            return True
+        # Check for "Dhara ( 2 T)" pattern
+        if 'dhara' in therapy_lower and ('2 t' in therapy_lower or '2t' in therapy_lower):
+            return True
+    
+    if has_thakradhara:
+        if has_pizhichil or has_abyangam or has_fbkadee or has_thakrapizhichil:
+            return True
+        # Check for "Thakradhara ( 2 T)" pattern
+        if 'thakradhara' in therapy_lower and ('2 t' in therapy_lower or '2t' in therapy_lower):
+            return True
+    
+    # Also check exact matches (case-insensitive, ignoring extra spaces)
+    normalized_therapy = ' '.join(therapy_lower.split())
+    for special_treatment in special_treatments:
+        normalized_special = ' '.join(special_treatment.split())
+        if normalized_therapy == normalized_special:
+            return True
+    
+    return False
+
 def get_client_ip(request):
     """Get client IP address from request"""
     x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
@@ -1478,15 +1546,14 @@ def therapy_entry(request):
                     import traceback
                     traceback.print_exc()
                 
-                # Check if this is Dhara & Pizichil therapy for senior therapist marking
-                # Handle variations: "Dhara & Pizichil", "Dhara and Pizichil", "Dhara Pizichil", etc.
-                is_dhara_pizichil = False
+                # Check if this treatment requires special senior tag handling
+                requires_senior_tag = False
                 if alloc and alloc.therapy_name:
-                    therapy_lower = str(alloc.therapy_name).lower()
-                    # Check for both "dhara" and "pizichil" (or "pizhichil" variant) in the name
-                    has_dhara = 'dhara' in therapy_lower
-                    has_pizichil = 'pizichil' in therapy_lower or 'pizhichil' in therapy_lower
-                    is_dhara_pizichil = has_dhara and has_pizichil
+                    requires_senior_tag = is_treatment_requiring_senior_tag(alloc.therapy_name)
+                
+                # First pass: collect all therapists and identify seniors who are not bathing
+                therapist_data_list = []
+                senior_non_bathing_therapist_code = None
                 
                 for a in b.assignments.all():
                     therapist_code = a.therapist.therapist_code
@@ -1506,20 +1573,38 @@ def therapy_entry(request):
                         except TherapistMaster.DoesNotExist:
                             pass
                     
-                    # Check if this therapist is senior (for Dhara & Pizichil highlighting)
-                    is_senior = False
-                    if is_dhara_pizichil and therapist_master:
-                        # TherapistMaster has ForeignKey to TherapistGrade
-                        if therapist_master.therapist_grade:
-                            grade_name = getattr(therapist_master.therapist_grade, 'name', '')
-                            if grade_name and 'Senior' in grade_name:
-                                is_senior = True
+                    # Check if this therapist is senior
+                    is_senior_grade = False
+                    if therapist_master and therapist_master.therapist_grade:
+                        grade_name = getattr(therapist_master.therapist_grade, 'name', '')
+                        if grade_name and 'Senior' in grade_name:
+                            is_senior_grade = True
                     
-                    therapists.append({
+                    therapist_data_list.append({
                         'name': therapist_name,
                         'code': therapist_code,
                         'is_bathing': bool(is_bathing),
-                        'is_senior': is_senior  # Mark senior therapist for Dhara & Pizichil
+                        'is_senior_grade': is_senior_grade,
+                        'therapist_master': therapist_master
+                    })
+                    
+                    # For special treatments: identify the first senior who is NOT bathing
+                    if requires_senior_tag and is_senior_grade and not is_bathing and senior_non_bathing_therapist_code is None:
+                        senior_non_bathing_therapist_code = therapist_code
+                
+                # Second pass: mark only one senior (non-bathing) with senior tag
+                for therapist_data in therapist_data_list:
+                    is_senior = False
+                    if requires_senior_tag:
+                        # Only mark the first senior who is not bathing
+                        if therapist_data['code'] == senior_non_bathing_therapist_code:
+                            is_senior = True
+                    
+                    therapists.append({
+                        'name': therapist_data['name'],
+                        'code': therapist_data['code'],
+                        'is_bathing': therapist_data['is_bathing'],
+                        'is_senior': is_senior
                     })
             except Exception:
                 therapists = []
@@ -3658,15 +3743,14 @@ def get_therapy_data_api(request):
                         import traceback
                         traceback.print_exc()
                     
-                    # Check if this is Dhara & Pizichil therapy for senior therapist marking
-                    # Handle variations: "Dhara & Pizichil", "Dhara and Pizichil", "Dhara Pizichil", etc.
-                    is_dhara_pizichil = False
+                    # Check if this treatment requires special senior tag handling
+                    requires_senior_tag = False
                     if allocation and allocation.therapy_name:
-                        therapy_lower = str(allocation.therapy_name).lower()
-                        # Check for both "dhara" and "pizichil" (or "pizhichil" variant) in the name
-                        has_dhara = 'dhara' in therapy_lower
-                        has_pizichil = 'pizichil' in therapy_lower or 'pizhichil' in therapy_lower
-                        is_dhara_pizichil = has_dhara and has_pizichil
+                        requires_senior_tag = is_treatment_requiring_senior_tag(allocation.therapy_name)
+                    
+                    # First pass: collect all therapists and identify seniors who are not bathing
+                    therapist_data_list = []
+                    senior_non_bathing_therapist_code = None
                     
                     for assignment in booking.assignments.all():
                         therapist_code = assignment.therapist.therapist_code
@@ -3676,26 +3760,44 @@ def get_therapy_data_api(request):
                         # Get TherapistMaster to check grade (use TherapistMaster, not Patient.models.Therapist)
                         therapist_master = therapist_masters.get(therapist_code)
                         
-                        # Check if this therapist is senior (for Dhara & Pizichil highlighting)
-                        is_senior = False
-                        if is_dhara_pizichil and therapist_master:
-                            # TherapistMaster has ForeignKey to TherapistGrade
-                            if therapist_master.therapist_grade:
-                                grade_name = getattr(therapist_master.therapist_grade, 'name', '')
-                                if grade_name and 'Senior' in grade_name:
-                                    is_senior = True
+                        # Check if this therapist is senior
+                        is_senior_grade = False
+                        if therapist_master and therapist_master.therapist_grade:
+                            grade_name = getattr(therapist_master.therapist_grade, 'name', '')
+                            if grade_name and 'Senior' in grade_name:
+                                is_senior_grade = True
                         
                         therapist_name = assignment.therapist.therapist_name or therapist_code
                         grade_display = ''
                         if therapist_master and therapist_master.therapist_grade:
                             grade_display = getattr(therapist_master.therapist_grade, 'name', '')
                         
-                        therapists.append({
+                        therapist_data_list.append({
                             'code': therapist_code,
                             'name': therapist_name,
                             'grade': grade_display,
                             'is_bathing': is_bathing,
-                            'is_senior': is_senior  # Mark senior therapist for Dhara & Pizichil
+                            'is_senior_grade': is_senior_grade
+                        })
+                        
+                        # For special treatments: identify the first senior who is NOT bathing
+                        if requires_senior_tag and is_senior_grade and not is_bathing and senior_non_bathing_therapist_code is None:
+                            senior_non_bathing_therapist_code = therapist_code
+                    
+                    # Second pass: mark only one senior (non-bathing) with senior tag
+                    for therapist_data in therapist_data_list:
+                        is_senior = False
+                        if requires_senior_tag:
+                            # Only mark the first senior who is not bathing
+                            if therapist_data['code'] == senior_non_bathing_therapist_code:
+                                is_senior = True
+                        
+                        therapists.append({
+                            'code': therapist_data['code'],
+                            'name': therapist_data['name'],
+                            'grade': therapist_data['grade'],
+                            'is_bathing': therapist_data['is_bathing'],
+                            'is_senior': is_senior
                         })
                     
                     # Get assigned nurses for this booking
@@ -3812,15 +3914,10 @@ def get_therapy_data_api(request):
             from .nurse_allocation import is_nurse_treatment
             
             for allocation in allocations:
-                    # Check if this is Dhara & Pizichil therapy for senior therapist marking
-                    # Handle variations: "Dhara & Pizichil", "Dhara and Pizichil", "Dhara Pizichil", etc.
-                    is_dhara_pizichil = False
+                    # Check if this treatment requires special senior tag handling
+                    requires_senior_tag = False
                     if allocation and allocation.therapy_name:
-                        therapy_lower = str(allocation.therapy_name).lower()
-                        # Check for both "dhara" and "pizichil" (or "pizhichil" variant) in the name
-                        has_dhara = 'dhara' in therapy_lower
-                        has_pizichil = 'pizichil' in therapy_lower or 'pizhichil' in therapy_lower
-                        is_dhara_pizichil = has_dhara and has_pizichil
+                        requires_senior_tag = is_treatment_requiring_senior_tag(allocation.therapy_name)
                     
                     # Get all therapist codes for this allocation to fetch TherapistMaster records
                     therapist_codes = []
@@ -3830,39 +3927,77 @@ def get_therapy_data_api(request):
                     
                     # Get all TherapistMaster records for this allocation
                     from masters.models import TherapistMaster
+                    from Patient.models import TherapistBooking
                     therapist_masters_dict = {}
                     if therapist_codes:
                         therapist_masters_dict = {tm.therapist_code: tm for tm in TherapistMaster.objects.filter(
                             therapist_code__in=therapist_codes
                         )}
                     
-                    # Get assigned therapists from all bookings
-                    therapists = []
+                    # Pre-fetch TherapistBooking records to check bathing status
+                    therapist_bookings_dict = {}
+                    if allocation and therapist_masters_dict:
+                        tb_list = TherapistBooking.objects.filter(
+                            visit=allocation,
+                            therapist__in=therapist_masters_dict.values(),
+                            status='BOOKED'
+                        ).select_related('therapist')
+                        for tb in tb_list:
+                            if tb.therapist:
+                                therapist_code = tb.therapist.therapist_code
+                                therapist_bookings_dict[therapist_code] = tb.is_bathing
+                    
+                    # First pass: collect all therapists and identify seniors who are not bathing
+                    therapist_data_list = []
+                    senior_non_bathing_therapist_code = None
+                    
                     for booking in allocation.bookings.all():
                         for assignment in booking.assignments.all():
                             therapist_code = assignment.therapist.therapist_code
                             # Get TherapistMaster to check grade (use TherapistMaster, not Patient.models.Therapist)
                             therapist_master = therapist_masters_dict.get(therapist_code)
                             
-                            # Check if this therapist is senior (for Dhara & Pizichil highlighting)
-                            is_senior = False
-                            if is_dhara_pizichil and therapist_master:
-                                # TherapistMaster has ForeignKey to TherapistGrade
-                                if therapist_master.therapist_grade:
-                                    grade_name = getattr(therapist_master.therapist_grade, 'name', '')
-                                    if grade_name and 'Senior' in grade_name:
-                                        is_senior = True
+                            # Get is_bathing flag
+                            is_bathing = therapist_bookings_dict.get(therapist_code, False)
+                            
+                            # Check if this therapist is senior
+                            is_senior_grade = False
+                            if therapist_master and therapist_master.therapist_grade:
+                                grade_name = getattr(therapist_master.therapist_grade, 'name', '')
+                                if grade_name and 'Senior' in grade_name:
+                                    is_senior_grade = True
                             
                             grade_display = ''
                             if therapist_master and therapist_master.therapist_grade:
                                 grade_display = getattr(therapist_master.therapist_grade, 'name', '')
                             
-                            therapists.append({
+                            therapist_data_list.append({
                                 'code': therapist_code,
                                 'name': assignment.therapist.therapist_name or therapist_code,
                                 'grade': grade_display,
-                                'is_senior': is_senior  # Mark senior therapist for Dhara & Pizichil
+                                'is_bathing': is_bathing,
+                                'is_senior_grade': is_senior_grade
                             })
+                            
+                            # For special treatments: identify the first senior who is NOT bathing
+                            if requires_senior_tag and is_senior_grade and not is_bathing and senior_non_bathing_therapist_code is None:
+                                senior_non_bathing_therapist_code = therapist_code
+                    
+                    # Second pass: mark only one senior (non-bathing) with senior tag
+                    therapists = []
+                    for therapist_data in therapist_data_list:
+                        is_senior = False
+                        if requires_senior_tag:
+                            # Only mark the first senior who is not bathing
+                            if therapist_data['code'] == senior_non_bathing_therapist_code:
+                                is_senior = True
+                        
+                        therapists.append({
+                            'code': therapist_data['code'],
+                            'name': therapist_data['name'],
+                            'grade': therapist_data['grade'],
+                            'is_senior': is_senior
+                        })
                     
                     # Get assigned nurses from all bookings
                     nurses = []

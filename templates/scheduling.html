@@ -2182,18 +2182,22 @@
                         // Prepare table data for this slot
                         const tableData = treatments.map(item => {
                             // Build therapist string with senior highlighting
+                            // This matches the dashboard display logic exactly
                             let therapistStr = '—';
                             if (item.therapists && item.therapists.length > 0) {
                                 therapistStr = item.therapists.map(t => {
-                                    const name = t.name || t.code || t;
-                                    const cleanedName = name.replace(/\(bathing\)/gi, '').replace(/^\*/, '').trim();
-                                    const isBathing = t.is_bathing === true || name.startsWith('*') || /\(bathing\)/i.test(name);
+                                    const rawName = t.name || t.code || t;
+                                    const cleanedName = rawName.replace(/\(bathing\)/gi, '').replace(/^\*/, '').trim();
+                                    const isBathing = t.is_bathing === true || rawName.startsWith('*') || /\(bathing\)/i.test(rawName);
+                                    // Check for senior tag - only one senior (non-bathing) should have is_senior=true
                                     const isSenior = t.is_senior === true;
                                     let displayName = cleanedName;
-                                    // Add (senior) prefix for Dhara & Pizichil senior therapists
+                                    // Add (senior) prefix for special treatments (Dhara & Pizhichil, Thakradhara, etc.)
+                                    // Only one senior therapist who is NOT bathing will have is_senior=true
                                     if (isSenior) {
                                         displayName = `${cleanedName} (senior)`;
                                     }
+                                    // Add * prefix for bathing therapist
                                     if (isBathing) {
                                         displayName = `*${displayName}`;
                                     }
