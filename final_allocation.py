@@ -13,6 +13,77 @@ def daterange(start_date, end_date):
         d += timedelta(days=1)
 
 # -----------------------
+# Helper: Check if treatment requires senior tag
+# -----------------------
+def is_treatment_requiring_senior_tag(therapy_name):
+    """
+    Check if a treatment requires special senior tag handling.
+    Returns True if the therapy name matches any of the specified treatments.
+    """
+    if not therapy_name:
+        return False
+    
+    # List of treatments that require senior tag (only one senior, not bathing)
+    special_treatments = [
+        'dhara & abh(3)',
+        'dhara& pizhichil (4)',
+        'dhara & pizhichil (5)',
+        'dhara & pizhichil (6)',
+        'dhara & pizhichil (7)',
+        'dhara & abyangam ( 3 t)',
+        'dhara & sudhikalpana dhara (5t)',
+        'dhara ( 2 t)',
+        'thakradhara & abhyangam (4)',
+        'thakradhara & pizichil(6)',
+        'thakradhara ( 2 t)',
+        'thakradhara&fbkadee kizhi (5 t)',
+        'thakradhara& thakrapizhichil(7)',
+    ]
+    
+    therapy_lower = str(therapy_name).lower().strip()
+    
+    # Check if therapy name contains key patterns
+    # Match treatments containing "dhara" or "thakradhara" with variations
+    has_dhara = 'dhara' in therapy_lower
+    has_thakradhara = 'thakradhara' in therapy_lower
+    
+    if not (has_dhara or has_thakradhara):
+        return False
+    
+    # Check for specific patterns in the treatment name
+    # Match treatments with "pizhichil", "pizichil", "abh", "abyangam", "abhyangam", "sudhikalpana", "fbkadee kizhi", "thakrapizhichil"
+    has_pizhichil = 'pizhichil' in therapy_lower or 'pizichil' in therapy_lower
+    has_abh = 'abh' in therapy_lower and 'abhyangam' not in therapy_lower
+    has_abyangam = 'abyangam' in therapy_lower or 'abhyangam' in therapy_lower
+    has_sudhikalpana = 'sudhikalpana' in therapy_lower
+    has_fbkadee = 'fbkadee kizhi' in therapy_lower or 'fbkadee' in therapy_lower
+    has_thakrapizhichil = 'thakrapizhichil' in therapy_lower
+    
+    # Check if it matches any of the special treatment patterns
+    if has_dhara:
+        if has_pizhichil or has_abh or has_abyangam or has_sudhikalpana:
+            return True
+        # Check for "Dhara ( 2 T)" pattern
+        if 'dhara' in therapy_lower and ('2 t' in therapy_lower or '2t' in therapy_lower):
+            return True
+    
+    if has_thakradhara:
+        if has_pizhichil or has_abyangam or has_fbkadee or has_thakrapizhichil:
+            return True
+        # Check for "Thakradhara ( 2 T)" pattern
+        if 'thakradhara' in therapy_lower and ('2 t' in therapy_lower or '2t' in therapy_lower):
+            return True
+    
+    # Also check exact matches (case-insensitive, ignoring extra spaces)
+    normalized_therapy = ' '.join(therapy_lower.split())
+    for special_treatment in special_treatments:
+        normalized_special = ' '.join(special_treatment.split())
+        if normalized_therapy == normalized_special:
+            return True
+    
+    return False
+
+# -----------------------
 # Therapy master cache
 # -----------------------
 therapy_cache = {}
@@ -1250,15 +1321,12 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
         assigned_therapists = candidate_therapists[:req_total]
         bath_assigned = None
         
-        # Check if this is Dhara & Pizichil therapy for special senior therapist handling
-        is_dhara_pizichil = False
+        # Check if this treatment requires special senior therapist handling
+        requires_senior_tag = is_treatment_requiring_senior_tag(therapy_name)
         senior_therapist = None
-        if therapy_name:
-            therapy_lower = str(therapy_name).lower()
-            is_dhara_pizichil = 'dhara' in therapy_lower and 'pizichil' in therapy_lower
         
-        # For Dhara & Pizichil: Identify the senior therapist from assigned therapists
-        if is_dhara_pizichil:
+        # For special treatments: Identify the senior therapist from assigned therapists
+        if requires_senior_tag:
             # Find senior therapist (Senior Therapist or Super Senior Therapist)
             for t in assigned_therapists:
                 grade_name = getattr(getattr(t, 'therapist_grade', None), 'name', '') if hasattr(t, 'therapist_grade') else ''
@@ -1298,8 +1366,8 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                 })
                 continue  # Skip to next booking
             
-            # For Dhara & Pizichil: Senior therapist should NOT be the bathing therapist
-            if is_dhara_pizichil and senior_therapist:
+            # For special treatments: Senior therapist should NOT be the bathing therapist
+            if requires_senior_tag and senior_therapist:
                 # Exclude senior therapist from bathing assignment
                 bathing_candidates = [t for t in assigned_therapists if t != senior_therapist and getattr(t, 'is_bathing_therapist', False)]
                 
@@ -1434,11 +1502,12 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                         })
                         continue  # Skip to next booking
         
-        # build therapist audit list - mark senior therapist for Dhara & Pizichil
+        # build therapist audit list - mark senior therapist for special treatments
         therapists_for_audit = []
         for t in assigned_therapists:
             is_bath = (t == bath_assigned)
-            is_senior = (is_dhara_pizichil and t == senior_therapist)
+            # Only mark senior therapist if it's a special treatment AND the therapist is not bathing
+            is_senior = (requires_senior_tag and t == senior_therapist and not is_bath)
             therapist_dict = therapist_entry(t, is_bath=is_bath)
             if is_senior:
                 therapist_dict["is_senior"] = True  # Mark senior therapist for UI highlighting
