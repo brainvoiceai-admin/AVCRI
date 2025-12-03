@@ -463,7 +463,7 @@ class store_PrescriptionItem(models.Model):
     prescription = models.ForeignKey('store_Prescription', on_delete=models.CASCADE, related_name='items')
     item_code = models.CharField(max_length=50)
     dosage = models.CharField(max_length=50)
-    usage = models.CharField(max_length=100)
+    usage = models.CharField(max_length=100, blank=True, null=True)
     internal_external = models.CharField(max_length=20)
     time = models.CharField(max_length=50)
     item_uom = models.CharField(max_length=50, blank=True, null=True)
