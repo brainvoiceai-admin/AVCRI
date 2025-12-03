@@ -722,8 +722,8 @@
                 </select>
               </div>
               <div class="form-group small">
-                <label for="item-builder-usage">Usage <span style="color:var(--danger);">*</span></label>
-                <select id="item-builder-usage" multiple required style="width:100%;"></select>
+                <label for="item-builder-usage">Usage</label>
+                <select id="item-builder-usage" multiple style="width:100%;"></select>
               </div>
               <div class="form-group small">
                 <label for="item-builder-time">Time</label>
@@ -900,6 +900,12 @@ $(function(){
 
   const $resumeModal = $('#resume-modal-backdrop'), $resumeFrom = $('#resume-from'), $resumeTo = $('#resume-to');
   const $resumeSubmitBtn = $('#resume-submit'), $resumeCloseBtn = $('#resume-modal-close'), $resumeModalInfo = $('#resume-modal-info');
+
+  // Set today's date as default for From Date field
+  if (!$fromDate.val()) {
+    const today = new Date().toISOString().split('T')[0];
+    $fromDate.val(today);
+  }
 
   // --- state ---
   let itemGroups = [];
@@ -1269,11 +1275,6 @@ $(function(){
     if (!uno) {
       alert('Unit is mandatory');
       $('#item-builder-uno').focus();
-      return;
-    }
-    if (!usage || usageValues.length === 0) {
-      alert('At least one Usage is mandatory');
-      usageSelect.focus();
       return;
     }
     
@@ -1702,7 +1703,8 @@ $(function(){
 
   function resetFormState(){
     editPrescriptionIndex = null; $('#form-title').text('Create New Prescription');
-    $fromDate.val(''); $toDate.val(''); $daysInput.val('');
+    const today = new Date().toISOString().split('T')[0];
+    $fromDate.val(today); $toDate.val(''); $daysInput.val('');
     $procuredSelect.val(''); $scopeSelect.val('');
     itemGroups = []; renderItemGroups();
     $allocateBtn.show(); $updateBtn.hide();
