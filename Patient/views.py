@@ -338,8 +338,30 @@ def therapy_entry_view(request):
 
 
 from .models import TherapyDetails
+from masters.models import TherapyMaster
+
 def search_therapies_api(request):
     query = request.GET.get('q', '')
+    patient_type = (request.GET.get('patient_type') or '').strip().upper()  # Get patient type (IP or OP)
+    
+    # Use TherapyMaster if available, otherwise fall back to TherapyDetails
+    try:
+        if TherapyMaster is not None:
+            qs = TherapyMaster.objects.filter(is_active=True)
+            
+            # Filter by patient type if provided (IP or OP)
+            if patient_type in ('IP', 'OP'):
+                qs = qs.filter(patient_type=patient_type)
+            
+            if query:
+                qs = qs.filter(Q(therapy_name__icontains=query) | Q(therapy_code__icontains=query))
+            
+            therapies = qs.values('therapy_code', 'therapy_name')[:10]
+            return JsonResponse(list(therapies), safe=False)
+    except Exception as e:
+        print(f"Error using TherapyMaster: {e}")
+    
+    # Fallback to TherapyDetails if TherapyMaster fails
     if query:
         therapies = TherapyDetails.objects.filter(
             therapy_name__icontains=query

@@ -660,6 +660,7 @@
             }
 
             function populatePatientInfo(patient) {
+                selectedPatient = patient; // Store patient globally
                 $('#patient-name').text(patient.patient_name || 'Unknown');
                 $('#patient-reg-no').text(patient.registration_number);
                 $('#patient-age-sex').text(`${patient.age || 'Unknown'} / ${patient.sex || 'Unknown'}`);
@@ -677,6 +678,11 @@
 
                 // Set patient type badge
                 $('#patient-type-badge').text(patient.patient_type).removeClass('bg-primary bg-success').addClass(patient.patient_type === 'IP' ? 'bg-primary' : 'bg-success');
+                
+                // Clear therapy select to refresh with new patient type filter
+                if ($('#therapy-select').length) {
+                    $('#therapy-select').val(null).trigger('change');
+                }
                 
                 // Load saved therapies for this patient
                 loadPatientTherapies(patient.registration_number);
@@ -755,7 +761,12 @@
                     dataType: 'json',
                     delay: 250,
                     data: function(params) {
-                        return { q: params.term };
+                        // Get patient type from selected patient
+                        const patientType = selectedPatient ? (selectedPatient.patient_type || 'IP') : '';
+                        return { 
+                            q: params.term,
+                            patient_type: patientType
+                        };
                     },
                     processResults: function (data) {
                         return {

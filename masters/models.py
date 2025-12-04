@@ -165,6 +165,15 @@ class TherapyMaster(models.Model):
     treatment_room_required = models.CharField(max_length=10, null=True, blank=True, verbose_name="Room Required")
     cost_of_therapy = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, verbose_name="Cost")
     
+    # Patient type field (IP or OP)
+    patient_type = models.CharField(
+        max_length=2,
+        choices=[('IP', 'IP (Inpatient)'), ('OP', 'OP (Outpatient)')],
+        default='IP',
+        verbose_name="Patient Type",
+        help_text="Select whether this therapy is for Inpatient (IP) or Outpatient (OP) patients"
+    )
+    
     # Therapist count fields (from original TherapyDetails model)
     no_of_super_senior_therapist = models.IntegerField(default=0, verbose_name="Super Senior Therapists")
     no_of_senior_therapist = models.IntegerField(default=0, verbose_name="Senior Therapists")
