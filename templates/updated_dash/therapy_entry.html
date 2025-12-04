@@ -1277,10 +1277,16 @@ $(function(){
   }
 
   function populatePatientInfo(patient) {
+    selectedPatient = patient; // Store patient globally
     $('#header-patient-select').val(patient.pat_op_reg_no || patient.pat_reg_no);
     // Make patient name bold/highlighted
     $('#hdr-pat-name').html(`<strong style="font-weight: bold; color: var(--primary);">${patient.pat_name || 'Unknown'}</strong>`);
     updatePatientAvatar(patient);
+    
+    // Clear therapy select to refresh with new patient type filter
+    if ($therapySelect.length) {
+      $therapySelect.val(null).trigger('change');
+    }
     
     // Load patient therapies
     // Use pat_reg_no consistently (or pat_op_reg_no if pat_reg_no doesn't exist)
@@ -1358,7 +1364,11 @@ $(function(){
     placeholder:'Search therapy (2+)', 
     minimumInputLength:2, 
     ajax:{
-      transport: function(p,s,f){ ajax({action:'search_therapies', q: p.data.q}).then(s).catch(f); },
+      transport: function(p,s,f){ 
+        // Get patient type from selected patient
+        const patientType = selectedPatient ? (selectedPatient.patient_type || 'IP') : '';
+        ajax({action:'search_therapies', q: p.data.q, patient_type: patientType}).then(s).catch(f); 
+      },
       processResults: data => ({ 
         results: (data||[]).map(t => ({
           id: t.therapy_code, 

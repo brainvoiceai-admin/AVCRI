@@ -1358,11 +1358,17 @@ def therapy_entry(request):
     # search therapies (includes both TherapyMaster and NurseTreatmentMaster)
     if action == 'search_therapies':
         q = (request.GET.get('q') or '').strip()
+        patient_type = (request.GET.get('patient_type') or '').strip().upper()  # Get patient type (IP or OP)
         results = []
         
         # Add regular therapies from TherapyMaster
         if TherapyMaster is not None:
             qs = TherapyMaster.objects.filter(is_active=True).all()  # Use local master table
+            
+            # Filter by patient type if provided (IP or OP)
+            if patient_type in ('IP', 'OP'):
+                qs = qs.filter(patient_type=patient_type)
+            
             if q:
                 qs = qs.filter(Q(therapy_name__icontains=q) | Q(therapy_code__icontains=q))
             qs = qs[:50]
@@ -1374,6 +1380,8 @@ def therapy_entry(request):
                 })
         
         # Add nurse treatments from NurseTreatmentMaster
+        # Note: Nurse treatments are typically for IP patients, but we include them for both
+        # You can add patient_type field to NurseTreatmentMaster later if needed
         if NurseTreatmentMaster is not None:
             qs = NurseTreatmentMaster.objects.filter(is_active=True).all()
             if q:

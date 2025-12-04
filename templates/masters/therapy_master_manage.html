@@ -104,6 +104,7 @@
                                     <th>Therapy Name</th>
                                     <th>Group</th>
                                     <th>Category</th>
+                                    <th>Patient Type</th>
                                     <th>Duration</th>
                                     <th>Therapists</th>
                                     <th>Bathing</th>
@@ -120,6 +121,15 @@
                                         <td>{{ therapy.therapy_name }}</td>
                                         <td>{{ therapy.therapy_group|default:"-" }}</td>
                                         <td>{{ therapy.therapy_category|default:"-" }}</td>
+                                        <td>
+                                            {% if therapy.patient_type == 'IP' %}
+                                                <span class="badge bg-primary">IP</span>
+                                            {% elif therapy.patient_type == 'OP' %}
+                                                <span class="badge bg-success">OP</span>
+                                            {% else %}
+                                                <span class="badge bg-secondary">-</span>
+                                            {% endif %}
+                                        </td>
                                         <td>{{ therapy.therapy_duration|default:"-" }}</td>
                                         <td>
                                             <span class="badge bg-primary">{{ therapy.total_no_of_therapist|default:0 }}</span>
