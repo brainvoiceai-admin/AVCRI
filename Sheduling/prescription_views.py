@@ -227,11 +227,13 @@ def get_prescription_details_api(request):
         except PatientSnapshot.DoesNotExist:
             return JsonResponse({'error': 'Patient not found'}, status=404)
         
-        # Get patient info
+        # Get patient info (include age/sex for print layout)
         patient_info = {
             'name': patient.pat_name or 'Unknown',
             'registration_no': patient.pat_reg_no,
             'room_no': getattr(patient, 'pat_room_no', None),
+            'age': getattr(patient, 'pat_age', '') or '',
+            'sex': getattr(patient, 'pat_sex', '') or '',
             'doctor_name': None  # Will be set from prescription if available
         }
         
@@ -297,14 +299,21 @@ def get_prescription_details_api(request):
                                 'status': 'active'
                             })
                     
-                    # Add the group exactly as it appears in items_groups
+                    # Fallback: use allocation-level usage/scope if group-level missing
+                    alloc_usage = getattr(allocation, 'usage', '')
+                    alloc_scope = getattr(allocation, 'scope', '')
+                    group_usage = group.get('usage', '') or alloc_usage
+                    usage_array = group.get('usage_array', [])
+                    internal_external = group.get('internal_external', '') or alloc_scope
+                    
+                    # Add the group exactly as it appears in items_groups (with fallbacks)
                     prescription_groups.append({
                         'group_id': f"prescription_group_{allocation.id}_{group_idx}",
                         'time': group.get('time', 'M'),
                         'dose': group.get('dosage', ''),
-                        'usage': group.get('usage', ''),
-                        'usage_array': group.get('usage_array', []),
-                        'internal_external': group.get('internal_external', ''),
+                        'usage': group_usage,
+                        'usage_array': usage_array,
+                        'internal_external': internal_external,
                         'notes': group.get('uno', ''),
                         'ingredients': group.get('ingredients', []),
                         'ingredient_ids': group.get('ingredient_ids', []),

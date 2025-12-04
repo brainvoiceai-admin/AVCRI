@@ -892,7 +892,7 @@
                 return;
             }
             
-            // Render prescription items section - grouped by allocation (like prescription entry page)
+            // Render prescription items section - grouped by allocation (same compact text format as prescription entry page)
             if (prescriptionGroups.length > 0) {
                 const prescriptionSection = document.createElement('div');
                 prescriptionSection.className = 'items-section';
@@ -940,7 +940,7 @@
                     }
                     prescriptionSection.appendChild(entryHeader);
                     
-                    // Single container for all groups from this allocation
+                    // Single container for this allocation: build one compact line joining all groups with " + "
                     const allocationDiv = document.createElement('div');
                     allocationDiv.style.marginBottom = '25px';
                     allocationDiv.style.border = allocationIsCancelled ? '2px solid #e63757' : '1px solid #e3ebf6';
@@ -951,123 +951,50 @@
                         allocationDiv.style.opacity = '0.7';
                     }
                     
-                    // Render all groups from this allocation, separated by horizontal rules (no numbering within entry)
-                    allocationGroups.forEach((group, groupIndex) => {
+                    const compactText = allocationGroups.map(group => {
                         const items = group.items || [];
-                        
-                        // Skip empty groups
-                        if (items.length === 0) return;
-                        
-                        // Add horizontal rule between groups (except first one)
-                        if (groupIndex > 0) {
-                            const hr = document.createElement('hr');
-                            hr.style.margin = '15px 0';
-                            hr.style.border = 'none';
-                            hr.style.borderTop = '2px solid #e3ebf6';
-                            allocationDiv.appendChild(hr);
-                        }
-                        
-                        // Display as single group with multiple items (like prescription entry page)
-                        const itemCard = document.createElement('div');
-                        itemCard.className = 'medicine-card';
-                        itemCard.style.borderLeft = allocationIsCancelled ? '4px solid #e63757' : '4px solid #2c7be5';
-                        itemCard.style.marginBottom = '8px';
-                        itemCard.style.padding = '12px';
-                        itemCard.style.backgroundColor = '#fff';
-                        itemCard.style.borderRadius = '6px';
-                        
-                        // Check if all items in this group are prepared
-                        let allPrepared = true;
-                        const medicineIds = [];
-                        items.forEach(item => {
-                            const medicineId = `${currentPatient.patient_id}_${item.id}_${currentDate}`;
-                            medicineIds.push(medicineId);
-                            if (!preparedMedicines.has(medicineId)) {
-                                allPrepared = false;
-                            }
-                        });
-                        
-                        if (allPrepared && items.length > 0) {
-                            itemCard.classList.add('prepared');
-                        }
-                        
-                        // Display multiple item names as tags (like prescription entry)
-                        const itemsHtml = items.map(it => {
-                            const medicineId = `${currentPatient.patient_id}_${it.id}_${currentDate}`;
-                            const isPrepared = preparedMedicines.has(medicineId);
-                            return `<span class="tag" style="display:inline-block;padding:4px 8px;margin:2px;background:${isPrepared ? '#d4edda' : '#e3ebf6'};border-radius:4px;font-size:0.9em;">${escapeHtml(it.item_name)}${it.quantity ? ` (Qty: ${escapeHtml(it.quantity)})` : ''}</span>`;
-                        }).join(' ');
-                        
-                        // Display ingredients if available
-                        const ingredientsHtml = (group.ingredients && group.ingredients.length > 0)
-                            ? group.ingredients.map(ing => `<span class="tag" style="display:inline-block;padding:4px 8px;margin:2px;background:#e8f5e9;border-radius:4px;font-size:0.9em;">${escapeHtml(ing.ingredient_name || ing.text || '')}</span>`).join(' ')
-                            : '<span class="text-muted" style="font-size:0.9em;">No ingredients</span>';
-                        
-                        // Single dosage, usage, time, UNO, and internal/external for the entire group
-                        const dosage = group.dose || items[0]?.dose || 'N/A';
-                        // Handle usage - can be string or array
-                        let usage = 'N/A';
-                        if (group.usage) {
-                            usage = group.usage;
-                        } else if (group.usage_array && Array.isArray(group.usage_array) && group.usage_array.length > 0) {
+                        if (!items.length) return '';
+                        const itemNames = items.map(it => escapeHtml(it.item_name)).join(', ');
+                        const dosageRaw = group.dose || items[0]?.dose || '';
+                        const unoRaw = group.notes || group.uno || items[0]?.notes || '';
+                        const dosageDisplay = (dosageRaw && unoRaw)
+                            ? `${dosageRaw} (${unoRaw})`
+                            : (dosageRaw || unoRaw);
+                        // Ingredients
+                        const ingredientsDisplay = (group.ingredients && group.ingredients.length > 0)
+                            ? group.ingredients.map(ing => escapeHtml(ing.ingredient_name || ing.text || '')).join(', ')
+                            : '';
+                        // Usage (string or array)
+                        let usage = group.usage || '';
+                        if (!usage && Array.isArray(group.usage_array) && group.usage_array.length > 0) {
                             usage = group.usage_array.join(', ');
-                        } else if (items[0]?.usage) {
+                        } else if (!usage && items[0]?.usage) {
                             usage = items[0].usage;
                         }
-                        const time = group.time || items[0]?.time || 'N/A';
-                        const uno = group.notes || group.uno || items[0]?.notes || 'N/A';
-                        const internalExternal = group.internal_external || items[0]?.internal_external || 'N/A';
+                        const time = group.time || items[0]?.time || '';
+                        const internalExternal = group.internal_external || items[0]?.internal_external || '';
                         
-                        itemCard.innerHTML = `
-                            <div style="display:flex;align-items:flex-start;gap:12px;">
-                                <div class="medicine-checkbox" style="flex-shrink:0;padding-top:4px;">
-                                    <input type="checkbox" id="med-group-${group.group_id}" ${allPrepared ? 'checked' : ''} ${allocationIsCancelled ? 'disabled' : ''}>
-                                </div>
-                                <div class="medicine-details" style="flex:1;">
-                                    <div style="margin-bottom:8px;">
-                                        ${itemsHtml}
-                                    </div>
-                                    <div style="margin-bottom:8px;font-size:0.9em;">
-                                        <strong>Ingredients:</strong> ${ingredientsHtml}
-                                    </div>
-                                    <div class="medicine-meta" style="font-size:0.9em;color:#666;display:flex;flex-wrap:wrap;gap:12px;">
-                                        ${dosage !== 'N/A' || uno !== 'N/A' ? `<span><strong>Dosage:</strong> ${escapeHtml(dosage !== 'N/A' && uno !== 'N/A' ? `${dosage} (${uno})` : (dosage !== 'N/A' ? dosage : '') + (uno !== 'N/A' ? ` (${uno})` : ''))}</span>` : ''}
-                                        ${usage !== 'N/A' ? `<span><strong>Usage:</strong> ${escapeHtml(usage)}</span>` : ''}
-                                        ${time !== 'N/A' ? `<span><strong>Time:</strong> ${escapeHtml(time)}</span>` : ''}
-                                        ${internalExternal !== 'N/A' ? `<span><strong>Ext/Int:</strong> ${escapeHtml(internalExternal)}</span>` : ''}
-                                    </div>
-                                </div>
-                            </div>
-                        `;
-                        
-                        // Add event listener for checkbox (only if prescription not cancelled)
-                        if (!allocationIsCancelled) {
-                            const checkbox = itemCard.querySelector('input[type="checkbox"]');
-                            checkbox.addEventListener('change', function() {
-                                // Toggle all items in the group
-                                medicineIds.forEach(medId => {
-                                    toggleMedicinePreparation(medId, this.checked);
-                                });
-                                // Update visual state
-                                if (this.checked) {
-                                    itemCard.classList.add('prepared');
-                                    // Update tag backgrounds
-                                    itemCard.querySelectorAll('.tag').forEach(tag => {
-                                        tag.style.background = '#d4edda';
-                                    });
-                                } else {
-                                    itemCard.classList.remove('prepared');
-                                    // Update tag backgrounds
-                                    itemCard.querySelectorAll('.tag').forEach(tag => {
-                                        tag.style.background = '#e3ebf6';
-                                    });
-                                }
-                            });
+                        const parts = [];
+                        if (itemNames) {
+                            parts.push(dosageDisplay ? `${itemNames} (${escapeHtml(dosageDisplay)})` : itemNames);
                         }
-                        
-                        allocationDiv.appendChild(itemCard);
-                    });
+                        if (ingredientsDisplay) parts.push(`Ingredients: ${ingredientsDisplay}`);
+                        if (time) parts.push(`Time: ${escapeHtml(time)}`);
+                        if (usage) parts.push(`Usage: ${escapeHtml(usage)}`);
+                        if (internalExternal) parts.push(`Ext/Int: ${escapeHtml(internalExternal)}`);
+                        return parts.join(', ');
+                    }).filter(Boolean).join(' + ');
                     
+                    const itemCard = document.createElement('div');
+                    itemCard.className = 'medicine-card';
+                    itemCard.style.borderLeft = allocationIsCancelled ? '4px solid #e63757' : '4px solid #2c7be5';
+                    itemCard.style.marginBottom = '8px';
+                    itemCard.style.padding = '12px';
+                    itemCard.style.backgroundColor = '#fff';
+                    itemCard.style.borderRadius = '6px';
+                    itemCard.innerHTML = `<div style="font-size:0.95em;">${compactText || 'No medicines'}</div>`;
+                    
+                    allocationDiv.appendChild(itemCard);
                     prescriptionSection.appendChild(allocationDiv);
                 });
                 

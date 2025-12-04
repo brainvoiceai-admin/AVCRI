@@ -471,14 +471,21 @@ def get_prescription_details_api(request):
                                 'status': 'active'
                             })
                     
-                    # Add the group exactly as it appears in items_groups
+                    # Fallback: use allocation-level usage/scope if group-level missing
+                    alloc_usage = getattr(allocation, 'usage', '')
+                    alloc_scope = getattr(allocation, 'scope', '')
+                    group_usage = group.get('usage', '') or alloc_usage
+                    usage_array = group.get('usage_array', [])
+                    internal_external = group.get('internal_external', '') or alloc_scope
+                    
+                    # Add the group exactly as it appears in items_groups (with fallbacks)
                     prescription_groups.append({
                         'group_id': f"prescription_group_{allocation.id}_{group_idx}",
                         'time': group.get('time', 'M'),
                         'dose': group.get('dosage', ''),
-                        'usage': group.get('usage', ''),
-                        'usage_array': group.get('usage_array', []),
-                        'internal_external': group.get('internal_external', ''),
+                        'usage': group_usage,
+                        'usage_array': usage_array,
+                        'internal_external': internal_external,
                         'notes': group.get('uno', ''),
                         'ingredients': group.get('ingredients', []),
                         'ingredient_ids': group.get('ingredient_ids', []),

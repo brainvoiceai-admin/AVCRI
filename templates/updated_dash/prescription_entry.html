@@ -722,10 +722,6 @@
                 </select>
               </div>
               <div class="form-group small">
-                <label for="item-builder-usage">Usage</label>
-                <select id="item-builder-usage" multiple style="width:100%;"></select>
-              </div>
-              <div class="form-group small">
                 <label for="item-builder-time">Time</label>
                 <select id="item-builder-time"><option value="">Select Time</option></select>
               </div>
@@ -736,6 +732,13 @@
               </div>
             </div>
             <div id="item-groups-list" style="margin-top:16px"></div>
+          </div>
+
+          <div class="form-row" style="margin-top: 24px;">
+            <div class="form-group">
+              <label for="common-usage-select">Usage</label>
+              <select id="common-usage-select" multiple style="width:100%;"></select>
+            </div>
           </div>
 
           <div class="form-row" style="margin-top: 24px;">
@@ -793,6 +796,7 @@
                   <th>#</th>
                   <th>Prescription</th>
                   <th>Procured From</th>
+                  <th>Scope (Ext/Int)</th>
                   <th>Medications</th>
                   <th>From</th>
                   <th>To</th>
@@ -803,7 +807,7 @@
               </thead>
               <tbody id="prescriptions-table-body">
                 <tr>
-                  <td colspan="9">
+                  <td colspan="10">
                     <div class="empty-state">
                       <i class="fas fa-prescription-bottle"></i>
                       <h3>No Prescriptions Found</h3>
@@ -891,6 +895,7 @@ $(function(){
   const $fromDate = $('#from-date-input'), $toDate = $('#to-date-input'), $daysInput = $('#days-input');
   const $procuredSelect = $('#procured-from-select');
   const $scopeSelect = $('#scope-select');
+  const $commonUsageSelect = $('#common-usage-select');
   const $itemBuilder = $('#item-builder-select'), $itemGroupsList = $('#item-groups-list');
   const $allocateBtn = $('#allocate-prescription-btn'), $updateBtn = $('#update-prescription-btn'), $clearBtn = $('#clear-form');
   const $prescriptionsTableBody = $('#prescriptions-table-body');
@@ -1185,7 +1190,7 @@ $(function(){
     ajax({action:'masters', type:'procured'}).then(list => { $procuredSelect.empty().append('<option value="">-- Select Source --</option>'); (list||FALLBACK_PROCURED).forEach(p => $procuredSelect.append(new Option(p.name, p.name))); }).catch(()=>{ $procuredSelect.empty().append('<option value="">-- Select Source --</option>'); FALLBACK_PROCURED.forEach(p => $procuredSelect.append(new Option(p.name, p.name))); });
     ajax({action:'masters', type:'prescriptionscope'}).then(list => { $scopeSelect.empty().append('<option value="">-- Select --</option>'); (list||[]).forEach(x => $scopeSelect.append(new Option(x.name, x.name))); }).catch(()=>{ $scopeSelect.empty().append('<option value="">-- Select --</option>'); });
     ajax({action:'masters', type:'prescriptionusage'}).then(list => { 
-      const $u=$('#item-builder-usage'); 
+      const $u=$commonUsageSelect; 
       $u.empty(); 
       (list||[]).forEach(x => $u.append(new Option(x.name, x.name))); 
       // Initialize Select2 for multiselect
@@ -1256,9 +1261,6 @@ $(function(){
   $('#add-item-group-btn').on('click', function(){
     const selected = $itemBuilder.select2('data') || [];
     const dosage = $('#item-builder-dosage').val().trim();
-    const usageSelect = $('#item-builder-usage');
-    const usageValues = usageSelect.val() || []; // Get array of selected values
-    const usage = usageValues.join(', '); // Join with comma and space
     const time = $('#item-builder-time').val().trim();
     const uno = $('#item-builder-uno').val().trim();
     const ingredientSelect = $('#item-builder-ingredients');
@@ -1279,11 +1281,10 @@ $(function(){
     }
     
     const items = selected.length > 0 ? selected.map(s => ({ item_code: s.id, item_name: s.text || s.id })) : [];
-    const grp = { id: Math.random().toString(36).slice(2,9), items, dosage, usage, usage_array: usageValues, time, uno, ingredients, ingredient_ids: ingredientIds };
+    const grp = { id: Math.random().toString(36).slice(2,9), items, dosage, time, uno, ingredients, ingredient_ids: ingredientIds };
     itemGroups.push(grp);
     $itemBuilder.val(null).trigger('change');
     $('#item-builder-dosage').val('');
-    usageSelect.val(null).trigger('change');
     $('#item-builder-time').val('');
     $('#item-builder-uno').val('');
     ingredientSelect.val(null).trigger('change');
@@ -1301,22 +1302,40 @@ $(function(){
       `); 
       return; 
     }
+    
+    // Show each group separately with edit/remove buttons, but in the same format as final display
     itemGroups.forEach((g,i) => {
-      const itemsHtml = g.items.map(it => `<span class="tag">${esc(it.item_name)}</span>`).join(' ');
-      const ingredientsHtml = (g.ingredients && g.ingredients.length > 0) 
-        ? g.ingredients.map(ing => `<span class="tag" style="background:#e8f5e9;">${esc(ing.ingredient_name)}</span>`).join(' ')
-        : '<span class="text-muted">No ingredients</span>';
+      const itemNames = (g.items || []).map(it => esc(it.item_name)).join(', ');
+      const ingredientsDisplay = (g.ingredients && g.ingredients.length > 0) 
+        ? g.ingredients.map(ing => esc(ing.ingredient_name)).join(', ')
+        : '—';
+      const timeDisplay = g.time ? esc(g.time) : '—';
+      const dosageDisplay = (g.dosage && g.uno) 
+        ? `${esc(g.dosage)} (${esc(g.uno)})`
+        : (g.dosage ? esc(g.dosage) : '—') + (g.uno ? ` (${esc(g.uno)})` : '');
+
+      const mainPart = itemNames || '—';
+      let parts = [];
+      if (mainPart !== '—') {
+        parts.push(mainPart + (dosageDisplay !== '—' ? ` (${dosageDisplay})` : ''));
+      }
+      if (ingredientsDisplay !== '—') {
+        parts.push(`Ingredients: ${ingredientsDisplay}`);
+      }
+      if (timeDisplay !== '—') {
+        parts.push(`Time: ${timeDisplay}`);
+      }
+      const groupDisplay = parts.join(', ');
+      
+      // Add separator if not the first group
+      if (i > 0) {
+        $itemGroupsList.append(`<div style="text-align:center;margin:8px 0;font-weight:bold;color:var(--text-medium);">+</div>`);
+      }
+      
       const $div = $(`
-        <div style="padding:12px;border:1px solid var(--border-light);margin-bottom:12px;border-radius:8px;display:flex;justify-content:space-between;align-items:center;background:white;">
-          <div style="flex:1;">
-            <div style="font-weight:600;color:var(--text-dark);margin-bottom:6px;">Group ${i+1}</div>
-            <div style="margin-bottom:6px;">${itemsHtml}</div>
-            <div style="margin-bottom:6px;font-size:0.9em;">
-              <strong>Ingredients:</strong> ${ingredientsHtml}
-            </div>
-            <div class="small-muted">Dosage: ${esc(g.dosage||'—')} • Usage: ${esc(g.usage||'—')} • Time: ${esc(g.time||'—')} • UNO: ${esc(g.uno||'—')}</div>
-          </div>
-          <div>
+        <div style="padding:12px;border:1px solid var(--border-light);border-radius:8px;display:flex;justify-content:space-between;align-items:center;background:white;">
+          <div style="flex:1;font-size:0.95em;">${groupDisplay}</div>
+          <div style="display:flex;gap:6px;">
             <button class="edit-group action-btn btn btn-outline" data-id="${g.id}" style="margin-right:6px;">
               <i class="fas fa-edit"></i> Edit
             </button>
@@ -1347,17 +1366,6 @@ $(function(){
     }); 
     $itemBuilder.trigger('change'); 
     $('#item-builder-dosage').val(g.dosage||''); 
-    // Handle usage - support both array and comma-separated string
-    const usageSelect = $('#item-builder-usage');
-    if (g.usage_array && Array.isArray(g.usage_array)) {
-      usageSelect.val(g.usage_array).trigger('change');
-    } else if (g.usage) {
-      // Split comma-separated string and trim each value
-      const usageArray = g.usage.split(',').map(u => u.trim()).filter(u => u);
-      usageSelect.val(usageArray).trigger('change');
-    } else {
-      usageSelect.val(null).trigger('change');
-    }
     $('#item-builder-time').val(g.time||''); 
     $('#item-builder-uno').val(g.uno||''); 
     // Handle ingredients
@@ -1399,6 +1407,10 @@ $(function(){
     if (!from || !to){ alert('Please set From and To dates'); return; }
     if (from > to){ alert('From must be <= To'); return; }
 
+    // Get common usage
+    const commonUsageValues = $commonUsageSelect.val() || [];
+    const commonUsage = commonUsageValues.join(', ');
+    
     // Prepare prescription data
     const prescriptionData = {
       from_date: from,
@@ -1406,11 +1418,11 @@ $(function(){
       days: Math.ceil((new Date(to).getTime() - new Date(from).getTime()) / (1000 * 60 * 60 * 24)) + 1,
       procured_from: $procuredSelect.val()||'',
       scope: $scopeSelect.val()||'',
+      usage: commonUsage,
+      usage_array: commonUsageValues,
       items_groups: itemGroups.map(g => ({ 
         items: g.items, 
         dosage: g.dosage, 
-        usage: g.usage || (g.usage_array ? g.usage_array.join(', ') : ''), 
-        usage_array: g.usage_array || (g.usage ? g.usage.split(',').map(u => u.trim()) : []),
         time: g.time, 
         uno: g.uno,
         ingredient_ids: g.ingredient_ids || [],
@@ -1462,7 +1474,7 @@ $(function(){
         
         // Reset form
         itemGroups = []; renderItemGroups();
-        $fromDate.val(''); $toDate.val(''); $daysInput.val(''); $procuredSelect.val(''); $scopeSelect.val('');
+        $fromDate.val(''); $toDate.val(''); $daysInput.val(''); $procuredSelect.val(''); $scopeSelect.val(''); $commonUsageSelect.val(null).trigger('change');
         
         // Render immediately so user sees the new prescription
         renderAll();
@@ -1507,26 +1519,51 @@ $(function(){
       return; 
     }
     addedPrescriptions.forEach((p,i) => {
+      // Get common usage from prescription level
+      let commonUsageDisplay = '—';
+      if (p.usage) {
+        commonUsageDisplay = esc(p.usage);
+      } else if (Array.isArray(p.usage_array) && p.usage_array.length > 0) {
+        commonUsageDisplay = esc(p.usage_array.join(', '));
+      }
+      
+      // Build compact, single-line representation of all medication groups,
+      // joined by "+" so pharmacy team can read one prescription in one line.
       const groupsHtml = (p.items_groups||[]).map(g => {
-        // Format usage - handle both string and array
-        let usageDisplay = '—';
-        if (g.usage) {
-          usageDisplay = esc(g.usage);
-        } else if (Array.isArray(g.usage_array) && g.usage_array.length > 0) {
-          usageDisplay = esc(g.usage_array.join(', '));
-        }
+        // Item names in this group (e.g., Kashyam1, Kashyam2)
+        const itemNames = (g.items || []).map(it => esc(it.item_name)).join(', ');
+
         // Format ingredients
         const ingredientsDisplay = (g.ingredients && g.ingredients.length > 0)
           ? g.ingredients.map(ing => esc(ing.ingredient_name || ing.text || '')).join(', ')
           : '—';
+
         // Combine dosage and UNO for better readability
         const dosageDisplay = (g.dosage && g.uno) 
-          ? `${esc(g.dosage)} (${esc(g.uno)})`
+          ? `${esc(g.dosage)} (${esc(g.uno)})`          // e.g. "10 ml"
           : (g.dosage ? esc(g.dosage) : '—') + (g.uno ? ` (${esc(g.uno)})` : '');
-        return (g.items||[]).map(it => `<span class="tag">${esc(it.item_name)}</span>`).join(' ') + 
-          `<div class="small-muted">Dosage: ${dosageDisplay} • Usage:${usageDisplay} • Time:${esc(g.time||'—')}</div>` +
-          `<div class="small-muted" style="margin-top:4px;">Ingredients: ${ingredientsDisplay}</div>`;
-      }).join('<hr style="margin:8px 0;border:none;border-top:1px solid var(--border-light);"/>');
+
+        const timeDisplay = esc(g.time || '—');
+
+        // Final text per group in new format:
+        // Example: "Kashyam1, Kashyam2 (10 ml), Ingredients: kashyam, etc, Time: 10AM"
+        const mainPart = itemNames || '—';
+        const dosePart = dosageDisplay && dosageDisplay !== '—' ? ` (${dosageDisplay})` : '';
+        
+        // Build group display with new format
+        let groupParts = [];
+        if (mainPart !== '—') {
+          groupParts.push(mainPart + dosePart);
+        }
+        if (ingredientsDisplay !== '—') {
+          groupParts.push(`Ingredients: ${ingredientsDisplay}`);
+        }
+        if (timeDisplay !== '—') {
+          groupParts.push(`Time: ${timeDisplay}`);
+        }
+        
+        return groupParts.join(', ');
+      }).join(' + ');
       
       // Status logic - show counts if available, format: "2 Draft / 3 Active"
       let statusHtml = '';
@@ -1584,7 +1621,11 @@ $(function(){
         <td>${i+1}</td>
         <td>${esc(p.prescription_name || 'Prescription')}</td>
         <td>${esc(p.procured_from || '—')}</td>
-        <td>${groupsHtml}</td>
+        <td>${esc(p.scope || '')}</td>
+        <td>
+          <div>${groupsHtml}</div>
+          ${commonUsageDisplay !== '—' ? `<div style="margin-top:4px;font-size:0.9em;color:var(--text-medium);"><strong>Usage:</strong> ${commonUsageDisplay}</div>` : ''}
+        </td>
         <td>${esc(p.from_date||'')}</td>
         <td>${esc(p.to_date||'')}</td>
         <td>${esc(p.days||'')}</td>
@@ -1623,12 +1664,21 @@ $(function(){
     $daysInput.val(p.days||'');
     $procuredSelect.val(p.procured_from||'');
     $scopeSelect.val(p.scope||'');
+    
+    // Load common usage
+    if (p.usage_array && Array.isArray(p.usage_array)) {
+      $commonUsageSelect.val(p.usage_array).trigger('change');
+    } else if (p.usage) {
+      const usageArray = p.usage.split(',').map(u => u.trim()).filter(u => u);
+      $commonUsageSelect.val(usageArray).trigger('change');
+    } else {
+      $commonUsageSelect.val(null).trigger('change');
+    }
+    
     itemGroups = (p.items_groups||[]).map(g=>({ 
       id: Math.random().toString(36).slice(2,9), 
       items: g.items||[], 
       dosage: g.dosage||'', 
-      usage: g.usage||'', 
-      usage_array: g.usage_array || (g.usage ? g.usage.split(',').map(u => u.trim()) : []),
       time: g.time||'', 
       uno: g.uno||'',
       ingredient_ids: g.ingredient_ids || [],
@@ -1641,18 +1691,20 @@ $(function(){
     if (editPrescriptionIndex === null) { alert('No prescription in edit mode'); return; }
     const p = addedPrescriptions[editPrescriptionIndex]; if(!p) return;
     
+    // Get common usage
+    const commonUsageValues = $commonUsageSelect.val() || [];
+    const commonUsage = commonUsageValues.join(', ');
+    
     // Update local data
     p.procured_from = $procuredSelect.val()||'';
     p.scope = $scopeSelect.val()||'';
+    p.usage = commonUsage;
+    p.usage_array = commonUsageValues;
     p.items_groups = itemGroups.map(g=>({
-      ingredient_ids: g.ingredient_ids || [],
-      ingredients: g.ingredients || [],
       ingredient_ids: g.ingredient_ids || [],
       ingredients: g.ingredients || [],
       items: g.items, 
       dosage: g.dosage, 
-      usage: g.usage || (g.usage_array ? g.usage_array.join(', ') : ''), 
-      usage_array: g.usage_array || (g.usage ? g.usage.split(',').map(u => u.trim()) : []),
       time: g.time, 
       uno: g.uno
     }));
@@ -1664,6 +1716,8 @@ $(function(){
         items_groups: p.items_groups,
         procured_from: p.procured_from,
         scope: p.scope,
+        usage: p.usage,
+        usage_array: p.usage_array,
         notes: p.notes || ''
       };
       

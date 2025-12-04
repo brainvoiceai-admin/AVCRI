@@ -1853,6 +1853,8 @@ def prescription_entry_page(request):
             prescription_name = payload.get('prescription_name', 'Prescription')
             items_groups = payload.get('items_groups', [])
             procured_from = payload.get('procured_from', '')
+            scope = payload.get('scope', '') or ''
+            usage = payload.get('usage', '') or ''
             from_date = parse_date(payload.get('from_date'))
             to_date = parse_date(payload.get('to_date'))
             notes = payload.get('notes', '')
@@ -1900,6 +1902,8 @@ def prescription_entry_page(request):
                     prescription_name=prescription_name,
                     items_groups=items_groups,
                     procured_from=procured_from,
+                    usage=usage,
+                    scope=scope,
                     from_date=from_date,
                     to_date=to_date,
                     days=(to_date - from_date).days + 1,
@@ -2026,6 +2030,8 @@ def prescription_entry_page(request):
             prescription_name = payload.get('prescription_name')
             items_groups = payload.get('items_groups', [])
             procured_from = payload.get('procured_from', '')
+            scope = payload.get('scope', '')
+            usage = payload.get('usage', '')
             notes = payload.get('notes', '')
             
             if not allocation_id:
@@ -2037,6 +2043,8 @@ def prescription_entry_page(request):
                     'prescription_name': allocation.prescription_name,
                     'items_groups': allocation.items_groups,
                     'procured_from': allocation.procured_from,
+                    'usage': allocation.usage,
+                    'scope': allocation.scope,
                     'notes': allocation.notes
                 }
                 
@@ -2056,6 +2064,10 @@ def prescription_entry_page(request):
                     allocation.items_groups = items_groups
                 if procured_from is not None:
                     allocation.procured_from = procured_from
+                if scope is not None:
+                    allocation.scope = scope or ''
+                if usage is not None:
+                    allocation.usage = usage or ''
                 if notes is not None:
                     allocation.notes = notes
                 
@@ -2073,6 +2085,8 @@ def prescription_entry_page(request):
                         'prescription_name': allocation.prescription_name,
                         'items_groups': allocation.items_groups,
                         'procured_from': allocation.procured_from,
+                        'usage': allocation.usage,
+                        'scope': allocation.scope,
                         'notes': allocation.notes
                     }
                 })
@@ -2301,6 +2315,8 @@ def prescription_entry_page(request):
             prescription_name = payload.get('prescription_name', 'Prescription')
             items_groups = payload.get('items_groups', [])
             procured_from = payload.get('procured_from', '')
+            scope = payload.get('scope', '') or ''
+            usage = payload.get('usage', '') or ''
             from_date = payload.get('from_date')
             to_date = payload.get('to_date')
             days = payload.get('days', 1)
@@ -2346,6 +2362,8 @@ def prescription_entry_page(request):
                     prescription_name=prescription_name,
                     items_groups=json.dumps(items_groups),
                     procured_from=procured_from,
+                    usage=usage,
+                    scope=scope,
                     from_date=from_date_parsed,
                     to_date=to_date_parsed,
                     days=days,
@@ -2473,6 +2491,8 @@ def prescription_entry_page(request):
             prescription_name = payload.get('prescription_name', '')
             items_groups = payload.get('items_groups', [])
             procured_from = payload.get('procured_from', '')
+            scope = payload.get('scope', '')
+            usage = payload.get('usage', '')
             from_date = payload.get('from_date')
             to_date = payload.get('to_date')
             days = payload.get('days', 1)
@@ -2488,6 +2508,8 @@ def prescription_entry_page(request):
                     'prescription_name': allocation.prescription_name,
                     'items_groups': allocation.items_groups,
                     'procured_from': allocation.procured_from,
+                    'usage': getattr(allocation, 'usage', ''),
+                    'scope': getattr(allocation, 'scope', ''),
                     'from_date': allocation.from_date.isoformat() if allocation.from_date else None,
                     'to_date': allocation.to_date.isoformat() if allocation.to_date else None,
                     'days': allocation.days,
@@ -2518,6 +2540,11 @@ def prescription_entry_page(request):
                     allocation.items_groups = items_groups  # store as JSON (list), not string
                 if procured_from:
                     allocation.procured_from = procured_from
+                # Update scope / usage if provided
+                if scope is not None:
+                    allocation.scope = scope or ''
+                if usage is not None:
+                    allocation.usage = usage or ''
                 if from_date:
                     allocation.from_date = parse_date(from_date)
                 if to_date:
@@ -2534,6 +2561,8 @@ def prescription_entry_page(request):
                         'prescription_name': allocation.prescription_name,
                         'items_groups': allocation.items_groups,
                         'procured_from': allocation.procured_from,
+                        'usage': getattr(allocation, 'usage', ''),
+                        'scope': getattr(allocation, 'scope', ''),
                         'from_date': allocation.from_date.isoformat() if allocation.from_date else None,
                         'to_date': allocation.to_date.isoformat() if allocation.to_date else None,
                         'days': allocation.days,
@@ -2720,6 +2749,7 @@ def prescription_entry_page(request):
                     'items_groups': p.items_groups if isinstance(p.items_groups, (list, dict)) else (json.loads(p.items_groups) if p.items_groups else []),
                     'procured_from': p.procured_from,
                     'scope': getattr(p, 'scope', ''),
+                    'usage': getattr(p, 'usage', ''),
                     'from_date': p.from_date.isoformat() if p.from_date else None,
                     'to_date': p.to_date.isoformat() if p.to_date else None,
                     'days': p.days,
