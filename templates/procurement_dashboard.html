@@ -892,7 +892,7 @@
                 return;
             }
             
-            // Render prescription items section - grouped by allocation (same compact text format as prescription entry page)
+            // Render prescription items section - grouped by allocation (same per‑group format as prescription entry table)
             if (prescriptionGroups.length > 0) {
                 const prescriptionSection = document.createElement('div');
                 prescriptionSection.className = 'items-section';
@@ -940,7 +940,7 @@
                     }
                     prescriptionSection.appendChild(entryHeader);
                     
-                    // Single container for this allocation: build one compact line joining all groups with " + "
+                    // Single container for this allocation: per-group lines with items highlighted and details below
                     const allocationDiv = document.createElement('div');
                     allocationDiv.style.marginBottom = '25px';
                     allocationDiv.style.border = allocationIsCancelled ? '2px solid #e63757' : '1px solid #e3ebf6';
@@ -951,50 +951,88 @@
                         allocationDiv.style.opacity = '0.7';
                     }
                     
-                    const compactText = allocationGroups.map(group => {
+                    // Common usage/ext-int for this allocation (from first group)
+                    let commonUsage = '';
+                    let commonExtInt = '';
+                    if (allocationGroups.length > 0) {
+                        const g0 = allocationGroups[0];
+                        if (g0.usage) {
+                            commonUsage = g0.usage;
+                        } else if (g0.usage_array && Array.isArray(g0.usage_array) && g0.usage_array.length > 0) {
+                            commonUsage = g0.usage_array.join(', ');
+                        }
+                        if (g0.internal_external) {
+                            commonExtInt = g0.internal_external;
+                        }
+                    }
+                    if (commonUsage || commonExtInt) {
+                        const metaDiv = document.createElement('div');
+                        metaDiv.style.fontSize = '0.85rem';
+                        metaDiv.style.color = '#4b5563';
+                        metaDiv.style.marginBottom = '6px';
+                        const metaParts = [];
+                        if (commonUsage) metaParts.push(`Usage: ${escapeHtml(commonUsage)}`);
+                        if (commonExtInt) metaParts.push(`Ext/Int: ${escapeHtml(commonExtInt)}`);
+                        metaDiv.innerHTML = metaParts.join(' | ');
+                        allocationDiv.appendChild(metaDiv);
+                    }
+                    
+                    allocationGroups.forEach((group, groupIndex) => {
                         const items = group.items || [];
-                        if (!items.length) return '';
+                        if (!items.length) return;
+                        
                         const itemNames = items.map(it => escapeHtml(it.item_name)).join(', ');
                         const dosageRaw = group.dose || items[0]?.dose || '';
                         const unoRaw = group.notes || group.uno || items[0]?.notes || '';
                         const dosageDisplay = (dosageRaw && unoRaw)
                             ? `${dosageRaw} (${unoRaw})`
                             : (dosageRaw || unoRaw);
-                        // Ingredients
                         const ingredientsDisplay = (group.ingredients && group.ingredients.length > 0)
                             ? group.ingredients.map(ing => escapeHtml(ing.ingredient_name || ing.text || '')).join(', ')
                             : '';
-                        // Usage (string or array)
-                        let usage = group.usage || '';
-                        if (!usage && Array.isArray(group.usage_array) && group.usage_array.length > 0) {
-                            usage = group.usage_array.join(', ');
-                        } else if (!usage && items[0]?.usage) {
-                            usage = items[0].usage;
-                        }
+                        // usage is common per allocation and shown above
                         const time = group.time || items[0]?.time || '';
                         const internalExternal = group.internal_external || items[0]?.internal_external || '';
                         
-                        const parts = [];
-                        if (itemNames) {
-                            parts.push(dosageDisplay ? `${itemNames} (${escapeHtml(dosageDisplay)})` : itemNames);
+                        if (groupIndex > 0) {
+                            const plusLine = document.createElement('div');
+                            plusLine.style.textAlign = 'center';
+                            plusLine.style.margin = '4px 0';
+                            plusLine.style.fontWeight = 'bold';
+                            plusLine.style.color = '#6b7280';
+                            plusLine.textContent = '+';
+                            allocationDiv.appendChild(plusLine);
                         }
-                        if (ingredientsDisplay) parts.push(`Ingredients: ${ingredientsDisplay}`);
-                        if (time) parts.push(`Time: ${escapeHtml(time)}`);
-                        if (usage) parts.push(`Usage: ${escapeHtml(usage)}`);
-                        if (internalExternal) parts.push(`Ext/Int: ${escapeHtml(internalExternal)}`);
-                        return parts.join(', ');
-                    }).filter(Boolean).join(' + ');
+                        
+                        const itemCard = document.createElement('div');
+                        itemCard.className = 'medicine-card';
+                        itemCard.style.borderLeft = allocationIsCancelled ? '4px solid #e63757' : '4px solid #2c7be5';
+                        itemCard.style.marginBottom = '8px';
+                        itemCard.style.padding = '12px';
+                        itemCard.style.backgroundColor = '#fff';
+                        itemCard.style.borderRadius = '6px';
+                        
+                        const line1 = document.createElement('div');
+                        line1.style.fontWeight = '600';
+                        line1.style.marginBottom = '2px';
+                        const prefix = groupIndex === 0 ? '• ' : '+ ';
+                        line1.innerHTML = `${prefix}<span style="display:inline-block;padding:2px 8px;border-radius:999px;background:#e3f2fd;color:#0d47a1;">${itemNames || 'No medicines'}</span>`;
+                        
+                        const line2 = document.createElement('div');
+                        line2.style.fontSize = '0.85rem';
+                        line2.style.color = '#4b5563';
+                        const details = [];
+                        if (dosageDisplay) details.push(`Dosage: ${escapeHtml(dosageDisplay)}`);
+                        if (time) details.push(`Time: ${escapeHtml(time)}`);
+                        if (internalExternal) details.push(`Ext/Int: ${escapeHtml(internalExternal)}`);
+                        if (ingredientsDisplay) details.push(`Ingredients: ${ingredientsDisplay}`);
+                        line2.innerHTML = details.join(' | ');
+                        
+                        itemCard.appendChild(line1);
+                        itemCard.appendChild(line2);
+                        allocationDiv.appendChild(itemCard);
+                    });
                     
-                    const itemCard = document.createElement('div');
-                    itemCard.className = 'medicine-card';
-                    itemCard.style.borderLeft = allocationIsCancelled ? '4px solid #e63757' : '4px solid #2c7be5';
-                    itemCard.style.marginBottom = '8px';
-                    itemCard.style.padding = '12px';
-                    itemCard.style.backgroundColor = '#fff';
-                    itemCard.style.borderRadius = '6px';
-                    itemCard.innerHTML = `<div style="font-size:0.95em;">${compactText || 'No medicines'}</div>`;
-                    
-                    allocationDiv.appendChild(itemCard);
                     prescriptionSection.appendChild(allocationDiv);
                 });
                 

@@ -238,6 +238,30 @@
       color: var(--primary);
     }
 
+    /* Medication group display (Allocated Prescriptions table) */
+    .med-group-line {
+      margin-bottom: 4px;
+    }
+    .med-group-items {
+      font-weight: 600;
+      margin-bottom: 2px;
+    }
+    .med-items-pill {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: #e3f2fd;
+      color: #0d47a1;
+    }
+    .med-group-details {
+      font-size: 0.8rem;
+      color: #4b5563;
+      margin-left: 14px;
+    }
+    .med-details-text {
+      white-space: normal;
+    }
+
     /* Form Elements */
     .form-row {
       display: flex;
@@ -797,6 +821,7 @@
                   <th>Prescription</th>
                   <th>Procured From</th>
                   <th>Scope (Ext/Int)</th>
+                  <th>Usage</th>
                   <th>Medications</th>
                   <th>From</th>
                   <th>To</th>
@@ -807,7 +832,7 @@
               </thead>
               <tbody id="prescriptions-table-body">
                 <tr>
-                  <td colspan="10">
+                  <td colspan="11">
                     <div class="empty-state">
                       <i class="fas fa-prescription-bottle"></i>
                       <h3>No Prescriptions Found</h3>
@@ -1519,51 +1544,58 @@ $(function(){
       return; 
     }
     addedPrescriptions.forEach((p,i) => {
-      // Get common usage from prescription level
-      let commonUsageDisplay = '—';
+      // Get common usage from prescription level (shown in its own column)
+      let commonUsageDisplay = '';
       if (p.usage) {
         commonUsageDisplay = esc(p.usage);
       } else if (Array.isArray(p.usage_array) && p.usage_array.length > 0) {
         commonUsageDisplay = esc(p.usage_array.join(', '));
       }
       
-      // Build compact, single-line representation of all medication groups,
-      // joined by "+" so pharmacy team can read one prescription in one line.
-      const groupsHtml = (p.items_groups||[]).map(g => {
-        // Item names in this group (e.g., Kashyam1, Kashyam2)
-        const itemNames = (g.items || []).map(it => esc(it.item_name)).join(', ');
+      // Build clearer, per‑group blocks:
+      //   Line 1: item names (highlighted)
+      //   Line 2: Dosage / Time / Ext-Int / Ingredients
+      const groupsHtml = (p.items_groups || []).map((g, idx) => {
+        const items = g.items || [];
+        const itemNames = items.map(it => esc(it.item_name)).join(', ');
 
-        // Format ingredients
+        // Dosage + UNO
+        const doseRaw = g.dosage || '';
+        const unoRaw = g.uno || '';
+        let doseDisplay = '';
+        if (doseRaw && unoRaw) {
+          doseDisplay = `${doseRaw} (${unoRaw})`;
+        } else if (doseRaw) {
+          doseDisplay = doseRaw;
+        } else if (unoRaw) {
+          doseDisplay = unoRaw;
+        }
+
+        // Ingredients
         const ingredientsDisplay = (g.ingredients && g.ingredients.length > 0)
           ? g.ingredients.map(ing => esc(ing.ingredient_name || ing.text || '')).join(', ')
-          : '—';
+          : '';
 
-        // Combine dosage and UNO for better readability
-        const dosageDisplay = (g.dosage && g.uno) 
-          ? `${esc(g.dosage)} (${esc(g.uno)})`          // e.g. "10 ml"
-          : (g.dosage ? esc(g.dosage) : '—') + (g.uno ? ` (${esc(g.uno)})` : '');
+        const time = g.time ? esc(g.time) : '';
+        const extInt = g.internal_external ? esc(g.internal_external) : '';
 
-        const timeDisplay = esc(g.time || '—');
+        const details = [];
+        if (doseDisplay) details.push(`Dosage: ${doseDisplay}`);
+        if (time) details.push(`Time: ${time}`);
+        if (extInt) details.push(`Ext/Int: ${extInt}`);
+        if (ingredientsDisplay) details.push(`Ingredients: ${ingredientsDisplay}`);
 
-        // Final text per group in new format:
-        // Example: "Kashyam1, Kashyam2 (10 ml), Ingredients: kashyam, etc, Time: 10AM"
-        const mainPart = itemNames || '—';
-        const dosePart = dosageDisplay && dosageDisplay !== '—' ? ` (${dosageDisplay})` : '';
-        
-        // Build group display with new format
-        let groupParts = [];
-        if (mainPart !== '—') {
-          groupParts.push(mainPart + dosePart);
-        }
-        if (ingredientsDisplay !== '—') {
-          groupParts.push(`Ingredients: ${ingredientsDisplay}`);
-        }
-        if (timeDisplay !== '—') {
-          groupParts.push(`Time: ${timeDisplay}`);
-        }
-        
-        return groupParts.join(', ');
-      }).join(' + ');
+        const firstLinePrefix = idx === 0 ? '• ' : '+ ';
+        const firstLine = `${firstLinePrefix}<span class="med-items-pill">${itemNames || 'No medicines'}</span>`;
+        const secondLine = details.length ? `<span class="med-details-text">${details.join(' | ')}</span>` : '';
+
+        return `
+          <div class="med-group-line">
+            <div class="med-group-items">${firstLine}</div>
+            ${secondLine ? `<div class="med-group-details">${secondLine}</div>` : ''}
+          </div>
+        `;
+      }).join('');
       
       // Status logic - show counts if available, format: "2 Draft / 3 Active"
       let statusHtml = '';
@@ -1622,9 +1654,9 @@ $(function(){
         <td>${esc(p.prescription_name || 'Prescription')}</td>
         <td>${esc(p.procured_from || '—')}</td>
         <td>${esc(p.scope || '')}</td>
+        <td>${commonUsageDisplay || '—'}</td>
         <td>
           <div>${groupsHtml}</div>
-          ${commonUsageDisplay !== '—' ? `<div style="margin-top:4px;font-size:0.9em;color:var(--text-medium);"><strong>Usage:</strong> ${commonUsageDisplay}</div>` : ''}
         </td>
         <td>${esc(p.from_date||'')}</td>
         <td>${esc(p.to_date||'')}</td>

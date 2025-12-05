@@ -965,7 +965,7 @@
                     }
                     prescriptionSection.appendChild(entryHeader);
                     
-                    // Single container for this allocation: build one compact line joining all groups with " + "
+                    // Single container for this allocation: per-group lines with items highlighted and details below
                     const allocationDiv = document.createElement('div');
                     allocationDiv.style.marginBottom = '25px';
                     allocationDiv.style.border = allocationIsCancelled ? '2px solid #e63757' : '1px solid #e3ebf6';
@@ -975,51 +975,82 @@
                     if (allocationIsCancelled) {
                         allocationDiv.style.opacity = '0.7';
                     }
+
+                    // Common usage/ext-int for this allocation (from first group)
+                    let commonUsage = '';
+                    let commonExtInt = '';
+                    if (allocationGroups.length > 0) {
+                        const g0 = allocationGroups[0];
+                        if (g0.usage) {
+                            commonUsage = g0.usage;
+                        } else if (g0.usage_array && Array.isArray(g0.usage_array) && g0.usage_array.length > 0) {
+                            commonUsage = g0.usage_array.join(', ');
+                        }
+                        if (g0.internal_external) {
+                            commonExtInt = g0.internal_external;
+                        }
+                    }
+                    if (commonUsage || commonExtInt) {
+                        const metaDiv = document.createElement('div');
+                        metaDiv.style.fontSize = '0.85rem';
+                        metaDiv.style.color = '#4b5563';
+                        metaDiv.style.marginBottom = '6px';
+                        const metaParts = [];
+                        if (commonUsage) metaParts.push(`Usage: ${commonUsage}`);
+                        if (commonExtInt) metaParts.push(`Ext/Int: ${commonExtInt}`);
+                        metaDiv.textContent = metaParts.join(' | ');
+                        allocationDiv.appendChild(metaDiv);
+                    }
                     
-                    const compactText = allocationGroups.map(group => {
+                    allocationGroups.forEach((group, groupIndex) => {
                         const items = group.items || [];
-                        if (!items.length) return '';
+                        if (!items.length) return;
+                        
                         const itemNames = items.map(it => escapeHtml(it.item_name)).join(', ');
                         const dosageRaw = group.dose || items[0]?.dose || '';
                         const unoRaw = group.notes || group.uno || items[0]?.notes || '';
                         const dosageDisplay = (dosageRaw && unoRaw)
                             ? `${dosageRaw} (${unoRaw})`
                             : (dosageRaw || unoRaw);
-                        // Ingredients
                         const ingredientsDisplay = (group.ingredients && group.ingredients.length > 0)
                             ? group.ingredients.map(ing => escapeHtml(ing.ingredient_name || ing.text || '')).join(', ')
                             : '';
-                        // Usage (string or array)
-                        let usage = group.usage || '';
-                        if (!usage && Array.isArray(group.usage_array) && group.usage_array.length > 0) {
-                            usage = group.usage_array.join(', ');
-                        } else if (!usage && items[0]?.usage) {
-                            usage = items[0].usage;
-                        }
                         const time = group.time || items[0]?.time || '';
-                        const internalExternal = group.internal_external || items[0]?.internal_external || '';
+                        // usage and Ext/Int are common per allocation and shown above
                         
-                        const parts = [];
-                        if (itemNames) {
-                            parts.push(dosageDisplay ? `${itemNames} (${escapeHtml(dosageDisplay)})` : itemNames);
+                        if (groupIndex > 0) {
+                            const plusLine = document.createElement('div');
+                            plusLine.style.textAlign = 'center';
+                            plusLine.style.margin = '4px 0';
+                            plusLine.style.fontWeight = 'bold';
+                            plusLine.style.color = '#6b7280';
+                            plusLine.textContent = '+';
+                            allocationDiv.appendChild(plusLine);
                         }
-                        if (ingredientsDisplay) parts.push(`Ingredients: ${ingredientsDisplay}`);
-                        if (time) parts.push(`Time: ${escapeHtml(time)}`);
-                        if (usage) parts.push(`Usage: ${escapeHtml(usage)}`);
-                        if (internalExternal) parts.push(`Ext/Int: ${escapeHtml(internalExternal)}`);
-                        return parts.join(', ');
-                    }).filter(Boolean).join(' + ');
+                        
+                        const groupWrapper = document.createElement('div');
+                        groupWrapper.style.marginBottom = '6px';
+                        
+                        const line1 = document.createElement('div');
+                        line1.style.fontWeight = '600';
+                        line1.style.marginBottom = '2px';
+                        const prefix = groupIndex === 0 ? '• ' : '+ ';
+                        line1.innerHTML = `${prefix}<span style="display:inline-block;padding:2px 8px;border-radius:999px;background:#e3f2fd;color:#0d47a1;">${itemNames || 'No medicines'}</span>`;
+                        
+                        const line2 = document.createElement('div');
+                        line2.style.fontSize = '0.85rem';
+                        line2.style.color = '#4b5563';
+                        const details = [];
+                        if (dosageDisplay) details.push(`Dosage: ${dosageDisplay}`);
+                        if (time) details.push(`Time: ${time}`);
+                        if (ingredientsDisplay) details.push(`Ingredients: ${ingredientsDisplay}`);
+                        line2.textContent = details.join(' | ');
+                        
+                        groupWrapper.appendChild(line1);
+                        groupWrapper.appendChild(line2);
+                        allocationDiv.appendChild(groupWrapper);
+                    });
                     
-                    const itemCard = document.createElement('div');
-                    itemCard.className = 'medicine-card';
-                    itemCard.style.borderLeft = allocationIsCancelled ? '4px solid #e63757' : '4px solid #2c7be5';
-                    itemCard.style.marginBottom = '8px';
-                    itemCard.style.padding = '12px';
-                    itemCard.style.backgroundColor = '#fff';
-                    itemCard.style.borderRadius = '6px';
-                    itemCard.innerHTML = `<div style="font-size:0.95em;">${compactText || 'No medicines'}</div>`;
-                    
-                    allocationDiv.appendChild(itemCard);
                     prescriptionSection.appendChild(allocationDiv);
                 });
                 
@@ -1340,32 +1371,10 @@
             // Sort by patient name
             uniqueData.sort((a, b) => (a.patient_name || '').localeCompare(b.patient_name || ''));
             
-            // Header function
+            // Header function (minimal – no title/date on each page)
             function addHeader() {
-                // Colored header bar like therapy scheduling
-                doc.setFillColor(59, 130, 246); // Blue
-                doc.rect(margin, yPos - 5, pageWidth - margin * 2, 12, 'F');
-                
-                doc.setFontSize(16);
-                doc.setFont(undefined, 'bold');
-                doc.setTextColor(255, 255, 255);
-                doc.text('Prescription Scheduling Report', margin + 5, yPos + 4);
-                yPos += 10;
-                
-                doc.setFontSize(10);
-                doc.setFont(undefined, 'normal');
-                doc.setTextColor(0, 0, 0);
-                doc.text(`Date: ${date}`, margin, yPos);
-                doc.setFontSize(9);
-                doc.setTextColor(108, 117, 125);
-                doc.text(`Generated: ${new Date().toLocaleString()}`, pageWidth - margin, yPos, { align: 'right' });
-                yPos += 8;
-                
-                // Separator line
-                doc.setLineWidth(0.5);
-                doc.setDrawColor(200, 200, 200);
-                doc.line(margin, yPos, pageWidth - margin, yPos);
-                yPos += 10;
+                // Just reset a small top margin; no report title, date, or generated time
+                yPos = margin;
             }
             
             // Footer function
@@ -1381,7 +1390,6 @@
                 doc.setFont(undefined, 'normal');
                 doc.setTextColor(108, 117, 125);
                 doc.text(`Page ${pageNum}`, pageWidth / 2, footerY, { align: 'center' });
-                doc.text(`Date: ${date}`, margin, footerY);
             }
             
             // Check if we need a new page
@@ -1395,7 +1403,7 @@
                 }
             }
             
-            // Add initial header
+            // Add initial header (only once to avoid repeating large title on every page)
             addHeader();
             
             // Process each patient
@@ -1412,29 +1420,19 @@
                 const prescriptionGroups = item.details?.prescription_groups || [];
                 const therapyItems = item.details?.therapy_items || [];
                 
-                // Calculate estimated height based on groups
-                let estimatedHeight = 35;
+                // Calculate estimated height based on groups (compact so multiple patients fit per page)
+                let estimatedHeight = 18;
                 prescriptionGroups.forEach(group => {
-                    estimatedHeight += 15 + (group.items?.length || 0) * 5;
+                    estimatedHeight += 6 + (group.items?.length || 0) * 3;
                 });
                 therapyItems.forEach(item => {
-                    estimatedHeight += 15 + (item.items?.length || 0) * 5;
+                    estimatedHeight += 6 + (item.items?.length || 0) * 3;
                 });
-                estimatedHeight += 30;
                 checkNewPage(estimatedHeight);
                 
-                // Patient Information Section - Colored header bar + compact details
-                doc.setFillColor(100, 116, 139); // Slate gray
-                doc.rect(margin, yPos - 3, pageWidth - margin * 2, 8, 'F');
-                
-                doc.setFontSize(13);
+                // Patient Information Section - compact (no big colored bar)
+                doc.setFontSize(9);
                 doc.setFont(undefined, 'bold');
-                doc.setTextColor(255, 255, 255);
-                doc.text(patientInfo.name, margin + 5, yPos + 2);
-                yPos += 10;
-                
-                doc.setFontSize(10);
-                doc.setFont(undefined, 'normal');
                 doc.setTextColor(0, 0, 0);
                 const roomText = `Room: ${patientInfo.room_no || 'N/A'}`;
                 const nameText = `Name: ${patientInfo.name || 'Unknown'}`;
@@ -1447,20 +1445,11 @@
                 // Second line: Gender/Age and Doctor
                 doc.text(genderAgeText, margin, yPos);
                 doc.text(doctorText, margin + 60, yPos);
-                yPos += 8;
+                yPos += 6;
                 
-                // Prescription Items - Grouped Format with colored header bar
+                // Prescription Items - compact (no blue section bar)
                 if (prescriptionGroups.length > 0) {
-                    checkNewPage(10);
-                    doc.setFillColor(59, 130, 246); // Blue
-                    doc.rect(margin, yPos - 3, pageWidth - margin * 2, 8, 'F');
-                    
-                    doc.setFontSize(12);
-                    doc.setFont(undefined, 'bold');
-                    doc.setTextColor(255, 255, 255);
-                    doc.text('Prescription Items', margin + 5, yPos + 2);
-                    yPos += 10;
-                    doc.setTextColor(0, 0, 0);
+                    checkNewPage(6);
                     
                     // Group prescription groups by allocation_id (extract from group_id)
                     // Handle both "prescription_group_{allocation_id}_{group_idx}" and "prescription_item_{item_id}" formats
@@ -1489,26 +1478,49 @@
                     allocationIds.forEach((allocationId, entryIndex) => {
                         const allocationGroups = groupsByAllocation[allocationId];
                         
-                        checkNewPage(25);
+                        // Use smaller estimated height to fit more entries per page
+                        checkNewPage(18);
                         
-                        // Entry number header - Colored bar like therapy scheduling
-                        doc.setFillColor(148, 163, 184); // Lighter slate
-                        doc.rect(margin, yPos - 2, pageWidth - margin * 2, 6, 'F');
+                        // Determine common usage/ext-int for this allocation
+                        let commonUsage = '';
+                        let commonExtInt = '';
+                        if (allocationGroups.length > 0) {
+                            const g0 = allocationGroups[0];
+                            if (g0.usage) {
+                                commonUsage = g0.usage;
+                            } else if (g0.usage_array && Array.isArray(g0.usage_array) && g0.usage_array.length > 0) {
+                                commonUsage = g0.usage_array.join(', ');
+                            }
+                            if (g0.internal_external) {
+                                commonExtInt = g0.internal_external;
+                            }
+                        }
                         
-                        doc.setFontSize(10);
+                        // Compact per-allocation header line: ALWAYS show entry number (No:1, No:2...), plus Usage / Ext-Int if available
+                        const headerParts = [];
+                        if (commonUsage) headerParts.push(`Usage: ${commonUsage}`);
+                        if (commonExtInt) headerParts.push(`Ext/Int: ${commonExtInt}`);
+                        doc.setFontSize(7.5);
                         doc.setFont(undefined, 'bold');
-                        doc.setTextColor(255, 255, 255);
-                        doc.text(`Entry ${entryIndex + 1}`, margin + 5, yPos + 2);
+                        doc.setTextColor(60, 60, 60);
+                        const headerText = headerParts.length
+                            ? `No:${entryIndex + 1} - ${headerParts.join(' | ')}`
+                            : `No:${entryIndex + 1}`;
+                        const headerLines = doc.splitTextToSize(headerText, pageWidth - margin * 2 - 10);
+                        doc.text(headerLines, margin, yPos);
+                        yPos += headerLines.length * 3;
                         
-                        yPos += 8;
-                        doc.setTextColor(0, 0, 0);
+                        // Build one compact line for all groups, rendering items in blue and details in grey
+                        let currentX = margin + 4;
+                        const startY = yPos;
+                        let maxLineHeight = 0;
                         
-                        // Build compact single-line text for all groups in this allocation, joined by "+"
-                        const compactText = allocationGroups.map(group => {
+                        allocationGroups.forEach((group, groupIndex) => {
                             const items = group.items || [];
-                            if (!items.length) return '';
+                            if (!items.length) return;
+
                             const itemNames = items.map(it => it.item_name || 'N/A').join(', ');
-                            
+
                             // Dosage + UNO
                             const dose = group.dose || '';
                             const unoNote = group.notes || '';
@@ -1520,44 +1532,67 @@
                             } else if (unoNote) {
                                 doseDisplay = unoNote;
                             }
-                            
-                            // Usage (string or array)
-                            let usage = '';
-                            if (group.usage) {
-                                usage = group.usage;
-                            } else if (group.usage_array && Array.isArray(group.usage_array) && group.usage_array.length > 0) {
-                                usage = group.usage_array.join(', ');
-                            }
-                            
+
                             const time = group.time || '';
                             const internalExternal = group.internal_external || '';
-                            
+
                             // Ingredients
                             const ingredientsDisplay = (group.ingredients && group.ingredients.length > 0)
                                 ? group.ingredients.map(ing => ing.ingredient_name || ing.text || 'N/A').join(', ')
                                 : '';
-                            
-                            const parts = [];
+
+                            // Render items in blue
                             if (itemNames) {
-                                parts.push(doseDisplay ? `${itemNames} (${doseDisplay})` : itemNames);
+                                doc.setFontSize(8);
+                                doc.setFont(undefined, 'bold');
+                                doc.setTextColor(0, 86, 179); // Blue
+                                const prefix = groupIndex === 0 ? '• ' : ' + ';
+                                const itemText = `${prefix}${itemNames}`;
+                                const itemWidth = doc.getTextWidth(itemText);
+                                
+                                // Check if we need to wrap to next line
+                                if (currentX + itemWidth > pageWidth - margin - 10) {
+                                    yPos += maxLineHeight + 1;
+                                    currentX = margin + 4;
+                                    maxLineHeight = 0;
+                                }
+                                
+                                doc.text(itemText, currentX, yPos);
+                                currentX += itemWidth;
+                                maxLineHeight = Math.max(maxLineHeight, 3);
                             }
-                            if (ingredientsDisplay) parts.push(`Ingredients: ${ingredientsDisplay}`);
-                            if (time) parts.push(`Time: ${time}`);
-                            if (usage) parts.push(`Usage: ${usage}`);
-                            if (internalExternal) parts.push(`Ext/Int: ${internalExternal}`);
+
+                            // Render details in grey, on same line
+                            const detailParts = [];
+                            if (doseDisplay) detailParts.push(`Dosage: ${doseDisplay}`);
+                            if (time) detailParts.push(`Time: ${time}`);
+                            if (internalExternal) detailParts.push(`Ext/Int: ${internalExternal}`);
+                            if (ingredientsDisplay) detailParts.push(`Ingredients: ${ingredientsDisplay}`);
                             
-                            return parts.join(', ');
-                        }).filter(Boolean).join(' + ');
+                            if (detailParts.length) {
+                                doc.setFontSize(7);
+                                doc.setFont(undefined, 'normal');
+                                doc.setTextColor(80, 80, 80); // Grey
+                                const detailText = ` - ${detailParts.join(' | ')}`;
+                                const detailWidth = doc.getTextWidth(detailText);
+                                
+                                // Check if we need to wrap
+                                if (currentX + detailWidth > pageWidth - margin - 10) {
+                                    yPos += maxLineHeight + 1;
+                                    currentX = margin + 4;
+                                    maxLineHeight = 0;
+                                }
+                                
+                                doc.text(detailText, currentX, yPos);
+                                currentX += detailWidth + 3; // Small space between groups
+                                maxLineHeight = Math.max(maxLineHeight, 2.5);
+                            }
+                        });
                         
-                        doc.setFontSize(9);
-                        doc.setFont(undefined, 'normal');
-                        doc.setTextColor(0, 0, 0);
-                        const lines = doc.splitTextToSize(compactText || 'No medicines', pageWidth - margin * 2 - 10);
-                        doc.text(lines, margin + 5, yPos);
-                        yPos += lines.length * 4 + 4;
+                        yPos += maxLineHeight + 1;
                     });
                     
-                    yPos += 5; // Space after prescription section
+                    yPos += 3; // Minimal space after prescription section
                 } else {
                     // No prescription items
                     doc.setFontSize(10);
