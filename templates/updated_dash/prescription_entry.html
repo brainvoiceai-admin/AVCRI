@@ -749,6 +749,10 @@
                 <label for="item-builder-time">Time</label>
                 <select id="item-builder-time"><option value="">Select Time</option></select>
               </div>
+              <div class="form-group small">
+                <label for="item-builder-oil-class">Oil Class</label>
+                <select id="item-builder-oil-class"><option value="">-- Select --</option></select>
+              </div>
               <div style="display:flex;align-items:flex-end;">
                 <button id="add-item-group-btn" class="btn">
                   <i class="fas fa-plus-circle"></i> Add Group
@@ -893,6 +897,21 @@ $(function(){
     return fetch(url).then(r => { if (!r.ok) throw new Error('Network'); return r.json(); });
   }
   function esc(s){ return String(s||''); }
+  // Format date as DD/MM/YYYY
+  function formatDate(dateStr) {
+    if (!dateStr) return '';
+    try {
+      const date = new Date(dateStr + 'T00:00:00');
+      if (isNaN(date.getTime())) return dateStr; // Return original if invalid
+      const day = String(date.getDate()).padStart(2, '0');
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const year = date.getFullYear();
+      return `${day}/${month}/${year}`;
+    } catch (e) {
+      return dateStr; // Return original if error
+    }
+  }
+  
   function getDateRange(from, to){ const out=[]; let cur=new Date(from+'T00:00:00'), end=new Date(to+'T00:00:00'); while(cur<=end){ out.push(cur.toISOString().slice(0,10)); cur.setDate(cur.getDate()+1);} return out; }
   function getCookie(name) { let v = document.cookie.match('(^|;)\\s*' + name + '\\s*=\\s*([^;]+)'); return v ? v.pop() : ''; }
 
@@ -922,6 +941,7 @@ $(function(){
   const $scopeSelect = $('#scope-select');
   const $commonUsageSelect = $('#common-usage-select');
   const $itemBuilder = $('#item-builder-select'), $itemGroupsList = $('#item-groups-list');
+  const $itemBuilderOilClass = $('#item-builder-oil-class');
   const $allocateBtn = $('#allocate-prescription-btn'), $updateBtn = $('#update-prescription-btn'), $clearBtn = $('#clear-form');
   const $prescriptionsTableBody = $('#prescriptions-table-body');
 
@@ -1228,6 +1248,8 @@ $(function(){
       }
     }).catch(()=>{});
     ajax({action:'masters', type:'prescriptiontime'}).then(list => { const $t=$('#item-builder-time'); $t.empty().append('<option value="">Select Time</option>'); (list||[]).forEach(x => $t.append(new Option(x.name, x.name))); }).catch(()=>{});
+    // Populate Oil Class in item builder section
+    ajax({action:'masters', type:'oil'}).then(list => { $itemBuilderOilClass.empty().append('<option value="">-- Select --</option>'); (list||[]).forEach(o => $itemBuilderOilClass.append(new Option(o.name, o.name))); }).catch(()=>{ $itemBuilderOilClass.empty().append('<option value="">-- Select --</option>'); });
     
     // Populate ingredients
     ajax({action:'masters', type:'ingredient'}).then(list => {
@@ -1288,6 +1310,7 @@ $(function(){
     const dosage = $('#item-builder-dosage').val().trim();
     const time = $('#item-builder-time').val().trim();
     const uno = $('#item-builder-uno').val().trim();
+    const oilClass = $itemBuilderOilClass.val() || '';
     const ingredientSelect = $('#item-builder-ingredients');
     const ingredientData = ingredientSelect.select2('data') || [];
     const ingredients = ingredientData.map(i => ({ id: i.id, ingredient_name: i.text || i.id }));
@@ -1306,12 +1329,13 @@ $(function(){
     }
     
     const items = selected.length > 0 ? selected.map(s => ({ item_code: s.id, item_name: s.text || s.id })) : [];
-    const grp = { id: Math.random().toString(36).slice(2,9), items, dosage, time, uno, ingredients, ingredient_ids: ingredientIds };
+    const grp = { id: Math.random().toString(36).slice(2,9), items, dosage, time, uno, oil_class: oilClass, ingredients, ingredient_ids: ingredientIds };
     itemGroups.push(grp);
     $itemBuilder.val(null).trigger('change');
     $('#item-builder-dosage').val('');
     $('#item-builder-time').val('');
     $('#item-builder-uno').val('');
+    $itemBuilderOilClass.val('');
     ingredientSelect.val(null).trigger('change');
     renderItemGroups();
   });
@@ -1335,6 +1359,7 @@ $(function(){
         ? g.ingredients.map(ing => esc(ing.ingredient_name)).join(', ')
         : '—';
       const timeDisplay = g.time ? esc(g.time) : '—';
+      const oilClassDisplay = g.oil_class ? esc(g.oil_class) : '—';
       const dosageDisplay = (g.dosage && g.uno) 
         ? `${esc(g.dosage)} (${esc(g.uno)})`
         : (g.dosage ? esc(g.dosage) : '—') + (g.uno ? ` (${esc(g.uno)})` : '');
@@ -1349,6 +1374,9 @@ $(function(){
       }
       if (timeDisplay !== '—') {
         parts.push(`Time: ${timeDisplay}`);
+      }
+      if (oilClassDisplay !== '—') {
+        parts.push(`Oil Class: ${oilClassDisplay}`);
       }
       const groupDisplay = parts.join(', ');
       
@@ -1392,7 +1420,8 @@ $(function(){
     $itemBuilder.trigger('change'); 
     $('#item-builder-dosage').val(g.dosage||''); 
     $('#item-builder-time').val(g.time||''); 
-    $('#item-builder-uno').val(g.uno||''); 
+    $('#item-builder-uno').val(g.uno||'');
+    $itemBuilderOilClass.val(g.oil_class||''); 
     // Handle ingredients
     const ingredientSelect = $('#item-builder-ingredients');
     if (g.ingredient_ids && Array.isArray(g.ingredient_ids) && g.ingredient_ids.length > 0) {
@@ -1450,6 +1479,7 @@ $(function(){
         dosage: g.dosage, 
         time: g.time, 
         uno: g.uno,
+        oil_class: g.oil_class || '',
         ingredient_ids: g.ingredient_ids || [],
         ingredients: g.ingredients || []
       })),
@@ -1580,10 +1610,12 @@ $(function(){
         const extInt = g.internal_external ? esc(g.internal_external) : '';
 
         const details = [];
+        const oilClass = g.oil_class ? esc(g.oil_class) : '';
         if (doseDisplay) details.push(`Dosage: ${doseDisplay}`);
         if (time) details.push(`Time: ${time}`);
         if (extInt) details.push(`Ext/Int: ${extInt}`);
         if (ingredientsDisplay) details.push(`Ingredients: ${ingredientsDisplay}`);
+        if (oilClass) details.push(`Oil Class: ${oilClass}`);
 
         const firstLinePrefix = idx === 0 ? '• ' : '+ ';
         const firstLine = `${firstLinePrefix}<span class="med-items-pill">${itemNames || 'No medicines'}</span>`;
@@ -1658,8 +1690,8 @@ $(function(){
         <td>
           <div>${groupsHtml}</div>
         </td>
-        <td>${esc(p.from_date||'')}</td>
-        <td>${esc(p.to_date||'')}</td>
+        <td>${formatDate(p.from_date)}</td>
+        <td>${formatDate(p.to_date)}</td>
         <td>${esc(p.days||'')}</td>
         <td>${statusHtml}</td>
         <td>
@@ -1713,6 +1745,7 @@ $(function(){
       dosage: g.dosage||'', 
       time: g.time||'', 
       uno: g.uno||'',
+      oil_class: g.oil_class || '',
       ingredient_ids: g.ingredient_ids || [],
       ingredients: g.ingredients || []
     }));
@@ -1727,18 +1760,27 @@ $(function(){
     const commonUsageValues = $commonUsageSelect.val() || [];
     const commonUsage = commonUsageValues.join(', ');
     
+    // Get dates and days from form
+    const fromDate = $fromDate.val() || '';
+    const toDate = $toDate.val() || '';
+    const days = parseInt($daysInput.val()) || 0;
+    
     // Update local data
     p.procured_from = $procuredSelect.val()||'';
     p.scope = $scopeSelect.val()||'';
     p.usage = commonUsage;
     p.usage_array = commonUsageValues;
+    p.from_date = fromDate;
+    p.to_date = toDate;
+    p.days = days;
     p.items_groups = itemGroups.map(g=>({
       ingredient_ids: g.ingredient_ids || [],
       ingredients: g.ingredients || [],
       items: g.items, 
       dosage: g.dosage, 
       time: g.time, 
-      uno: g.uno
+      uno: g.uno,
+      oil_class: g.oil_class || ''
     }));
     
     // Send update to server if prescription has allocation_id
@@ -1750,6 +1792,9 @@ $(function(){
         scope: p.scope,
         usage: p.usage,
         usage_array: p.usage_array,
+        from_date: p.from_date,
+        to_date: p.to_date,
+        days: p.days,
         notes: p.notes || ''
       };
       
@@ -1800,7 +1845,7 @@ $(function(){
   $prescriptionsTableBody.on('click', '.cancel-prescription', function(){ const i=$(this).data('i'); openCancelModal(i); });
   function openCancelModal(index){
     cancelingPrescriptionIndex = index; const p = addedPrescriptions[index]; if(!p) return;
-    $('#cancel-modal-info').text(`Prescription: ${p.prescription_name} — Allowed cancel range: ${p.from_date||'—'} → ${p.to_date||'—'}`);
+    $('#cancel-modal-info').text(`Prescription: ${p.prescription_name} — Allowed cancel range: ${formatDate(p.from_date)||'—'} → ${formatDate(p.to_date)||'—'}`);
     if (p.from_date) $cancelFrom.attr('min', p.from_date).val(p.from_date); else $cancelFrom.removeAttr('min').val('');
     if (p.to_date) $cancelTo.attr('max', p.to_date).val(p.to_date); else $cancelTo.removeAttr('max').val('');
     if (p.from_date && p.to_date){ $cancelFrom.attr('max', p.to_date); $cancelTo.attr('min', p.from_date); if(!$cancelFrom.val()) $cancelFrom.val(p.from_date); if(!$cancelTo.val()) $cancelTo.val(p.to_date); }
@@ -1868,7 +1913,7 @@ $(function(){
     resumingPrescriptionIndex = index; 
     const p = addedPrescriptions[index]; 
     if(!p) return;
-    $('#resume-modal-info').text(`Prescription: ${p.prescription_name} — Resume range: ${p.from_date||'—'} → ${p.to_date||'—'}`);
+    $('#resume-modal-info').text(`Prescription: ${p.prescription_name} — Resume range: ${formatDate(p.from_date)||'—'} → ${formatDate(p.to_date)||'—'}`);
     if (p.from_date) $resumeFrom.attr('min', p.from_date).val(p.from_date); 
     else $resumeFrom.removeAttr('min').val('');
     if (p.to_date) $resumeTo.attr('max', p.to_date).val(p.to_date); 

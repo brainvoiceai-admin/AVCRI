@@ -487,6 +487,7 @@ def get_prescription_details_api(request):
                         'usage_array': usage_array,
                         'internal_external': internal_external,
                         'notes': group.get('uno', ''),
+                        'oil_class': group.get('oil_class', ''),
                         'ingredients': group.get('ingredients', []),
                         'ingredient_ids': group.get('ingredient_ids', []),
                         'items': group_items,
