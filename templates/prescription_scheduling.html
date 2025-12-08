@@ -791,7 +791,7 @@
                     </td>
                     ${status === 'scheduled' ? `<td>${escapeHtml(item.sent_to || '-')}</td>` : ''}
                     ${status === 'dispatched' ? `<td>${escapeHtml(item.dispatched_from || '-')}</td>` : ''}
-                    ${status === 'dispatched' ? `<td>${escapeHtml(item.dispatched_at || '-')}</td>` : ''}
+                    ${status === 'dispatched' ? `<td>${formatDate(item.dispatched_at) || '-'}</td>` : ''}
                     <td>
                         <div style="display: flex; gap: 8px;">
                             <button class="btn btn-outline btn-small" onclick="viewPrescriptionDetails(${item.patient_id}, '${date}')">
@@ -852,7 +852,7 @@
                 return;
             }
             
-            if (!confirm(`Are you sure you want to send all draft prescriptions for ${date} to procurement departments?`)) {
+            if (!confirm(`Are you sure you want to send all draft prescriptions for ${formatDate(date)} to procurement departments?`)) {
                 return;
             }
             
@@ -1040,10 +1040,12 @@
                         const line2 = document.createElement('div');
                         line2.style.fontSize = '0.85rem';
                         line2.style.color = '#4b5563';
+                        const oilClass = group.oil_class || '';
                         const details = [];
                         if (dosageDisplay) details.push(`Dosage: ${dosageDisplay}`);
                         if (time) details.push(`Time: ${time}`);
                         if (ingredientsDisplay) details.push(`Ingredients: ${ingredientsDisplay}`);
+                        if (oilClass) details.push(`Oil Class: ${oilClass}`);
                         line2.textContent = details.join(' | ');
                         
                         groupWrapper.appendChild(line1);
@@ -1217,7 +1219,7 @@
                     <div style="border: 1px solid var(--border); border-radius: 8px; padding: 15px; margin-bottom: 10px;">
                         <h4>${escapeHtml(entry.action)}</h4>
                         <p><strong>Patient:</strong> ${escapeHtml(entry.patient_name)}</p>
-                        <p><strong>Date:</strong> ${escapeHtml(entry.date)}</p>
+                        <p><strong>Date:</strong> ${formatDate(entry.date)}</p>
                         <p><strong>Changed By:</strong> ${escapeHtml(entry.changed_by)}</p>
                         <p><strong>Time:</strong> ${escapeHtml(entry.timestamp)}</p>
                         ${entry.before_values ? `<p><strong>Before:</strong> ${escapeHtml(entry.before_values)}</p>` : ''}
@@ -1256,6 +1258,29 @@
             setTimeout(() => {
                 alertDiv.remove();
             }, 5000);
+        }
+        
+        // Format date as DD/MM/YYYY
+        function formatDate(dateStr) {
+            if (!dateStr) return '';
+            try {
+                // Handle both YYYY-MM-DD format and Date objects
+                let date;
+                if (typeof dateStr === 'string') {
+                    date = new Date(dateStr + 'T00:00:00');
+                } else if (dateStr instanceof Date) {
+                    date = dateStr;
+                } else {
+                    return dateStr;
+                }
+                if (isNaN(date.getTime())) return dateStr; // Return original if invalid
+                const day = String(date.getDate()).padStart(2, '0');
+                const month = String(date.getMonth() + 1).padStart(2, '0');
+                const year = date.getFullYear();
+                return `${day}/${month}/${year}`;
+            } catch (e) {
+                return dateStr; // Return original if error
+            }
         }
         
         function escapeHtml(text) {
@@ -1371,10 +1396,27 @@
             // Sort by patient name
             uniqueData.sort((a, b) => (a.patient_name || '').localeCompare(b.patient_name || ''));
             
-            // Header function (minimal – no title/date on each page)
-            function addHeader() {
-                // Just reset a small top margin; no report title, date, or generated time
-                yPos = margin;
+            // Header function - add heading only on first page
+            function addHeader(isFirstPage) {
+                if (isFirstPage) {
+                    // Add heading "Prescription Scheduling of [date]" at top of first page
+                    const formattedDate = formatDate(date);
+                    doc.setFontSize(14);
+                    doc.setFont(undefined, 'bold');
+                    doc.setTextColor(0, 0, 0);
+                    const headingText = `Prescription Scheduling of ${formattedDate}`;
+                    doc.text(headingText, pageWidth / 2, margin + 8, { align: 'center' });
+                    
+                    // Add a line below the heading
+                    doc.setDrawColor(0, 0, 0);
+                    doc.setLineWidth(0.5);
+                    doc.line(margin, margin + 12, pageWidth - margin, margin + 12);
+                    
+                    yPos = margin + 18; // Start content below heading
+                } else {
+                    // Just reset a small top margin for subsequent pages
+                    yPos = margin;
+                }
             }
             
             // Footer function
@@ -1398,13 +1440,12 @@
                     addFooter(currentPage);
                     doc.addPage();
                     currentPage++;
-                    yPos = margin;
-                    addHeader();
+                    addHeader(false); // Not first page
                 }
             }
             
-            // Add initial header (only once to avoid repeating large title on every page)
-            addHeader();
+            // Add initial header with heading on first page only
+            addHeader(true);
             
             // Process each patient
             uniqueData.forEach((item, index) => {
@@ -1481,9 +1522,8 @@
                         // Use smaller estimated height to fit more entries per page
                         checkNewPage(18);
                         
-                        // Determine common usage/ext-int for this allocation
+                        // Determine common usage for this allocation
                         let commonUsage = '';
-                        let commonExtInt = '';
                         if (allocationGroups.length > 0) {
                             const g0 = allocationGroups[0];
                             if (g0.usage) {
@@ -1491,15 +1531,11 @@
                             } else if (g0.usage_array && Array.isArray(g0.usage_array) && g0.usage_array.length > 0) {
                                 commonUsage = g0.usage_array.join(', ');
                             }
-                            if (g0.internal_external) {
-                                commonExtInt = g0.internal_external;
-                            }
                         }
                         
-                        // Compact per-allocation header line: ALWAYS show entry number (No:1, No:2...), plus Usage / Ext-Int if available
+                        // Compact per-allocation header line: ALWAYS show entry number (No:1, No:2...), plus Usage if available
                         const headerParts = [];
                         if (commonUsage) headerParts.push(`Usage: ${commonUsage}`);
-                        if (commonExtInt) headerParts.push(`Ext/Int: ${commonExtInt}`);
                         doc.setFontSize(7.5);
                         doc.setFont(undefined, 'bold');
                         doc.setTextColor(60, 60, 60);
@@ -1534,7 +1570,7 @@
                             }
 
                             const time = group.time || '';
-                            const internalExternal = group.internal_external || '';
+                            const oilClass = group.oil_class || '';
 
                             // Ingredients
                             const ingredientsDisplay = (group.ingredients && group.ingredients.length > 0)
@@ -1566,8 +1602,8 @@
                             const detailParts = [];
                             if (doseDisplay) detailParts.push(`Dosage: ${doseDisplay}`);
                             if (time) detailParts.push(`Time: ${time}`);
-                            if (internalExternal) detailParts.push(`Ext/Int: ${internalExternal}`);
                             if (ingredientsDisplay) detailParts.push(`Ingredients: ${ingredientsDisplay}`);
+                            if (oilClass) detailParts.push(`Oil Class: ${oilClass}`);
                             
                             if (detailParts.length) {
                                 doc.setFontSize(7);

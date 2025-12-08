@@ -2545,14 +2545,35 @@ def prescription_entry_page(request):
                     allocation.scope = scope or ''
                 if usage is not None:
                     allocation.usage = usage or ''
-                if from_date:
+                if from_date is not None and from_date != '':
                     allocation.from_date = parse_date(from_date)
-                if to_date:
+                if to_date is not None and to_date != '':
                     allocation.to_date = parse_date(to_date)
-                if days:
-                    allocation.days = days
+                if days is not None and days != '':
+                    try:
+                        allocation.days = int(days)
+                    except (ValueError, TypeError):
+                        pass  # Keep existing days if invalid
 
                 allocation.save()
+
+                # Create/update PrescriptionScheduling records for the date range (especially for extended dates)
+                from .models import PrescriptionScheduling
+                from datetime import timedelta
+                
+                if allocation.from_date and allocation.to_date:
+                    current_date = allocation.from_date
+                    while current_date <= allocation.to_date:
+                        # Get or create PrescriptionScheduling for this date
+                        PrescriptionScheduling.objects.get_or_create(
+                            patient=allocation.patient,
+                            prescription_date=current_date,
+                            defaults={
+                                'doctor': request.user if request.user.is_authenticated else None,
+                                'status': 'draft'
+                            }
+                        )
+                        current_date += timedelta(days=1)
 
                 # Log audit
                 log_prescription_audit(request.user, 'update_prescription', 'PrescriptionAllocation', str(allocation.id), {

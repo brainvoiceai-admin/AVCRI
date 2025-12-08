@@ -1022,10 +1022,12 @@
                         line2.style.fontSize = '0.85rem';
                         line2.style.color = '#4b5563';
                         const details = [];
+                        const oilClass = group.oil_class || '';
                         if (dosageDisplay) details.push(`Dosage: ${escapeHtml(dosageDisplay)}`);
                         if (time) details.push(`Time: ${escapeHtml(time)}`);
                         if (internalExternal) details.push(`Ext/Int: ${escapeHtml(internalExternal)}`);
                         if (ingredientsDisplay) details.push(`Ingredients: ${ingredientsDisplay}`);
+                        if (oilClass) details.push(`Oil Class: ${escapeHtml(oilClass)}`);
                         line2.innerHTML = details.join(' | ');
                         
                         itemCard.appendChild(line1);
@@ -1366,6 +1368,41 @@
                 });
         }
         
+        // Helper function to format values for display (handles objects, arrays, strings)
+        function formatChangeValue(value) {
+            if (value === null || value === undefined) {
+                return '';
+            }
+            if (Array.isArray(value)) {
+                // Handle arrays - check if items are objects or strings
+                return value.map(item => {
+                    if (typeof item === 'string' || typeof item === 'number') {
+                        return String(item);
+                    } else if (typeof item === 'object' && item !== null) {
+                        // Try to extract meaningful properties from objects
+                        if (item.item_name) return item.item_name;
+                        if (item.name) return item.name;
+                        if (item.text) return item.text;
+                        // If no recognizable property, try JSON stringify
+                        try {
+                            return JSON.stringify(item);
+                        } catch (e) {
+                            return String(item);
+                        }
+                    }
+                    return String(item);
+                }).join(', ');
+            }
+            if (typeof value === 'object') {
+                try {
+                    return JSON.stringify(value, null, 2);
+                } catch (e) {
+                    return String(value);
+                }
+            }
+            return String(value);
+        }
+        
         function renderChangeLog(logs) {
             const changeLogContent = document.getElementById('changeLogContent');
             
@@ -1395,55 +1432,196 @@
                                 <strong style="font-size: 0.85em; color: #333;">Changes:</strong>
                                 <ul style="margin: 5px 0 0 0; padding-left: 20px; font-size: 0.85em;">
                                     ${log.changes.map(change => {
-                                        if (change.items_groups_changes && change.items_groups_changes.length) {
+                                        // Handle items_groups field - check if it has structured changes or needs parsing
+                                        if (change.field === 'items_groups' || change.field === 'Items Groups') {
+                                            // If structured changes are available, use them
+                                            if (change.items_groups_changes && change.items_groups_changes.length) {
                                             const groupsHtml = change.items_groups_changes.map(gch => {
                                                 const groupLines = (gch.changes || []).map(c => {
                                                     if (c.field === 'items') {
-                                                        const beforeItems = Array.isArray(c.before) ? c.before.join(', ') : '';
-                                                        const afterItems = Array.isArray(c.after) ? c.after.join(', ') : '';
+                                                        // Handle items - extract item names from objects
+                                                        let beforeItems = '';
+                                                        let afterItems = '';
+                                                        
+                                                        if (Array.isArray(c.before)) {
+                                                            beforeItems = c.before.map(item => {
+                                                                if (typeof item === 'string') {
+                                                                    return item;
+                                                                } else if (typeof item === 'object' && item !== null) {
+                                                                    return item.item_name || item.name || '';
+                                                                }
+                                                                return '';
+                                                            }).filter(Boolean).join(', ');
+                                                        }
+                                                        
+                                                        if (Array.isArray(c.after)) {
+                                                            afterItems = c.after.map(item => {
+                                                                if (typeof item === 'string') {
+                                                                    return item;
+                                                                } else if (typeof item === 'object' && item !== null) {
+                                                                    return item.item_name || item.name || '';
+                                                                }
+                                                                return '';
+                                                            }).filter(Boolean).join(', ');
+                                                        }
+                                                        
                                                         return `
-                                                            <li style="margin-bottom:3px;">
-                                                                <span style="color:#333;">items</span>:
-                                                                <span style="color:#d32f2f;">${escapeHtml(beforeItems)}</span>
-                                                                →
-                                                                <span style="color:#388e3c;">${escapeHtml(afterItems)}</span>
-                                                            </li>
+                                                            <div style="margin-left: 20px; margin-bottom: 4px; font-size: 0.9em;">
+                                                                <span style="color:#333; font-weight: 500;">items:</span>
+                                                                <span style="color:#d32f2f; margin-left: 4px;">${escapeHtml(beforeItems || '—')}</span>
+                                                                <span style="margin: 0 6px;">→</span>
+                                                                <span style="color:#388e3c;">${escapeHtml(afterItems || '—')}</span>
+                                                            </div>
                                                         `;
                                                     }
+                                                    // Handle other fields (dosage, time, uno, oil_class, etc.)
+                                                    const beforeVal = c.before !== null && c.before !== undefined ? String(c.before) : '—';
+                                                    const afterVal = c.after !== null && c.after !== undefined ? String(c.after) : '—';
                                                     return `
-                                                        <li style=\"margin-bottom:3px;\">
-                                                            <span style=\"color:#333;\">${escapeHtml(c.field)}</span>:
-                                                            <span style=\"color:#d32f2f;\">${escapeHtml(String(c.before || ''))}</span>
-                                                            →
-                                                            <span style=\"color:#388e3c;\">${escapeHtml(String(c.after || ''))}</span>
-                                                        </li>
+                                                        <div style="margin-left: 20px; margin-bottom: 4px; font-size: 0.9em;">
+                                                            <span style="color:#333; font-weight: 500;">${escapeHtml(c.field)}:</span>
+                                                            <span style="color:#d32f2f; margin-left: 4px;">${escapeHtml(beforeVal)}</span>
+                                                            <span style="margin: 0 6px;">→</span>
+                                                            <span style="color:#388e3c;">${escapeHtml(afterVal)}</span>
+                                                        </div>
                                                     `;
                                                 }).join('');
                                                 return `
-                                                    <li style="margin-bottom:6px;">
-                                                        <div style="font-weight:600;color:#555;">Group #${gch.group_index + 1}</div>
-                                                        <ul style="margin:4px 0 0 16px; padding:0; list-style: circle;">${groupLines}</ul>
-                                                    </li>
+                                                    <div style="margin-bottom: 12px; padding: 8px; background: #f9f9f9; border-radius: 4px; border-left: 3px solid #2196F3;">
+                                                        <div style="font-weight: 600; color: #555; margin-bottom: 6px; font-size: 0.95em;">Group #${gch.group_index + 1}</div>
+                                                        ${groupLines}
+                                                    </div>
                                                 `;
                                             }).join('');
                                             return `
-                                                <li style="margin-bottom: 8px;">
-                                                    <div>
-                                                        <strong>Prescription groups updated</strong>
-                                                    </div>
-                                                    <div style="margin-top:6px;">
-                                                        <div style="font-weight:600;color:#444;font-size:0.85em;">Group changes:</div>
-                                                        <ul style="margin:4px 0 0 16px; padding:0; list-style: disc;">${groupsHtml}</ul>
+                                                <li style="margin-bottom: 12px; list-style: none;">
+                                                    <div style="font-weight: 600; color: #333; margin-bottom: 8px; font-size: 0.95em;">Prescription groups updated</div>
+                                                    <div style="margin-top: 8px;">
+                                                        <div style="font-weight: 600; color: #444; font-size: 0.9em; margin-bottom: 8px;">Group changes:</div>
+                                                        <div style="margin-left: 0;">${groupsHtml}</div>
                                                     </div>
                                                 </li>
                                             `;
+                                            } else {
+                                                // If no structured changes, try to parse JSON and show structured view
+                                                try {
+                                                    let beforeGroups = [];
+                                                    let afterGroups = [];
+                                                    
+                                                    if (typeof change.before === 'string') {
+                                                        beforeGroups = JSON.parse(change.before);
+                                                    } else if (Array.isArray(change.before)) {
+                                                        beforeGroups = change.before;
+                                                    }
+                                                    
+                                                    if (typeof change.after === 'string') {
+                                                        afterGroups = JSON.parse(change.after);
+                                                    } else if (Array.isArray(change.after)) {
+                                                        afterGroups = change.after;
+                                                    }
+                                                    
+                                                    // Compare groups and show differences
+                                                    const maxLen = Math.max(beforeGroups.length, afterGroups.length);
+                                                    const groupsHtml = [];
+                                                    
+                                                    for (let i = 0; i < maxLen; i++) {
+                                                        const beforeGroup = beforeGroups[i] || {};
+                                                        const afterGroup = afterGroups[i] || {};
+                                                        const groupChanges = [];
+                                                        
+                                                        // Compare each field
+                                                        const fields = ['dosage', 'time', 'uno', 'oil_class'];
+                                                        fields.forEach(field => {
+                                                            const beforeVal = beforeGroup[field] || '';
+                                                            const afterVal = afterGroup[field] || '';
+                                                            if (beforeVal !== afterVal) {
+                                                                groupChanges.push({
+                                                                    field: field,
+                                                                    before: beforeVal,
+                                                                    after: afterVal
+                                                                });
+                                                            }
+                                                        });
+                                                        
+                                                        // Compare items
+                                                        const beforeItems = (beforeGroup.items || []).map(it => it.item_name || it.name || '').filter(Boolean).join(', ');
+                                                        const afterItems = (afterGroup.items || []).map(it => it.item_name || it.name || '').filter(Boolean).join(', ');
+                                                        if (beforeItems !== afterItems) {
+                                                            groupChanges.push({
+                                                                field: 'items',
+                                                                before: beforeItems,
+                                                                after: afterItems
+                                                            });
+                                                        }
+                                                        
+                                                        // Compare ingredients
+                                                        const beforeIng = (beforeGroup.ingredients || []).map(ing => ing.ingredient_name || ing.name || '').filter(Boolean).join(', ');
+                                                        const afterIng = (afterGroup.ingredients || []).map(ing => ing.ingredient_name || ing.name || '').filter(Boolean).join(', ');
+                                                        if (beforeIng !== afterIng) {
+                                                            groupChanges.push({
+                                                                field: 'ingredients',
+                                                                before: beforeIng,
+                                                                after: afterIng
+                                                            });
+                                                        }
+                                                        
+                                                        if (groupChanges.length > 0 || i < beforeGroups.length || i < afterGroups.length) {
+                                                            const groupLines = groupChanges.map(c => {
+                                                                if (c.field === 'items' || c.field === 'ingredients') {
+                                                                    return `
+                                                                        <div style="margin-left: 20px; margin-bottom: 4px; font-size: 0.9em;">
+                                                                            <span style="color:#333; font-weight: 500;">${escapeHtml(c.field)}:</span>
+                                                                            <span style="color:#d32f2f; margin-left: 4px;">${escapeHtml(c.before || '—')}</span>
+                                                                            <span style="margin: 0 6px;">→</span>
+                                                                            <span style="color:#388e3c;">${escapeHtml(c.after || '—')}</span>
+                                                                        </div>
+                                                                    `;
+                                                                }
+                                                                return `
+                                                                    <div style="margin-left: 20px; margin-bottom: 4px; font-size: 0.9em;">
+                                                                        <span style="color:#333; font-weight: 500;">${escapeHtml(c.field)}:</span>
+                                                                        <span style="color:#d32f2f; margin-left: 4px;">${escapeHtml(c.before || '—')}</span>
+                                                                        <span style="margin: 0 6px;">→</span>
+                                                                        <span style="color:#388e3c;">${escapeHtml(c.after || '—')}</span>
+                                                                    </div>
+                                                                `;
+                                                            }).join('');
+                                                            
+                                                            groupsHtml.push(`
+                                                                <div style="margin-bottom: 12px; padding: 8px; background: #f9f9f9; border-radius: 4px; border-left: 3px solid #2196F3;">
+                                                                    <div style="font-weight: 600; color: #555; margin-bottom: 6px; font-size: 0.95em;">Group #${i + 1}</div>
+                                                                    ${groupLines || '<div style="margin-left: 20px; font-size: 0.9em; color: #666;">(New group added)</div>'}
+                                                                </div>
+                                                            `);
+                                                        }
+                                                    }
+                                                    
+                                                    if (groupsHtml.length > 0) {
+                                                        return `
+                                                            <li style="margin-bottom: 12px; list-style: none;">
+                                                                <div style="font-weight: 600; color: #333; margin-bottom: 8px; font-size: 0.95em;">Prescription groups updated</div>
+                                                                <div style="margin-top: 8px;">
+                                                                    <div style="font-weight: 600; color: #444; font-size: 0.9em; margin-bottom: 8px;">Group changes:</div>
+                                                                    <div style="margin-left: 0;">${groupsHtml.join('')}</div>
+                                                                </div>
+                                                            </li>
+                                                        `;
+                                                    }
+                                                } catch (e) {
+                                                    // If parsing fails, fall back to formatted display
+                                                    console.error('Error parsing items_groups:', e);
+                                                }
+                                            }
                                         }
+                                        // Handle other field changes (not items_groups)
+                                        const beforeVal = formatChangeValue(change.before);
+                                        const afterVal = formatChangeValue(change.after);
                                         return `
-                                            <li style="margin-bottom: 5px;">
+                                            <li style="margin-bottom: 5px; font-size: 0.9em;">
                                                 <strong>${escapeHtml(change.field)}</strong>:
-                                                <span style="color: #d32f2f;">${escapeHtml(String(change.before))}</span>
+                                                <span style="color: #d32f2f;">${escapeHtml(beforeVal)}</span>
                                                 →
-                                                <span style="color: #388e3c;">${escapeHtml(String(change.after))}</span>
+                                                <span style="color: #388e3c;">${escapeHtml(afterVal)}</span>
                                             </li>
                                         `;
                                     }).join('')}
