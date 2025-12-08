@@ -940,6 +940,59 @@ $(function(){
   const $procuredSelect = $('#procured-from-select');
   const $scopeSelect = $('#scope-select');
   const $commonUsageSelect = $('#common-usage-select');
+  let usageSelectionOrder = []; // Track selection order for usage field
+  
+  // Function to reorder selected tags in the DOM to match selection order (global function)
+  function reorderUsageTags() {
+    // Use requestAnimationFrame for smoother updates
+    requestAnimationFrame(() => {
+      setTimeout(() => {
+        const $select2Container = $commonUsageSelect.next('.select2-container');
+        if (!$select2Container.length) return;
+        
+        const $choicesContainer = $select2Container.find('.select2-selection__rendered');
+        if (!$choicesContainer.length) return;
+        
+        const $tags = $choicesContainer.find('.select2-selection__choice');
+        if ($tags.length === 0) return;
+        
+        const currentValues = $commonUsageSelect.val() || [];
+        const orderedValues = usageSelectionOrder.filter(val => currentValues.indexOf(val) !== -1);
+        
+        // If no reordering needed, return early
+        if (orderedValues.length <= 1) return;
+        
+        // Create a map of value to DOM element by matching text content
+        const tagMap = {};
+        $tags.each(function() {
+          const $tag = $(this);
+          // Get the text content (removing the X button text)
+          const tagText = $tag.clone().find('.select2-selection__choice__remove').remove().end().text().trim();
+          
+          // Find matching value by comparing with option text
+          for (let i = 0; i < orderedValues.length; i++) {
+            const val = orderedValues[i];
+            const $option = $commonUsageSelect.find(`option[value="${val}"]`);
+            const optionText = $option.text().trim();
+            if (tagText === optionText || tagText === val) {
+              tagMap[val] = $tag;
+              break;
+            }
+          }
+        });
+        
+        // Reorder tags based on selection order by moving them in DOM
+        // Only reorder if we have all tags mapped correctly
+        if (Object.keys(tagMap).length === orderedValues.length) {
+          orderedValues.forEach(val => {
+            if (tagMap[val]) {
+              tagMap[val].detach().appendTo($choicesContainer);
+            }
+          });
+        }
+      }, 10);
+    });
+  }
   const $itemBuilder = $('#item-builder-select'), $itemGroupsList = $('#item-groups-list');
   const $itemBuilderOilClass = $('#item-builder-oil-class');
   const $allocateBtn = $('#allocate-prescription-btn'), $updateBtn = $('#update-prescription-btn'), $clearBtn = $('#clear-form');
@@ -1195,16 +1248,30 @@ $(function(){
   }
 
   function populatePatientInfo(patient) {
+    // Clear previous patient's data first
+    addedPrescriptions = [];
+    itemGroups = [];
+    editPrescriptionIndex = null;
+    cancelingPrescriptionIndex = null;
+    resumingPrescriptionIndex = null;
+    
+    // Reset form state
+    resetFormState();
+    
     $('#header-patient-select').val(patient.pat_op_reg_no || patient.pat_reg_no);
     // Make patient name bold/highlighted
     $('#hdr-pat-name').html(`<strong style="font-weight: bold; color: var(--primary);">${patient.pat_name || 'Unknown'}</strong>`);
     updatePatientAvatar(patient);
     
     // Load patient prescriptions
-    ajax({action:'patient_prescriptions', patient_reg_no: patient.pat_op_reg_no || patient.pat_reg_no}).then(list => {
+    const patientRegNo = patient.pat_op_reg_no || patient.pat_reg_no;
+    ajax({action:'patient_prescriptions', patient_reg_no: patientRegNo}).then(list => {
       addedPrescriptions = list || [];
       renderAll();
-    }).catch(()=>{ renderAll(); });
+    }).catch(()=>{ 
+      addedPrescriptions = [];
+      renderAll(); 
+    });
   }
 
   // Clear patient selection functionality
@@ -1237,15 +1304,82 @@ $(function(){
     ajax({action:'masters', type:'prescriptionusage'}).then(list => { 
       const $u=$commonUsageSelect; 
       $u.empty(); 
+      usageSelectionOrder = []; // Reset selection order
       (list||[]).forEach(x => $u.append(new Option(x.name, x.name))); 
       // Initialize Select2 for multiselect
       if (!$u.hasClass('select2-hidden-accessible')) {
         $u.select2({
           placeholder: 'Select Usage (multiple)',
           allowClear: true,
-          width: '100%'
+          width: '100%',
+          closeOnSelect: false
         });
       }
+      
+      // Track selection order and reorder display immediately
+      $u.on('select2:select', function(e) {
+        const selectedValue = e.params.data.id;
+        if (usageSelectionOrder.indexOf(selectedValue) === -1) {
+          usageSelectionOrder.push(selectedValue);
+        }
+        // Reorder tags immediately and multiple times to ensure it sticks
+        // Select2 may re-render, so we need to catch it multiple times
+        reorderUsageTags();
+        setTimeout(reorderUsageTags, 10);
+        setTimeout(reorderUsageTags, 50);
+        setTimeout(reorderUsageTags, 150);
+      });
+      
+      $u.on('select2:unselect', function(e) {
+        const unselectedValue = e.params.data.id;
+        const index = usageSelectionOrder.indexOf(unselectedValue);
+        if (index > -1) {
+          usageSelectionOrder.splice(index, 1);
+        }
+        // Reorder remaining tags
+        reorderUsageTags();
+        setTimeout(reorderUsageTags, 10);
+        setTimeout(reorderUsageTags, 50);
+      });
+      
+      // Also reorder when values are set programmatically (like when loading for edit)
+      $u.on('change', function() {
+        reorderUsageTags();
+        setTimeout(reorderUsageTags, 100);
+      });
+      
+      // Reorder after Select2 opens/closes to ensure correct order
+      $u.on('select2:open', function() {
+        setTimeout(reorderUsageTags, 10);
+      });
+      
+      $u.on('select2:close', function() {
+        setTimeout(reorderUsageTags, 10);
+      });
+      
+      // Use MutationObserver to watch for DOM changes and reorder automatically
+      setTimeout(() => {
+        const $select2Container = $u.next('.select2-container');
+        if ($select2Container.length) {
+          const $choicesContainer = $select2Container.find('.select2-selection__rendered');
+          if ($choicesContainer.length && $choicesContainer[0]) {
+            const observer = new MutationObserver(function(mutations) {
+              // Only reorder if tags were added/removed
+              const hasChanges = mutations.some(m => 
+                m.addedNodes.length > 0 || m.removedNodes.length > 0
+              );
+              if (hasChanges) {
+                reorderUsageTags();
+              }
+            });
+            
+            observer.observe($choicesContainer[0], {
+              childList: true,
+              subtree: true
+            });
+          }
+        }
+      }, 500);
     }).catch(()=>{});
     ajax({action:'masters', type:'prescriptiontime'}).then(list => { const $t=$('#item-builder-time'); $t.empty().append('<option value="">Select Time</option>'); (list||[]).forEach(x => $t.append(new Option(x.name, x.name))); }).catch(()=>{});
     // Populate Oil Class in item builder section
@@ -1461,8 +1595,10 @@ $(function(){
     if (!from || !to){ alert('Please set From and To dates'); return; }
     if (from > to){ alert('From must be <= To'); return; }
 
-    // Get common usage
-    const commonUsageValues = $commonUsageSelect.val() || [];
+    // Get common usage in selection order
+    const selectedValues = $commonUsageSelect.val() || [];
+    // Maintain selection order instead of alphabetical
+    const commonUsageValues = usageSelectionOrder.filter(val => selectedValues.indexOf(val) !== -1);
     const commonUsage = commonUsageValues.join(', ');
     
     // Prepare prescription data
@@ -1515,35 +1651,48 @@ $(function(){
       return response.json();
     }).then(j => {
       if (j.allocation_id || j.status === 'ok') {
-        // Add to local list immediately with server response (like therapy page does)
-        const newPrescription = {
-          ...prescriptionData,
-          prescription_name: 'Prescription', // Default name (server also uses this default)
-          allocation_id: j.allocation_id,
-          id: j.allocation_id,
-          status: 'draft', // Default status
-          status_counts: {},
-          status_summary: { draft: 1 } // Initial status summary
-        };
-        addedPrescriptions.push(newPrescription);
-        
-        // Reset form
-        itemGroups = []; renderItemGroups();
-        $fromDate.val(''); $toDate.val(''); $daysInput.val(''); $procuredSelect.val(''); $scopeSelect.val(''); $commonUsageSelect.val(null).trigger('change');
-        
-        // Render immediately so user sees the new prescription
-        renderAll();
+        // Reset form first
+        itemGroups = []; 
+        renderItemGroups();
+        const today = new Date().toISOString().split('T')[0];
+        $fromDate.val(today); 
+        $toDate.val(''); 
+        $daysInput.val(''); 
+        $procuredSelect.val(''); 
+        $scopeSelect.val(''); 
+        $commonUsageSelect.val(null).trigger('change');
+        usageSelectionOrder = []; // Reset selection order
         
         // Reload patient prescriptions from server to get accurate status counts
+        // Use the same registration number format that was used to save
         if (selectedPatient) {
-          const patientRegNo = selectedPatient.pat_reg_no || selectedPatient.pat_op_reg_no;
-          ajax({action:'patient_prescriptions', patient_reg_no: patientRegNo}).then(list => {
-            addedPrescriptions = list || [];
-            renderAll();
-          }).catch(()=>{ renderAll(); });
+          const patientRegNo = selectedPatient.pat_op_reg_no || selectedPatient.pat_reg_no;
+          // Small delay to ensure server has processed the save
+          setTimeout(() => {
+            ajax({action:'patient_prescriptions', patient_reg_no: patientRegNo}).then(list => {
+              if (list && Array.isArray(list)) {
+                addedPrescriptions = list;
+                renderAll();
+                alert('Prescription saved to server as Draft.');
+              } else {
+                // If list is empty or invalid, show error but don't break
+                addedPrescriptions = [];
+                renderAll();
+                alert('Prescription saved to server as Draft. (Note: Could not load updated prescription list - please refresh)');
+              }
+            }).catch(err => {
+              console.error('Error reloading prescriptions:', err);
+              // Clear and show empty state if reload fails
+              addedPrescriptions = [];
+              renderAll();
+              alert('Prescription saved to server as Draft. (Note: Could not refresh prescription list - please refresh page)');
+            });
+          }, 300); // 300ms delay to ensure server has processed
+        } else {
+          addedPrescriptions = [];
+          renderAll();
+          alert('Prescription saved to server as Draft.');
         }
-        
-        alert('Prescription saved to server as Draft.');
       } else {
         alert('Failed to save prescription: ' + (j.error || 'Unknown error'));
       }
@@ -1729,13 +1878,21 @@ $(function(){
     $procuredSelect.val(p.procured_from||'');
     $scopeSelect.val(p.scope||'');
     
-    // Load common usage
+    // Load common usage and restore selection order
+    usageSelectionOrder = []; // Reset selection order
     if (p.usage_array && Array.isArray(p.usage_array)) {
+      usageSelectionOrder = [...p.usage_array]; // Preserve the order from saved data
       $commonUsageSelect.val(p.usage_array).trigger('change');
+      // Reorder tags after loading
+      setTimeout(reorderUsageTags, 200);
     } else if (p.usage) {
       const usageArray = p.usage.split(',').map(u => u.trim()).filter(u => u);
+      usageSelectionOrder = [...usageArray]; // Preserve the order from saved data
       $commonUsageSelect.val(usageArray).trigger('change');
+      // Reorder tags after loading
+      setTimeout(reorderUsageTags, 200);
     } else {
+      usageSelectionOrder = [];
       $commonUsageSelect.val(null).trigger('change');
     }
     
@@ -1756,8 +1913,10 @@ $(function(){
     if (editPrescriptionIndex === null) { alert('No prescription in edit mode'); return; }
     const p = addedPrescriptions[editPrescriptionIndex]; if(!p) return;
     
-    // Get common usage
-    const commonUsageValues = $commonUsageSelect.val() || [];
+    // Get common usage in selection order
+    const selectedValues = $commonUsageSelect.val() || [];
+    // Maintain selection order instead of alphabetical
+    const commonUsageValues = usageSelectionOrder.filter(val => selectedValues.indexOf(val) !== -1);
     const commonUsage = commonUsageValues.join(', ');
     
     // Get dates and days from form
@@ -1837,6 +1996,8 @@ $(function(){
     const today = new Date().toISOString().split('T')[0];
     $fromDate.val(today); $toDate.val(''); $daysInput.val('');
     $procuredSelect.val(''); $scopeSelect.val('');
+    $commonUsageSelect.val(null).trigger('change');
+    usageSelectionOrder = []; // Reset selection order
     itemGroups = []; renderItemGroups();
     $allocateBtn.show(); $updateBtn.hide();
   }
@@ -2013,4 +2174,5 @@ $(function(){
 });
 </script>
 </body>
+</html>
 </html>
