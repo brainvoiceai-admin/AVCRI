@@ -1519,9 +1519,6 @@
                     allocationIds.forEach((allocationId, entryIndex) => {
                         const allocationGroups = groupsByAllocation[allocationId];
                         
-                        // Use smaller estimated height to fit more entries per page
-                        checkNewPage(18);
-                        
                         // Determine common usage for this allocation
                         let commonUsage = '';
                         if (allocationGroups.length > 0) {
@@ -1533,24 +1530,72 @@
                             }
                         }
                         
-                        // Compact per-allocation header line: ALWAYS show entry number (No:1, No:2...), plus Usage if available
-                        const headerParts = [];
-                        if (commonUsage) headerParts.push(`Usage: ${commonUsage}`);
+                        // Calculate approximate box height needed
+                        let estimatedHeight = 10; // Base height for header and column headers
+                        allocationGroups.forEach(group => {
+                            if (group.items && group.items.length > 0) {
+                                estimatedHeight += 5; // Height per row
+                            }
+                        });
+                        checkNewPage(estimatedHeight);
+                        
+                        // Draw box/table for this prescription entry
+                        const boxX = margin;
+                        const boxY = yPos;
+                        const boxWidth = pageWidth - margin * 2;
+                        const boxStartY = yPos;
+                        
+                        // Usage header row with background
+                        doc.setFillColor(245, 245, 245);
+                        doc.rect(boxX, boxY, boxWidth, 4, 'F');
+                        
+                        // Usage label and value
                         doc.setFontSize(7.5);
                         doc.setFont(undefined, 'bold');
-                        doc.setTextColor(60, 60, 60);
-                        const headerText = headerParts.length
-                            ? `No:${entryIndex + 1} - ${headerParts.join(' | ')}`
-                            : `No:${entryIndex + 1}`;
-                        const headerLines = doc.splitTextToSize(headerText, pageWidth - margin * 2 - 10);
-                        doc.text(headerLines, margin, yPos);
-                        yPos += headerLines.length * 3;
+                        doc.setTextColor(0, 0, 0);
+                        doc.text('Usage:', boxX + 2, boxY + 2.5);
                         
-                        // Build one compact line for all groups, rendering items in blue and details in grey
-                        let currentX = margin + 4;
-                        const startY = yPos;
-                        let maxLineHeight = 0;
+                        if (commonUsage) {
+                            doc.setFont(undefined, 'normal');
+                            doc.setTextColor(0, 0, 0);
+                            const usageLines = doc.splitTextToSize(commonUsage, boxWidth - 25);
+                            doc.text(usageLines, boxX + 18, boxY + 2.5);
+                            yPos = boxY + Math.max(4, usageLines.length * 2.5);
+                        } else {
+                            doc.setFont(undefined, 'normal');
+                            doc.setTextColor(120, 120, 120);
+                            doc.text('—', boxX + 18, boxY + 2.5);
+                            yPos = boxY + 4;
+                        }
                         
+                        // Draw horizontal line after usage header
+                        doc.setDrawColor(200, 200, 200);
+                        doc.setLineWidth(0.2);
+                        doc.line(boxX, yPos, boxX + boxWidth, yPos);
+                        yPos += 1.5;
+                        
+                        // Column headers row with background
+                        const colHeadersY = yPos;
+                        doc.setFillColor(250, 250, 250);
+                        doc.rect(boxX, colHeadersY, boxWidth, 3.5, 'F');
+                        
+                        doc.setFontSize(7);
+                        doc.setFont(undefined, 'bold');
+                        doc.setTextColor(0, 0, 0);
+                        doc.text('Items', boxX + 2, colHeadersY + 2.5);
+                        doc.text('Dosage', boxX + 48, colHeadersY + 2.5);
+                        doc.text('Time', boxX + 75, colHeadersY + 2.5);
+                        doc.text('Ingredients', boxX + 95, colHeadersY + 2.5);
+                        doc.text('Oil Class', boxX + 135, colHeadersY + 2.5);
+                        
+                        // Draw line under column headers
+                        yPos = colHeadersY + 3.5;
+                        doc.setDrawColor(200, 200, 200);
+                        doc.setLineWidth(0.2);
+                        doc.line(boxX, yPos, boxX + boxWidth, yPos);
+                        yPos += 2;
+                        
+                        // Render each group as a row
                         allocationGroups.forEach((group, groupIndex) => {
                             const items = group.items || [];
                             if (!items.length) return;
@@ -1577,55 +1622,60 @@
                                 ? group.ingredients.map(ing => ing.ingredient_name || ing.text || 'N/A').join(', ')
                                 : '';
 
-                            // Render items in blue
-                            if (itemNames) {
-                                doc.setFontSize(8);
-                                doc.setFont(undefined, 'bold');
-                                doc.setTextColor(0, 86, 179); // Blue
-                                const prefix = groupIndex === 0 ? '• ' : ' + ';
-                                const itemText = `${prefix}${itemNames}`;
-                                const itemWidth = doc.getTextWidth(itemText);
-                                
-                                // Check if we need to wrap to next line
-                                if (currentX + itemWidth > pageWidth - margin - 10) {
-                                    yPos += maxLineHeight + 1;
-                                    currentX = margin + 4;
-                                    maxLineHeight = 0;
-                                }
-                                
-                                doc.text(itemText, currentX, yPos);
-                                currentX += itemWidth;
-                                maxLineHeight = Math.max(maxLineHeight, 3);
-                            }
-
-                            // Render details in grey, on same line
-                            const detailParts = [];
-                            if (doseDisplay) detailParts.push(`Dosage: ${doseDisplay}`);
-                            if (time) detailParts.push(`Time: ${time}`);
-                            if (ingredientsDisplay) detailParts.push(`Ingredients: ${ingredientsDisplay}`);
-                            if (oilClass) detailParts.push(`Oil Class: ${oilClass}`);
+                            const rowStartY = yPos;
                             
-                            if (detailParts.length) {
-                                doc.setFontSize(7);
-                                doc.setFont(undefined, 'normal');
-                                doc.setTextColor(80, 80, 80); // Grey
-                                const detailText = ` - ${detailParts.join(' | ')}`;
-                                const detailWidth = doc.getTextWidth(detailText);
-                                
-                                // Check if we need to wrap
-                                if (currentX + detailWidth > pageWidth - margin - 10) {
-                                    yPos += maxLineHeight + 1;
-                                    currentX = margin + 4;
-                                    maxLineHeight = 0;
-                                }
-                                
-                                doc.text(detailText, currentX, yPos);
-                                currentX += detailWidth + 3; // Small space between groups
-                                maxLineHeight = Math.max(maxLineHeight, 2.5);
+                            // Render row data
+                            doc.setFontSize(7);
+                            
+                            // Items (in blue, bold) - add "+" prefix for groups after the first
+                            doc.setFont(undefined, 'bold');
+                            doc.setTextColor(0, 86, 179);
+                            const prefix = groupIndex > 0 ? '+ ' : '';
+                            const itemsText = prefix + (itemNames || '—');
+                            const itemsLines = doc.splitTextToSize(itemsText, 43);
+                            doc.text(itemsLines, boxX + 2, yPos + 2);
+                            
+                            // Dosage
+                            doc.setFont(undefined, 'normal');
+                            doc.setTextColor(0, 0, 0);
+                            const doseLines = doc.splitTextToSize(doseDisplay || '—', 25);
+                            doc.text(doseLines, boxX + 48, yPos + 2);
+                            
+                            // Time
+                            doc.text(time || '—', boxX + 75, yPos + 2);
+                            
+                            // Ingredients
+                            const ingredientsLines = doc.splitTextToSize(ingredientsDisplay || '—', 38);
+                            doc.text(ingredientsLines, boxX + 95, yPos + 2);
+                            
+                            // Oil Class
+                            doc.text(oilClass || '—', boxX + 135, yPos + 2);
+                            
+                            // Calculate row height based on tallest cell
+                            const rowHeight = Math.max(
+                                itemsLines.length * 2.5,
+                                doseLines.length * 2.5,
+                                ingredientsLines.length * 2.5,
+                                3.5
+                            );
+                            yPos += rowHeight;
+                            
+                            // Draw row separator line (except for last row)
+                            if (groupIndex < allocationGroups.length - 1) {
+                                doc.setDrawColor(230, 230, 230);
+                                doc.setLineWidth(0.1);
+                                doc.line(boxX, yPos, boxX + boxWidth, yPos);
+                                yPos += 1;
                             }
                         });
                         
-                        yPos += maxLineHeight + 1;
+                        // Draw box border
+                        const actualBoxHeight = yPos - boxStartY;
+                        doc.setDrawColor(0, 0, 0);
+                        doc.setLineWidth(0.3);
+                        doc.rect(boxX, boxStartY, boxWidth, actualBoxHeight);
+                        
+                        yPos += 3; // Space after box
                     });
                     
                     yPos += 3; // Minimal space after prescription section
