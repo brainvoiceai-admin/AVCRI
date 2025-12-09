@@ -318,12 +318,36 @@ def therapy_entry(request):
             
             try:
                 allocation = TherapyAllocation.objects.get(id=allocation_id)
+                cancel_from_obj = parse_date(cancel_from)
+                cancel_to_obj = parse_date(cancel_to)
+                
+                # Merge with existing cancellations if any
+                if allocation.cancelled_date_from and allocation.cancelled_date_to:
+                    # Merge cancellation ranges
+                    existing_from = allocation.cancelled_date_from
+                    existing_to = allocation.cancelled_date_to
+                    
+                    # Calculate the merged range (union of both ranges)
+                    merged_from = min(existing_from, cancel_from_obj)
+                    merged_to = max(existing_to, cancel_to_obj)
+                    
+                    allocation.cancelled_date_from = merged_from
+                    allocation.cancelled_date_to = merged_to
+                    # Append reason if different
+                    if reason and reason != allocation.cancellation_reason:
+                        if allocation.cancellation_reason:
+                            allocation.cancellation_reason += f" | Additional cancellation: {reason}"
+                        else:
+                            allocation.cancellation_reason = reason
+                else:
+                    # First cancellation
+                    allocation.cancelled_date_from = cancel_from_obj
+                    allocation.cancelled_date_to = cancel_to_obj
+                    allocation.cancellation_reason = reason
+                
                 allocation.status = 'cancelled'
                 allocation.cancelled_by = request.user if request.user.is_authenticated else None
                 allocation.cancelled_at = timezone.now()
-                allocation.cancellation_reason = reason
-                allocation.cancelled_date_from = parse_date(cancel_from)
-                allocation.cancelled_date_to = parse_date(cancel_to)
                 allocation.save()
                 
                 # Update related bookings
@@ -373,23 +397,33 @@ def therapy_entry(request):
         # ---------- resume therapy ----------
         if action_post == 'resume_therapy':
             allocation_id = payload.get('allocation_id')
-            resume_from = payload.get('resume_from')
-            resume_to = payload.get('resume_to')
+            resume_date = payload.get('resume_date')  # Single date to resume
+            resume_from = payload.get('resume_from')  # Backward compatibility
+            resume_to = payload.get('resume_to')  # Backward compatibility
             
-            if not allocation_id or not resume_from or not resume_to:
+            if not allocation_id:
+                return JsonResponse({'error': 'missing_allocation_id'}, status=400)
+            
+            # Support both single date and date range (for backward compatibility)
+            if resume_date:
+                resume_from = resume_date
+                resume_to = resume_date
+            elif not resume_from or not resume_to:
                 return JsonResponse({'error': 'missing_fields'}, status=400)
             
             try:
                 allocation = TherapyAllocation.objects.get(id=allocation_id)
-                allocation.status = 'draft'
-                allocation.resumed_by = request.user if request.user.is_authenticated else None
-                allocation.resumed_at = timezone.now()
-                allocation.cancelled_date_from = None
-                allocation.cancelled_date_to = None
-                allocation.cancellation_reason = ''
-                allocation.save()
                 
-                # Update related bookings
+                # If there are no cancelled dates, return error
+                if not allocation.cancelled_date_from or not allocation.cancelled_date_to:
+                    return JsonResponse({'error': 'no_cancelled_dates_to_resume'}, status=400)
+                
+                # Validate that the date is within cancelled range
+                resume_date_obj = parse_date(resume_from)
+                if resume_date_obj < allocation.cancelled_date_from or resume_date_obj > allocation.cancelled_date_to:
+                    return JsonResponse({'error': 'resume_date_outside_cancelled_range'}, status=400)
+                
+                # Update related bookings for the specific date(s)
                 resumed_bookings = Booking.objects.filter(
                     allocation=allocation,
                     date__gte=parse_date(resume_from),
@@ -425,6 +459,49 @@ def therapy_entry(request):
                                 failed_reasons.append({'date': d.isoformat(), 'reason': str(_e)})
                 except Exception:
                     pass
+                
+                # Update cancelled date range based on what was resumed
+                if allocation.cancelled_date_from and allocation.cancelled_date_to:
+                    resume_from_obj = parse_date(resume_from)
+                    resume_to_obj = parse_date(resume_to)
+                    
+                    # If resuming the entire range, clear cancellation
+                    if resume_from_obj == allocation.cancelled_date_from and resume_to_obj == allocation.cancelled_date_to:
+                        allocation.cancelled_date_from = None
+                        allocation.cancelled_date_to = None
+                        allocation.cancellation_reason = ''
+                        allocation.status = 'draft'
+                    # If resuming from the start, update from_date
+                    elif resume_from_obj == allocation.cancelled_date_from:
+                        from datetime import timedelta
+                        new_from = resume_to_obj + timedelta(days=1)
+                        if new_from <= allocation.cancelled_date_to:
+                            allocation.cancelled_date_from = new_from
+                        else:
+                            # All dates resumed
+                            allocation.cancelled_date_from = None
+                            allocation.cancelled_date_to = None
+                            allocation.cancellation_reason = ''
+                            allocation.status = 'draft'
+                    # If resuming from the end, update to_date
+                    elif resume_to_obj == allocation.cancelled_date_to:
+                        from datetime import timedelta
+                        new_to = resume_from_obj - timedelta(days=1)
+                        if new_to >= allocation.cancelled_date_from:
+                            allocation.cancelled_date_to = new_to
+                        else:
+                            # All dates resumed
+                            allocation.cancelled_date_from = None
+                            allocation.cancelled_date_to = None
+                            allocation.cancellation_reason = ''
+                            allocation.status = 'draft'
+                    # If resuming from the middle, we need to split the range
+                    # For simplicity, we'll keep the original range but note that this date is resumed
+                    # The frontend will handle showing remaining dates
+                
+                allocation.resumed_by = request.user if request.user.is_authenticated else None
+                allocation.resumed_at = timezone.now()
+                allocation.save()
                 
                 # set overall status after resume
                 if any_success:
@@ -1038,6 +1115,8 @@ def therapy_entry(request):
         
         # ---------- allocate ----------
         if action_post == 'allocate':
+            # Ensure timedelta is available in this scope
+            from datetime import timedelta
             try:
                 # required fields (items_groups is optional - can be empty array)
                 required = ['patient_reg_no', 'therapy_code', 'therapy_name', 'from_date', 'to_date']
@@ -1740,7 +1819,10 @@ def therapy_entry(request):
                     'items_groups': a.items_groups or [],
                     'status': a.status,
                     'status_counts': status_counts,
-                    'status_summary': status_summary
+                    'status_summary': status_summary,
+                    'cancelled_date_from': a.cancelled_date_from.isoformat() if a.cancelled_date_from else None,
+                    'cancelled_date_to': a.cancelled_date_to.isoformat() if a.cancelled_date_to else None,
+                    'cancellation_reason': getattr(a, 'cancellation_reason', '') or ''
                 })
             return JsonResponse(out, safe=False)
 
@@ -2420,12 +2502,36 @@ def prescription_entry_page(request):
             
             try:
                 allocation = PrescriptionAllocation.objects.get(id=allocation_id)
+                cancel_from_obj = parse_date(cancel_from)
+                cancel_to_obj = parse_date(cancel_to)
+                
+                # Merge with existing cancellations if any
+                if allocation.cancelled_date_from and allocation.cancelled_date_to:
+                    # Merge cancellation ranges
+                    existing_from = allocation.cancelled_date_from
+                    existing_to = allocation.cancelled_date_to
+                    
+                    # Calculate the merged range (union of both ranges)
+                    merged_from = min(existing_from, cancel_from_obj)
+                    merged_to = max(existing_to, cancel_to_obj)
+                    
+                    allocation.cancelled_date_from = merged_from
+                    allocation.cancelled_date_to = merged_to
+                    # Append reason if different
+                    if reason and reason != allocation.cancellation_reason:
+                        if allocation.cancellation_reason:
+                            allocation.cancellation_reason += f" | Additional cancellation: {reason}"
+                        else:
+                            allocation.cancellation_reason = reason
+                else:
+                    # First cancellation
+                    allocation.cancelled_date_from = cancel_from_obj
+                    allocation.cancelled_date_to = cancel_to_obj
+                    allocation.cancellation_reason = reason
+                
                 allocation.status = 'cancelled'
                 allocation.cancelled_by = request.user if request.user.is_authenticated else None
                 allocation.cancelled_at = timezone.now()
-                allocation.cancelled_date_from = parse_date(cancel_from)
-                allocation.cancelled_date_to = parse_date(cancel_to)
-                allocation.cancellation_reason = reason
                 allocation.save()
                 
                 # Create notification - COMMENTED OUT DUE TO WEBSOCKET ERRORS
@@ -2451,30 +2557,96 @@ def prescription_entry_page(request):
         # ---------- resume prescription ----------
         if action_post == 'resume_prescription':
             allocation_id = payload.get('allocation_id')
-            resume_from = payload.get('resume_from')
-            resume_to = payload.get('resume_to')
+            resume_date = payload.get('resume_date')  # Single date to resume
+            resume_from = payload.get('resume_from')  # Backward compatibility
+            resume_to = payload.get('resume_to')  # Backward compatibility
             
-            if not allocation_id or not resume_from or not resume_to:
+            if not allocation_id:
+                return JsonResponse({'error': 'missing_allocation_id'}, status=400)
+            
+            # Support both single date and date range (for backward compatibility)
+            if resume_date:
+                resume_from = resume_date
+                resume_to = resume_date
+            elif not resume_from or not resume_to:
                 return JsonResponse({'error': 'missing_fields'}, status=400)
             
             try:
                 allocation = PrescriptionAllocation.objects.get(id=allocation_id)
-                allocation.status = 'draft'  # Set to draft on resume
+                
+                # If there are no cancelled dates, return error
+                if not allocation.cancelled_date_from or not allocation.cancelled_date_to:
+                    return JsonResponse({'error': 'no_cancelled_dates_to_resume'}, status=400)
+                
+                # Validate that the date is within cancelled range
+                resume_date_obj = parse_date(resume_from)
+                if resume_date_obj < allocation.cancelled_date_from or resume_date_obj > allocation.cancelled_date_to:
+                    return JsonResponse({'error': 'resume_date_outside_cancelled_range'}, status=400)
+                
+                # Update cancelled date range based on what was resumed
+                if allocation.cancelled_date_from and allocation.cancelled_date_to:
+                    resume_from_obj = parse_date(resume_from)
+                    resume_to_obj = parse_date(resume_to)
+                    
+                    # If resuming the entire range, clear cancellation
+                    if resume_from_obj == allocation.cancelled_date_from and resume_to_obj == allocation.cancelled_date_to:
+                        allocation.cancelled_date_from = None
+                        allocation.cancelled_date_to = None
+                        allocation.cancellation_reason = ''
+                        allocation.status = 'draft'
+                    # If resuming from the start, update from_date
+                    elif resume_from_obj == allocation.cancelled_date_from:
+                        from datetime import timedelta
+                        new_from = resume_to_obj + timedelta(days=1)
+                        if new_from <= allocation.cancelled_date_to:
+                            allocation.cancelled_date_from = new_from
+                        else:
+                            # All dates resumed
+                            allocation.cancelled_date_from = None
+                            allocation.cancelled_date_to = None
+                            allocation.cancellation_reason = ''
+                            allocation.status = 'draft'
+                    # If resuming from the end, update to_date
+                    elif resume_to_obj == allocation.cancelled_date_to:
+                        from datetime import timedelta
+                        new_to = resume_from_obj - timedelta(days=1)
+                        if new_to >= allocation.cancelled_date_from:
+                            allocation.cancelled_date_to = new_to
+                        else:
+                            # All dates resumed
+                            allocation.cancelled_date_from = None
+                            allocation.cancelled_date_to = None
+                            allocation.cancellation_reason = ''
+                            allocation.status = 'draft'
+                    # If resuming from the middle, we keep the original range
+                    # The frontend will handle showing remaining dates
+                
                 allocation.resumed_by = request.user if request.user.is_authenticated else None
                 allocation.resumed_at = timezone.now()
-                allocation.cancelled_date_from = None
-                allocation.cancelled_date_to = None
-                allocation.cancellation_reason = ''
                 allocation.save()
+                
+                # Ensure PrescriptionScheduling record exists for the resumed date
+                from .models import PrescriptionScheduling
+                resume_date_obj = parse_date(resume_from)
+                PrescriptionScheduling.objects.get_or_create(
+                    patient=allocation.patient,
+                    prescription_date=resume_date_obj,
+                    defaults={
+                        'doctor': request.user if request.user.is_authenticated else None,
+                        'status': 'draft'
+                    }
+                )
                 
                 # Create notification - COMMENTED OUT TEMPORARILY DUE TO NETWORK ERRORS
                 # create_prescription_notification(allocation, 'prescription_resumed', request.user, {
+                #     'resume_date': resume_date or resume_from,
                 #     'resume_from': resume_from,
                 #     'resume_to': resume_to
                 # })
                 
                 # Log audit
                 log_prescription_audit(request.user, 'resume_prescription', 'PrescriptionAllocation', str(allocation.id), {
+                    'resume_date': resume_date or resume_from,
                     'resume_from': resume_from,
                     'resume_to': resume_to
                 })

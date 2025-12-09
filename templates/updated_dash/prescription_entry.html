@@ -871,16 +871,14 @@
 
   <!-- Resume Modal -->
   <div id="resume-modal-backdrop" class="modal-backdrop">
-    <div class="modal" role="dialog" aria-modal="true">
+    <div class="modal" role="dialog" aria-modal="true" style="max-width: 600px;">
       <h3><i class="fas fa-play-circle"></i> Resume Prescription</h3>
       <div id="resume-modal-info" class="small-muted" style="margin-top: 8px;"></div>
-      <div style="margin-top:16px;" class="form-row">
-        <div class="form-group"><label for="resume-from">Resume From</label><input type="date" id="resume-from" /></div>
-        <div class="form-group"><label for="resume-to">Resume To</label><input type="date" id="resume-to" /></div>
+      <div id="resume-dates-list" style="margin-top: 16px; max-height: 400px; overflow-y: auto;">
+        <!-- Cancelled dates will be listed here with individual resume buttons -->
       </div>
       <div class="modal-footer">
         <button id="resume-modal-close" class="btn btn-outline">Close</button>
-        <button id="resume-submit" class="btn btn-success">Resume Prescription</button>
       </div>
     </div>
   </div>
@@ -1001,8 +999,8 @@ $(function(){
   const $cancelModal = $('#cancel-modal-backdrop'), $cancelFrom = $('#cancel-from'), $cancelTo = $('#cancel-to'), $cancelReason = $('#cancel-reason');
   const $cancelSubmitBtn = $('#cancel-submit'), $cancelCloseBtn = $('#cancel-modal-close'), $cancelModalInfo = $('#cancel-modal-info');
 
-  const $resumeModal = $('#resume-modal-backdrop'), $resumeFrom = $('#resume-from'), $resumeTo = $('#resume-to');
-  const $resumeSubmitBtn = $('#resume-submit'), $resumeCloseBtn = $('#resume-modal-close'), $resumeModalInfo = $('#resume-modal-info');
+  const $resumeModal = $('#resume-modal-backdrop');
+  const $resumeCloseBtn = $('#resume-modal-close'), $resumeModalInfo = $('#resume-modal-info');
 
   // Set today's date as default for From Date field
   if (!$fromDate.val()) {
@@ -1850,14 +1848,24 @@ $(function(){
           <button class="update-prescription action-btn btn btn-success" data-i="${i}" style="display:none">
             <i class="fas fa-sync-alt"></i> Update
           </button>
-          ${p.status === 'cancelled' ? 
-            `<button class="resume-prescription action-btn btn btn-success" data-i="${i}">
-              <i class="fas fa-play-circle"></i> Resume
-            </button>` : 
-            `<button class="cancel-prescription action-btn btn" data-i="${i}" style="background:var(--warning);">
-              <i class="fas fa-ban"></i> Cancel
-            </button>`
-          }
+          ${(() => {
+            const hasCancelledDates = p.cancelled_date_from && p.cancelled_date_to;
+            const hasDateRange = p.from_date && p.to_date;
+            let buttons = '';
+            // Show resume button if there are cancelled dates
+            if (hasCancelledDates) {
+              buttons += `<button class="resume-prescription action-btn btn btn-success" data-i="${i}">
+                <i class="fas fa-play-circle"></i> Resume
+              </button>`;
+            }
+            // Show cancel button if there's a date range (can always cancel, will merge with existing)
+            if (hasDateRange) {
+              buttons += `<button class="cancel-prescription action-btn btn" data-i="${i}" style="background:var(--warning);">
+                <i class="fas fa-ban"></i> Cancel
+              </button>`;
+            }
+            return buttons;
+          })()}
         </td>
       </tr>`;
       $prescriptionsTableBody.append(row);
@@ -2006,11 +2014,27 @@ $(function(){
   $prescriptionsTableBody.on('click', '.cancel-prescription', function(){ const i=$(this).data('i'); openCancelModal(i); });
   function openCancelModal(index){
     cancelingPrescriptionIndex = index; const p = addedPrescriptions[index]; if(!p) return;
-    $('#cancel-modal-info').text(`Prescription: ${p.prescription_name} — Allowed cancel range: ${formatDate(p.from_date)||'—'} → ${formatDate(p.to_date)||'—'}`);
-    if (p.from_date) $cancelFrom.attr('min', p.from_date).val(p.from_date); else $cancelFrom.removeAttr('min').val('');
-    if (p.to_date) $cancelTo.attr('max', p.to_date).val(p.to_date); else $cancelTo.removeAttr('max').val('');
-    if (p.from_date && p.to_date){ $cancelFrom.attr('max', p.to_date); $cancelTo.attr('min', p.from_date); if(!$cancelFrom.val()) $cancelFrom.val(p.from_date); if(!$cancelTo.val()) $cancelTo.val(p.to_date); }
-    else { $cancelFrom.removeAttr('max'); $cancelTo.removeAttr('min'); }
+    let infoText = `Prescription: ${p.prescription_name} — Allowed cancel range: ${formatDate(p.from_date)||'—'} → ${formatDate(p.to_date)||'—'}`;
+    if (p.cancelled_date_from && p.cancelled_date_to) {
+      infoText += `\nAlready cancelled: ${formatDate(p.cancelled_date_from)} → ${formatDate(p.cancelled_date_to)}`;
+    }
+    $('#cancel-modal-info').text(infoText);
+    
+    // Set min/max based on prescription date range
+    if (p.from_date) $cancelFrom.attr('min', p.from_date); else $cancelFrom.removeAttr('min');
+    if (p.to_date) $cancelTo.attr('max', p.to_date); else $cancelTo.removeAttr('max');
+    
+    // Allow cancelling any date within the prescription range (including already cancelled ones)
+    if (p.from_date && p.to_date){ 
+      $cancelFrom.attr('max', p.to_date); 
+      $cancelTo.attr('min', p.from_date); 
+      if(!$cancelFrom.val()) $cancelFrom.val(p.from_date); 
+      if(!$cancelTo.val()) $cancelTo.val(p.to_date); 
+    }
+    else { 
+      $cancelFrom.removeAttr('max'); 
+      $cancelTo.removeAttr('min'); 
+    }
     $cancelReason.val(''); $cancelModal.show();
   }
 
@@ -2043,13 +2067,35 @@ $(function(){
         return response.json();
       }).then(j => {
         if (j.status === 'ok') {
-          p.status = 'cancelled';
-          p.cancelled_date_from = cfrom;
-          p.cancelled_date_to = cto;
-          p.cancellation_reason = reason;
+          // Reload from server to get merged cancellation dates
+          if (p.allocation_id && selectedPatient) {
+            const patientRegNo = selectedPatient.pat_op_reg_no || selectedPatient.pat_reg_no;
+            ajax({action:'patient_prescriptions', patient_reg_no: patientRegNo}).then(list => {
+              if (list && Array.isArray(list)) {
+                const updated = list.find(pr => pr.allocation_id === p.allocation_id);
+                if (updated) {
+                  Object.assign(p, updated);
+                }
+              }
+              renderAll();
+            }).catch(() => {
+              // Fallback: update with local values
+              if (!p.cancelled_date_from || cfrom < p.cancelled_date_from) p.cancelled_date_from = cfrom;
+              if (!p.cancelled_date_to || cto > p.cancelled_date_to) p.cancelled_date_to = cto;
+              p.status = 'cancelled';
+              p.cancellation_reason = reason;
+              renderAll();
+            });
+          } else {
+            // Local cancellation - merge dates
+            if (!p.cancelled_date_from || cfrom < p.cancelled_date_from) p.cancelled_date_from = cfrom;
+            if (!p.cancelled_date_to || cto > p.cancelled_date_to) p.cancelled_date_to = cto;
+            p.status = 'cancelled';
+            p.cancellation_reason = reason;
+            renderAll();
+          }
           alert('Prescription cancelled successfully.');
           $cancelModal.hide();
-          renderAll();
         } else {
           alert('Failed: ' + (j.error || JSON.stringify(j)));
         }
@@ -2068,48 +2114,93 @@ $(function(){
     }
   });
 
+  // Helper function to generate date range (avoiding timezone issues)
+  function getDateRange(fromDate, toDate) {
+    const dates = [];
+    if (!fromDate || !toDate) return dates;
+    
+    // Parse dates directly without timezone conversion
+    const startParts = fromDate.split('-');
+    const endParts = toDate.split('-');
+    if (startParts.length !== 3 || endParts.length !== 3) return dates;
+    
+    const start = new Date(parseInt(startParts[0]), parseInt(startParts[1]) - 1, parseInt(startParts[2]));
+    const end = new Date(parseInt(endParts[0]), parseInt(endParts[1]) - 1, parseInt(endParts[2]));
+    
+    const current = new Date(start);
+    while (current <= end) {
+      // Format as YYYY-MM-DD without timezone conversion
+      const year = current.getFullYear();
+      const month = String(current.getMonth() + 1).padStart(2, '0');
+      const day = String(current.getDate()).padStart(2, '0');
+      dates.push(`${year}-${month}-${day}`);
+      current.setDate(current.getDate() + 1);
+    }
+    return dates;
+  }
+
   // Resume prescription
   $prescriptionsTableBody.on('click', '.resume-prescription', function(){ const i=$(this).data('i'); openResumeModal(i); });
   function openResumeModal(index){
     resumingPrescriptionIndex = index; 
     const p = addedPrescriptions[index]; 
     if(!p) return;
-    $('#resume-modal-info').text(`Prescription: ${p.prescription_name} — Resume range: ${formatDate(p.from_date)||'—'} → ${formatDate(p.to_date)||'—'}`);
-    if (p.from_date) $resumeFrom.attr('min', p.from_date).val(p.from_date); 
-    else $resumeFrom.removeAttr('min').val('');
-    if (p.to_date) $resumeTo.attr('max', p.to_date).val(p.to_date); 
-    else $resumeTo.removeAttr('max').val('');
-    if (p.from_date && p.to_date){ 
-      $resumeFrom.attr('max', p.to_date); 
-      $resumeTo.attr('min', p.from_date); 
-      if(!$resumeFrom.val()) $resumeFrom.val(p.from_date); 
-      if(!$resumeTo.val()) $resumeTo.val(p.to_date); 
+    
+    $('#resume-modal-info').html(`<strong>Prescription:</strong> ${p.prescription_name || 'N/A'}<br/><strong>Cancelled Range:</strong> ${formatDate(p.cancelled_date_from) || '—'} → ${formatDate(p.cancelled_date_to) || '—'}`);
+    
+    const $datesList = $('#resume-dates-list');
+    $datesList.empty();
+    
+    if (!p.cancelled_date_from || !p.cancelled_date_to) {
+      $datesList.html('<p style="color: #666; padding: 16px; text-align: center;">No cancelled dates found.</p>');
+      $resumeModal.show();
+      return;
     }
-    else { 
-      $resumeFrom.removeAttr('max'); 
-      $resumeTo.removeAttr('min'); 
+    
+    const cancelledDates = getDateRange(p.cancelled_date_from, p.cancelled_date_to);
+    
+    if (cancelledDates.length === 0) {
+      $datesList.html('<p style="color: #666; padding: 16px; text-align: center;">No cancelled dates found.</p>');
+      $resumeModal.show();
+      return;
     }
+    
+    cancelledDates.forEach(date => {
+      const $dateItem = $(`
+        <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px; margin-bottom: 8px; background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 6px;">
+          <div style="font-weight: 500; color: #333;">
+            <i class="fas fa-calendar-alt" style="margin-right: 8px; color: #6c757d;"></i>
+            ${formatDate(date)}
+          </div>
+          <button class="btn btn-sm btn-success resume-date-btn" data-date="${date}" style="min-width: 100px;">
+            <i class="fas fa-play"></i> Resume
+          </button>
+        </div>
+      `);
+      $datesList.append($dateItem);
+    });
+    
     $resumeModal.show();
   }
   
-  $resumeCloseBtn.on('click', function(){ $resumeModal.hide(); resumingPrescriptionIndex = null; });
-  $resumeSubmitBtn.on('click', function(){ submitResume(); });
-  
-  function submitResume(){
-    if (resumingPrescriptionIndex === null) return;
-    const from = $resumeFrom.val();
-    const to = $resumeTo.val();
-    if (!from || !to) { alert('Please select both dates'); return; }
-    if (from > to) { alert('From date must be <= To date'); return; }
+  // Handle individual date resume
+  $(document).on('click', '.resume-date-btn', function(){
+    const date = $(this).data('date');
+    if (!date || resumingPrescriptionIndex === null) return;
     
     const prescription = addedPrescriptions[resumingPrescriptionIndex];
+    if (!prescription) return;
+    
+    if (!confirm(`Are you sure you want to resume prescription for ${formatDate(date)}?`)) {
+      return;
+    }
     
     if (prescription.allocation_id) {
       // Server-side resume
       fetch(API_URL + '?action=resume_prescription', {
         method:'POST',
         headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({ allocation_id: prescription.allocation_id, resume_from: from, resume_to: to })
+        body: JSON.stringify({ allocation_id: prescription.allocation_id, resume_date: date })
       }).then(response => {
         if (!response.ok) {
           return response.json().then(j => {
@@ -2121,14 +2212,41 @@ $(function(){
         return response.json();
       }).then(j => {
         if (j.status === 'ok') {
-          prescription.status = 'draft';
-          prescription.cancelled_date_from = null;
-          prescription.cancelled_date_to = null;
-          prescription.cancellation_reason = '';
-          alert('Prescription resumed successfully and set to Draft status.');
-          $resumeModal.hide();
-          resumingPrescriptionIndex = null;
-          renderAll();
+          alert('Prescription resumed successfully for ' + formatDate(date) + ' and set to Draft status.');
+          // Reload prescription data from server to get updated cancelled dates
+          if (selectedPatient && prescription.allocation_id) {
+            const patientRegNo = selectedPatient.pat_op_reg_no || selectedPatient.pat_reg_no;
+            ajax({action:'patient_prescriptions', patient_reg_no: patientRegNo}).then(list => {
+              if (list && Array.isArray(list)) {
+                const updated = list.find(pr => pr.allocation_id === prescription.allocation_id);
+                if (updated) {
+                  Object.assign(prescription, updated);
+                }
+              }
+              // Reload the modal to show updated dates
+              if (prescription.cancelled_date_from && prescription.cancelled_date_to) {
+                openResumeModal(resumingPrescriptionIndex);
+              } else {
+                $resumeModal.hide();
+                resumingPrescriptionIndex = null;
+              }
+              renderAll();
+            }).catch(() => {
+              // Fallback: try to reload modal anyway
+              if (prescription.cancelled_date_from && prescription.cancelled_date_to) {
+                openResumeModal(resumingPrescriptionIndex);
+              } else {
+                $resumeModal.hide();
+                resumingPrescriptionIndex = null;
+              }
+              renderAll();
+            });
+          } else {
+            // No patient selected or local prescription - just close modal
+            $resumeModal.hide();
+            resumingPrescriptionIndex = null;
+            renderAll();
+          }
         } else {
           alert('Failed: ' + (j.error || JSON.stringify(j)));
         }
@@ -2137,17 +2255,28 @@ $(function(){
       });
     } else {
       // Local resume
-      prescription.status = 'draft';
-      prescription.cancelled_date_from = null;
-      prescription.cancelled_date_to = null;
-      prescription.cancellation_reason = '';
+      if (prescription.cancelled_date_from === date && prescription.cancelled_date_to === date) {
+        prescription.status = 'draft';
+        prescription.cancelled_date_from = null;
+        prescription.cancelled_date_to = null;
+        prescription.cancellation_reason = '';
+      } else if (prescription.cancelled_date_from === date) {
+        const nextDate = new Date(date);
+        nextDate.setDate(nextDate.getDate() + 1);
+        prescription.cancelled_date_from = nextDate.toISOString().split('T')[0];
+      } else if (prescription.cancelled_date_to === date) {
+        const prevDate = new Date(date);
+        prevDate.setDate(prevDate.getDate() - 1);
+        prescription.cancelled_date_to = prevDate.toISOString().split('T')[0];
+      }
       
+      alert('Prescription resumed successfully for ' + formatDate(date) + ' and set to Draft status.');
+      openResumeModal(resumingPrescriptionIndex);
       renderAll();
-      $resumeModal.hide();
-      resumingPrescriptionIndex = null;
-      alert('Prescription resumed successfully and set to Draft status');
     }
-  }
+  });
+  
+  $resumeCloseBtn.on('click', function(){ $resumeModal.hide(); resumingPrescriptionIndex = null; });
 
   // export JSON
   $('#export-json').on('click', function(){

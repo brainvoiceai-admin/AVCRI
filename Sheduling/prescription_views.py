@@ -136,14 +136,36 @@ def get_prescription_data_api(request):
                 # Get room_no - fallback to PatientSnapshot.pat_room_no
                 room_no = getattr(patient, 'pat_room_no', None)
                 
-                # Get prescription items count from associated PrescriptionAllocation
-                allocation = PrescriptionAllocation.objects.filter(
+                # Get ALL prescription allocations for this patient and date
+                # Exclude only cancelled prescriptions for this specific date
+                allocations = PrescriptionAllocation.objects.filter(
                     patient=patient,
                     from_date__lte=filter_date,
                     to_date__gte=filter_date
-                ).first()
+                )
                 
-                if allocation:
+                # Filter out allocations that are cancelled for this specific date
+                active_allocations = []
+                for alloc in allocations:
+                    # Skip if allocation is cancelled and the filter_date falls within the cancelled date range
+                    if alloc.status == 'cancelled' and alloc.cancelled_date_from and alloc.cancelled_date_to:
+                        if alloc.cancelled_date_from <= filter_date <= alloc.cancelled_date_to:
+                            # This prescription is cancelled for this date, skip it
+                            continue
+                    active_allocations.append(alloc)
+                
+                # If no active allocations (all are cancelled for this date), skip this patient entry
+                if not active_allocations:
+                    continue
+                
+                # Count items from all active allocations
+                prescription_count = 0
+                prescription_names = []
+                
+                for allocation in active_allocations:
+                    if allocation.prescription_name:
+                        prescription_names.append(allocation.prescription_name)
+                    
                     # Normalize items_groups to a list of groups
                     raw_groups = allocation.items_groups
                     groups = []
@@ -159,16 +181,15 @@ def get_prescription_data_api(request):
                     else:
                         groups = []
 
-                    # Count total items across groups
-                    prescription_count = 0
+                    # Count total items across groups for this allocation
                     for grp in groups:
                         items = grp.get('items', []) if isinstance(grp, dict) else []
                         prescription_count += len(items)
-
-                    prescription_name = allocation.prescription_name
-                else:
-                    prescription_count = 0
-                    prescription_name = 'Prescription'
+                
+                # Use first prescription name or default
+                prescription_name = prescription_names[0] if prescription_names else 'Prescription'
+                if len(prescription_names) > 1:
+                    prescription_name += f' (+{len(prescription_names) - 1} more)'
                 
                 data.append({
                     'patient_id': patient.id,
@@ -256,17 +277,27 @@ def get_prescription_details_api(request):
             to_date__gte=filter_date
         ).order_by('from_date', 'id')
         
+        # Filter out allocations that are cancelled for this specific date
+        active_allocations = []
+        for allocation in allocations:
+            # Skip if allocation is cancelled and the filter_date falls within the cancelled date range
+            if allocation.status == 'cancelled' and allocation.cancelled_date_from and allocation.cancelled_date_to:
+                if allocation.cancelled_date_from <= filter_date <= allocation.cancelled_date_to:
+                    # This prescription is cancelled for this date, skip it
+                    continue
+            active_allocations.append(allocation)
+        
         prescription_is_cancelled = False
         prescription_status = 'draft'
         
-        if allocations:
-            all_cancelled = all(a.status == 'cancelled' for a in allocations)
+        if active_allocations:
+            all_cancelled = all(a.status == 'cancelled' for a in active_allocations)
             prescription_is_cancelled = all_cancelled
-            non_cancel_statuses = [a.status for a in allocations if a.status != 'cancelled']
+            non_cancel_statuses = [a.status for a in active_allocations if a.status != 'cancelled']
             prescription_status = non_cancel_statuses[0] if non_cancel_statuses else 'cancelled'
         
-        # Process all allocations and use items_groups exactly as stored
-        for allocation in allocations:
+        # Process all active allocations and use items_groups exactly as stored
+        for allocation in active_allocations:
             if allocation.items_groups:
                 raw_groups = allocation.items_groups
                 groups = []
