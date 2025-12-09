@@ -728,7 +728,7 @@
           <div class="item-groups-container">
             <div class="form-row">
               <div class="form-group">
-                <label for="item-builder-select">Select Medications</label>
+                <label for="item-builder-select">Select Medications <span style="color:var(--danger);">*</span></label>
                 <select id="item-builder-select" multiple="multiple"></select>
               </div>
               <div class="form-group">
@@ -736,12 +736,12 @@
                 <select id="item-builder-ingredients" multiple="multiple" style="width:100%;"></select>
               </div>
               <div class="form-group small">
-                <label for="item-builder-dosage">Dosage <span style="color:var(--danger);">*</span></label>
-                <input id="item-builder-dosage" type="text" placeholder="e.g. 2 tsp" required>
+                <label for="item-builder-dosage">Dosage</label>
+                <input id="item-builder-dosage" type="text" placeholder="e.g. 2 tsp">
               </div>
               <div class="form-group small">
-                <label for="item-builder-uno">Unit <span style="color:var(--danger);">*</span></label>
-                <select id="item-builder-uno" required>
+                <label for="item-builder-uno">Unit</label>
+                <select id="item-builder-uno">
                   <option value="">Select Unit</option>
                 </select>
               </div>
@@ -1449,14 +1449,9 @@ $(function(){
     const ingredientIds = ingredientData.map(i => i.id);
     
     // Validate mandatory fields
-    if (!dosage) {
-      alert('Dosage is mandatory');
-      $('#item-builder-dosage').focus();
-      return;
-    }
-    if (!uno) {
-      alert('Unit is mandatory');
-      $('#item-builder-uno').focus();
+    if (!selected || selected.length === 0) {
+      alert('Please select at least one medication');
+      $itemBuilder.focus();
       return;
     }
     

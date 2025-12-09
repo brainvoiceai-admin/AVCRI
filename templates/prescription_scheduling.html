@@ -1545,35 +1545,6 @@
                         const boxWidth = pageWidth - margin * 2;
                         const boxStartY = yPos;
                         
-                        // Usage header row with background
-                        doc.setFillColor(245, 245, 245);
-                        doc.rect(boxX, boxY, boxWidth, 4, 'F');
-                        
-                        // Usage label and value
-                        doc.setFontSize(7.5);
-                        doc.setFont(undefined, 'bold');
-                        doc.setTextColor(0, 0, 0);
-                        doc.text('Usage:', boxX + 2, boxY + 2.5);
-                        
-                        if (commonUsage) {
-                            doc.setFont(undefined, 'normal');
-                            doc.setTextColor(0, 0, 0);
-                            const usageLines = doc.splitTextToSize(commonUsage, boxWidth - 25);
-                            doc.text(usageLines, boxX + 18, boxY + 2.5);
-                            yPos = boxY + Math.max(4, usageLines.length * 2.5);
-                        } else {
-                            doc.setFont(undefined, 'normal');
-                            doc.setTextColor(120, 120, 120);
-                            doc.text('—', boxX + 18, boxY + 2.5);
-                            yPos = boxY + 4;
-                        }
-                        
-                        // Draw horizontal line after usage header
-                        doc.setDrawColor(200, 200, 200);
-                        doc.setLineWidth(0.2);
-                        doc.line(boxX, yPos, boxX + boxWidth, yPos);
-                        yPos += 1.5;
-                        
                         // Column headers row with background
                         const colHeadersY = yPos;
                         doc.setFillColor(250, 250, 250);
@@ -1583,10 +1554,11 @@
                         doc.setFont(undefined, 'bold');
                         doc.setTextColor(0, 0, 0);
                         doc.text('Items', boxX + 2, colHeadersY + 2.5);
-                        doc.text('Dosage', boxX + 48, colHeadersY + 2.5);
-                        doc.text('Time', boxX + 75, colHeadersY + 2.5);
-                        doc.text('Ingredients', boxX + 95, colHeadersY + 2.5);
-                        doc.text('Oil Class', boxX + 135, colHeadersY + 2.5);
+                        doc.text('Usage', boxX + 40, colHeadersY + 2.5);
+                        doc.text('Dosage', boxX + 68, colHeadersY + 2.5);
+                        doc.text('Time', boxX + 95, colHeadersY + 2.5);
+                        doc.text('Ingredients', boxX + 118, colHeadersY + 2.5);
+                        doc.text('Oil Class', boxX + 150, colHeadersY + 2.5);
                         
                         // Draw line under column headers
                         yPos = colHeadersY + 3.5;
@@ -1624,6 +1596,9 @@
 
                             const rowStartY = yPos;
                             
+                            // Get usage for this entry (only show in first row)
+                            const rowUsage = (groupIndex === 0) ? (group.usage || commonUsage || '') : '';
+                            
                             // Render row data
                             doc.setFontSize(7);
                             
@@ -1632,28 +1607,36 @@
                             doc.setTextColor(0, 86, 179);
                             const prefix = groupIndex > 0 ? '+ ' : '';
                             const itemsText = prefix + (itemNames || '—');
-                            const itemsLines = doc.splitTextToSize(itemsText, 43);
+                            const itemsLines = doc.splitTextToSize(itemsText, 35);
                             doc.text(itemsLines, boxX + 2, yPos + 2);
                             
-                            // Dosage
+                            // Usage (only show in first row of entry, common for full entry)
                             doc.setFont(undefined, 'normal');
                             doc.setTextColor(0, 0, 0);
+                            const usageLines = (groupIndex === 0 && rowUsage) ? doc.splitTextToSize(rowUsage, 25) : [];
+                            if (usageLines.length > 0) {
+                                doc.text(usageLines, boxX + 40, yPos + 2);
+                            }
+                            // For subsequent rows, usage column is left empty
+                            
+                            // Dosage
                             const doseLines = doc.splitTextToSize(doseDisplay || '—', 25);
-                            doc.text(doseLines, boxX + 48, yPos + 2);
+                            doc.text(doseLines, boxX + 68, yPos + 2);
                             
                             // Time
-                            doc.text(time || '—', boxX + 75, yPos + 2);
+                            doc.text(time || '—', boxX + 95, yPos + 2);
                             
                             // Ingredients
-                            const ingredientsLines = doc.splitTextToSize(ingredientsDisplay || '—', 38);
-                            doc.text(ingredientsLines, boxX + 95, yPos + 2);
+                            const ingredientsLines = doc.splitTextToSize(ingredientsDisplay || '—', 30);
+                            doc.text(ingredientsLines, boxX + 118, yPos + 2);
                             
                             // Oil Class
-                            doc.text(oilClass || '—', boxX + 135, yPos + 2);
+                            doc.text(oilClass || '—', boxX + 150, yPos + 2);
                             
-                            // Calculate row height based on tallest cell
+                            // Calculate row height based on tallest cell (include usage only for first row)
                             const rowHeight = Math.max(
                                 itemsLines.length * 2.5,
+                                (groupIndex === 0 ? usageLines.length * 2.5 : 0),
                                 doseLines.length * 2.5,
                                 ingredientsLines.length * 2.5,
                                 3.5
