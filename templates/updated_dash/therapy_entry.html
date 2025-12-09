@@ -927,16 +927,14 @@
 
   <!-- Resume Modal -->
   <div id="resume-modal-backdrop" class="modal-backdrop">
-    <div class="modal" role="dialog" aria-modal="true">
+    <div class="modal" role="dialog" aria-modal="true" style="max-width: 600px;">
       <h3><i class="fas fa-play-circle"></i> Resume Therapy</h3>
       <div id="resume-modal-info" class="small-muted" style="margin-top: 8px;"></div>
-      <div style="margin-top:16px;" class="form-row">
-        <div class="form-group"><label for="resume-from">Resume From</label><input type="date" id="resume-from" /></div>
-        <div class="form-group"><label for="resume-to">Resume To</label><input type="date" id="resume-to" /></div>
+      <div id="resume-dates-list" style="margin-top: 16px; max-height: 400px; overflow-y: auto;">
+        <!-- Cancelled dates will be listed here with individual resume buttons -->
       </div>
       <div class="modal-footer">
         <button id="resume-modal-close" class="btn btn-outline">Close</button>
-        <button id="resume-submit" class="btn btn-success">Resume Therapy</button>
       </div>
     </div>
   </div>
@@ -1033,9 +1031,6 @@ $(function(){
 
   const $resumeModal = $('#resume-modal-backdrop');
   const $resumeCloseBtn = $('#resume-modal-close');
-  const $resumeSubmitBtn = $('#resume-submit');
-  const $resumeFrom = $('#resume-from');
-  const $resumeTo = $('#resume-to');
 
   // --- state ---
   let itemGroups = [];
@@ -1781,6 +1776,9 @@ $(function(){
       let statusHtml = '';
       let statusClass = 'status-scheduled';
       
+      // Check if therapy has cancelled dates
+      const hasCancelledDates = t.cancelled_date_from && t.cancelled_date_to && t.cancelled_date_from !== 'null' && t.cancelled_date_to !== 'null';
+      
       // Build status display with counts - format: "2 Draft / 3 Allocated"
       const statusSummary = t.status_summary || {};
       const statusParts = [];
@@ -1795,7 +1793,20 @@ $(function(){
       if (statusSummary.failed) {
         statusParts.push(`${statusSummary.failed} Failed`);
       }
-      if (statusSummary.cancelled) {
+      // Check cancelled dates or status_summary for cancelled count
+      if (hasCancelledDates) {
+        // Calculate cancelled days from date range (avoiding timezone issues)
+        const fromParts = t.cancelled_date_from.split('-');
+        const toParts = t.cancelled_date_to.split('-');
+        if (fromParts.length === 3 && toParts.length === 3) {
+          const cancelledFrom = new Date(parseInt(fromParts[0]), parseInt(fromParts[1]) - 1, parseInt(fromParts[2]));
+          const cancelledTo = new Date(parseInt(toParts[0]), parseInt(toParts[1]) - 1, parseInt(toParts[2]));
+          const cancelledDays = Math.floor((cancelledTo - cancelledFrom) / (1000 * 60 * 60 * 24)) + 1;
+          if (cancelledDays > 0) {
+            statusParts.push(`${cancelledDays} Cancelled`);
+          }
+        }
+      } else if (statusSummary.cancelled) {
         statusParts.push(`${statusSummary.cancelled} Cancelled`);
       }
       
@@ -1805,7 +1816,11 @@ $(function(){
         statusClass = 'status-mixed';
       } else {
         // Fallback to overall status if no counts available
-        if (t.status === 'draft') {
+        // Also check cancelled dates for immediate feedback
+        if (hasCancelledDates) {
+          statusHtml = '<span class="status-pill status-cancelled">Cancelled</span>';
+          statusClass = 'status-cancelled';
+        } else if (t.status === 'draft') {
           statusHtml = '<span class="status-pill status-draft">Draft</span>';
           statusClass = 'status-draft';
         } else if (t.status === 'cancelled') {
@@ -1845,14 +1860,27 @@ $(function(){
           <button class="update-therapy action-btn btn btn-success" data-i="${i}" style="display:none">
             <i class="fas fa-sync-alt"></i> Update
           </button>
-          ${t.status === 'cancelled' ? 
-            `<button class="resume-therapy action-btn btn btn-success" data-i="${i}">
-              <i class="fas fa-play-circle"></i> Resume
-            </button>` : 
-            `<button class="cancel-therapy action-btn btn btn-warning" data-i="${i}">
-              <i class="fas fa-ban"></i> Cancel
-            </button>`
-          }
+          ${(() => {
+            // Check for cancelled dates - handle both string and null/undefined values
+            const cancelledFrom = t.cancelled_date_from;
+            const cancelledTo = t.cancelled_date_to;
+            const hasCancelledDates = cancelledFrom && cancelledTo && cancelledFrom !== 'null' && cancelledTo !== 'null';
+            const hasDateRange = t.from_date && t.to_date;
+            let buttons = '';
+            // Show resume button if there are cancelled dates
+            if (hasCancelledDates) {
+              buttons += `<button class="resume-therapy action-btn btn btn-success" data-i="${i}">
+                <i class="fas fa-play-circle"></i> Resume
+              </button>`;
+            }
+            // Show cancel button if there's a date range (can always cancel, will merge with existing)
+            if (hasDateRange) {
+              buttons += `<button class="cancel-therapy action-btn btn btn-warning" data-i="${i}">
+                <i class="fas fa-ban"></i> Cancel
+              </button>`;
+            }
+            return buttons;
+          })()}
         </td>
       </tr>`;
       $therapiesTableBody.append(row);
@@ -1975,11 +2003,27 @@ $(function(){
   
   function openCancelModal(index){
     cancelingTherapyIndex = index; const t = addedTherapies[index]; if(!t) return;
-    $('#cancel-modal-info').text(`Therapy: ${t.therapy_name} — Allowed cancel range: ${t.from_date||'—'} → ${t.to_date||'—'}`);
-    if (t.from_date) $cancelFrom.attr('min', t.from_date).val(t.from_date); else $cancelFrom.removeAttr('min').val('');
-    if (t.to_date) $cancelTo.attr('max', t.to_date).val(t.to_date); else $cancelTo.removeAttr('max').val('');
-    if (t.from_date && t.to_date){ $cancelFrom.attr('max', t.to_date); $cancelTo.attr('min', t.from_date); if(!$cancelFrom.val()) $cancelFrom.val(t.from_date); if(!$cancelTo.val()) $cancelTo.val(t.to_date); }
-    else { $cancelFrom.removeAttr('max'); $cancelTo.removeAttr('min'); }
+    let infoText = `Therapy: ${t.therapy_name} — Allowed cancel range: ${t.from_date||'—'} → ${t.to_date||'—'}`;
+    if (t.cancelled_date_from && t.cancelled_date_to) {
+      infoText += `\nAlready cancelled: ${formatDate(t.cancelled_date_from)} → ${formatDate(t.cancelled_date_to)}`;
+    }
+    $('#cancel-modal-info').text(infoText);
+    
+    // Set min/max based on therapy date range
+    if (t.from_date) $cancelFrom.attr('min', t.from_date); else $cancelFrom.removeAttr('min');
+    if (t.to_date) $cancelTo.attr('max', t.to_date); else $cancelTo.removeAttr('max');
+    
+    // Allow cancelling any date within the therapy range (including already cancelled ones)
+    if (t.from_date && t.to_date){ 
+      $cancelFrom.attr('max', t.to_date); 
+      $cancelTo.attr('min', t.from_date); 
+      if(!$cancelFrom.val()) $cancelFrom.val(t.from_date); 
+      if(!$cancelTo.val()) $cancelTo.val(t.to_date); 
+    }
+    else { 
+      $cancelFrom.removeAttr('max'); 
+      $cancelTo.removeAttr('min'); 
+    }
     $cancelReason.val(''); $cancelModal.show();
   }
 
@@ -2003,13 +2047,45 @@ $(function(){
         body: JSON.stringify({ allocation_id: t.allocation_id, cancel_from: cfrom, cancel_to: cto, reason: reason })
       }).then(r => r.json()).then(j => {
         if (j.status === 'ok') {
-          t.status = 'cancelled';
-          t.cancelled_date_from = cfrom;
-          t.cancelled_date_to = cto;
-          t.cancellation_reason = reason;
+          // Reload from server to get merged cancellation dates
+          if (t.allocation_id) {
+            const patientRegNo = selectedPatient ? (selectedPatient.pat_op_reg_no || selectedPatient.pat_reg_no) : '';
+            ajax({action:'patient_therapies', patient_reg_no: patientRegNo}).then(therapies => {
+              if (therapies && Array.isArray(therapies)) {
+                const updated = therapies.find(th => th.allocation_id === t.allocation_id);
+                if (updated) {
+                  // Update all fields from server response
+                  Object.assign(t, updated);
+                  // Explicitly set cancelled dates (handle null/undefined)
+                  t.cancelled_date_from = updated.cancelled_date_from || null;
+                  t.cancelled_date_to = updated.cancelled_date_to || null;
+                  t.cancellation_reason = updated.cancellation_reason || '';
+                  t.status = updated.status || t.status;
+                  // Update status_summary if available
+                  if (updated.status_summary) {
+                    t.status_summary = updated.status_summary;
+                  }
+                }
+              }
+              renderAll();
+            }).catch(() => {
+              // Fallback: update with local values
+              if (!t.cancelled_date_from || cfrom < t.cancelled_date_from) t.cancelled_date_from = cfrom;
+              if (!t.cancelled_date_to || cto > t.cancelled_date_to) t.cancelled_date_to = cto;
+              t.status = 'cancelled';
+              t.cancellation_reason = reason;
+              renderAll();
+            });
+          } else {
+            // Local cancellation - merge dates
+            if (!t.cancelled_date_from || cfrom < t.cancelled_date_from) t.cancelled_date_from = cfrom;
+            if (!t.cancelled_date_to || cto > t.cancelled_date_to) t.cancelled_date_to = cto;
+            t.status = 'cancelled';
+            t.cancellation_reason = reason;
+            renderAll();
+          }
           alert('Therapy cancelled successfully.');
           $cancelModal.hide();
-          renderAll();
         } else {
           alert('Failed: ' + JSON.stringify(j));
         }
@@ -2180,6 +2256,42 @@ $(function(){
     $allocateBtn.show(); $updateBtn.hide();
   }
 
+  // Helper function to format date as DD/MM/YYYY
+  function formatDate(dateStr) {
+    if (!dateStr) return '';
+    const date = new Date(dateStr + 'T00:00:00');
+    if (isNaN(date.getTime())) return dateStr;
+    const day = String(date.getDate()).padStart(2, '0');
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const year = date.getFullYear();
+    return `${day}/${month}/${year}`;
+  }
+
+  // Helper function to generate date range (avoiding timezone issues)
+  function getDateRange(fromDate, toDate) {
+    const dates = [];
+    if (!fromDate || !toDate) return dates;
+    
+    // Parse dates directly without timezone conversion
+    const startParts = fromDate.split('-');
+    const endParts = toDate.split('-');
+    if (startParts.length !== 3 || endParts.length !== 3) return dates;
+    
+    const start = new Date(parseInt(startParts[0]), parseInt(startParts[1]) - 1, parseInt(startParts[2]));
+    const end = new Date(parseInt(endParts[0]), parseInt(endParts[1]) - 1, parseInt(endParts[2]));
+    
+    const current = new Date(start);
+    while (current <= end) {
+      // Format as YYYY-MM-DD without timezone conversion
+      const year = current.getFullYear();
+      const month = String(current.getMonth() + 1).padStart(2, '0');
+      const day = String(current.getDate()).padStart(2, '0');
+      dates.push(`${year}-${month}-${day}`);
+      current.setDate(current.getDate() + 1);
+    }
+    return dates;
+  }
+
   // Resume modal handlers
   $therapiesTableBody.on('click', '.resume-therapy', function(){ const i=$(this).data('i'); openResumeModal(i); });
   
@@ -2187,69 +2299,152 @@ $(function(){
     resumingTherapyIndex = index; 
     const t = addedTherapies[index]; 
     if(!t) return;
-    $('#resume-modal-info').text(`Therapy: ${t.therapy_name} — Resume range: ${t.from_date||'—'} → ${t.to_date||'—'}`);
-    if (t.from_date) $resumeFrom.attr('min', t.from_date).val(t.from_date); 
-    else $resumeFrom.removeAttr('min').val('');
-    if (t.to_date) $resumeTo.attr('max', t.to_date).val(t.to_date); 
-    else $resumeTo.removeAttr('max').val('');
-    if (t.from_date && t.to_date){ 
-      $resumeFrom.attr('max', t.to_date); 
-      $resumeTo.attr('min', t.from_date); 
-      if(!$resumeFrom.val()) $resumeFrom.val(t.from_date); 
-      if(!$resumeTo.val()) $resumeTo.val(t.to_date); 
+    
+    // Get fresh data from the therapy object (ensure we have latest cancelled dates)
+    const cancelledFrom = t.cancelled_date_from;
+    const cancelledTo = t.cancelled_date_to;
+    
+    $('#resume-modal-info').html(`<strong>Therapy:</strong> ${t.therapy_name || 'N/A'}<br/><strong>Cancelled Range:</strong> ${formatDate(cancelledFrom) || '—'} → ${formatDate(cancelledTo) || '—'}`);
+    
+    const $datesList = $('#resume-dates-list');
+    $datesList.empty();
+    
+    // Check if cancelled dates exist and are valid
+    if (!cancelledFrom || !cancelledTo || cancelledFrom === 'null' || cancelledTo === 'null') {
+      $datesList.html('<p style="color: #666; padding: 16px; text-align: center;">No cancelled dates found.</p>');
+      $resumeModal.show();
+      return;
     }
-    else { 
-      $resumeFrom.removeAttr('max'); 
-      $resumeTo.removeAttr('min'); 
+    
+    const cancelledDates = getDateRange(cancelledFrom, cancelledTo);
+    
+    if (cancelledDates.length === 0) {
+      $datesList.html('<p style="color: #666; padding: 16px; text-align: center;">No cancelled dates found.</p>');
+      $resumeModal.show();
+      return;
     }
+    
+    cancelledDates.forEach(date => {
+      const $dateItem = $(`
+        <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px; margin-bottom: 8px; background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 6px;">
+          <div style="font-weight: 500; color: #333;">
+            <i class="fas fa-calendar-alt" style="margin-right: 8px; color: #6c757d;"></i>
+            ${formatDate(date)}
+          </div>
+          <button class="btn btn-sm btn-success resume-date-btn" data-date="${date}" style="min-width: 100px;">
+            <i class="fas fa-play"></i> Resume
+          </button>
+        </div>
+      `);
+      $datesList.append($dateItem);
+    });
+    
     $resumeModal.show();
   }
   
-  function submitResume(){
-    if (resumingTherapyIndex === null) return;
-    const from = $resumeFrom.val();
-    const to = $resumeTo.val();
-    if (!from || !to) { alert('Please select both dates'); return; }
-    if (from > to) { alert('From date must be <= To date'); return; }
+  // Handle individual date resume
+  $(document).on('click', '.resume-date-btn', function(){
+    const date = $(this).data('date');
+    if (!date || resumingTherapyIndex === null) return;
     
     const therapy = addedTherapies[resumingTherapyIndex];
+    if (!therapy) return;
+    
+    if (!confirm(`Are you sure you want to resume therapy for ${formatDate(date)}?`)) {
+      return;
+    }
     
     if (therapy.allocation_id) {
       // Server-side resume
       fetch(API_URL + '?action=resume_therapy', {
         method:'POST',
         headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({ allocation_id: therapy.allocation_id, resume_from: from, resume_to: to })
+        body: JSON.stringify({ allocation_id: therapy.allocation_id, resume_date: date })
       }).then(r => r.json()).then(j => {
         if (j.status === 'ok') {
-          therapy.status = 'draft';
-          therapy.cancelled_date_from = null;
-          therapy.cancelled_date_to = null;
-          therapy.cancellation_reason = '';
-          alert('Therapy resumed successfully.');
-          $resumeModal.hide();
-          resumingTherapyIndex = null;
-          renderAll();
+          alert('Therapy resumed successfully for ' + formatDate(date) + '.');
+          // Reload therapy data from server to get updated cancelled dates
+          if (selectedPatient && therapy.allocation_id) {
+            const patientRegNo = selectedPatient.pat_op_reg_no || selectedPatient.pat_reg_no;
+            ajax({action:'patient_therapies', patient_reg_no: patientRegNo}).then(therapies => {
+              if (therapies && Array.isArray(therapies)) {
+                const updated = therapies.find(th => th.allocation_id === therapy.allocation_id);
+                if (updated) {
+                  // Update all fields from server response
+                  Object.assign(therapy, updated);
+                  // Explicitly set cancelled dates (handle null/undefined)
+                  therapy.cancelled_date_from = updated.cancelled_date_from || null;
+                  therapy.cancelled_date_to = updated.cancelled_date_to || null;
+                  therapy.cancellation_reason = updated.cancellation_reason || '';
+                  therapy.status = updated.status || therapy.status;
+                  // Update status_summary if available
+                  if (updated.status_summary) {
+                    therapy.status_summary = updated.status_summary;
+                  }
+                }
+              }
+              // Update the table immediately
+              renderAll();
+              
+              // Reload the modal to show updated dates (with a small delay to ensure renderAll completes)
+              setTimeout(() => {
+                const currentTherapy = addedTherapies[resumingTherapyIndex];
+                if (currentTherapy && currentTherapy.cancelled_date_from && currentTherapy.cancelled_date_to && 
+                    currentTherapy.cancelled_date_from !== 'null' && currentTherapy.cancelled_date_to !== 'null') {
+                  openResumeModal(resumingTherapyIndex);
+                } else {
+                  $resumeModal.hide();
+                  resumingTherapyIndex = null;
+                }
+              }, 100);
+            }).catch(() => {
+              // Fallback: update locally and reload modal
+              renderAll();
+              setTimeout(() => {
+                const currentTherapy = addedTherapies[resumingTherapyIndex];
+                if (currentTherapy && currentTherapy.cancelled_date_from && currentTherapy.cancelled_date_to &&
+                    currentTherapy.cancelled_date_from !== 'null' && currentTherapy.cancelled_date_to !== 'null') {
+                  openResumeModal(resumingTherapyIndex);
+                } else {
+                  $resumeModal.hide();
+                  resumingTherapyIndex = null;
+                }
+              }, 100);
+            });
+          } else {
+            // No patient selected or local therapy - just close modal
+            $resumeModal.hide();
+            resumingTherapyIndex = null;
+            renderAll();
+          }
         } else {
-          alert('Failed: ' + JSON.stringify(j));
+          alert('Failed: ' + (j.error || JSON.stringify(j)));
         }
       }).catch(()=>alert('Network error'));
     } else {
       // Local resume
-      therapy.status = 'draft';
-      therapy.cancelled_date_from = null;
-      therapy.cancelled_date_to = null;
-      therapy.cancellation_reason = '';
+      if (therapy.cancelled_date_from === date && therapy.cancelled_date_to === date) {
+        therapy.status = 'draft';
+        therapy.cancelled_date_from = null;
+        therapy.cancelled_date_to = null;
+        therapy.cancellation_reason = '';
+      } else if (therapy.cancelled_date_from === date) {
+        const nextDate = new Date(date);
+        nextDate.setDate(nextDate.getDate() + 1);
+        therapy.cancelled_date_from = nextDate.toISOString().split('T')[0];
+      } else if (therapy.cancelled_date_to === date) {
+        const prevDate = new Date(date);
+        prevDate.setDate(prevDate.getDate() - 1);
+        therapy.cancelled_date_to = prevDate.toISOString().split('T')[0];
+      }
       
+      alert('Therapy resumed successfully for ' + formatDate(date) + '.');
+      openResumeModal(resumingTherapyIndex);
       renderAll();
-      $resumeModal.hide();
-      resumingTherapyIndex = null;
-      alert('Therapy resumed successfully');
     }
-  }
+  });
   
   $resumeCloseBtn.on('click', function(){ $resumeModal.hide(); resumingTherapyIndex = null; });
-  $resumeSubmitBtn.on('click', function(){ submitResume(); });
 
   // export JSON
   $('#export-json').on('click', function(){
