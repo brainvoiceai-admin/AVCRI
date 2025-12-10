@@ -1553,12 +1553,12 @@
                         doc.setFontSize(7);
                         doc.setFont(undefined, 'bold');
                         doc.setTextColor(0, 0, 0);
-                        doc.text('Items', boxX + 2, colHeadersY + 2.5);
-                        doc.text('Usage', boxX + 40, colHeadersY + 2.5);
+                        // Column order: Usage, Items, Dosage, Oil Class, Ingredients
+                        doc.text('Usage', boxX + 2, colHeadersY + 2.5);
+                        doc.text('Items', boxX + 30, colHeadersY + 2.5);
                         doc.text('Dosage', boxX + 68, colHeadersY + 2.5);
-                        doc.text('Time', boxX + 95, colHeadersY + 2.5);
-                        doc.text('Ingredients', boxX + 118, colHeadersY + 2.5);
-                        doc.text('Oil Class', boxX + 150, colHeadersY + 2.5);
+                        doc.text('Oil Class', boxX + 100, colHeadersY + 2.5);
+                        doc.text('Ingredients', boxX + 135, colHeadersY + 2.5);
                         
                         // Draw line under column headers
                         yPos = colHeadersY + 3.5;
@@ -1586,7 +1586,6 @@
                                 doseDisplay = unoNote;
                             }
 
-                            const time = group.time || '';
                             const oilClass = group.oil_class || '';
 
                             // Ingredients
@@ -1602,36 +1601,35 @@
                             // Render row data
                             doc.setFontSize(7);
                             
-                            // Items (in blue, bold) - add "+" prefix for groups after the first
+                            // Usage (first column, only show in first row of entry, common for full entry)
+                            doc.setFont(undefined, 'normal');
+                            doc.setTextColor(0, 0, 0);
+                            const usageLines = (groupIndex === 0 && rowUsage) ? doc.splitTextToSize(rowUsage, 25) : [];
+                            if (usageLines.length > 0) {
+                                doc.text(usageLines, boxX + 2, yPos + 2);
+                            }
+                            // For subsequent rows, usage column is left empty
+                            
+                            // Items (second column, in blue, bold) - add "+" prefix for groups after the first
                             doc.setFont(undefined, 'bold');
                             doc.setTextColor(0, 86, 179);
                             const prefix = groupIndex > 0 ? '+ ' : '';
                             const itemsText = prefix + (itemNames || '—');
                             const itemsLines = doc.splitTextToSize(itemsText, 35);
-                            doc.text(itemsLines, boxX + 2, yPos + 2);
+                            doc.text(itemsLines, boxX + 30, yPos + 2);
                             
-                            // Usage (only show in first row of entry, common for full entry)
+                            // Dosage (third column)
                             doc.setFont(undefined, 'normal');
                             doc.setTextColor(0, 0, 0);
-                            const usageLines = (groupIndex === 0 && rowUsage) ? doc.splitTextToSize(rowUsage, 25) : [];
-                            if (usageLines.length > 0) {
-                                doc.text(usageLines, boxX + 40, yPos + 2);
-                            }
-                            // For subsequent rows, usage column is left empty
-                            
-                            // Dosage
-                            const doseLines = doc.splitTextToSize(doseDisplay || '—', 25);
+                            const doseLines = doc.splitTextToSize(doseDisplay || '—', 30);
                             doc.text(doseLines, boxX + 68, yPos + 2);
                             
-                            // Time
-                            doc.text(time || '—', boxX + 95, yPos + 2);
+                            // Oil Class (fourth column)
+                            doc.text(oilClass || '—', boxX + 100, yPos + 2);
                             
-                            // Ingredients
+                            // Ingredients (fifth column)
                             const ingredientsLines = doc.splitTextToSize(ingredientsDisplay || '—', 30);
-                            doc.text(ingredientsLines, boxX + 118, yPos + 2);
-                            
-                            // Oil Class
-                            doc.text(oilClass || '—', boxX + 150, yPos + 2);
+                            doc.text(ingredientsLines, boxX + 135, yPos + 2);
                             
                             // Calculate row height based on tallest cell (include usage only for first row)
                             const rowHeight = Math.max(
