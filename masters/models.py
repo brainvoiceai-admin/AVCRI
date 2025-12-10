@@ -200,6 +200,7 @@ class ItemMaster(models.Model):
     item_name = models.CharField(max_length=255, verbose_name="Item Name")
     item_category = models.CharField(max_length=100, null=True, blank=True, verbose_name="Category")
     unit_of_measure = models.CharField(max_length=50, null=True, blank=True, verbose_name="Unit")
+    procured_from = models.ForeignKey('Procured', on_delete=models.SET_NULL, null=True, blank=True, verbose_name="Procured From")
     is_active = models.BooleanField(default=True, verbose_name="Active")
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="Created At")
     updated_at = models.DateTimeField(auto_now=True, verbose_name="Updated At")

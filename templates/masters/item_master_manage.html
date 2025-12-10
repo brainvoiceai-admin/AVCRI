@@ -106,6 +106,7 @@
                                 <th>Item Name</th>
                                 <th>Category</th>
                                 <th>Unit of Measure</th>
+                                <th>Procured From</th>
                                 <th>Status</th>
                                 <th>Created</th>
                                 <th>Actions</th>
@@ -122,6 +123,7 @@
                                     <span class="badge bg-info">{{ item.item_category|default:"-" }}</span>
                                 </td>
                                 <td>{{ item.unit_of_measure|default:"-" }}</td>
+                                <td>{{ item.procured_from.name|default:"-" }}</td>
                                 <td>
                                     {% if item.is_active %}
                                         <span class="badge bg-success">Active</span>
@@ -149,7 +151,7 @@
                             </tr>
                             {% empty %}
                             <tr>
-                                <td colspan="7" class="text-center py-4">
+                                <td colspan="8" class="text-center py-4">
                                     <div class="text-muted">
                                         <i class="fas fa-box fa-3x mb-3"></i>
                                         <p>No items found. <a href="{% url 'item_master_add' %}">Add the first item</a></p>

@@ -277,23 +277,46 @@ def get_prescription_details_api(request):
             to_date__gte=filter_date
         ).order_by('from_date', 'id')
         
-        # Filter out allocations that are cancelled for this specific date
+        # Include all allocations, but we'll mark them as cancelled only if the current date
+        # falls within the cancelled date range. This way cancelled entries show as cancelled
+        # only for the specific dates they were cancelled, not for all dates.
         active_allocations = []
         for allocation in allocations:
-            # Skip if allocation is cancelled and the filter_date falls within the cancelled date range
+            # Check if this allocation is cancelled for the current date
+            is_cancelled_for_this_date = False
             if allocation.status == 'cancelled' and allocation.cancelled_date_from and allocation.cancelled_date_to:
                 if allocation.cancelled_date_from <= filter_date <= allocation.cancelled_date_to:
-                    # This prescription is cancelled for this date, skip it
-                    continue
+                    is_cancelled_for_this_date = True
+            
+            # Include the allocation in active_allocations regardless of cancellation status
+            # We'll use is_cancelled_for_this_date when setting is_cancelled flag for groups
             active_allocations.append(allocation)
         
         prescription_is_cancelled = False
         prescription_status = 'draft'
         
         if active_allocations:
-            all_cancelled = all(a.status == 'cancelled' for a in active_allocations)
-            prescription_is_cancelled = all_cancelled
-            non_cancel_statuses = [a.status for a in active_allocations if a.status != 'cancelled']
+            # Check if all allocations are cancelled for this specific date
+            all_cancelled_for_date = True
+            for a in active_allocations:
+                is_cancelled_for_date = False
+                if a.status == 'cancelled' and a.cancelled_date_from and a.cancelled_date_to:
+                    if a.cancelled_date_from <= filter_date <= a.cancelled_date_to:
+                        is_cancelled_for_date = True
+                if not is_cancelled_for_date:
+                    all_cancelled_for_date = False
+                    break
+            
+            prescription_is_cancelled = all_cancelled_for_date
+            # Get status from non-cancelled allocations (for this date)
+            non_cancel_statuses = []
+            for a in active_allocations:
+                is_cancelled_for_date = False
+                if a.status == 'cancelled' and a.cancelled_date_from and a.cancelled_date_to:
+                    if a.cancelled_date_from <= filter_date <= a.cancelled_date_to:
+                        is_cancelled_for_date = True
+                if not is_cancelled_for_date:
+                    non_cancel_statuses.append(a.status)
             prescription_status = non_cancel_statuses[0] if non_cancel_statuses else 'cancelled'
         
         # Process all active allocations and use items_groups exactly as stored
@@ -337,6 +360,13 @@ def get_prescription_details_api(request):
                     usage_array = group.get('usage_array', [])
                     internal_external = group.get('internal_external', '') or alloc_scope
                     
+                    # Check if this allocation is cancelled for the current date
+                    # Only mark as cancelled if the current date falls within the cancelled date range
+                    is_cancelled_for_date = False
+                    if allocation.status == 'cancelled' and allocation.cancelled_date_from and allocation.cancelled_date_to:
+                        if allocation.cancelled_date_from <= filter_date <= allocation.cancelled_date_to:
+                            is_cancelled_for_date = True
+                    
                     # Add the group exactly as it appears in items_groups (with fallbacks)
                     prescription_groups.append({
                         'group_id': f"prescription_group_{allocation.id}_{group_idx}",
@@ -350,7 +380,7 @@ def get_prescription_details_api(request):
                         'ingredients': group.get('ingredients', []),
                         'ingredient_ids': group.get('ingredient_ids', []),
                         'items': group_items,
-                        'is_cancelled': allocation.status == 'cancelled',
+                        'is_cancelled': is_cancelled_for_date,
                         'is_group': True
                     })
         

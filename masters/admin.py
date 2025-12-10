@@ -87,9 +87,9 @@ class TherapyMasterAdmin(admin.ModelAdmin):
 
 @admin.register(ItemMaster)
 class ItemMasterAdmin(admin.ModelAdmin):
-    list_display = ['item_code', 'item_name', 'item_category', 'is_active', 'created_at']
-    list_filter = ['is_active', 'item_category', 'created_at']
-    search_fields = ['item_code', 'item_name', 'item_category']
+    list_display = ['item_code', 'item_name', 'item_category', 'procured_from', 'is_active', 'created_at']
+    list_filter = ['is_active', 'item_category', 'procured_from', 'created_at']
+    search_fields = ['item_code', 'item_name', 'item_category', 'procured_from__name']
     list_editable = ['is_active']
     ordering = ['item_name']
     fieldsets = (
@@ -97,7 +97,7 @@ class ItemMasterAdmin(admin.ModelAdmin):
             'fields': ('item_code', 'item_name', 'item_category')
         }),
         ('Details', {
-            'fields': ('unit_of_measure',)
+            'fields': ('unit_of_measure', 'procured_from')
         }),
         ('Status', {
             'fields': ('is_active',)

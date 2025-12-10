@@ -753,6 +753,10 @@
                 <label for="item-builder-oil-class">Oil Class</label>
                 <select id="item-builder-oil-class"><option value="">-- Select --</option></select>
               </div>
+              <div class="form-group small">
+                <label for="item-builder-procured-from">Procured From</label>
+                <select id="item-builder-procured-from"><option value="">-- Select Source --</option></select>
+              </div>
               <div style="display:flex;align-items:flex-end;">
                 <button id="add-item-group-btn" class="btn">
                   <i class="fas fa-plus-circle"></i> Add Group
@@ -770,10 +774,6 @@
           </div>
 
           <div class="form-row" style="margin-top: 24px;">
-            <div class="form-group">
-              <label for="procured-from-select">Procured From</label>
-              <select id="procured-from-select"><option value="">-- Select Source --</option></select>
-            </div>
             <div class="form-group small">
               <label for="scope-select">External/Internal</label>
               <select id="scope-select"><option value="">-- Select --</option></select>
@@ -935,7 +935,8 @@ $(function(){
   const $patientSelect = $('#header-patient-select');
   const $hdrName = $('#hdr-pat-name'), $hdrMeta = $('#hdr-pat-meta'), $hdrVip = $('#hdr-pat-vip'), $hdrIp = $('#hdr-pat-ip'), $hdrUnique = $('#hdr-pat-unique'), $hdrType = $('#hdr-pat-type');
   const $fromDate = $('#from-date-input'), $toDate = $('#to-date-input'), $daysInput = $('#days-input');
-  const $procuredSelect = $('#procured-from-select');
+  const $procuredSelect = $('#procured-from-select'); // Keep for backward compatibility, but use item-builder-procured-from for new groups
+  const $itemBuilderProcuredFrom = $('#item-builder-procured-from');
   const $scopeSelect = $('#scope-select');
   const $commonUsageSelect = $('#common-usage-select');
   let usageSelectionOrder = []; // Track selection order for usage field
@@ -1297,7 +1298,21 @@ $(function(){
 
   // populate masters with fallback
   function populateMasters(){
-    ajax({action:'masters', type:'procured'}).then(list => { $procuredSelect.empty().append('<option value="">-- Select Source --</option>'); (list||FALLBACK_PROCURED).forEach(p => $procuredSelect.append(new Option(p.name, p.name))); }).catch(()=>{ $procuredSelect.empty().append('<option value="">-- Select Source --</option>'); FALLBACK_PROCURED.forEach(p => $procuredSelect.append(new Option(p.name, p.name))); });
+    ajax({action:'masters', type:'procured'}).then(list => { 
+      $procuredSelect.empty().append('<option value="">-- Select Source --</option>'); 
+      $itemBuilderProcuredFrom.empty().append('<option value="">-- Select Source --</option>');
+      (list||FALLBACK_PROCURED).forEach(p => {
+        $procuredSelect.append(new Option(p.name, p.name));
+        $itemBuilderProcuredFrom.append(new Option(p.name, p.name));
+      });
+    }).catch(()=>{ 
+      $procuredSelect.empty().append('<option value="">-- Select Source --</option>'); 
+      $itemBuilderProcuredFrom.empty().append('<option value="">-- Select Source --</option>');
+      FALLBACK_PROCURED.forEach(p => {
+        $procuredSelect.append(new Option(p.name, p.name));
+        $itemBuilderProcuredFrom.append(new Option(p.name, p.name));
+      });
+    });
     ajax({action:'masters', type:'prescriptionscope'}).then(list => { $scopeSelect.empty().append('<option value="">-- Select --</option>'); (list||[]).forEach(x => $scopeSelect.append(new Option(x.name, x.name))); }).catch(()=>{ $scopeSelect.empty().append('<option value="">-- Select --</option>'); });
     ajax({action:'masters', type:'prescriptionusage'}).then(list => { 
       const $u=$commonUsageSelect; 
@@ -1421,6 +1436,9 @@ $(function(){
   }
   populateMasters();
 
+  // Store item data for procured_from checking
+  const itemDataCache = {};
+  
   // init select2s
   $itemBuilder.select2({
     placeholder:'Search or type items (multi)',
@@ -1428,12 +1446,95 @@ $(function(){
     tags: true,
     tokenSeparators: [','],
     ajax: {
-      transport: function(p, s, f){
-        ajax({action:'search_items', q: p.data.q}).then(s).catch(function(){ s({ results: [] }); });
+      url: function() {
+        return API_URL;
       },
-      processResults: data => ({ results: (data||[]).map(i => ({ id: i.item_code, text: i.item_name })) }),
-      cache:true
+      dataType: 'json',
+      delay: 250,
+      data: function(params) {
+        return {
+          action: 'search_items',
+          q: params.term || ''
+        };
+      },
+      processResults: function(data) {
+        console.log('Select2 processResults called with data:', data);
+        // Cache item data including procured_from
+        if (data && Array.isArray(data)) {
+          data.forEach(item => {
+            if (item && item.item_code) {
+              itemDataCache[item.item_code] = item;
+            }
+          });
+          // Format for Select2
+          const formattedResults = data.map(i => ({ 
+            id: i.item_code, 
+            text: i.item_name || i.item_code 
+          }));
+          console.log('Formatted results:', formattedResults);
+          return { results: formattedResults };
+        }
+        return { results: [] };
+      },
+      cache: true
     }
+  });
+  
+  // Function to check and auto-fill procured_from based on selected items
+  function updateProcuredFromField() {
+    const selected = $itemBuilder.select2('data') || [];
+    
+    if (selected.length === 0) {
+      $itemBuilderProcuredFrom.val('').trigger('change');
+      return;
+    }
+    
+    // Get procured_from values from selected items using cached data
+    const procuredFromValues = [];
+    selected.forEach(item => {
+      const itemData = itemDataCache[item.id];
+      if (itemData && itemData.procured_from) {
+        procuredFromValues.push(itemData.procured_from);
+      } else {
+        // If not in cache, fetch it from API
+        procuredFromValues.push(null);
+      }
+    });
+    
+    // Filter out null/empty values
+    const validProcuredFromValues = procuredFromValues.filter(v => v && v.trim() !== '');
+    
+    // Check if all items have the same procured_from
+    if (validProcuredFromValues.length > 0 && validProcuredFromValues.length === selected.length) {
+      // All selected items have procured_from values
+      const uniqueValues = [...new Set(validProcuredFromValues)];
+      
+      if (uniqueValues.length === 1) {
+        // All items have the same procured_from - auto-fill
+        const procuredFromName = uniqueValues[0];
+        // Check if the option exists in the dropdown
+        const optionExists = $itemBuilderProcuredFrom.find(`option[value="${procuredFromName}"]`).length > 0;
+        if (optionExists) {
+          $itemBuilderProcuredFrom.val(procuredFromName).trigger('change');
+        } else {
+          // Option doesn't exist, add it temporarily
+          $itemBuilderProcuredFrom.append(new Option(procuredFromName, procuredFromName));
+          $itemBuilderProcuredFrom.val(procuredFromName).trigger('change');
+        }
+      } else {
+        // Different procured_from values - clear and let user select
+        $itemBuilderProcuredFrom.val('').trigger('change');
+      }
+    } else {
+      // Some or all items have null/empty procured_from - clear field and let user select
+      $itemBuilderProcuredFrom.val('').trigger('change');
+    }
+  }
+  
+  // Listen for item selection changes
+  $itemBuilder.on('select2:select select2:unselect', function() {
+    // Small delay to ensure select2 data is updated
+    setTimeout(updateProcuredFromField, 100);
   });
 
   // Add Group
@@ -1443,6 +1544,7 @@ $(function(){
     const time = $('#item-builder-time').val().trim();
     const uno = $('#item-builder-uno').val().trim();
     const oilClass = $itemBuilderOilClass.val() || '';
+    const procuredFrom = $itemBuilderProcuredFrom.val() || '';
     const ingredientSelect = $('#item-builder-ingredients');
     const ingredientData = ingredientSelect.select2('data') || [];
     const ingredients = ingredientData.map(i => ({ id: i.id, ingredient_name: i.text || i.id }));
@@ -1456,13 +1558,14 @@ $(function(){
     }
     
     const items = selected.length > 0 ? selected.map(s => ({ item_code: s.id, item_name: s.text || s.id })) : [];
-    const grp = { id: Math.random().toString(36).slice(2,9), items, dosage, time, uno, oil_class: oilClass, ingredients, ingredient_ids: ingredientIds };
+    const grp = { id: Math.random().toString(36).slice(2,9), items, dosage, time, uno, oil_class: oilClass, procured_from: procuredFrom, ingredients, ingredient_ids: ingredientIds };
     itemGroups.push(grp);
     $itemBuilder.val(null).trigger('change');
     $('#item-builder-dosage').val('');
     $('#item-builder-time').val('');
     $('#item-builder-uno').val('');
     $itemBuilderOilClass.val('');
+    $itemBuilderProcuredFrom.val('');
     ingredientSelect.val(null).trigger('change');
     renderItemGroups();
   });
@@ -1487,6 +1590,7 @@ $(function(){
         : '—';
       const timeDisplay = g.time ? esc(g.time) : '—';
       const oilClassDisplay = g.oil_class ? esc(g.oil_class) : '—';
+      const procuredFromDisplay = g.procured_from ? esc(g.procured_from) : '—';
       const dosageDisplay = (g.dosage && g.uno) 
         ? `${esc(g.dosage)} (${esc(g.uno)})`
         : (g.dosage ? esc(g.dosage) : '—') + (g.uno ? ` (${esc(g.uno)})` : '');
@@ -1495,6 +1599,9 @@ $(function(){
       let parts = [];
       if (mainPart !== '—') {
         parts.push(mainPart + (dosageDisplay !== '—' ? ` (${dosageDisplay})` : ''));
+      }
+      if (procuredFromDisplay !== '—') {
+        parts.push(`Procured From: ${procuredFromDisplay}`);
       }
       if (ingredientsDisplay !== '—') {
         parts.push(`Ingredients: ${ingredientsDisplay}`);
@@ -1549,6 +1656,7 @@ $(function(){
     $('#item-builder-time').val(g.time||''); 
     $('#item-builder-uno').val(g.uno||'');
     $itemBuilderOilClass.val(g.oil_class||''); 
+    $itemBuilderProcuredFrom.val(g.procured_from||''); 
     // Handle ingredients
     const ingredientSelect = $('#item-builder-ingredients');
     if (g.ingredient_ids && Array.isArray(g.ingredient_ids) && g.ingredient_ids.length > 0) {
@@ -1599,7 +1707,7 @@ $(function(){
       from_date: from,
       to_date: to,
       days: Math.ceil((new Date(to).getTime() - new Date(from).getTime()) / (1000 * 60 * 60 * 24)) + 1,
-      procured_from: $procuredSelect.val()||'',
+      // procured_from is now stored per group in items_groups, not globally
       scope: $scopeSelect.val()||'',
       usage: commonUsage,
       usage_array: commonUsageValues,
@@ -1609,6 +1717,7 @@ $(function(){
         time: g.time, 
         uno: g.uno,
         oil_class: g.oil_class || '',
+        procured_from: g.procured_from || '',
         ingredient_ids: g.ingredient_ids || [],
         ingredients: g.ingredients || []
       })),
@@ -1651,7 +1760,7 @@ $(function(){
         $fromDate.val(today); 
         $toDate.val(''); 
         $daysInput.val(''); 
-        $procuredSelect.val(''); 
+        // procured_from is now per group, not global - no need to clear global field 
         $scopeSelect.val(''); 
         $commonUsageSelect.val(null).trigger('change');
         usageSelectionOrder = []; // Reset selection order
@@ -1750,10 +1859,12 @@ $(function(){
 
         const time = g.time ? esc(g.time) : '';
         const extInt = g.internal_external ? esc(g.internal_external) : '';
+        const procuredFrom = g.procured_from ? esc(g.procured_from) : '';
 
         const details = [];
         const oilClass = g.oil_class ? esc(g.oil_class) : '';
         if (doseDisplay) details.push(`Dosage: ${doseDisplay}`);
+        if (procuredFrom) details.push(`Procured From: ${procuredFrom}`);
         if (time) details.push(`Time: ${time}`);
         if (extInt) details.push(`Ext/Int: ${extInt}`);
         if (ingredientsDisplay) details.push(`Ingredients: ${ingredientsDisplay}`);
@@ -1823,10 +1934,14 @@ $(function(){
         }
       }
       
+      // Get unique procured_from values from all groups for display
+      const procuredFromValues = [...new Set((p.items_groups || []).map(g => g.procured_from).filter(pf => pf))];
+      const procuredFromDisplay = procuredFromValues.length > 0 ? procuredFromValues.join(', ') : '—';
+      
       const row = `<tr class="${statusClass}">
         <td>${i+1}</td>
         <td>${esc(p.prescription_name || 'Prescription')}</td>
-        <td>${esc(p.procured_from || '—')}</td>
+        <td>${esc(procuredFromDisplay)}</td>
         <td>${esc(p.scope || '')}</td>
         <td>${commonUsageDisplay || '—'}</td>
         <td>
@@ -1878,7 +1993,7 @@ $(function(){
     $fromDate.val(p.from_date||'');
     $toDate.val(p.to_date||'');
     $daysInput.val(p.days||'');
-    $procuredSelect.val(p.procured_from||'');
+    // procured_from is now per group, not global - no need to set global field
     $scopeSelect.val(p.scope||'');
     
     // Load common usage and restore selection order
@@ -1906,6 +2021,7 @@ $(function(){
       time: g.time||'', 
       uno: g.uno||'',
       oil_class: g.oil_class || '',
+      procured_from: g.procured_from || '',
       ingredient_ids: g.ingredient_ids || [],
       ingredients: g.ingredients || []
     }));
@@ -1928,7 +2044,6 @@ $(function(){
     const days = parseInt($daysInput.val()) || 0;
     
     // Update local data
-    p.procured_from = $procuredSelect.val()||'';
     p.scope = $scopeSelect.val()||'';
     p.usage = commonUsage;
     p.usage_array = commonUsageValues;
@@ -1940,7 +2055,8 @@ $(function(){
       ingredients: g.ingredients || [],
       items: g.items, 
       dosage: g.dosage, 
-      time: g.time, 
+      time: g.time,
+      procured_from: g.procured_from || '', 
       uno: g.uno,
       oil_class: g.oil_class || ''
     }));
@@ -1950,7 +2066,7 @@ $(function(){
       const updatePayload = {
         allocation_id: p.allocation_id,
         items_groups: p.items_groups,
-        procured_from: p.procured_from,
+        // procured_from is now stored per group in items_groups, not globally
         scope: p.scope,
         usage: p.usage,
         usage_array: p.usage_array,
@@ -1998,7 +2114,8 @@ $(function(){
     editPrescriptionIndex = null; $('#form-title').text('Create New Prescription');
     const today = new Date().toISOString().split('T')[0];
     $fromDate.val(today); $toDate.val(''); $daysInput.val('');
-    $procuredSelect.val(''); $scopeSelect.val('');
+    // procured_from is now per group, not global - no need to clear global field
+    $scopeSelect.val('');
     $commonUsageSelect.val(null).trigger('change');
     usageSelectionOrder = []; // Reset selection order
     itemGroups = []; renderItemGroups();
