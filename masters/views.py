@@ -155,6 +155,23 @@ def update_master_item(request, item_id):
             item = ItemMaster.objects.get(id=item_id)
             item.item_name = data.get('item_name', item.item_name)
             item.item_category = data.get('item_category', item.item_category)
+            # Handle procured_from as ForeignKey - can be ID or name
+            procured_from_data = data.get('procured_from')
+            if procured_from_data:
+                if isinstance(procured_from_data, int):
+                    try:
+                        item.procured_from = Procured.objects.get(id=procured_from_data)
+                    except Procured.DoesNotExist:
+                        item.procured_from = None
+                elif isinstance(procured_from_data, str):
+                    try:
+                        item.procured_from = Procured.objects.get(name=procured_from_data)
+                    except Procured.DoesNotExist:
+                        item.procured_from = None
+                else:
+                    item.procured_from = None
+            else:
+                item.procured_from = None
             item.is_active = data.get('is_active', item.is_active)
         elif master_type == 'slot':
             item = SlotMaster.objects.get(id=item_id)
@@ -1361,7 +1378,8 @@ class ItemMasterManagementView(ListView):
             queryset = queryset.filter(
                 db_models.Q(item_code__icontains=search) |
                 db_models.Q(item_name__icontains=search) |
-                db_models.Q(item_category__icontains=search)
+                db_models.Q(item_category__icontains=search) |
+                db_models.Q(procured_from__name__icontains=search)
             )
         
         # Status filter
@@ -1383,15 +1401,35 @@ class ItemMasterManagementView(ListView):
         context['master_type'] = 'item'
         context['master_name'] = 'Item Master'
         context['required_fields'] = ['item_code', 'item_name']
-        context['optional_fields'] = ['item_category', 'unit_of_measure', 'is_active']
+        context['optional_fields'] = ['item_category', 'unit_of_measure', 'procured_from', 'is_active']
         context['search'] = self.request.GET.get('search', '')
         context['status_filter'] = self.request.GET.get('status', '')
         context['category_filter'] = self.request.GET.get('category', '')
         return context
 
+class ItemMasterForm(forms.ModelForm):
+    """Custom form for ItemMaster with filtered procured_from dropdown"""
+    class Meta:
+        model = ItemMaster
+        fields = ['item_code', 'item_name', 'item_category', 'unit_of_measure', 'procured_from', 'is_active']
+        widgets = {
+            'item_code': forms.TextInput(attrs={'class': 'form-control'}),
+            'item_name': forms.TextInput(attrs={'class': 'form-control'}),
+            'item_category': forms.TextInput(attrs={'class': 'form-control'}),
+            'unit_of_measure': forms.TextInput(attrs={'class': 'form-control'}),
+            'procured_from': forms.Select(attrs={'class': 'form-control'}),
+            'is_active': forms.CheckboxInput(attrs={'class': 'form-check-input'}),
+        }
+    
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Filter procured_from to show only active sources
+        self.fields['procured_from'].queryset = Procured.objects.filter(is_active=True).order_by('name')
+        self.fields['procured_from'].empty_label = '-- Select Source --'
+
 class ItemMasterCreateView(CreateView):
     model = ItemMaster
-    fields = ['item_code', 'item_name', 'item_category', 'unit_of_measure', 'is_active']
+    form_class = ItemMasterForm
     template_name = 'masters/item_master_form.html'
     success_url = reverse_lazy('item_master_manage')
     
@@ -1401,7 +1439,7 @@ class ItemMasterCreateView(CreateView):
 
 class ItemMasterUpdateView(UpdateView):
     model = ItemMaster
-    fields = ['item_code', 'item_name', 'item_category', 'unit_of_measure', 'is_active']
+    form_class = ItemMasterForm
     template_name = 'masters/item_master_form.html'
     success_url = reverse_lazy('item_master_manage')
     
@@ -2042,10 +2080,10 @@ def download_master_template(request, master_type):
             }
         elif master_type == 'item' or master_type == 'itemmaster':
             template_data = {
-                'columns': ['item_code', 'item_name', 'item_category', 'unit_of_measure', 'is_active'],
+                'columns': ['item_code', 'item_name', 'item_category', 'unit_of_measure', 'procured_from', 'is_active'],
                 'example_rows': [
-                    ['ITM001', 'Sesame Oil', 'Oil', 'ml', 'true'],
-                    ['ITM002', 'Turmeric Powder', 'Herb', 'gm', 'true'],
+                    ['ITM001', 'Sesame Oil', 'Oil', 'ml', 'IP Pharmacy', 'true'],
+                    ['ITM002', 'Turmeric Powder', 'Herb', 'gm', 'Kashaya Room', 'true'],
                 ]
             }
         elif master_type == 'slot' or master_type == 'slotmaster':
@@ -2319,12 +2357,24 @@ def bulk_upload_master(request):
                         
                         is_active = _parse_boolean(row.get('is_active', True))
                         
+                        # Handle procured_from as ForeignKey
+                        procured_from_name = str(row.get('procured_from', '')).strip()
+                        procured_from_obj = None
+                        if procured_from_name:
+                            try:
+                                procured_from_obj = Procured.objects.get(name=procured_from_name)
+                            except Procured.DoesNotExist:
+                                # Try to create if it doesn't exist (optional - you may want to skip instead)
+                                # procured_from_obj = Procured.objects.create(name=procured_from_name, is_active=True)
+                                pass
+                        
                         item, created = ItemMaster.objects.get_or_create(
                             item_code=item_code,
                             defaults={
                                 'item_name': item_name,
                                 'item_category': str(row.get('item_category', '')).strip() or None,
                                 'unit_of_measure': str(row.get('unit_of_measure', '')).strip() or None,
+                                'procured_from': procured_from_obj,
                                 'is_active': is_active,
                             }
                         )
@@ -2333,6 +2383,7 @@ def bulk_upload_master(request):
                             item.item_name = item_name
                             item.item_category = str(row.get('item_category', '')).strip() or None
                             item.unit_of_measure = str(row.get('unit_of_measure', '')).strip() or None
+                            item.procured_from = procured_from_obj
                             item.is_active = is_active
                             item.save()
                             updated_count += 1

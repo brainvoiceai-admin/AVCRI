@@ -1481,18 +1481,37 @@ def therapy_entry(request):
         results = []
         if ItemMaster is not None:
             try:
-                qs = ItemMaster.objects.filter(is_active=True).all()  # Use local master table
+                # Try with select_related first, fallback to regular query if it fails
+                try:
+                    qs = ItemMaster.objects.filter(is_active=True).select_related('procured_from').all()
+                except Exception:
+                    # If select_related fails (e.g., field doesn't exist yet), use regular query
+                    qs = ItemMaster.objects.filter(is_active=True).all()
+                
                 if q:
                     qs = qs.filter(Q(item_name__icontains=q) | Q(item_code__icontains=q))
                 qs = qs[:50]
                 for i in qs:
+                    procured_from_name = ''
+                    try:
+                        if hasattr(i, 'procured_from') and i.procured_from:
+                            procured_from_name = i.procured_from.name if hasattr(i.procured_from, 'name') else str(i.procured_from)
+                    except Exception:
+                        pass
+                    
                     results.append({
                         'item_code': getattr(i, 'item_code', ''),
                         'item_name': getattr(i, 'item_name', ''),
-                        'item_uom': getattr(i, 'unit_of_measure', '') or ''
+                        'item_uom': getattr(i, 'unit_of_measure', '') or '',
+                        'procured_from': procured_from_name
                     })
-            except Exception:
+            except Exception as e:
+                print(f"Error in search_items (therapy_entry): {e}")
+                import traceback
+                traceback.print_exc()
                 results = []
+        else:
+            print("ItemMaster model not found - check if masters app is installed")
         return JsonResponse(results, safe=False)
 
     # masters (procured / oil / usage / slots etc.)
@@ -2213,19 +2232,38 @@ def prescription_entry_page(request):
         results = []
         if ItemMaster is not None:
             try:
-                qs = ItemMaster.objects.filter(is_active=True).all()  # Use local master table
+                # Try with select_related first, fallback to regular query if it fails
+                try:
+                    qs = ItemMaster.objects.filter(is_active=True).select_related('procured_from').all()
+                except Exception:
+                    # If select_related fails (e.g., field doesn't exist yet), use regular query
+                    qs = ItemMaster.objects.filter(is_active=True).all()
+                
                 if q:
                     qs = qs.filter(Q(item_name__icontains=q) | Q(item_code__icontains=q))
                 qs = qs[:50]
                 for i in qs:
+                    procured_from_name = ''
+                    try:
+                        if hasattr(i, 'procured_from') and i.procured_from:
+                            procured_from_name = i.procured_from.name if hasattr(i.procured_from, 'name') else str(i.procured_from)
+                    except Exception:
+                        pass
+                    
                     results.append({
                         'item_code': getattr(i, 'item_code', ''),
                         'item_name': getattr(i, 'item_name', ''),
-                        'item_uom': getattr(i, 'unit_of_measure', '') or ''
+                        'item_uom': getattr(i, 'unit_of_measure', '') or '',
+                        'procured_from': procured_from_name
                     })
-                print(results)
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"Error in search_items: {e}")
+                import traceback
+                traceback.print_exc()
+                # Return empty results on error rather than failing completely
+                results = []
+        else:
+            print("ItemMaster model not found - check if masters app is installed")
         return JsonResponse(results, safe=False)
     
     # masters lookup
@@ -2803,18 +2841,37 @@ def prescription_entry_page(request):
         results = []
         if ItemMaster is not None:
             try:
-                qs = ItemMaster.objects.filter(is_active=True).all()  # Use local master table
+                # Try with select_related first, fallback to regular query if it fails
+                try:
+                    qs = ItemMaster.objects.filter(is_active=True).select_related('procured_from').all()
+                except Exception:
+                    # If select_related fails (e.g., field doesn't exist yet), use regular query
+                    qs = ItemMaster.objects.filter(is_active=True).all()
+                
                 if q:
                     qs = qs.filter(Q(item_name__icontains=q) | Q(item_code__icontains=q))
                 qs = qs[:50]
                 for i in qs:
+                    procured_from_name = ''
+                    try:
+                        if hasattr(i, 'procured_from') and i.procured_from:
+                            procured_from_name = i.procured_from.name if hasattr(i.procured_from, 'name') else str(i.procured_from)
+                    except Exception:
+                        pass
+                    
                     results.append({
                         'item_code': getattr(i, 'item_code', ''),
                         'item_name': getattr(i, 'item_name', ''),
-                        'item_uom': getattr(i, 'unit_of_measure', '') or ''
+                        'item_uom': getattr(i, 'unit_of_measure', '') or '',
+                        'procured_from': procured_from_name
                     })
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"Error in search_items: {e}")
+                import traceback
+                traceback.print_exc()
+                results = []
+        else:
+            print("ItemMaster model not found - check if masters app is installed")
         return JsonResponse(results, safe=False)
     
     # masters lookup
