@@ -24,59 +24,9 @@ from datetime import date, datetime
 from final_allocation import expand_therapies_for_visit
 
 # Step 1: Patient Lookup
-def patient_lookup_view(request):
-    if request.method == "POST":
-        reg_number = request.POST.get('reg_number')
-        from_date_str = request.POST.get('from_date')
-        to_date_str = request.POST.get('to_date')
-
-        patient_found = False
-        
-        # First, try to find in IP patients (Registration table)
-        try:
-            patient = Registration.objects.using('therapy_db').get(pat_reg_no=reg_number)
-            request.session['patient_reg_no'] = str(patient.pat_reg_no)
-            request.session['is_ip_or_op'] = 'IP'
-            patient_found = True
-        except Registration.DoesNotExist:
-            pass
-        except Exception as e:
-            print(f"Error searching IP patients: {e}")
-        
-        # If not found in IP patients, try OP patients (OPMaster table)
-        if not patient_found:
-            try:
-                op_patient = OPMaster.objects.using('hospital_db').filter(NPat_Reg_No=reg_number).first()
-                
-                if op_patient:
-                    request.session['patient_reg_no'] = str(op_patient.NPat_Reg_No)
-                    request.session['is_ip_or_op'] = 'OP'
-                    patient_found = True
-            except Exception as e:
-                print(f"Error searching OP patients: {e}")
-        
-        if patient_found:
-            # Store date and days data in the session
-            request.session['from_date'] = from_date_str
-            request.session['to_date'] = to_date_str
-            
-            if from_date_str and to_date_str:
-                try:
-                    from_date = datetime.strptime(from_date_str, '%Y-%m-%d').date()
-                    to_date = datetime.strptime(to_date_str, '%Y-%m-%d').date()
-                    admission_days = (to_date - from_date).days + 1
-                    request.session['admission_days'] = admission_days
-                except ValueError:
-                    request.session['admission_days'] = None
-            else:
-                request.session['admission_days'] = None
-
-            return redirect('patient:therapy_entry')
-        else:
-            error_message = "Registration number not found in IP or OP patients."
-            return render(request, 'patient_lookup.html', {'error': error_message})
-    
-    return render(request, 'dashboards/doctorsAndHelpDesk/patient_lookup.html')
+# Removed patient_lookup_view - template deleted (not in navigation)
+# def patient_lookup_view(request):
+#     ...
 
 
 def search_patients_api(request):
@@ -398,107 +348,9 @@ from django.conf import settings
 
 DB_ALIAS = getattr(settings, 'DB_ALIAS', 'therapy_db')  # if you use a constant, keep that
 
-def review_view(request):
-    patient_reg_no = request.session.get('patient_reg_no')
-    if not patient_reg_no:
-        return redirect('patient:patient_lookup')
-
-    patient = get_object_or_404(Registration.objects.using(DB_ALIAS), pat_reg_no=patient_reg_no)
-
-    try:
-        vip_status = "Yes" if Repeated_Visitors.objects.using(DB_ALIAS).filter(register_number=patient_reg_no, is_vip=1).exists() else "No"
-    except Exception:
-        vip_status = "N/A"
-
-    from_date = request.session.get('from_date')
-    to_date = request.session.get('to_date')
-    admission_days = request.session.get('admission_days')
-    is_ip_or_op = request.session.get('is_ip_or_op')
-    repeated_status = request.session.get('repeated_status')
-    therapy_data = request.session.get('therapy_rows_data', []) or []
-    prescription_data = request.session.get('prescription_rows_data', []) or []
-
-    # Resolve item names for therapies (supports multiple items per therapy)
-    for therapy_row in therapy_data:
-        items = therapy_row.get('items') or []
-        resolved = []
-        for it in items:
-            item_code = it.get('item_code') or it.get('item')
-            if item_code:
-                try:
-                    item_master = ItemMaster.objects.using(DB_ALIAS).get(item_code=item_code)
-                    resolved.append({
-                        'item_code': item_code,
-                        'item_name': item_master.item_name,
-                        'oil_class': it.get('oil_class') or '',
-                        'usage': it.get('usage') or '',
-                        'procured': it.get('procured') or '',
-                    })
-                except ItemMaster.DoesNotExist:
-                    resolved.append({
-                        'item_code': item_code,
-                        'item_name': 'Item not found',
-                        'oil_class': it.get('oil_class') or '',
-                        'usage': it.get('usage') or '',
-                        'procured': it.get('procured') or '',
-                    })
-        therapy_row['resolved_items'] = resolved
-
-        # --- NEW: resolve slot to friendly label ---
-        slot_label = ''
-        # Try time_slot_id first (your sanitized view stores time_slot_id)
-        time_slot_id = therapy_row.get('time_slot_id')
-        if time_slot_id:
-            from masters.models import SlotMaster
-            # SlotMaster primary key is slot_number; attempt both ways
-            ts = SlotMaster.objects.filter(slot_number=time_slot_id, is_active=True).first()
-            if not ts:
-                ts = SlotMaster.objects.filter(pk=time_slot_id, is_active=True).first()
-            if ts:
-                try:
-                    slot_label = ts.slot_time.strftime("%I:%M %p").lstrip("0")
-                except Exception:
-                    slot_label = str(ts.slot_time)
-        else:
-            # fallback to free-text slot_value (expected "HH:MM")
-            sv = therapy_row.get('slot_value') or therapy_row.get('slot') or ''
-            if sv:
-                try:
-                    dt = datetime.strptime(sv.strip(), "%H:%M")
-                    slot_label = dt.strftime("%I:%M %p").lstrip("0")
-                except Exception:
-                    # if format differs, just show raw value
-                    slot_label = sv
-
-        therapy_row['slot_label'] = slot_label or ''
-
-    # Resolve prescription row item names and ensure from/to/days fields are present
-    for pres_row in prescription_data:
-        item_code = pres_row.get('item') or pres_row.get('item_code')
-        if item_code:
-            try:
-                item_master = ItemMaster.objects.using(DB_ALIAS).get(item_code=item_code)
-                pres_row['item_name'] = item_master.item_name
-            except ItemMaster.DoesNotExist:
-                pres_row['item_name'] = 'Item not found'
-        # ensure date fields exist (they come from frontend)
-        pres_row['from_date'] = pres_row.get('from_date') or ''
-        pres_row['to_date'] = pres_row.get('to_date') or ''
-        pres_row['days'] = pres_row.get('days') or 0
-        pres_row['procured_from'] = pres_row.get('procured_from') or pres_row.get('procured_from') or ''
-
-    context = {
-        'patient': patient,
-        'vip_status': vip_status,
-        'from_date': from_date,
-        'to_date': to_date,
-        'admission_days': admission_days,
-        'is_ip_or_op': is_ip_or_op,
-        'therapy_data': therapy_data,
-        'prescription_data': prescription_data,
-        'repeated_status': repeated_status,
-    }
-    return render(request, 'dashboards/doctorsAndHelpDesk/review_page.html', context)
+# Removed review_view - template deleted (not in navigation)
+# def review_view(request):
+#     ...
 
 
 DEFAULT_DB = 'default'
@@ -816,39 +668,40 @@ from MySql_Data_pull.models import Visit  # adjust path if needed
 from .models import RoomBooking, TherapistBooking
 from MySql_Data_pull.models import store_Therapy, store_TherapyItem, store_PrescriptionItem
 
-class PatientListView(ListView):
-    model = Visit
-    template_name = "dashboards/prescriptions/patient_list.html"   # see templates section below
-    context_object_name = "visits"
-    paginate_by = 25
-
-    def get_queryset(self):
-        # Gather active bookings (status='BOOKED')
-        room_qs = RoomBooking.objects.filter(status='BOOKED')
-        therapist_qs = TherapistBooking.objects.filter(status='BOOKED')
-
-        patient_ids_from_bookings = set(
-            list(room_qs.values_list('patient_id', flat=True)) +
-            list(therapist_qs.values_list('patient_id', flat=True))
-        )
-        patient_ids_from_bookings = {p for p in patient_ids_from_bookings if p is not None and p != ""}
-
-        visit_ids_from_bookings = set(
-            list(room_qs.exclude(visit__isnull=True).values_list('visit__id', flat=True)) +
-            list(therapist_qs.exclude(visit__isnull=True).values_list('visit__id', flat=True))
-        )
-
-        queries = Q()
-        if visit_ids_from_bookings:
-            queries |= Q(id__in=list(visit_ids_from_bookings))
-        if patient_ids_from_bookings and hasattr(Visit, 'patient_id'):
-            queries |= Q(patient_id__in=list(patient_ids_from_bookings))
-
-        if queries:
-            qs = Visit.objects.filter(queries).distinct().order_by('-id')
-        else:
-            qs = Visit.objects.none()
-        return qs
+# Removed PatientListView - Treatment Schedule page not needed
+# class PatientListView(ListView):
+#     model = Visit
+#     template_name = "dashboards/prescriptions/patient_list.html"
+#     context_object_name = "visits"
+#     paginate_by = 25
+# 
+#     def get_queryset(self):
+#         # Gather active bookings (status='BOOKED')
+#         room_qs = RoomBooking.objects.filter(status='BOOKED')
+#         therapist_qs = TherapistBooking.objects.filter(status='BOOKED')
+# 
+#         patient_ids_from_bookings = set(
+#             list(room_qs.values_list('patient_id', flat=True)) +
+#             list(therapist_qs.values_list('patient_id', flat=True))
+#         )
+#         patient_ids_from_bookings = {p for p in patient_ids_from_bookings if p is not None and p != ""}
+# 
+#         visit_ids_from_bookings = set(
+#             list(room_qs.exclude(visit__isnull=True).values_list('visit__id', flat=True)) +
+#             list(therapist_qs.exclude(visit__isnull=True).values_list('visit__id', flat=True))
+#         )
+# 
+#         queries = Q()
+#         if visit_ids_from_bookings:
+#             queries |= Q(id__in=list(visit_ids_from_bookings))
+#         if patient_ids_from_bookings and hasattr(Visit, 'patient_id'):
+#             queries |= Q(patient_id__in=list(patient_ids_from_bookings))
+# 
+#         if queries:
+#             qs = Visit.objects.filter(queries).distinct().order_by('-id')
+#         else:
+#             qs = Visit.objects.none()
+#         return qs
     
 
 from collections import defaultdict
@@ -1042,7 +895,7 @@ def cancel_session_bookings(request):
     ids = request.POST.getlist("booking_ids")
     if not ids:
         messages.error(request, "No bookings selected to cancel.")
-        return redirect(request.META.get("HTTP_REFERER", reverse("patient:patient_list")))
+        return redirect(request.META.get("HTTP_REFERER", reverse("patient:home")))
 
     canceled = 0
     errors = []
@@ -1080,7 +933,7 @@ def complete_session_bookings(request):
     ids = request.POST.getlist("booking_ids")
     if not ids:
         messages.error(request, "No bookings selected to complete.")
-        return redirect(request.META.get("HTTP_REFERER", reverse("patient:patient_list")))
+        return redirect(request.META.get("HTTP_REFERER", reverse("patient:home")))
 
     completed = 0
     errors = []
@@ -1177,7 +1030,7 @@ def update_therapy_item(request, item_id):
         store_TherapyItemDay.expand_for_item(item)
 
         messages.success(request, "Therapy item and day schedule updated successfully.")
-        return redirect(request.META.get("HTTP_REFERER", reverse("patient:patient_list")))
+        return redirect(request.META.get("HTTP_REFERER", reverse("patient:home")))
 
     return render(request, "dashboards/prescriptions/update_therapy_item.html", {"item": item})
 
@@ -1226,7 +1079,7 @@ def update_prescription_item(request, item_id):
         item.updated_at = timezone.now()
         item.save(update_fields=["dosage", "usage", "from_date", "to_date", "time", "item_uom", "status", "updated_at"])
         messages.success(request, "Prescription item updated.")
-        return redirect(request.META.get("HTTP_REFERER", reverse("patient:patient_list")))
+        return redirect(request.META.get("HTTP_REFERER", reverse("patient:home")))
 
     return render(request, "dashboards/prescriptions/update_prescription_item.html", {"item": item})
 

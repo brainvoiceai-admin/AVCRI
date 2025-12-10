@@ -1,422 +1,319 @@
-{% load static %}
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Reports & Analytics - AVCRI</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <title>Reports & Analytics - Therapy & Prescription</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
         body {
-            font-family: Arial, sans-serif;
             background-color: #f8f9fa;
+            font-family: 'Inter', sans-serif;
         }
-        .sidebar {
-            background-color: #343a40;
-            color: white;
-            min-height: 100vh;
-            position: fixed;
-            width: 18%;
-        }
-        .sidebar a {
-            color: #adb5bd;
-            padding: 10px 15px;
-            display: block;
-            text-decoration: none;
-        }
-        .sidebar a:hover {
-            color: white;
-            background-color: #495057;
-        }
-        .main {
-            padding: 20px;
-            margin-left: 18%;
-            width: calc(100% - 18%);
-            max-width: calc(100vw - 18%);
-            overflow-x: auto;
-        }
-        .card {
-            box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
-            margin-bottom: 20px;
+        .main-content {
+            margin-left: 270px;
+            padding: 1.5rem;
+            width: calc(100% - 270px);
         }
         .stat-card {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            border-radius: 10px;
-            padding: 20px;
-            margin-bottom: 20px;
+            background: white;
+            border-radius: 8px;
+            padding: 1.5rem;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 1.5rem;
         }
-        .stat-card.success {
-            background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+        .stat-number {
+            font-size: 2rem;
+            font-weight: bold;
+            color: #2ed573;
         }
-        .stat-card.warning {
-            background: linear-gradient(135deg, #ffc107 0%, #fd7e14 100%);
-        }
-        .stat-card.danger {
-            background: linear-gradient(135deg, #dc3545 0%, #e83e8c 100%);
-        }
-        .stat-card.info {
-            background: linear-gradient(135deg, #17a2b8 0%, #6f42c1 100%);
+        .stat-label {
+            color: #6c757d;
+            font-size: 0.9rem;
+            margin-top: 0.5rem;
         }
         .chart-container {
             position: relative;
             height: 300px;
-            margin-bottom: 20px;
+            margin-top: 1rem;
         }
-        @media (max-width: 768px) {
-            .sidebar {
-                position: static;
-                width: 100%;
-            }
-            .main {
+        @media (max-width: 992px) {
+            .main-content {
                 margin-left: 0;
-                padding: 10px;
+                width: 100%;
+                padding: 1rem;
             }
         }
     </style>
 </head>
 <body>
-    <div class="container-fluid">
-        <div class="row">
-            <!-- Sidebar -->
-            <div class="sidebar p-0">
-                {% include 'dashboards/nav.html' %}
+    {% include 'dashboards/nav.html' %}
+
+    <main class="main-content">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h1 class="h2 mb-0">Reports & Analytics</h1>
+            <form method="get" class="d-flex gap-2">
+                <input type="date" name="start_date" value="{{ start_date|date:'Y-m-d' }}" class="form-control">
+                <input type="date" name="end_date" value="{{ end_date|date:'Y-m-d' }}" class="form-control">
+                <button type="submit" class="btn btn-primary">Apply</button>
+            </form>
+        </div>
+
+        <!-- Therapy Statistics -->
+        <div class="row mb-4">
+            <div class="col-md-4">
+                <div class="stat-card">
+                    <div class="stat-number">{{ total_therapies }}</div>
+                    <div class="stat-label">Total Therapies</div>
+                </div>
             </div>
+            <div class="col-md-4">
+                <div class="stat-card">
+                    <div class="stat-number">{{ active_therapies }}</div>
+                    <div class="stat-label">Active Therapies</div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="stat-card">
+                    <div class="stat-number">{{ cancelled_therapies }}</div>
+                    <div class="stat-label">Cancelled Therapies</div>
+                </div>
+            </div>
+        </div>
 
-            <!-- Main Content -->
-            <div class="main">
-                <div class="d-flex justify-content-between align-items-center mb-4">
-                    <h2>Reports & Analytics</h2>
-                    <div>
-                        <form method="get" class="d-inline-flex gap-2">
-                            <input type="date" name="start_date" class="form-control" value="{{ start_date|date:'Y-m-d' }}" required>
-                            <input type="date" name="end_date" class="form-control" value="{{ end_date|date:'Y-m-d' }}" required>
-                            <button type="submit" class="btn btn-primary">Apply Filters</button>
-                        </form>
+        <!-- Prescription Statistics -->
+        <div class="row mb-4">
+            <div class="col-md-4">
+                <div class="stat-card">
+                    <div class="stat-number">{{ total_prescriptions }}</div>
+                    <div class="stat-label">Total Prescriptions</div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="stat-card">
+                    <div class="stat-number">{{ active_prescriptions }}</div>
+                    <div class="stat-label">Active Prescriptions</div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="stat-card">
+                    <div class="stat-number">{{ cancelled_prescriptions }}</div>
+                    <div class="stat-label">Cancelled Prescriptions</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Booking Statistics -->
+        <div class="row mb-4">
+            <div class="col-md-4">
+                <div class="stat-card">
+                    <div class="stat-number">{{ total_bookings }}</div>
+                    <div class="stat-label">Total Bookings</div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="stat-card">
+                    <div class="stat-number">{{ completed_bookings }}</div>
+                    <div class="stat-label">Completed Bookings</div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="stat-card">
+                    <div class="stat-number">{{ cancelled_bookings }}</div>
+                    <div class="stat-label">Cancelled Bookings</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Average Durations -->
+        <div class="row mb-4">
+            <div class="col-md-6">
+                <div class="stat-card">
+                    <div class="stat-number">{{ avg_therapy_duration }}</div>
+                    <div class="stat-label">Avg Therapy Duration (Days)</div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="stat-card">
+                    <div class="stat-number">{{ avg_prescription_duration }}</div>
+                    <div class="stat-label">Avg Prescription Duration (Days)</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Charts Row 1 -->
+        <div class="row mb-4">
+            <div class="col-md-6">
+                <div class="stat-card">
+                    <h5 class="mb-3">Therapy Status Distribution</h5>
+                    <div class="chart-container">
+                        <canvas id="therapyStatusChart"></canvas>
                     </div>
                 </div>
-
-                <!-- Statistics Overview -->
-                <div class="row mb-4">
-                    <div class="col-md-3">
-                        <div class="stat-card">
-                            <h4>{{ total_therapies }}</h4>
-                            <p class="mb-0">Total Therapies</p>
-                        </div>
-                    </div>
-                    <div class="col-md-3">
-                        <div class="stat-card success">
-                            <h4>{{ active_therapies }}</h4>
-                            <p class="mb-0">Active Therapies</p>
-                        </div>
-                    </div>
-                    <div class="col-md-3">
-                        <div class="stat-card danger">
-                            <h4>{{ cancelled_therapies }}</h4>
-                            <p class="mb-0">Cancelled Therapies</p>
-                        </div>
-                    </div>
-                    <div class="col-md-3">
-                        <div class="stat-card info">
-                            <h4>{{ total_prescriptions }}</h4>
-                            <p class="mb-0">Total Prescriptions</p>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="row mb-4">
-                    <div class="col-md-3">
-                        <div class="stat-card success">
-                            <h4>{{ active_prescriptions }}</h4>
-                            <p class="mb-0">Active Prescriptions</p>
-                        </div>
-                    </div>
-                    <div class="col-md-3">
-                        <div class="stat-card warning">
-                            <h4>{{ total_bookings }}</h4>
-                            <p class="mb-0">Total Bookings</p>
-                        </div>
-                    </div>
-                    <div class="col-md-3">
-                        <div class="stat-card success">
-                            <h4>{{ completed_bookings }}</h4>
-                            <p class="mb-0">Completed Bookings</p>
-                        </div>
-                    </div>
-                    <div class="col-md-3">
-                        <div class="stat-card">
-                            <h4>{{ avg_therapy_duration }}</h4>
-                            <p class="mb-0">Avg Therapy Duration (Days)</p>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Charts Row 1 -->
-                <div class="row">
-                    <div class="col-md-6">
-                        <div class="card">
-                            <div class="card-header">
-                                <h5 class="mb-0">Therapy Status Distribution</h5>
-                            </div>
-                            <div class="card-body">
-                                <div class="chart-container">
-                                    <canvas id="therapyStatusChart"></canvas>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="col-md-6">
-                        <div class="card">
-                            <div class="card-header">
-                                <h5 class="mb-0">Prescription Status Distribution</h5>
-                            </div>
-                            <div class="card-body">
-                                <div class="chart-container">
-                                    <canvas id="prescriptionStatusChart"></canvas>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Charts Row 2 -->
-                <div class="row">
-                    <div class="col-md-12">
-                        <div class="card">
-                            <div class="card-header">
-                                <h5 class="mb-0">Daily Therapy Bookings Trend</h5>
-                            </div>
-                            <div class="card-body">
-                                <div class="chart-container" style="height: 400px;">
-                                    <canvas id="dailyBookingsChart"></canvas>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Charts Row 3 -->
-                <div class="row">
-                    <div class="col-md-6">
-                        <div class="card">
-                            <div class="card-header">
-                                <h5 class="mb-0">Top 10 Therapies</h5>
-                            </div>
-                            <div class="card-body">
-                                <div class="chart-container">
-                                    <canvas id="topTherapiesChart"></canvas>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="col-md-6">
-                        <div class="card">
-                            <div class="card-header">
-                                <h5 class="mb-0">Top 10 Therapist Utilization</h5>
-                            </div>
-                            <div class="card-body">
-                                <div class="chart-container">
-                                    <canvas id="therapistUtilizationChart"></canvas>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Charts Row 4 -->
-                <div class="row">
-                    <div class="col-md-12">
-                        <div class="card">
-                            <div class="card-header">
-                                <h5 class="mb-0">Top 10 Room Utilization</h5>
-                            </div>
-                            <div class="card-body">
-                                <div class="chart-container">
-                                    <canvas id="roomUtilizationChart"></canvas>
-                                </div>
-                            </div>
-                        </div>
+            </div>
+            <div class="col-md-6">
+                <div class="stat-card">
+                    <h5 class="mb-3">Prescription Status Distribution</h5>
+                    <div class="chart-container">
+                        <canvas id="prescriptionStatusChart"></canvas>
                     </div>
                 </div>
             </div>
         </div>
-    </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+        <!-- Charts Row 2 -->
+        <div class="row mb-4">
+            <div class="col-md-6">
+                <div class="stat-card">
+                    <h5 class="mb-3">Top Therapies</h5>
+                    <div class="chart-container">
+                        <canvas id="topTherapiesChart"></canvas>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="stat-card">
+                    <h5 class="mb-3">Daily Bookings Trend</h5>
+                    <div class="chart-container">
+                        <canvas id="dailyBookingsChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Charts Row 3 -->
+        <div class="row mb-4">
+            <div class="col-md-6">
+                <div class="stat-card">
+                    <h5 class="mb-3">Therapist Utilization</h5>
+                    <div class="chart-container">
+                        <canvas id="therapistUtilChart"></canvas>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="stat-card">
+                    <h5 class="mb-3">Room Utilization</h5>
+                    <div class="chart-container">
+                        <canvas id="roomUtilChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
     <script>
         // Therapy Status Chart
-        const therapyStatusData = JSON.parse('{{ therapy_status_data|escapejs }}');
-        const therapyStatusCtx = document.getElementById('therapyStatusChart').getContext('2d');
-        new Chart(therapyStatusCtx, {
+        const therapyStatusData = {{ therapy_status_data|safe }};
+        new Chart(document.getElementById('therapyStatusChart'), {
             type: 'doughnut',
             data: {
-                labels: Object.keys(therapyStatusData).map(k => k.charAt(0).toUpperCase() + k.slice(1)),
+                labels: Object.keys(therapyStatusData),
                 datasets: [{
                     data: Object.values(therapyStatusData),
-                    backgroundColor: [
-                        '#28a745',
-                        '#dc3545',
-                        '#ffc107',
-                        '#17a2b8'
-                    ]
+                    backgroundColor: ['#2ed573', '#e74c3c', '#f39c12', '#3498db']
                 }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    legend: {
-                        position: 'bottom'
-                    }
-                }
             }
         });
 
         // Prescription Status Chart
-        const prescriptionStatusData = JSON.parse('{{ prescription_status_data|escapejs }}');
-        const prescriptionStatusCtx = document.getElementById('prescriptionStatusChart').getContext('2d');
-        new Chart(prescriptionStatusCtx, {
+        const prescriptionStatusData = {{ prescription_status_data|safe }};
+        new Chart(document.getElementById('prescriptionStatusChart'), {
             type: 'doughnut',
             data: {
-                labels: Object.keys(prescriptionStatusData).map(k => k.charAt(0).toUpperCase() + k.slice(1)),
+                labels: Object.keys(prescriptionStatusData),
                 datasets: [{
                     data: Object.values(prescriptionStatusData),
-                    backgroundColor: [
-                        '#28a745',
-                        '#dc3545',
-                        '#ffc107',
-                        '#17a2b8'
-                    ]
+                    backgroundColor: ['#2ed573', '#e74c3c', '#f39c12', '#3498db']
+                }]
+            }
+        });
+
+        // Top Therapies Chart
+        const topTherapiesData = {{ top_therapies|safe }};
+        new Chart(document.getElementById('topTherapiesChart'), {
+            type: 'bar',
+            data: {
+                labels: topTherapiesData.map(t => t.therapy_name),
+                datasets: [{
+                    label: 'Count',
+                    data: topTherapiesData.map(t => t.count),
+                    backgroundColor: '#2ed573'
                 }]
             },
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
-                plugins: {
-                    legend: {
-                        position: 'bottom'
-                    }
+                scales: {
+                    y: { beginAtZero: true }
                 }
             }
         });
 
         // Daily Bookings Chart
-        const dailyBookingsData = JSON.parse('{{ daily_bookings_data|escapejs }}');
-        const dailyBookingsCtx = document.getElementById('dailyBookingsChart').getContext('2d');
-        new Chart(dailyBookingsCtx, {
+        const dailyBookingsData = {{ daily_bookings_data|safe }};
+        new Chart(document.getElementById('dailyBookingsChart'), {
             type: 'line',
             data: {
                 labels: dailyBookingsData.dates,
                 datasets: [{
-                    label: 'Daily Bookings',
+                    label: 'Bookings',
                     data: dailyBookingsData.counts,
-                    borderColor: '#667eea',
-                    backgroundColor: 'rgba(102, 126, 234, 0.1)',
-                    tension: 0.4,
+                    borderColor: '#2ed573',
+                    backgroundColor: 'rgba(46, 213, 115, 0.1)',
                     fill: true
                 }]
             },
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
-                plugins: {
-                    legend: {
-                        display: true
-                    }
-                },
                 scales: {
-                    y: {
-                        beginAtZero: true
-                    }
-                }
-            }
-        });
-
-        // Top Therapies Chart
-        const topTherapiesData = JSON.parse('{{ top_therapies|escapejs }}');
-        const topTherapiesCtx = document.getElementById('topTherapiesChart').getContext('2d');
-        new Chart(topTherapiesCtx, {
-            type: 'bar',
-            data: {
-                labels: topTherapiesData.map(t => t.therapy_name.length > 20 ? t.therapy_name.substring(0, 20) + '...' : t.therapy_name),
-                datasets: [{
-                    label: 'Allocations',
-                    data: topTherapiesData.map(t => t.count),
-                    backgroundColor: '#28a745'
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    legend: {
-                        display: false
-                    }
-                },
-                scales: {
-                    y: {
-                        beginAtZero: true
-                    }
+                    y: { beginAtZero: true }
                 }
             }
         });
 
         // Therapist Utilization Chart
-        const therapistUtilData = JSON.parse('{{ therapist_utilization|escapejs }}');
-        const therapistUtilCtx = document.getElementById('therapistUtilizationChart').getContext('2d');
-        new Chart(therapistUtilCtx, {
+        const therapistUtilData = {{ therapist_utilization|safe }};
+        new Chart(document.getElementById('therapistUtilChart'), {
             type: 'bar',
             data: {
-                labels: therapistUtilData.map(t => t.therapist__therapist_name || 'Unknown'),
+                labels: therapistUtilData.map(t => t.therapist__therapist_name),
                 datasets: [{
                     label: 'Bookings',
                     data: therapistUtilData.map(t => t.count),
-                    backgroundColor: '#17a2b8'
+                    backgroundColor: '#3498db'
                 }]
             },
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
-                plugins: {
-                    legend: {
-                        display: false
-                    }
-                },
                 scales: {
-                    y: {
-                        beginAtZero: true
-                    }
+                    y: { beginAtZero: true }
                 }
             }
         });
 
         // Room Utilization Chart
-        const roomUtilData = JSON.parse('{{ room_utilization|escapejs }}');
-        const roomUtilCtx = document.getElementById('roomUtilizationChart').getContext('2d');
-        new Chart(roomUtilCtx, {
+        const roomUtilData = {{ room_utilization|safe }};
+        new Chart(document.getElementById('roomUtilChart'), {
             type: 'bar',
             data: {
-                labels: roomUtilData.map(r => r.room__room_no || 'Unknown'),
+                labels: roomUtilData.map(r => r.room__room_no),
                 datasets: [{
                     label: 'Bookings',
                     data: roomUtilData.map(r => r.count),
-                    backgroundColor: '#ffc107'
+                    backgroundColor: '#f39c12'
                 }]
             },
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
-                plugins: {
-                    legend: {
-                        display: false
-                    }
-                },
                 scales: {
-                    y: {
-                        beginAtZero: true
-                    }
+                    y: { beginAtZero: true }
                 }
             }
         });
