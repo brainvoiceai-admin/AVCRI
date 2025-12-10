@@ -1,0 +1,115 @@
+{%load static%}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pharmacy Medicine Preparation</title>
+    
+    <link rel="stylesheet" href="{% static 'css/procurement_dashboard.css' %}">
+    <link rel="stylesheet" href="{% static 'css/dashboards_nav.css' %}">
+</head>
+<body>
+    {% include 'dashboards/nav.html' %}
+    <div class="main-content">
+    <div class="container">
+        <header>
+            <div>
+                <h1>Pharmacy Medicine Preparation</h1>
+                <div class="subtitle">Select a patient and mark medicines as prepared</div>
+            </div>
+            <div class="controls">
+                <div class="date-filter">
+                    <label for="dateFilter">Date:</label>
+                    <input type="date" id="dateFilter">
+                </div>
+                <div class="stats">
+                    <div class="stat-card total">
+                        <div class="stat-value" id="totalMeds">0</div>
+                        <div class="stat-label">Total Medicines</div>
+                    </div>
+                    <div class="stat-card pending">
+                        <div class="stat-value" id="pendingMeds">0</div>
+                        <div class="stat-label">Pending</div>
+                    </div>
+                    <div class="stat-card prepared">
+                        <div class="stat-value" id="preparedMeds">0</div>
+                        <div class="stat-label">Prepared</div>
+                    </div>
+                </div>
+            </div>
+        </header>
+        
+        <div class="dashboard">
+            <div class="patients-panel">
+                <div class="panel-header">
+                    <div class="panel-title">Patients</div>
+                    <div class="small" id="patientsCount">0 patients</div>
+                </div>
+                
+                <div class="search-box">
+                    <span class="search-icon">🔍</span>
+                    <input type="text" id="search" placeholder="Search patients...">
+                </div>
+                
+                <div class="filter-tabs">
+                    <div class="filter-tab active" data-filter="all">All</div>
+                    <div class="filter-tab" data-filter="pending">Pending</div>
+                    <div class="filter-tab" data-filter="prepared">Prepared</div>
+                </div>
+                
+                <div class="patients-list" id="patientsList">
+                    <!-- Patient cards will be inserted here -->
+                </div>
+            </div>
+            
+            <div class="medicines-panel">
+                <div id="noSelection" class="no-selection">
+                    <div class="no-selection-icon">💊</div>
+                    <h3>No Patient Selected</h3>
+                    <p>Select a patient from the list to view and prepare their medicines</p>
+                </div>
+                
+                <div id="patientView" style="display: none;">
+                    <div class="patient-header">
+                        <div class="patient-info">
+                            <h2 id="pv_name">Patient Name</h2>
+                            <div class="patient-meta" id="pv_meta">ID • Age • Sex</div>
+                            <div class="patient-meta">Room: <span id="pv_room">-</span> • Therapy: <span id="pv_therapy">-</span></div>
+                        </div>
+                        <div class="header-actions">
+                            <button class="btn btn-outline" id="viewChangeLogBtn">View Change Log</button>
+                            <button class="prepare-all-btn" id="prepareAllBtn">Mark All as Prepared</button>
+                        </div>
+                    </div>
+                    
+                    <div id="changeLogPanel" style="display: none; margin-bottom: 20px; padding: 15px; background: #f5f5f5; border-radius: 8px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                            <h3 style="margin: 0;">Change Log</h3>
+                            <button class="btn btn-outline" id="closeChangeLogBtn" style="padding: 5px 10px;">Close</button>
+                        </div>
+                        <div id="changeLogContent" style="max-height: 300px; overflow-y: auto;">
+                            <!-- Change log entries will be inserted here -->
+                        </div>
+                    </div>
+                    
+                    <div id="pv_content">
+                        <!-- Medicine lists will be inserted here -->
+                    </div>
+                    
+                    <div class="action-buttons">
+                        <button class="btn btn-outline" id="exportPatientCSV">Export Patient CSV</button>
+                        <button class="btn btn-primary" id="saveChangesBtn">Save Changes</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    
+    </div>
+</div>
+    <script src="{% static 'js/procurement_dashboard.js' %}"></script>
+    <script src="{% static 'js/dashboards_nav.js' %}"></script>
+</body>
+</html>

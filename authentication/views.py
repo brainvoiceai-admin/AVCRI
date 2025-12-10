@@ -1567,7 +1567,7 @@ def add_therapy_with_autofill(request):
         'all_therapies': all_therapies,
         'all_slots': all_slots
     }
-    return render(request, 'dashboards/doctorsAndHelpDesk/therapy_entry.html', context)
+    return render(request, 'dashboards/prescriptions/therapy_entry.html', context)
 
 @login_required
 def search_patients(request):

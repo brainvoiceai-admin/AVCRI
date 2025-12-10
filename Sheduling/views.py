@@ -1930,7 +1930,7 @@ def therapy_entry(request):
     except Exception:
         masters_context['slots'] = []
 
-    return render(request, 'updated_dash/therapy_entry.html', context={'masters': masters_context})
+    return render(request, 'dashboards/prescriptions/therapy_entry.html', context={'masters': masters_context})
 
 
 def prescription_entry_page(request):
@@ -2322,7 +2322,7 @@ def prescription_entry_page(request):
     
     
     # Default: render template
-    return render(request, 'updated_dash/prescription_entry.html')
+    return render(request, 'dashboards/prescriptions/prescription_entry.html')
 
 
 def create_prescription_notification(prescription_allocation, action, user, additional_data=None):
@@ -3023,7 +3023,7 @@ def prescription_entry_page(request):
             return JsonResponse({'error': str(e)}, status=500)
     
     # Default: render the template
-    return render(request, 'updated_dash/prescription_entry.html')
+    return render(request, 'dashboards/prescriptions/prescription_entry.html')
 
 
 def create_prescription_notification(prescription_allocation, action, user, additional_data=None):
@@ -3661,7 +3661,7 @@ def scheduling_dashboard(request):
         }
     }
     
-    return render(request, 'scheduling.html', context)
+    return render(request, 'dashboards/scheduling/scheduling.html', context)
 
 
 @require_http_methods(["GET"])

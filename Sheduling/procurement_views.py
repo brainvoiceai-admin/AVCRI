@@ -17,7 +17,7 @@ def procurement_dashboard(request):
     """
     Display the procurement dashboard for prescription preparation and dispatch.
     """
-    return render(request, 'procurement_dashboard.html')
+    return render(request, 'dashboards/procurement/procurement_dashboard.html')
 
 @csrf_exempt
 @require_http_methods(["GET"])

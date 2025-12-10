@@ -284,7 +284,7 @@ def therapy_entry_view(request):
         'patient': patient,
         'all_therapy_items': all_therapy_items,
     }
-    return render(request, 'dashboards/doctorsAndHelpDesk/therapy_entry.html', context)
+    return render(request, 'dashboards/prescriptions/therapy_entry.html', context)
 
 
 from .models import TherapyDetails
