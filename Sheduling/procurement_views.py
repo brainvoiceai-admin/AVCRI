@@ -436,6 +436,14 @@ def get_prescription_details_api(request):
         
         # Process all allocations and use items_groups exactly as stored
         for allocation in allocations:
+            # Check if this allocation is cancelled for the current date
+            # An allocation is cancelled for a date only if:
+            # 1. The allocation status is 'cancelled', AND
+            # 2. The date falls within the cancelled_date_from and cancelled_date_to range
+            is_cancelled_for_this_date = False
+            if allocation.status == 'cancelled' and allocation.cancelled_date_from and allocation.cancelled_date_to:
+                if allocation.cancelled_date_from <= filter_date <= allocation.cancelled_date_to:
+                    is_cancelled_for_this_date = True
             
             # Use the original items_groups structure from allocation - exactly as stored
             if allocation.items_groups:
@@ -479,6 +487,7 @@ def get_prescription_details_api(request):
                     internal_external = group.get('internal_external', '') or alloc_scope
                     
                     # Add the group exactly as it appears in items_groups (with fallbacks)
+                    # Use is_cancelled_for_this_date instead of just checking allocation.status
                     prescription_groups.append({
                         'group_id': f"prescription_group_{allocation.id}_{group_idx}",
                         'time': group.get('time', 'M'),
@@ -491,7 +500,7 @@ def get_prescription_details_api(request):
                         'ingredients': group.get('ingredients', []),
                         'ingredient_ids': group.get('ingredient_ids', []),
                         'items': group_items,
-                        'is_cancelled': allocation.status == 'cancelled',
+                        'is_cancelled': is_cancelled_for_this_date,  # Use date-specific cancellation check
                         'is_group': True
                     })
         

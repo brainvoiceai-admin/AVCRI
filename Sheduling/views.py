@@ -430,8 +430,82 @@ def therapy_entry(request):
                     date__lte=parse_date(resume_to)
                 )
                 resumed_count = resumed_bookings.count()
-                # default set to draft; will selectively schedule if final run exists
-                resumed_bookings.update(status='draft')
+                
+                # Release previous assignments/resources before re-allocating
+                # This ensures clean state for the algorithm
+                try:
+                    # Use global BookingAssignment variable (defined at top of file)
+                    # Don't use local import to avoid UnboundLocalError when checking it earlier
+                    if BookingAssignment is not None:
+                        BookingAssignment.objects.filter(booking__in=resumed_bookings).update(status='released')
+                except Exception:
+                    pass
+                
+                # Clear room assignments, ensure timeslot is set, and set status to draft
+                # The algorithm will allocate room and therapists fresh
+                # Make sure timeslot is set from allocation (needed for algorithm)
+                update_dict = {'status': 'draft', 'room': None}
+                if allocation.timeslot:
+                    update_dict['timeslot'] = allocation.timeslot
+                resumed_bookings.update(**update_dict)
+                BookingItem.objects.filter(booking__in=resumed_bookings).update(status='draft')
+                
+                # Delete any existing TherapistBooking/RoomBooking for these dates
+                # DELETE instead of UPDATE to avoid unique constraint issues
+                # This ensures they're completely removed and can be re-allocated fresh
+                try:
+                    from Patient.models import TherapistBooking as TB, RoomBooking as RB
+                    day_timeslot = allocation.timeslot
+                    if day_timeslot:
+                        for d in daterange(parse_date(resume_from), parse_date(resume_to)):
+                            # Delete TherapistBooking for this date/timeslot (any status to avoid conflicts)
+                            TB.objects.filter(
+                                visit=allocation,
+                                date=d,
+                                time_slot=day_timeslot
+                            ).delete()
+                            TB.objects.filter(
+                                date=d,
+                                time_slot=day_timeslot,
+                                patient_id=allocation.patient.id,
+                                visit__isnull=True
+                            ).delete()
+                            
+                            # Delete RoomBooking for this date/timeslot (any status to avoid conflicts)
+                            RB.objects.filter(
+                                therapy=allocation,
+                                date=d,
+                                time_slot=day_timeslot
+                            ).delete()
+                            for booking in resumed_bookings.filter(date=d):
+                                RB.objects.filter(
+                                    visit=booking,
+                                    date=d,
+                                    time_slot=day_timeslot
+                                ).delete()
+                            RB.objects.filter(
+                                date=d,
+                                time_slot=day_timeslot,
+                                patient_id=allocation.patient.id,
+                                therapy__isnull=True,
+                                visit__isnull=True
+                            ).delete()
+                    else:
+                        # If no timeslot, delete all for these dates
+                        for d in daterange(parse_date(resume_from), parse_date(resume_to)):
+                            TB.objects.filter(
+                                visit=allocation,
+                                date=d
+                            ).delete()
+                            RB.objects.filter(
+                                therapy=allocation,
+                                date=d
+                            ).delete()
+                except Exception as e:
+                    print(f"Error deleting TherapistBooking/RoomBooking on resume: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    pass
                 
                 # re-allocate only for dates where FinalScheduleRun exists
                 failed_reasons = []
@@ -442,7 +516,66 @@ def therapy_entry(request):
                     for d in daterange(parse_date(resume_from), parse_date(resume_to)):
                         if FinalScheduleRun.objects.filter(run_date=d).exists():
                             try:
+                                # Debug: Check booking state before calling algorithm
+                                booking_check = Booking.objects.filter(allocation=allocation, date=d).first()
+                                if not booking_check:
+                                    failed_reasons.append({'date': d.isoformat(), 'reason': 'no_booking_found'})
+                                    continue
+                                
+                                # Ensure booking has timeslot (required by algorithm)
+                                if not booking_check.timeslot and allocation.timeslot:
+                                    booking_check.timeslot = allocation.timeslot
+                                    booking_check.save(update_fields=['timeslot'])
+                                
+                                # Double-check: Delete any remaining TherapistBooking/RoomBooking for this allocation
+                                # The algorithm checks for patient_already_has_booking, so we need to ensure
+                                # no bookings exist for this allocation that could cause conflicts
+                                try:
+                                    from Patient.models import TherapistBooking as TB, RoomBooking as RB
+                                    if booking_check.timeslot:
+                                        # Delete TherapistBooking linked to this allocation
+                                        TB.objects.filter(
+                                            visit=allocation,
+                                            date=d,
+                                            time_slot=booking_check.timeslot
+                                        ).delete()
+                                        # Also delete by patient_id if visit FK is not set
+                                        TB.objects.filter(
+                                            patient_id=allocation.patient.id,
+                                            date=d,
+                                            time_slot=booking_check.timeslot,
+                                            visit__isnull=True
+                                        ).delete()
+                                        
+                                        # Delete RoomBooking linked to this allocation or booking
+                                        RB.objects.filter(
+                                            therapy=allocation,
+                                            date=d,
+                                            time_slot=booking_check.timeslot
+                                        ).delete()
+                                        RB.objects.filter(
+                                            visit=booking_check,
+                                            date=d,
+                                            time_slot=booking_check.timeslot
+                                        ).delete()
+                                        # Also delete orphaned RoomBooking for this patient
+                                        RB.objects.filter(
+                                            patient_id=allocation.patient.id,
+                                            date=d,
+                                            time_slot=booking_check.timeslot,
+                                            therapy__isnull=True,
+                                            visit__isnull=True
+                                        ).delete()
+                                        
+                                        print(f"Final cleanup: Deleted TherapistBooking/RoomBooking for allocation {allocation.id} on {d}")
+                                except Exception as cleanup_e:
+                                    print(f"Warning: Error in final cleanup before algorithm: {cleanup_e}")
+                                    import traceback
+                                    traceback.print_exc()
+                                
                                 tasks = expand_therapies_for_visit(allocation.id, d.strftime('%Y-%m-%d'), create_bookings=True)
+                                print(f"Resume allocation {allocation.id} for date {d}: algorithm returned {tasks}")
+                                
                                 if isinstance(tasks, list) and any(t.get('status') == 'BOOKED' for t in tasks):
                                     any_success = True
                                     Booking.objects.filter(allocation=allocation, date=d).update(status='scheduled')
@@ -452,10 +585,15 @@ def therapy_entry(request):
                                     if isinstance(tasks, list):
                                         fails = [t for t in tasks if t.get('status') == 'FAILED']
                                         reason = fails[0].get('reason') if fails else 'allocation_failed'
+                                        print(f"Resume failed for date {d}: {reason}")
                                     elif isinstance(tasks, dict):
                                         reason = tasks.get('error')
+                                        print(f"Resume error for date {d}: {reason}")
                                     failed_reasons.append({'date': d.isoformat(), 'reason': reason or 'unknown'})
                             except Exception as _e:
+                                print(f"Exception during resume allocation for date {d}: {_e}")
+                                import traceback
+                                traceback.print_exc()
                                 failed_reasons.append({'date': d.isoformat(), 'reason': str(_e)})
                 except Exception:
                     pass
@@ -495,9 +633,15 @@ def therapy_entry(request):
                             allocation.cancelled_date_to = None
                             allocation.cancellation_reason = ''
                             allocation.status = 'draft'
-                    # If resuming from the middle, we need to split the range
-                    # For simplicity, we'll keep the original range but note that this date is resumed
-                    # The frontend will handle showing remaining dates
+                    # If resuming from the middle, keep the original cancelled range unchanged
+                    # Only the specific resumed date's bookings are updated
+                    # The cancelled_date_from/to range stays the same so other dates remain in the cancelled range
+                    else:
+                        # Resuming a date in the middle - don't change the cancelled_date_from/to range
+                        # The range stays as-is (e.g., 11th-14th), and only the specific date (13th) is resumed
+                        # This allows resuming dates one by one without losing the cancelled range
+                        # The UI will check individual booking statuses to determine which dates are actually cancelled
+                        pass  # Keep the original cancelled_date_from/to unchanged
                 
                 allocation.resumed_by = request.user if request.user.is_authenticated else None
                 allocation.resumed_at = timezone.now()
@@ -658,6 +802,20 @@ def therapy_entry(request):
                     
                     # Now delete the bookings
                     bookings_to_delete.delete()
+                    
+                    # Adjust cancelled_date_from and cancelled_date_to to fit within new date range
+                    if allocation.cancelled_date_from and allocation.cancelled_date_to:
+                        # If cancelled range is completely outside new date range, clear it
+                        if allocation.cancelled_date_to < allocation.from_date or allocation.cancelled_date_from > allocation.to_date:
+                            allocation.cancelled_date_from = None
+                            allocation.cancelled_date_to = None
+                            allocation.cancellation_reason = ''
+                        else:
+                            # Adjust cancelled range to fit within new date range
+                            if allocation.cancelled_date_from < allocation.from_date:
+                                allocation.cancelled_date_from = allocation.from_date
+                            if allocation.cancelled_date_to > allocation.to_date:
+                                allocation.cancelled_date_to = allocation.to_date
 
                 allocation.save()
 
@@ -1207,8 +1365,11 @@ def therapy_entry(request):
                 # create allocation and per-date bookings atomically (all-or-nothing)
                 try:
                     with transaction.atomic():
-                        if TherapyAllocation is None or Booking is None or BookingItem is None or BookingAssignment is None:
-                            return JsonResponse({'error': 'required models missing (TherapyAllocation/Booking/BookingItem/BookingAssignment)'}, status=500)
+                        # Check if required models are available
+                        # Note: Don't check BookingAssignment here to avoid UnboundLocalError
+                        # (it may be imported locally later in the function)
+                        if TherapyAllocation is None or Booking is None or BookingItem is None:
+                            return JsonResponse({'error': 'required models missing (TherapyAllocation/Booking/BookingItem)'}, status=500)
 
                     alloc = TherapyAllocation.objects.create(
                         patient=ps,
@@ -1259,9 +1420,19 @@ def therapy_entry(request):
                                 )
                                 created_items.append({'item_code': bi.item_code, 'item_name': bi.item_name})
                         assigns = []
-                        for t in therapists:
-                            a = BookingAssignment.objects.create(booking=b, booking_item=None, therapist=t, role=getattr(t,'therapist_grade',''), assigned_for='booking', status='assigned')
-                            assigns.append(getattr(t,'therapist_code',''))
+                        # Use global BookingAssignment variable (not local import to avoid UnboundLocalError)
+                        if BookingAssignment is not None:
+                            for t in therapists:
+                                try:
+                                    a = BookingAssignment.objects.create(booking=b, booking_item=None, therapist=t, role=getattr(t,'therapist_grade',''), assigned_for='booking', status='assigned')
+                                    assigns.append(getattr(t,'therapist_code',''))
+                                except Exception as assign_e:
+                                    print(f"Error creating BookingAssignment: {assign_e}")
+                                    assigns.append(getattr(t,'therapist_code',''))
+                        else:
+                            # If BookingAssignment model not available, just track therapist codes
+                            for t in therapists:
+                                assigns.append(getattr(t,'therapist_code',''))
                         bookings_created.append({'date': single_date.isoformat(), 'booking_id': b.pk, 'items_count': len(created_items), 'therapists': assigns})
                         date_status_map[single_date.isoformat()] = 'draft'
                         status_counts['draft'] += 1
@@ -2089,41 +2260,11 @@ def prescription_entry_page(request):
                 return JsonResponse({'error': str(e)}, status=500)
 
         # ---------- resume prescription ----------
-        if action_post == 'resume_prescription':
-            allocation_id = payload.get('allocation_id')
-            resume_from = payload.get('resume_from')
-            resume_to = payload.get('resume_to')
-            
-            if not allocation_id or not resume_from or not resume_to:
-                return JsonResponse({'error': 'missing_fields'}, status=400)
-            
-            try:
-                allocation = PrescriptionAllocation.objects.get(id=allocation_id)
-                allocation.status = 'draft'  # Set to draft on resume
-                allocation.resumed_by = request.user if request.user.is_authenticated else None
-                allocation.resumed_at = timezone.now()
-                allocation.cancelled_date_from = None
-                allocation.cancelled_date_to = None
-                allocation.cancellation_reason = ''
-                allocation.save()
-                
-                # Create notification - COMMENTED OUT TEMPORARILY DUE TO NETWORK ERRORS
-                # create_prescription_notification(allocation, 'prescription_resumed', request.user, {
-                #     'resume_from': resume_from,
-                #     'resume_to': resume_to
-                # })
-                
-                # Log audit
-                log_prescription_audit(request.user, 'resume_prescription', 'PrescriptionAllocation', str(allocation.id), {
-                    'resume_from': resume_from,
-                    'resume_to': resume_to
-                })
-                
-                return JsonResponse({'status': 'ok', 'message': 'Prescription resumed successfully'})
-            except PrescriptionAllocation.DoesNotExist:
-                return JsonResponse({'error': 'allocation_not_found'}, status=404)
-            except Exception as e:
-                return JsonResponse({'error': str(e)}, status=500)
+        # NOTE: The resume_prescription handler has been moved to the second POST section (around line 2767)
+        # to support single date resume (resume_date) for middle dates
+        # This old handler is kept commented out for reference but should not be used
+        # if action_post == 'resume_prescription':
+        #     ... (old implementation removed - see line 2767 for new implementation)
 
         # ---------- update prescription ----------
         if action_post == 'update_prescription':
@@ -2663,10 +2804,10 @@ def prescription_entry_page(request):
                 allocation.resumed_at = timezone.now()
                 allocation.save()
                 
-                # Ensure PrescriptionScheduling record exists for the resumed date
+                # Ensure PrescriptionScheduling record exists for the resumed date and update status to 'draft'
                 from .models import PrescriptionScheduling
                 resume_date_obj = parse_date(resume_from)
-                PrescriptionScheduling.objects.get_or_create(
+                ps_record, created = PrescriptionScheduling.objects.get_or_create(
                     patient=allocation.patient,
                     prescription_date=resume_date_obj,
                     defaults={
@@ -2674,6 +2815,10 @@ def prescription_entry_page(request):
                         'status': 'draft'
                     }
                 )
+                # Update status to 'draft' even if record already existed (was cancelled)
+                if not created:
+                    ps_record.status = 'draft'
+                    ps_record.save()
                 
                 # Create notification - COMMENTED OUT TEMPORARILY DUE TO NETWORK ERRORS
                 # create_prescription_notification(allocation, 'prescription_resumed', request.user, {
@@ -2969,13 +3114,15 @@ def prescription_entry_page(request):
                         prescription_date__lte=p.to_date
                     )
                     
+                    # Count status from PrescriptionScheduling records
+                    # This correctly reflects the actual status of each date
                     for ps in scheduling_records:
                         if ps.status in status_counts:
                             status_counts[ps.status] += 1
                     
-                    # Also count the allocation status itself
-                    if p.status in ['active', 'cancelled', 'failed']:
-                        status_counts[p.status] += 1
+                    # Don't add allocation status to counts - status_counts should only reflect PrescriptionScheduling records
+                    # The allocation status (p.status) is separate and represents the overall allocation state
+                    # Individual dates have their own status in PrescriptionScheduling
                 
                 # Build status summary (only include non-zero counts)
                 status_summary = {}

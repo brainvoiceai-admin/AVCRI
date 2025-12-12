@@ -305,8 +305,64 @@ $(function(){
   }
 
   function populatePatientInfo(patient) {
+    // ALWAYS clear form completely whenever a patient is loaded
+    // This ensures all fields are empty and fresh, like a page refresh
+    
+    // Complete reset - clear everything
+    editTherapyIndex = null;
+    cancelingTherapyIndex = null;
+    resumingTherapyIndex = null;
+    viewingStatusTherapyIndex = null;
+    pendingSlotValue = null;
+    
+    // Close any open modals
+    $cancelModal.hide();
+    $resumeModal.hide();
+    $statusModal.hide();
+    
+    // Clear all form fields completely
+    $('#form-title').text('Create New Therapy');
+    $therapySelect.val(null).trigger('change').prop('disabled', false);
+    $slotSelect.val('').prop('disabled', false);
+    $('#ext-int-select').val('').prop('value', '');
+    $fromDate.val('').prop('value', '').prop('disabled', false);
+    $toDate.val('').prop('value', '').prop('disabled', false);
+    $daysInput.val('').prop('value', '');
+    $therapyUsageInput.val('').prop('value', '');
+    
+    // Clear procured select
+    $procuredSelect.val('').prop('value', '');
+    if ($procuredSelect.hasClass('select2-hidden-accessible')) {
+      $procuredSelect.trigger('change');
+    }
+    
+    // Clear item builder fields
+    if ($itemBuilder.hasClass('select2-hidden-accessible')) {
+      $itemBuilder.val(null).trigger('change');
+    } else {
+      $itemBuilder.val(null);
+    }
+    $('#item-builder-dosage').val('').prop('value', '');
+    $('#item-builder-uno').val('').prop('value', '');
+    $itemBuilderOilClass.val('').prop('value', '');
+    if ($itemBuilderOilClass.hasClass('select2-hidden-accessible')) {
+      $itemBuilderOilClass.trigger('change');
+    }
+    
+    // Clear item groups
+    itemGroups = [];
+    renderItemGroups();
+    
+    // Reset buttons
+    $allocateBtn.show();
+    $updateBtn.hide();
+    
+    // Clear therapies and bookings - will be reloaded for new patient
+    addedTherapies = [];
+    bookings = [];
+    
     selectedPatient = patient; // Store patient globally
-    $('#header-patient-select').val(patient.pat_op_reg_no || patient.pat_reg_no);
+    $('#header-patient-select').val(patient.pat_reg_no || patient.pat_op_reg_no);
     // Make patient name bold/highlighted
     $('#hdr-pat-name').html(`<strong style="font-weight: bold; color: var(--primary);">${patient.pat_name || 'Unknown'}</strong>`);
     updatePatientAvatar(patient);
@@ -316,17 +372,23 @@ $(function(){
       $therapySelect.val(null).trigger('change');
     }
     
-    // Load patient therapies
+    // Load patient therapies - this will refresh the entire therapy list
     // Use pat_reg_no consistently (or pat_op_reg_no if pat_reg_no doesn't exist)
     const patientRegNo = patient.pat_reg_no || patient.pat_op_reg_no;
     ajax({action:'patient_therapies', patient_reg_no: patientRegNo}).then(list => {
+      // Completely replace therapies list with new patient's data
       addedTherapies = list || [];
       bookings = [];
       addedTherapies.forEach((t, idx) => {
         if (t.from_date && t.to_date) getDateRange(t.from_date, t.to_date).forEach(d => bookings.push({ id: Math.random().toString(36).slice(2,9), allocation_id: t.allocation_id || t.allocation_id || t.allocation_id, therapyIndex: idx, date:d, slot: t.slot||'', room: t.room||'', therapist: t.therapist||'', status: 'scheduled' }));
       });
       renderAll();
-    }).catch(()=>{ renderAll(); });
+    }).catch(()=>{ 
+      // On error, still render to show empty state
+      addedTherapies = [];
+      bookings = [];
+      renderAll(); 
+    });
   }
 
   // Clear patient selection functionality
@@ -488,9 +550,42 @@ $(function(){
     });
   }
   
+  // Store the slot value that should be restored after slot repopulation (for edit mode)
+  let pendingSlotValue = null;
+  
   // Listen for therapy selection changes
   $therapySelect.on('change', function() {
-    updateSlotsForTherapy();
+    updateSlotsForTherapy().then(() => {
+      // If there's a pending slot value (from edit mode), restore it after slots are populated
+      if (pendingSlotValue) {
+        setTimeout(() => {
+          const normalizedPending = normalizeSlotTime(pendingSlotValue);
+          let foundValue = null;
+          
+          // Try to find exact match
+          let foundOption = $slotSelect.find(`option[value="${pendingSlotValue}"]`);
+          if (foundOption.length > 0) {
+            foundValue = foundOption.val();
+          } else {
+            // Try to find by normalized value
+            $slotSelect.find('option').each(function() {
+              const optionValue = $(this).val();
+              if (optionValue && normalizeSlotTime(optionValue) === normalizedPending) {
+                foundValue = optionValue;
+                return false;
+              }
+            });
+          }
+          
+          if (foundValue) {
+            $slotSelect.val(foundValue);
+          } else {
+            $slotSelect.val(pendingSlotValue);
+          }
+          pendingSlotValue = null; // Clear after setting
+        }, 50);
+      }
+    });
   });
 
   $itemBuilder.select2({
@@ -813,10 +908,12 @@ $(function(){
       const hasCancelledDates = t.cancelled_date_from && t.cancelled_date_to && t.cancelled_date_from !== 'null' && t.cancelled_date_to !== 'null';
       
       // Build status display with counts - format: "2 Draft / 3 Allocated"
+      // Use status_summary from backend which is based on actual booking statuses
       const statusSummary = t.status_summary || {};
       const statusParts = [];
       
       // Order: Draft, Allocated, Failed, Cancelled
+      // Use status_summary values which are calculated from actual booking statuses
       if (statusSummary.draft) {
         statusParts.push(`${statusSummary.draft} Draft`);
       }
@@ -826,9 +923,13 @@ $(function(){
       if (statusSummary.failed) {
         statusParts.push(`${statusSummary.failed} Failed`);
       }
-      // Check cancelled dates or status_summary for cancelled count
-      if (hasCancelledDates) {
-        // Calculate cancelled days from date range (avoiding timezone issues)
+      // Use status_summary.cancelled if available (based on actual booking statuses)
+      // Only fall back to date range calculation if status_summary is not available
+      if (statusSummary.cancelled !== undefined && statusSummary.cancelled > 0) {
+        statusParts.push(`${statusSummary.cancelled} Cancelled`);
+      } else if (hasCancelledDates && !statusSummary.cancelled) {
+        // Fallback: Calculate cancelled days from date range only if status_summary doesn't have cancelled count
+        // This handles cases where status_summary might not be populated yet
         const fromParts = t.cancelled_date_from.split('-');
         const toParts = t.cancelled_date_to.split('-');
         if (fromParts.length === 3 && toParts.length === 3) {
@@ -839,8 +940,6 @@ $(function(){
             statusParts.push(`${cancelledDays} Cancelled`);
           }
         }
-      } else if (statusSummary.cancelled) {
-        statusParts.push(`${statusSummary.cancelled} Cancelled`);
       }
       
       // If we have detailed counts, show them with slashes
@@ -894,10 +993,8 @@ $(function(){
             <i class="fas fa-sync-alt"></i> Update
           </button>
           ${(() => {
-            // Check for cancelled dates - handle both string and null/undefined values
-            const cancelledFrom = t.cancelled_date_from;
-            const cancelledTo = t.cancelled_date_to;
-            const hasCancelledDates = cancelledFrom && cancelledTo && cancelledFrom !== 'null' && cancelledTo !== 'null';
+            // Check for cancelled dates - EXACTLY like prescription entry
+            const hasCancelledDates = t.cancelled_date_from && t.cancelled_date_to;
             const hasDateRange = t.from_date && t.to_date;
             let buttons = '';
             // Show resume button if there are cancelled dates
@@ -1035,29 +1132,76 @@ $(function(){
   $therapiesTableBody.on('click', '.cancel-therapy', function(){ const i=$(this).data('i'); openCancelModal(i); });
   
   function openCancelModal(index){
-    cancelingTherapyIndex = index; const t = addedTherapies[index]; if(!t) return;
+    cancelingTherapyIndex = index; 
+    const t = addedTherapies[index]; 
+    if(!t) return;
+    
     let infoText = `Therapy: ${t.therapy_name} — Allowed cancel range: ${t.from_date||'—'} → ${t.to_date||'—'}`;
-    if (t.cancelled_date_from && t.cancelled_date_to) {
-      infoText += `\nAlready cancelled: ${formatDate(t.cancelled_date_from)} → ${formatDate(t.cancelled_date_to)}`;
+    
+    // Set initial info text (will be updated with cancelled dates if available)
+    $('#cancel-modal-info').html(infoText.replace(/\n/g, '<br>'));
+    
+    // Fetch booking statuses to show individual cancelled dates (not just the range)
+    if (t.allocation_id && t.cancelled_date_from && t.cancelled_date_to && 
+        t.cancelled_date_from !== 'null' && t.cancelled_date_to !== 'null') {
+      // Fetch booking statuses to get actual cancelled dates
+      ajax({action:'allocation_status', allocation_id: t.allocation_id}).then(data => {
+        const bookings = data.bookings || [];
+        // Get all dates in the cancelled range
+        const cancelledRangeDates = getDateRange(t.cancelled_date_from, t.cancelled_date_to);
+        // Filter to only dates that are actually cancelled
+        const actuallyCancelledDates = cancelledRangeDates.filter(date => {
+          const booking = bookings.find(b => b.date === date);
+          const status = booking ? (booking.status || booking.display_status || 'draft') : 'cancelled';
+          return status === 'cancelled';
+        });
+        
+        // Update info text with individual cancelled dates
+        let updatedInfoText = `Therapy: ${t.therapy_name} — Allowed cancel range: ${t.from_date||'—'} → ${t.to_date||'—'}`;
+        if (actuallyCancelledDates.length > 0) {
+          // Show individual cancelled dates
+          const datesList = actuallyCancelledDates.map(d => formatDate(d)).join(', ');
+          updatedInfoText += `<br>Already cancelled dates: ${datesList}`;
+        }
+        $('#cancel-modal-info').html(updatedInfoText);
+      }).catch(() => {
+        // Fallback: show range if we can't fetch booking statuses
+        let fallbackText = infoText;
+        fallbackText += `<br>Already cancelled: ${formatDate(t.cancelled_date_from)} → ${formatDate(t.cancelled_date_to)}`;
+        $('#cancel-modal-info').html(fallbackText);
+      });
     }
-    $('#cancel-modal-info').text(infoText);
+    
+    // ALWAYS reset and set the date inputs to the current therapy's date range
+    // Clear any previous values first
+    $cancelFrom.val('');
+    $cancelTo.val('');
     
     // Set min/max based on therapy date range
-    if (t.from_date) $cancelFrom.attr('min', t.from_date); else $cancelFrom.removeAttr('min');
-    if (t.to_date) $cancelTo.attr('max', t.to_date); else $cancelTo.removeAttr('max');
+    if (t.from_date) {
+      $cancelFrom.attr('min', t.from_date);
+      $cancelFrom.attr('max', t.to_date || t.from_date);
+    } else {
+      $cancelFrom.removeAttr('min');
+      $cancelFrom.removeAttr('max');
+    }
     
-    // Allow cancelling any date within the therapy range (including already cancelled ones)
-    if (t.from_date && t.to_date){ 
-      $cancelFrom.attr('max', t.to_date); 
-      $cancelTo.attr('min', t.from_date); 
-      if(!$cancelFrom.val()) $cancelFrom.val(t.from_date); 
-      if(!$cancelTo.val()) $cancelTo.val(t.to_date); 
+    if (t.to_date) {
+      $cancelTo.attr('max', t.to_date);
+      $cancelTo.attr('min', t.from_date || t.to_date);
+    } else {
+      $cancelTo.removeAttr('max');
+      $cancelTo.removeAttr('min');
     }
-    else { 
-      $cancelFrom.removeAttr('max'); 
-      $cancelTo.removeAttr('min'); 
+    
+    // ALWAYS set default values to the current therapy's date range (not previous values)
+    if (t.from_date && t.to_date) {
+      $cancelFrom.val(t.from_date);
+      $cancelTo.val(t.to_date);
     }
-    $cancelReason.val(''); $cancelModal.show();
+    
+    $cancelReason.val('');
+    $cancelModal.show();
   }
 
   $cancelCloseBtn.on('click', function(){ $cancelModal.hide(); cancelingTherapyIndex=null; });
@@ -1065,6 +1209,7 @@ $(function(){
   $cancelSubmitBtn.on('click', function(){
     if (cancelingTherapyIndex === null) return;
     const t = addedTherapies[cancelingTherapyIndex];
+    if (!t) return;
     const cfrom = $cancelFrom.val(), cto = $cancelTo.val(), reason = $cancelReason.val().trim();
     if (!cfrom || !cto){ alert('Pick both Cancel From and Cancel To'); return; }
     if (cfrom > cto){ alert('Cancel From must be <= Cancel To'); return; }
@@ -1072,66 +1217,123 @@ $(function(){
     if (t.to_date && cto > t.to_date){ alert('Cancel To > therapy end'); return; }
     if (!reason){ alert('Cancellation reason is mandatory'); return; }
     
+    // IMMEDIATELY update local data BEFORE server call - EXACTLY like prescription entry
+    // Calculate how many days are being cancelled
+    const cancelledDates = getDateRange(cfrom, cto);
+    const cancelledDaysCount = cancelledDates.length;
+    
+    // Update status_summary optimistically to reflect the cancellation
+    if (!t.status_summary) {
+      t.status_summary = {};
+    }
+    
+    // Calculate how many days were already cancelled in the new range
+    let alreadyCancelledInRange = 0;
+    if (t.cancelled_date_from && t.cancelled_date_to) {
+      const existingCancelledDates = getDateRange(t.cancelled_date_from, t.cancelled_date_to);
+      const newCancelledDates = getDateRange(cfrom, cto);
+      // Count dates that are in both ranges (already cancelled)
+      alreadyCancelledInRange = newCancelledDates.filter(d => existingCancelledDates.includes(d)).length;
+    }
+    
+    // Calculate how many new days are being cancelled (not already cancelled)
+    const newlyCancelledDays = cancelledDaysCount - alreadyCancelledInRange;
+    
+    // Update cancelled count (add newly cancelled days)
+    if (newlyCancelledDays > 0) {
+      t.status_summary.cancelled = (t.status_summary.cancelled || 0) + newlyCancelledDays;
+      
+      // Decrease draft/allocated counts for newly cancelled days
+      // We need to estimate how many were draft vs allocated
+      // For simplicity, we'll decrease draft first, then allocated
+      const currentDraft = t.status_summary.draft || 0;
+      const currentAllocated = t.status_summary.allocated || 0;
+      
+      if (currentDraft >= newlyCancelledDays) {
+        t.status_summary.draft = currentDraft - newlyCancelledDays;
+        if (t.status_summary.draft === 0) {
+          delete t.status_summary.draft;
+        }
+      } else {
+        // Decrease all draft, then decrease allocated for the remainder
+        const remainingToCancel = newlyCancelledDays - currentDraft;
+        if (currentDraft > 0) {
+          delete t.status_summary.draft;
+        }
+        if (currentAllocated >= remainingToCancel) {
+          t.status_summary.allocated = currentAllocated - remainingToCancel;
+          if (t.status_summary.allocated === 0) {
+            delete t.status_summary.allocated;
+          }
+        } else {
+          // If allocated is less than remaining, just decrease what we have
+          if (currentAllocated > 0) {
+            delete t.status_summary.allocated;
+          }
+        }
+      }
+    }
+    
+    if (!t.cancelled_date_from || cfrom < t.cancelled_date_from) {
+      t.cancelled_date_from = cfrom;
+    }
+    if (!t.cancelled_date_to || cto > t.cancelled_date_to) {
+      t.cancelled_date_to = cto;
+    }
+    t.status = 'cancelled';
+    t.cancellation_reason = reason;
+    
+    // IMMEDIATELY update UI - don't wait for server - EXACTLY like prescription entry
+    $cancelModal.hide();
+    renderAll();
+    alert('Therapy cancelled successfully.');
+    
     if (t.allocation_id) {
-      // Server-side cancellation
+      // Server-side cancellation (happens in background)
       fetch(API_URL + '?action=cancel_therapy', {
         method:'POST',
         headers: {'Content-Type':'application/json'},
         body: JSON.stringify({ allocation_id: t.allocation_id, cancel_from: cfrom, cancel_to: cto, reason: reason })
       }).then(r => r.json()).then(j => {
         if (j.status === 'ok') {
-          // Reload from server to get merged cancellation dates
-          if (t.allocation_id) {
-            const patientRegNo = selectedPatient ? (selectedPatient.pat_op_reg_no || selectedPatient.pat_reg_no) : '';
-            ajax({action:'patient_therapies', patient_reg_no: patientRegNo}).then(therapies => {
-              if (therapies && Array.isArray(therapies)) {
-                const updated = therapies.find(th => th.allocation_id === t.allocation_id);
-                if (updated) {
-                  // Update all fields from server response
-                  Object.assign(t, updated);
-                  // Explicitly set cancelled dates (handle null/undefined)
-                  t.cancelled_date_from = updated.cancelled_date_from || null;
-                  t.cancelled_date_to = updated.cancelled_date_to || null;
-                  t.cancellation_reason = updated.cancellation_reason || '';
-                  t.status = updated.status || t.status;
-                  // Update status_summary if available
-                  if (updated.status_summary) {
-                    t.status_summary = updated.status_summary;
+          // UI already updated above, alert already shown, server sync will happen in background
+          
+          // Then reload from server to get merged cancellation dates (in background)
+          if (t.allocation_id && selectedPatient) {
+            const patientRegNo = selectedPatient.pat_op_reg_no || selectedPatient.pat_reg_no;
+            if (patientRegNo) {
+              ajax({action:'patient_therapies', patient_reg_no: patientRegNo}).then(therapies => {
+                if (therapies && Array.isArray(therapies)) {
+                  const updated = therapies.find(th => th.allocation_id === t.allocation_id);
+                  if (updated) {
+                    // Update all fields from server response
+                    Object.assign(t, updated);
+                    // Explicitly set cancelled dates (handle null/undefined/string 'null')
+                    t.cancelled_date_from = (updated.cancelled_date_from && updated.cancelled_date_from !== 'null') ? updated.cancelled_date_from : null;
+                    t.cancelled_date_to = (updated.cancelled_date_to && updated.cancelled_date_to !== 'null') ? updated.cancelled_date_to : null;
+                    t.cancellation_reason = updated.cancellation_reason || '';
+                    t.status = updated.status || t.status;
+                    // Update status_summary if available
+                    if (updated.status_summary) {
+                      t.status_summary = updated.status_summary;
+                    }
+                    // Update UI again with server data
+                    renderAll();
                   }
                 }
-              }
-              renderAll();
-            }).catch(() => {
-              // Fallback: update with local values
-              if (!t.cancelled_date_from || cfrom < t.cancelled_date_from) t.cancelled_date_from = cfrom;
-              if (!t.cancelled_date_to || cto > t.cancelled_date_to) t.cancelled_date_to = cto;
-              t.status = 'cancelled';
-              t.cancellation_reason = reason;
-              renderAll();
-            });
-          } else {
-            // Local cancellation - merge dates
-            if (!t.cancelled_date_from || cfrom < t.cancelled_date_from) t.cancelled_date_from = cfrom;
-            if (!t.cancelled_date_to || cto > t.cancelled_date_to) t.cancelled_date_to = cto;
-            t.status = 'cancelled';
-            t.cancellation_reason = reason;
-            renderAll();
+              }).catch(() => {
+                // Silently fail - UI already updated with local values
+                console.log('Failed to reload therapy data from server, using local values');
+              });
+            }
           }
-          alert('Therapy cancelled successfully.');
-          $cancelModal.hide();
         } else {
           alert('Failed: ' + JSON.stringify(j));
         }
       }).catch(()=>alert('Network error'));
     } else {
-      // Local cancellation
-      t.status = 'cancelled';
-      t.cancelled_date_from = cfrom;
-      t.cancelled_date_to = cto;
-      t.cancellation_reason = reason;
+      // Local cancellation - already updated above, just show message
       alert('Therapy cancelled locally.');
-      $cancelModal.hide();
-      renderAll();
     }
   });
 
@@ -1151,30 +1353,54 @@ $(function(){
     $therapySelect.append(opt).val(t.therapy_code);
     $therapySelect.prop('disabled', false);
     
-    // Populate slots based on therapy, then set the slot value
-    updateSlotsForTherapy().then(() => {
-      // After slots are populated, try to find and set the matching slot
-      if (normalizedSavedSlot) {
-        // Try to find exact match first
-        let foundOption = $slotSelect.find(`option[value="${savedSlotValue}"]`);
-        if (foundOption.length === 0) {
-          // Try to find by normalized value
-          $slotSelect.find('option').each(function() {
-            const optionValue = $(this).val();
-            if (normalizeSlotTime(optionValue) === normalizedSavedSlot) {
-              foundOption = $(this);
-              return false; // break
-            }
-          });
-        }
-        if (foundOption.length > 0) {
-          $slotSelect.val(foundOption.val());
-        } else {
-          // If no exact match found, try to set by value anyway
-          $slotSelect.val(savedSlotValue);
-        }
+    // Store the slot value to restore after slot repopulation
+    pendingSlotValue = savedSlotValue;
+    
+    // Helper function to set slot value after slots are populated
+    const setSlotValue = () => {
+      if (!savedSlotValue) {
+        $slotSelect.prop('disabled', false);
+        return;
+      }
+      
+      // Normalize the saved slot value for comparison
+      const normalizedSaved = normalizeSlotTime(savedSlotValue);
+      let foundValue = null;
+      
+      // Try to find exact match first (by value attribute)
+      let foundOption = $slotSelect.find(`option[value="${savedSlotValue}"]`);
+      if (foundOption.length > 0) {
+        foundValue = foundOption.val();
+      } else {
+        // Try to find by normalized value (compare all options)
+        $slotSelect.find('option').each(function() {
+          const optionValue = $(this).val();
+          if (optionValue && normalizeSlotTime(optionValue) === normalizedSaved) {
+            foundValue = optionValue;
+            return false; // break
+          }
+        });
+      }
+      
+      // Set the value if found
+      if (foundValue) {
+        $slotSelect.val(foundValue);
+      } else {
+        // If no match found, try to set by value anyway (might work if format matches)
+        $slotSelect.val(savedSlotValue);
       }
       $slotSelect.prop('disabled', false);
+    };
+    
+    // Populate slots based on therapy, then set the slot value
+    updateSlotsForTherapy().then(() => {
+      // Wait a bit for DOM to update, then set slot value
+      setTimeout(() => {
+        setSlotValue();
+      }, 50);
+    }).catch(() => {
+      // If slot population fails, still try to set the value
+      setSlotValue();
     });
     
     // Trigger change after a small delay to avoid race condition
@@ -1215,8 +1441,47 @@ $(function(){
       t.therapy_name = selTherapy.text;
     }
     t.slot = $slotSelect.val() || '';
+    const oldFromDate = t.from_date;
+    const oldToDate = t.to_date;
     t.from_date = $fromDate.val() || t.from_date;
     t.to_date = $toDate.val() || t.to_date;
+    
+    // Adjust cancelled dates if they fall outside the new date range
+    if (t.cancelled_date_from && t.cancelled_date_to && 
+        t.cancelled_date_from !== 'null' && t.cancelled_date_to !== 'null') {
+      const cancelledFrom = new Date(t.cancelled_date_from + 'T00:00:00');
+      const cancelledTo = new Date(t.cancelled_date_to + 'T00:00:00');
+      const newFrom = new Date(t.from_date + 'T00:00:00');
+      const newTo = new Date(t.to_date + 'T00:00:00');
+      
+      // If cancelled range is completely outside new date range, clear it
+      if (cancelledTo < newFrom || cancelledFrom > newTo) {
+        t.cancelled_date_from = null;
+        t.cancelled_date_to = null;
+        t.cancellation_reason = '';
+      } else {
+        // Adjust cancelled range to fit within new date range
+        if (cancelledFrom < newFrom) {
+          t.cancelled_date_from = t.from_date;
+        }
+        if (cancelledTo > newTo) {
+          t.cancelled_date_to = t.to_date;
+        }
+      }
+    }
+    
+    // Recalculate days from the updated dates
+    if (t.from_date && t.to_date) {
+      const fd = new Date(t.from_date);
+      const td = new Date(t.to_date);
+      if (fd <= td) {
+        t.days = Math.ceil((td.getTime() - fd.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+      } else {
+        t.days = '';
+      }
+    } else {
+      t.days = '';
+    }
     const updatedUsageText = ($therapyUsageInput.val() || '').trim();
     const updatedUsageArray = parseUsageInput(updatedUsageText);
     t.usage = updatedUsageText;
@@ -1238,6 +1503,7 @@ $(function(){
         slot: t.slot,
         from_date: t.from_date,
         to_date: t.to_date,
+        days: t.days, // Include updated days in payload
         ext_int: t.ext_int,
         usage: updatedUsageText,
         usage_array: updatedUsageArray,
@@ -1261,10 +1527,38 @@ $(function(){
       }).then(r => r.json()).then(j => {
         if (j.status === 'ok') {
           alert('Therapy updated successfully on server.');
-          resetFormState(); 
-          renderAll();
+          resetFormState();
+          
+          // Reload therapy data from server to get accurate days and other fields
+          if (t.allocation_id && selectedPatient) {
+            const patientRegNo = t.patient_reg_no || selectedPatient.pat_reg_no || selectedPatient.pat_op_reg_no;
+            if (patientRegNo) {
+              ajax({action:'patient_therapies', patient_reg_no: patientRegNo}).then(therapies => {
+                if (therapies && Array.isArray(therapies)) {
+                  const updated = therapies.find(th => th.allocation_id === t.allocation_id);
+                  if (updated) {
+                    // Update all fields from server response, including days
+                    Object.assign(t, updated);
+                    // Ensure days is set correctly
+                    if (updated.days) {
+                      t.days = updated.days;
+                    }
+                  }
+                }
+                renderAll();
+              }).catch(() => {
+                // If reload fails, use local values
+                renderAll();
+              });
+            } else {
+              renderAll();
+            }
+          } else {
+            renderAll();
+          }
         } else {
           alert('Failed to update therapy: ' + JSON.stringify(j));
+          renderAll();
         }
       }).catch(() => {
         alert('Network error. Therapy updated locally only.');
@@ -1280,13 +1574,52 @@ $(function(){
   });
 
   function resetFormState(){
-    editTherapyIndex = null; $('#form-title').text('Create New Therapy');
+    editTherapyIndex = null; 
+    $('#form-title').text('Create New Therapy');
+    
+    // Clear all form fields completely
     $therapySelect.val(null).trigger('change').prop('disabled', false);
     $slotSelect.val('').prop('disabled', false);
-    $('#ext-int-select').val(''); $fromDate.val('').prop('disabled', false); $toDate.val('').prop('disabled', false); $daysInput.val('');
-    $therapyUsageInput.val(''); $procuredSelect.val('');
-    itemGroups = []; renderItemGroups();
-    $allocateBtn.show(); $updateBtn.hide();
+    $('#ext-int-select').val(''); 
+    
+    // Clear date fields explicitly
+    $fromDate.val('').prop('value', '').prop('disabled', false); 
+    $toDate.val('').prop('value', '').prop('disabled', false); 
+    $daysInput.val('').prop('value', '');
+    
+    // Clear usage field explicitly
+    $therapyUsageInput.val('').prop('value', ''); 
+    
+    // Clear procured select - handle both regular select and select2
+    if ($procuredSelect.hasClass('select2-hidden-accessible')) {
+      $procuredSelect.val('').trigger('change');
+    } else {
+      $procuredSelect.val('').prop('value', '');
+    }
+    
+    // Clear item builder fields
+    if ($itemBuilder.hasClass('select2-hidden-accessible')) {
+      $itemBuilder.val(null).trigger('change');
+    } else {
+      $itemBuilder.val(null);
+    }
+    $('#item-builder-dosage').val('').prop('value', '');
+    $('#item-builder-uno').val('').prop('value', '');
+    $itemBuilderOilClass.val('').prop('value', '');
+    if ($itemBuilderOilClass.hasClass('select2-hidden-accessible')) {
+      $itemBuilderOilClass.trigger('change');
+    }
+    
+    // Clear item groups
+    itemGroups = []; 
+    renderItemGroups();
+    
+    // Reset buttons
+    $allocateBtn.show(); 
+    $updateBtn.hide();
+    
+    // Clear any pending slot value
+    pendingSlotValue = null;
   }
 
   // Helper function to format date as DD/MM/YYYY
@@ -1341,11 +1674,12 @@ $(function(){
     
     const $datesList = $('#resume-dates-list');
     $datesList.empty();
+    $datesList.html('<p style="color: #666; padding: 16px; text-align: center;">Loading cancelled dates...</p>');
+    $resumeModal.show();
     
     // Check if cancelled dates exist and are valid
     if (!cancelledFrom || !cancelledTo || cancelledFrom === 'null' || cancelledTo === 'null') {
       $datesList.html('<p style="color: #666; padding: 16px; text-align: center;">No cancelled dates found.</p>');
-      $resumeModal.show();
       return;
     }
     
@@ -1353,26 +1687,82 @@ $(function(){
     
     if (cancelledDates.length === 0) {
       $datesList.html('<p style="color: #666; padding: 16px; text-align: center;">No cancelled dates found.</p>');
-      $resumeModal.show();
       return;
     }
     
-    cancelledDates.forEach(date => {
-      const $dateItem = $(`
-        <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px; margin-bottom: 8px; background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 6px;">
-          <div style="font-weight: 500; color: #333;">
-            <i class="fas fa-calendar-alt" style="margin-right: 8px; color: #6c757d;"></i>
-            ${formatDate(date)}
+    // If we have an allocation_id, fetch booking statuses to show only dates that are still cancelled
+    if (t.allocation_id) {
+      ajax({action:'allocation_status', allocation_id: t.allocation_id}).then(data => {
+        const bookings = data.bookings || [];
+        // Create a map of date -> booking status
+        const bookingStatusMap = {};
+        bookings.forEach(b => {
+          bookingStatusMap[b.date] = b.status || b.display_status || 'draft';
+        });
+        
+        // Filter to show only dates that are still cancelled
+        const stillCancelledDates = cancelledDates.filter(date => {
+          const status = bookingStatusMap[date];
+          // Show date if it's cancelled or if we don't have booking info for it
+          return status === 'cancelled' || !status;
+        });
+        
+        if (stillCancelledDates.length === 0) {
+          $datesList.html('<p style="color: #666; padding: 16px; text-align: center;">No cancelled dates found (all dates have been resumed).</p>');
+          return;
+        }
+        
+        $datesList.empty();
+        stillCancelledDates.forEach(date => {
+          const $dateItem = $(`
+            <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px; margin-bottom: 8px; background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 6px;">
+              <div style="font-weight: 500; color: #333;">
+                <i class="fas fa-calendar-alt" style="margin-right: 8px; color: #6c757d;"></i>
+                ${formatDate(date)}
+              </div>
+              <button class="btn btn-sm btn-success resume-date-btn" data-date="${date}" style="min-width: 100px;">
+                <i class="fas fa-play"></i> Resume
+              </button>
+            </div>
+          `);
+          $datesList.append($dateItem);
+        });
+      }).catch(() => {
+        // Fallback: show all dates in cancelled range if we can't fetch booking statuses
+        $datesList.empty();
+        cancelledDates.forEach(date => {
+          const $dateItem = $(`
+            <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px; margin-bottom: 8px; background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 6px;">
+              <div style="font-weight: 500; color: #333;">
+                <i class="fas fa-calendar-alt" style="margin-right: 8px; color: #6c757d;"></i>
+                ${formatDate(date)}
+              </div>
+              <button class="btn btn-sm btn-success resume-date-btn" data-date="${date}" style="min-width: 100px;">
+                <i class="fas fa-play"></i> Resume
+              </button>
+            </div>
+          `);
+          $datesList.append($dateItem);
+        });
+      });
+    } else {
+      // No allocation_id - show all dates in cancelled range
+      $datesList.empty();
+      cancelledDates.forEach(date => {
+        const $dateItem = $(`
+          <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px; margin-bottom: 8px; background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 6px;">
+            <div style="font-weight: 500; color: #333;">
+              <i class="fas fa-calendar-alt" style="margin-right: 8px; color: #6c757d;"></i>
+              ${formatDate(date)}
+            </div>
+            <button class="btn btn-sm btn-success resume-date-btn" data-date="${date}" style="min-width: 100px;">
+              <i class="fas fa-play"></i> Resume
+            </button>
           </div>
-          <button class="btn btn-sm btn-success resume-date-btn" data-date="${date}" style="min-width: 100px;">
-            <i class="fas fa-play"></i> Resume
-          </button>
-        </div>
-      `);
-      $datesList.append($dateItem);
-    });
-    
-    $resumeModal.show();
+        `);
+        $datesList.append($dateItem);
+      });
+    }
   }
   
   // Handle individual date resume
@@ -1387,93 +1777,169 @@ $(function(){
       return;
     }
     
+    // IMMEDIATELY update local data BEFORE server call
+    // Update status_summary optimistically to reflect the resume action
+    if (!therapy.status_summary) {
+      therapy.status_summary = {};
+    }
+    
+    // Decrease cancelled count and increase draft count optimistically
+    if (therapy.status_summary.cancelled && therapy.status_summary.cancelled > 0) {
+      therapy.status_summary.cancelled = (therapy.status_summary.cancelled || 0) - 1;
+      if (therapy.status_summary.cancelled === 0) {
+        delete therapy.status_summary.cancelled;
+      }
+    }
+    // Increase draft count (the resumed booking will be draft)
+    therapy.status_summary.draft = (therapy.status_summary.draft || 0) + 1;
+    
+    // For middle dates, we don't update cancelled_date_from/to optimistically
+    // We wait for server response to get the correct updated range
+    if (therapy.cancelled_date_from === date && therapy.cancelled_date_to === date) {
+      // Resuming the only cancelled date - clear cancellation
+      therapy.status = 'draft';
+      therapy.cancelled_date_from = null;
+      therapy.cancelled_date_to = null;
+      therapy.cancellation_reason = '';
+      renderAll();
+    } else if (therapy.cancelled_date_from === date) {
+      // Resuming from start - move start date forward
+      const nextDate = new Date(date);
+      nextDate.setDate(nextDate.getDate() + 1);
+      therapy.cancelled_date_from = nextDate.toISOString().split('T')[0];
+      renderAll();
+    } else if (therapy.cancelled_date_to === date) {
+      // Resuming from end - move end date backward
+      const prevDate = new Date(date);
+      prevDate.setDate(prevDate.getDate() - 1);
+      therapy.cancelled_date_to = prevDate.toISOString().split('T')[0];
+      renderAll();
+    } else {
+      // Resuming a date in the middle - DON'T update cancelled_date_from/to optimistically
+      // Keep the range unchanged and wait for server response
+      // The server will keep the range unchanged, only resuming the specific date's bookings
+      // We'll update the UI after getting the server response
+      const dateObj = new Date(date + 'T00:00:00');
+      const fromObj = new Date(therapy.cancelled_date_from + 'T00:00:00');
+      const toObj = new Date(therapy.cancelled_date_to + 'T00:00:00');
+      
+      if (dateObj > fromObj && dateObj < toObj) {
+        // Middle date - don't update cancelled_date_from/to, wait for server
+        // Just update status_summary optimistically and render
+        renderAll();
+      } else if (dateObj <= fromObj) {
+        // Resumed date is at or before the start - clear cancellation entirely
+        therapy.cancelled_date_from = null;
+        therapy.cancelled_date_to = null;
+        therapy.cancellation_reason = '';
+        therapy.status = 'draft';
+        renderAll();
+      }
+    }
+    
+    // Update resume modal if still open - check if there are still cancelled dates
+    if (resumingTherapyIndex !== null) {
+      const currentTherapy = addedTherapies[resumingTherapyIndex];
+      if (currentTherapy && currentTherapy.cancelled_date_from && currentTherapy.cancelled_date_to) {
+        // Still has cancelled dates - refresh the modal
+        setTimeout(() => {
+          openResumeModal(resumingTherapyIndex);
+        }, 50);
+      } else {
+        // No more cancelled dates - close modal
+        $resumeModal.hide();
+        resumingTherapyIndex = null;
+      }
+    }
+    
+    alert('Therapy resumed successfully for ' + formatDate(date) + '.');
+    
     if (therapy.allocation_id) {
-      // Server-side resume
+      // Server-side resume (happens in background)
       fetch(API_URL + '?action=resume_therapy', {
         method:'POST',
         headers: {'Content-Type':'application/json'},
         body: JSON.stringify({ allocation_id: therapy.allocation_id, resume_date: date })
       }).then(r => r.json()).then(j => {
         if (j.status === 'ok') {
-          alert('Therapy resumed successfully for ' + formatDate(date) + '.');
-          // Reload therapy data from server to get updated cancelled dates
+          // UI already updated above, alert already shown, server sync will happen in background
+          
+          // Then reload from server to get accurate updated cancelled dates and status_summary (in background)
           if (selectedPatient && therapy.allocation_id) {
-            const patientRegNo = selectedPatient.pat_op_reg_no || selectedPatient.pat_reg_no;
-            ajax({action:'patient_therapies', patient_reg_no: patientRegNo}).then(therapies => {
-              if (therapies && Array.isArray(therapies)) {
-                const updated = therapies.find(th => th.allocation_id === therapy.allocation_id);
-                if (updated) {
-                  // Update all fields from server response
-                  Object.assign(therapy, updated);
-                  // Explicitly set cancelled dates (handle null/undefined)
-                  therapy.cancelled_date_from = updated.cancelled_date_from || null;
-                  therapy.cancelled_date_to = updated.cancelled_date_to || null;
-                  therapy.cancellation_reason = updated.cancellation_reason || '';
-                  therapy.status = updated.status || therapy.status;
-                  // Update status_summary if available
-                  if (updated.status_summary) {
-                    therapy.status_summary = updated.status_summary;
+            const patientRegNo = therapy.patient_reg_no || selectedPatient.pat_reg_no || selectedPatient.pat_op_reg_no;
+            if (patientRegNo) {
+              ajax({action:'patient_therapies', patient_reg_no: patientRegNo}).then(therapies => {
+                if (therapies && Array.isArray(therapies)) {
+                  const updated = therapies.find(th => th.allocation_id === therapy.allocation_id);
+                  if (updated) {
+                    // Update all fields from server response
+                    Object.assign(therapy, updated);
+                    // Explicitly set cancelled dates (handle null/undefined/string 'null')
+                    therapy.cancelled_date_from = (updated.cancelled_date_from && updated.cancelled_date_from !== 'null') ? updated.cancelled_date_from : null;
+                    therapy.cancelled_date_to = (updated.cancelled_date_to && updated.cancelled_date_to !== 'null') ? updated.cancelled_date_to : null;
+                    therapy.cancellation_reason = updated.cancellation_reason || '';
+                    therapy.status = updated.status || therapy.status;
+                    // Update status_summary if available
+                    if (updated.status_summary) {
+                      therapy.status_summary = updated.status_summary;
+                    }
                   }
                 }
-              }
-              // Update the table immediately
-              renderAll();
-              
-              // Reload the modal to show updated dates (with a small delay to ensure renderAll completes)
-              setTimeout(() => {
-                const currentTherapy = addedTherapies[resumingTherapyIndex];
-                if (currentTherapy && currentTherapy.cancelled_date_from && currentTherapy.cancelled_date_to && 
-                    currentTherapy.cancelled_date_from !== 'null' && currentTherapy.cancelled_date_to !== 'null') {
-                  openResumeModal(resumingTherapyIndex);
-                } else {
-                  $resumeModal.hide();
-                  resumingTherapyIndex = null;
-                }
-              }, 100);
-            }).catch(() => {
-              // Fallback: update locally and reload modal
-              renderAll();
-              setTimeout(() => {
-                const currentTherapy = addedTherapies[resumingTherapyIndex];
-                if (currentTherapy && currentTherapy.cancelled_date_from && currentTherapy.cancelled_date_to &&
-                    currentTherapy.cancelled_date_from !== 'null' && currentTherapy.cancelled_date_to !== 'null') {
-                  openResumeModal(resumingTherapyIndex);
-                } else {
-                  $resumeModal.hide();
-                  resumingTherapyIndex = null;
-                }
-              }, 100);
-            });
+                // Update the table with server data
+                renderAll();
+                
+                // Reload the modal to show updated dates (with a small delay to ensure renderAll completes)
+                setTimeout(() => {
+                  const currentTherapy = addedTherapies[resumingTherapyIndex];
+                  if (currentTherapy && currentTherapy.cancelled_date_from && currentTherapy.cancelled_date_to && 
+                      currentTherapy.cancelled_date_from !== 'null' && currentTherapy.cancelled_date_to !== 'null') {
+                    openResumeModal(resumingTherapyIndex);
+                  } else {
+                    $resumeModal.hide();
+                    resumingTherapyIndex = null;
+                  }
+                }, 100);
+              }).catch(() => {
+                // Silently fail - UI already updated with local values
+                console.log('Failed to reload therapy data from server, using local values');
+                // Close modal if no cancelled dates remain
+                setTimeout(() => {
+                  const currentTherapy = addedTherapies[resumingTherapyIndex];
+                  if (currentTherapy && currentTherapy.cancelled_date_from && currentTherapy.cancelled_date_to &&
+                      currentTherapy.cancelled_date_from !== 'null' && currentTherapy.cancelled_date_to !== 'null') {
+                    openResumeModal(resumingTherapyIndex);
+                  } else {
+                    $resumeModal.hide();
+                    resumingTherapyIndex = null;
+                  }
+                }, 100);
+              });
+            } else {
+              // No patient reg number - close modal and refresh
+              $resumeModal.hide();
+              resumingTherapyIndex = null;
+            }
           } else {
-            // No patient selected or local therapy - just close modal
+            // No patient selected or local therapy - close modal
             $resumeModal.hide();
             resumingTherapyIndex = null;
-            renderAll();
           }
         } else {
           alert('Failed: ' + (j.error || JSON.stringify(j)));
         }
       }).catch(()=>alert('Network error'));
     } else {
-      // Local resume
-      if (therapy.cancelled_date_from === date && therapy.cancelled_date_to === date) {
-        therapy.status = 'draft';
-        therapy.cancelled_date_from = null;
-        therapy.cancelled_date_to = null;
-        therapy.cancellation_reason = '';
-      } else if (therapy.cancelled_date_from === date) {
-        const nextDate = new Date(date);
-        nextDate.setDate(nextDate.getDate() + 1);
-        therapy.cancelled_date_from = nextDate.toISOString().split('T')[0];
-      } else if (therapy.cancelled_date_to === date) {
-        const prevDate = new Date(date);
-        prevDate.setDate(prevDate.getDate() - 1);
-        therapy.cancelled_date_to = prevDate.toISOString().split('T')[0];
-      }
-      
+      // Local resume - data already updated above, just show message and handle modal
       alert('Therapy resumed successfully for ' + formatDate(date) + '.');
-      openResumeModal(resumingTherapyIndex);
-      renderAll();
+      
+      // Check if there are still cancelled dates to show in modal
+      if (therapy.cancelled_date_from && therapy.cancelled_date_to && 
+          therapy.cancelled_date_from !== 'null' && therapy.cancelled_date_to !== 'null') {
+        openResumeModal(resumingTherapyIndex);
+      } else {
+        $resumeModal.hide();
+        resumingTherapyIndex = null;
+      }
     }
   });
   

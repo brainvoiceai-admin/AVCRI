@@ -1073,7 +1073,13 @@ $(function(){
             <i class="fas fa-sync-alt"></i> Update
           </button>
           ${(() => {
-            const hasCancelledDates = p.cancelled_date_from && p.cancelled_date_to;
+            // Check for cancelled dates - handle null, undefined, and string 'null'
+            const hasCancelledDates = p.cancelled_date_from && 
+                                     p.cancelled_date_to && 
+                                     p.cancelled_date_from !== 'null' && 
+                                     p.cancelled_date_to !== 'null' &&
+                                     p.cancelled_date_from !== null &&
+                                     p.cancelled_date_to !== null;
             const hasDateRange = p.from_date && p.to_date;
             let buttons = '';
             // Show resume button if there are cancelled dates
@@ -1097,6 +1103,17 @@ $(function(){
   }
 
   function renderAll(){ renderItemGroups(); renderPrescriptions(); }
+  
+  // Helper function to format date as DD/MM/YYYY
+  function formatDate(dateStr) {
+    if (!dateStr) return '';
+    const date = new Date(dateStr + 'T00:00:00');
+    if (isNaN(date.getTime())) return dateStr;
+    const day = String(date.getDate()).padStart(2, '0');
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const year = date.getFullYear();
+    return `${day}/${month}/${year}`;
+  }
 
   // Edit prescription
   $prescriptionsTableBody.on('click', '.edit-prescription', function(){ const i=$(this).data('i'); loadPrescriptionForEdit(i); });
@@ -1239,29 +1256,64 @@ $(function(){
   // Cancel prescription
   $prescriptionsTableBody.on('click', '.cancel-prescription', function(){ const i=$(this).data('i'); openCancelModal(i); });
   function openCancelModal(index){
-    cancelingPrescriptionIndex = index; const p = addedPrescriptions[index]; if(!p) return;
+    cancelingPrescriptionIndex = index; 
+    const p = addedPrescriptions[index]; 
+    if(!p) return;
+    
     let infoText = `Prescription: ${p.prescription_name} — Allowed cancel range: ${formatDate(p.from_date)||'—'} → ${formatDate(p.to_date)||'—'}`;
-    if (p.cancelled_date_from && p.cancelled_date_to) {
-      infoText += `\nAlready cancelled: ${formatDate(p.cancelled_date_from)} → ${formatDate(p.cancelled_date_to)}`;
+    
+    // Set initial info text (will be updated with cancelled dates if available)
+    $('#cancel-modal-info').html(infoText.replace(/\n/g, '<br>'));
+    
+    // Fetch PrescriptionScheduling statuses to show individual cancelled dates (not just the range)
+    if (p.allocation_id && p.cancelled_date_from && p.cancelled_date_to && 
+        p.cancelled_date_from !== 'null' && p.cancelled_date_to !== 'null') {
+      // Get all dates in the cancelled range
+      const cancelledRangeDates = getDateRange(p.cancelled_date_from, p.cancelled_date_to);
+      // Filter out dates that have been resumed (from resumed_dates array)
+      const resumedDates = p.resumed_dates && Array.isArray(p.resumed_dates) ? new Set(p.resumed_dates) : new Set();
+      const actuallyCancelledDates = cancelledRangeDates.filter(date => !resumedDates.has(date));
+      
+      // Update info text with individual cancelled dates
+      let updatedInfoText = `Prescription: ${p.prescription_name} — Allowed cancel range: ${formatDate(p.from_date)||'—'} → ${formatDate(p.to_date)||'—'}`;
+      if (actuallyCancelledDates.length > 0) {
+        // Show individual cancelled dates
+        const datesList = actuallyCancelledDates.map(d => formatDate(d)).join(', ');
+        updatedInfoText += `<br>Already cancelled dates: ${datesList}`;
+      }
+      $('#cancel-modal-info').html(updatedInfoText);
     }
-    $('#cancel-modal-info').text(infoText);
+    
+    // ALWAYS reset and set the date inputs to the current prescription's date range
+    // Clear any previous values first
+    $cancelFrom.val('');
+    $cancelTo.val('');
     
     // Set min/max based on prescription date range
-    if (p.from_date) $cancelFrom.attr('min', p.from_date); else $cancelFrom.removeAttr('min');
-    if (p.to_date) $cancelTo.attr('max', p.to_date); else $cancelTo.removeAttr('max');
+    if (p.from_date) {
+      $cancelFrom.attr('min', p.from_date);
+      $cancelFrom.attr('max', p.to_date || p.from_date);
+    } else {
+      $cancelFrom.removeAttr('min');
+      $cancelFrom.removeAttr('max');
+    }
     
-    // Allow cancelling any date within the prescription range (including already cancelled ones)
-    if (p.from_date && p.to_date){ 
-      $cancelFrom.attr('max', p.to_date); 
-      $cancelTo.attr('min', p.from_date); 
-      if(!$cancelFrom.val()) $cancelFrom.val(p.from_date); 
-      if(!$cancelTo.val()) $cancelTo.val(p.to_date); 
+    if (p.to_date) {
+      $cancelTo.attr('max', p.to_date);
+      $cancelTo.attr('min', p.from_date || p.to_date);
+    } else {
+      $cancelTo.removeAttr('max');
+      $cancelTo.removeAttr('min');
     }
-    else { 
-      $cancelFrom.removeAttr('max'); 
-      $cancelTo.removeAttr('min'); 
+    
+    // ALWAYS set default values to the current prescription's date range (not previous values)
+    if (p.from_date && p.to_date) {
+      $cancelFrom.val(p.from_date);
+      $cancelTo.val(p.to_date);
     }
-    $cancelReason.val(''); $cancelModal.show();
+    
+    $cancelReason.val('');
+    $cancelModal.show();
   }
 
   $cancelCloseBtn.on('click', function(){ $cancelModal.hide(); cancelingPrescriptionIndex=null; });
@@ -1269,6 +1321,7 @@ $(function(){
   $cancelSubmitBtn.on('click', function(){
     if (cancelingPrescriptionIndex === null) return;
     const p = addedPrescriptions[cancelingPrescriptionIndex];
+    if (!p) return;
     const cfrom = $cancelFrom.val(), cto = $cancelTo.val(), reason = $cancelReason.val().trim();
     if (!cfrom || !cto){ alert('Pick both Cancel From and Cancel To'); return; }
     if (cfrom > cto){ alert('Cancel From must be <= Cancel To'); return; }
@@ -1276,67 +1329,127 @@ $(function(){
     if (p.to_date && cto > p.to_date){ alert('Cancel To > prescription end'); return; }
     if (!reason){ alert('Cancellation reason is mandatory'); return; }
     
+    // IMMEDIATELY update local data BEFORE server call - EXACTLY like therapy entry
+    // Calculate how many days are being cancelled
+    const cancelledDates = getDateRange(cfrom, cto);
+    const cancelledDaysCount = cancelledDates.length;
+    
+    // Update status_summary optimistically to reflect the cancellation
+    if (!p.status_summary) {
+      p.status_summary = {};
+    }
+    
+    // Calculate how many days were already cancelled in the new range
+    let alreadyCancelledInRange = 0;
+    if (p.cancelled_date_from && p.cancelled_date_to) {
+      const existingCancelledDates = getDateRange(p.cancelled_date_from, p.cancelled_date_to);
+      const newCancelledDates = getDateRange(cfrom, cto);
+      // Count dates that are in both ranges (already cancelled)
+      alreadyCancelledInRange = newCancelledDates.filter(d => existingCancelledDates.includes(d)).length;
+    }
+    
+    // Calculate how many new days are being cancelled (not already cancelled)
+    const newlyCancelledDays = cancelledDaysCount - alreadyCancelledInRange;
+    
+    // Update cancelled count (add newly cancelled days)
+    if (newlyCancelledDays > 0) {
+      p.status_summary.cancelled = (p.status_summary.cancelled || 0) + newlyCancelledDays;
+      
+      // Decrease draft/active counts for newly cancelled days
+      // We need to estimate how many were draft vs active
+      // For simplicity, we'll decrease draft first, then active
+      const currentDraft = p.status_summary.draft || 0;
+      const currentActive = p.status_summary.active || 0;
+      
+      if (currentDraft >= newlyCancelledDays) {
+        p.status_summary.draft = currentDraft - newlyCancelledDays;
+        if (p.status_summary.draft === 0) {
+          delete p.status_summary.draft;
+        }
+      } else {
+        // Decrease all draft, then decrease active for the remainder
+        const remainingToCancel = newlyCancelledDays - currentDraft;
+        if (currentDraft > 0) {
+          delete p.status_summary.draft;
+        }
+        if (currentActive >= remainingToCancel) {
+          p.status_summary.active = currentActive - remainingToCancel;
+          if (p.status_summary.active === 0) {
+            delete p.status_summary.active;
+          }
+        } else {
+          // If active is less than remaining, just decrease what we have
+          if (currentActive > 0) {
+            delete p.status_summary.active;
+          }
+        }
+      }
+    }
+    
+    if (!p.cancelled_date_from || cfrom < p.cancelled_date_from) {
+      p.cancelled_date_from = cfrom;
+    }
+    if (!p.cancelled_date_to || cto > p.cancelled_date_to) {
+      p.cancelled_date_to = cto;
+    }
+    p.status = 'cancelled';
+    p.cancellation_reason = reason;
+    
+    // IMMEDIATELY update UI - don't wait for server - EXACTLY like therapy entry
+    $cancelModal.hide();
+    renderAll();
+    setTimeout(() => {
+      alert('Prescription cancelled successfully.');
+    }, 100);
+    
     if (p.allocation_id) {
-      // Server-side cancellation
+      // Server-side cancellation (happens in background)
       fetch(API_URL + '?action=cancel_prescription', {
         method:'POST',
         headers: {'Content-Type':'application/json'},
         body: JSON.stringify({ allocation_id: p.allocation_id, cancel_from: cfrom, cancel_to: cto, reason: reason })
-      }).then(response => {
-        if (!response.ok) {
-          return response.json().then(j => {
-            throw new Error(j.error || 'Failed to cancel prescription');
-          }).catch(() => {
-            throw new Error(`Server error: ${response.status}`);
-          });
-        }
-        return response.json();
-      }).then(j => {
+      }).then(r => r.json()).then(j => {
         if (j.status === 'ok') {
-          // Reload from server to get merged cancellation dates
+          // UI already updated above, alert already shown, server sync will happen in background
+          
+          // Then reload from server to get merged cancellation dates (in background)
           if (p.allocation_id && selectedPatient) {
             const patientRegNo = selectedPatient.pat_op_reg_no || selectedPatient.pat_reg_no;
-            ajax({action:'patient_prescriptions', patient_reg_no: patientRegNo}).then(list => {
-              if (list && Array.isArray(list)) {
-                const updated = list.find(pr => pr.allocation_id === p.allocation_id);
-                if (updated) {
-                  Object.assign(p, updated);
-                }
-              }
-              renderAll();
-            }).catch(() => {
-              // Fallback: update with local values
-              if (!p.cancelled_date_from || cfrom < p.cancelled_date_from) p.cancelled_date_from = cfrom;
-              if (!p.cancelled_date_to || cto > p.cancelled_date_to) p.cancelled_date_to = cto;
-              p.status = 'cancelled';
-              p.cancellation_reason = reason;
-              renderAll();
-            });
-          } else {
-            // Local cancellation - merge dates
-            if (!p.cancelled_date_from || cfrom < p.cancelled_date_from) p.cancelled_date_from = cfrom;
-            if (!p.cancelled_date_to || cto > p.cancelled_date_to) p.cancelled_date_to = cto;
-            p.status = 'cancelled';
-            p.cancellation_reason = reason;
-            renderAll();
+            if (patientRegNo) {
+              setTimeout(() => {
+                ajax({action:'patient_prescriptions', patient_reg_no: patientRegNo}).then(list => {
+                  if (list && Array.isArray(list)) {
+                    const updated = list.find(pr => pr.allocation_id === p.allocation_id);
+                    if (updated) {
+                      // Update all fields from server response
+                      Object.assign(p, updated);
+                      // Explicitly set cancelled dates (handle null/undefined/string 'null')
+                      p.cancelled_date_from = (updated.cancelled_date_from && updated.cancelled_date_from !== 'null') ? updated.cancelled_date_from : null;
+                      p.cancelled_date_to = (updated.cancelled_date_to && updated.cancelled_date_to !== 'null') ? updated.cancelled_date_to : null;
+                      p.cancellation_reason = updated.cancellation_reason || '';
+                      p.status = updated.status || p.status;
+                      // Update status_summary if available
+                      if (updated.status_summary) {
+                        p.status_summary = updated.status_summary;
+                      }
+                      // Update UI again with server data
+                      renderAll();
+                    }
+                  }
+                }).catch(() => {
+                  // Silently fail - UI already updated with local values
+                  console.log('Failed to reload prescription data from server, using local values');
+                });
+              }, 500);
+            }
           }
-          alert('Prescription cancelled successfully.');
-          $cancelModal.hide();
         } else {
-          alert('Failed: ' + (j.error || JSON.stringify(j)));
+          alert('Failed: ' + JSON.stringify(j));
         }
-      }).catch(e => {
-        alert('Network error: ' + (e.message || 'Please try again.'));
-      });
+      }).catch(()=>alert('Network error'));
     } else {
-      // Local cancellation
-      p.status = 'cancelled';
-      p.cancelled_date_from = cfrom;
-      p.cancelled_date_to = cto;
-      p.cancellation_reason = reason;
-      alert('Prescription cancelled locally.');
-    $cancelModal.hide();
-    renderAll();
+      // Local cancellation - already updated above, just show message
+      // (alert already shown above)
     }
   });
 
@@ -1367,138 +1480,274 @@ $(function(){
 
   // Resume prescription
   $prescriptionsTableBody.on('click', '.resume-prescription', function(){ const i=$(this).data('i'); openResumeModal(i); });
+  
   function openResumeModal(index){
     resumingPrescriptionIndex = index; 
     const p = addedPrescriptions[index]; 
     if(!p) return;
     
-    $('#resume-modal-info').html(`<strong>Prescription:</strong> ${p.prescription_name || 'N/A'}<br/><strong>Cancelled Range:</strong> ${formatDate(p.cancelled_date_from) || '—'} → ${formatDate(p.cancelled_date_to) || '—'}`);
+    // Get fresh data from the prescription object (ensure we have latest cancelled dates)
+    const cancelledFrom = p.cancelled_date_from;
+    const cancelledTo = p.cancelled_date_to;
+    
+    $('#resume-modal-info').html(`<strong>Prescription:</strong> ${p.prescription_name || 'N/A'}<br/><strong>Cancelled Range:</strong> ${formatDate(cancelledFrom) || '—'} → ${formatDate(cancelledTo) || '—'}`);
     
     const $datesList = $('#resume-dates-list');
     $datesList.empty();
+    $datesList.html('<p style="color: #666; padding: 16px; text-align: center;">Loading cancelled dates...</p>');
+    $resumeModal.show();
     
-    if (!p.cancelled_date_from || !p.cancelled_date_to) {
+    // Check if cancelled dates exist and are valid
+    if (!cancelledFrom || !cancelledTo || cancelledFrom === 'null' || cancelledTo === 'null') {
       $datesList.html('<p style="color: #666; padding: 16px; text-align: center;">No cancelled dates found.</p>');
-      $resumeModal.show();
       return;
     }
     
-    const cancelledDates = getDateRange(p.cancelled_date_from, p.cancelled_date_to);
+    const cancelledDates = getDateRange(cancelledFrom, cancelledTo);
     
     if (cancelledDates.length === 0) {
       $datesList.html('<p style="color: #666; padding: 16px; text-align: center;">No cancelled dates found.</p>');
-      $resumeModal.show();
       return;
     }
     
-    cancelledDates.forEach(date => {
-      const $dateItem = $(`
-        <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px; margin-bottom: 8px; background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 6px;">
-          <div style="font-weight: 500; color: #333;">
-            <i class="fas fa-calendar-alt" style="margin-right: 8px; color: #6c757d;"></i>
-            ${formatDate(date)}
+    // If we have an allocation_id, use resumed_dates to show only dates that are still cancelled
+    if (p.allocation_id) {
+      // Get set of already resumed dates for this prescription
+      const resumedDates = p.resumed_dates && Array.isArray(p.resumed_dates) ? new Set(p.resumed_dates) : new Set();
+      
+      // Filter to show only dates that are still cancelled (not in resumed_dates)
+      const stillCancelledDates = cancelledDates.filter(date => !resumedDates.has(date));
+      
+      if (stillCancelledDates.length === 0) {
+        $datesList.html('<p style="color: #666; padding: 16px; text-align: center;">No cancelled dates found (all dates have been resumed).</p>');
+        return;
+      }
+      
+      $datesList.empty();
+      stillCancelledDates.forEach(date => {
+        const $dateItem = $(`
+          <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px; margin-bottom: 8px; background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 6px;">
+            <div style="font-weight: 500; color: #333;">
+              <i class="fas fa-calendar-alt" style="margin-right: 8px; color: #6c757d;"></i>
+              ${formatDate(date)}
+            </div>
+            <button class="btn btn-sm btn-success resume-date-btn" data-date="${date}" style="min-width: 100px;">
+              <i class="fas fa-play"></i> Resume
+            </button>
           </div>
-          <button class="btn btn-sm btn-success resume-date-btn" data-date="${date}" style="min-width: 100px;">
-            <i class="fas fa-play"></i> Resume
-          </button>
-        </div>
-      `);
-      $datesList.append($dateItem);
-    });
-    
-    $resumeModal.show();
+        `);
+        $datesList.append($dateItem);
+      });
+    } else {
+      // No allocation_id - show all dates in cancelled range
+      $datesList.empty();
+      cancelledDates.forEach(date => {
+        const $dateItem = $(`
+          <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px; margin-bottom: 8px; background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 6px;">
+            <div style="font-weight: 500; color: #333;">
+              <i class="fas fa-calendar-alt" style="margin-right: 8px; color: #6c757d;"></i>
+              ${formatDate(date)}
+            </div>
+            <button class="btn btn-sm btn-success resume-date-btn" data-date="${date}" style="min-width: 100px;">
+              <i class="fas fa-play"></i> Resume
+            </button>
+          </div>
+        `);
+        $datesList.append($dateItem);
+      });
+    }
   }
   
   // Handle individual date resume
-  $(document).on('click', '.resume-date-btn', function(){
+  $(document).on('click', '.resume-date-btn', function(e){
+    e.preventDefault();
+    e.stopPropagation();
+    
     const date = $(this).data('date');
-    if (!date || resumingPrescriptionIndex === null) return;
+    console.log('Resume button clicked, date:', date, 'resumingPrescriptionIndex:', resumingPrescriptionIndex);
+    
+    if (!date || resumingPrescriptionIndex === null) {
+      console.log('Missing date or resumingPrescriptionIndex:', {date, resumingPrescriptionIndex});
+      return;
+    }
     
     const prescription = addedPrescriptions[resumingPrescriptionIndex];
-    if (!prescription) return;
+    if (!prescription) {
+      console.log('Prescription not found at index:', resumingPrescriptionIndex);
+      return;
+    }
+    
+    console.log('Prescription found:', prescription);
+    console.log('Cancelled dates:', prescription.cancelled_date_from, prescription.cancelled_date_to);
     
     if (!confirm(`Are you sure you want to resume prescription for ${formatDate(date)}?`)) {
       return;
     }
     
+    // IMMEDIATELY remove the button from the modal (optimistic UI update)
+    // This provides instant feedback to the user
+    const $clickedButton = $(this);
+    const $dateItem = $clickedButton.closest('div[style*="display: flex"]');
+    
+    $dateItem.fadeOut(200, function() {
+      $(this).remove();
+      // If no dates left, show message
+      const $datesList = $('#resume-dates-list');
+      if ($datesList.children().length === 0) {
+        $datesList.html('<p style="color: #666; padding: 16px; text-align: center;">No cancelled dates remaining.</p>');
+      }
+    });
+    
+    // IMMEDIATELY update local data BEFORE server call
+    // Update status_summary optimistically to reflect the resume action
+    if (!prescription.status_summary) {
+      prescription.status_summary = {};
+    }
+    
+    // Decrease cancelled count and increase draft count optimistically
+    if (prescription.status_summary.cancelled && prescription.status_summary.cancelled > 0) {
+      prescription.status_summary.cancelled = (prescription.status_summary.cancelled || 0) - 1;
+      if (prescription.status_summary.cancelled === 0) {
+        delete prescription.status_summary.cancelled;
+      }
+    }
+    // Increase draft count (the resumed prescription will be draft)
+    prescription.status_summary.draft = (prescription.status_summary.draft || 0) + 1;
+    
+    // For middle dates, we don't update cancelled_date_from/to optimistically
+    // We wait for server response to get the correct updated range
+    if (prescription.cancelled_date_from === date && prescription.cancelled_date_to === date) {
+      // Resuming the only cancelled date - clear cancellation
+      prescription.status = 'draft';
+      prescription.cancelled_date_from = null;
+      prescription.cancelled_date_to = null;
+      prescription.cancellation_reason = '';
+      renderAll();
+    } else if (prescription.cancelled_date_from === date) {
+      // Resuming from start - move start date forward
+      const nextDate = new Date(date);
+      nextDate.setDate(nextDate.getDate() + 1);
+      prescription.cancelled_date_from = nextDate.toISOString().split('T')[0];
+      renderAll();
+    } else if (prescription.cancelled_date_to === date) {
+      // Resuming from end - move end date backward
+      const prevDate = new Date(date);
+      prevDate.setDate(prevDate.getDate() - 1);
+      prescription.cancelled_date_to = prevDate.toISOString().split('T')[0];
+      renderAll();
+    } else {
+      // Resuming a date in the middle - DON'T update cancelled_date_from/to optimistically
+      // Keep the range unchanged and wait for server response
+      // The server will keep the range unchanged, only resuming the specific date
+      // But we've already removed the button from the modal, so UI is updated
+      renderAll();
+    }
+    
+    setTimeout(() => {
+      alert('Prescription resumed successfully for ' + formatDate(date) + '.');
+    }, 100);
+    
     if (prescription.allocation_id) {
-      // Server-side resume
+      // Server-side resume (happens in background)
       fetch(API_URL + '?action=resume_prescription', {
         method:'POST',
         headers: {'Content-Type':'application/json'},
         body: JSON.stringify({ allocation_id: prescription.allocation_id, resume_date: date })
-      }).then(response => {
-        if (!response.ok) {
-          return response.json().then(j => {
-            throw new Error(j.error || 'Failed to resume prescription');
-          }).catch(() => {
-            throw new Error(`Server error: ${response.status}`);
+      }).then(r => {
+        console.log('Server response status:', r.status);
+        if (!r.ok) {
+          return r.json().then(err => {
+            console.error('Server error:', err);
+            throw new Error(err.error || 'Server error');
           });
         }
-        return response.json();
+        return r.json();
       }).then(j => {
+        console.log('Server response:', j);
         if (j.status === 'ok') {
-          alert('Prescription resumed successfully for ' + formatDate(date) + ' and set to Draft status.');
-          // Reload prescription data from server to get updated cancelled dates
+          // UI already updated above, alert already shown, server sync will happen in background
+          
+          // Then reload from server to get accurate updated cancelled dates and status_summary (in background)
           if (selectedPatient && prescription.allocation_id) {
-            const patientRegNo = selectedPatient.pat_op_reg_no || selectedPatient.pat_reg_no;
-            ajax({action:'patient_prescriptions', patient_reg_no: patientRegNo}).then(list => {
-              if (list && Array.isArray(list)) {
-                const updated = list.find(pr => pr.allocation_id === prescription.allocation_id);
-                if (updated) {
-                  Object.assign(prescription, updated);
-                }
-              }
-              // Reload the modal to show updated dates
-              if (prescription.cancelled_date_from && prescription.cancelled_date_to) {
-                openResumeModal(resumingPrescriptionIndex);
-              } else {
-                $resumeModal.hide();
-                resumingPrescriptionIndex = null;
-              }
-              renderAll();
-            }).catch(() => {
-              // Fallback: try to reload modal anyway
-              if (prescription.cancelled_date_from && prescription.cancelled_date_to) {
-                openResumeModal(resumingPrescriptionIndex);
-              } else {
-                $resumeModal.hide();
-                resumingPrescriptionIndex = null;
-              }
-              renderAll();
-            });
-          } else {
-            // No patient selected or local prescription - just close modal
-            $resumeModal.hide();
-            resumingPrescriptionIndex = null;
-            renderAll();
+            const patientRegNo = prescription.patient_reg_no || selectedPatient.pat_reg_no || selectedPatient.pat_op_reg_no;
+            if (patientRegNo) {
+              setTimeout(() => {
+                ajax({action:'patient_prescriptions', patient_reg_no: patientRegNo}).then(list => {
+                  if (list && Array.isArray(list)) {
+                    const updated = list.find(pr => pr.allocation_id === prescription.allocation_id);
+                    if (updated) {
+                      // Update all fields from server response
+                      Object.assign(prescription, updated);
+                      // Explicitly set cancelled dates (handle null/undefined/string 'null')
+                      prescription.cancelled_date_from = (updated.cancelled_date_from && updated.cancelled_date_from !== 'null') ? updated.cancelled_date_from : null;
+                      prescription.cancelled_date_to = (updated.cancelled_date_to && updated.cancelled_date_to !== 'null') ? updated.cancelled_date_to : null;
+                      prescription.cancellation_reason = updated.cancellation_reason || '';
+                      prescription.status = updated.status || prescription.status;
+                      // Update status_summary if available
+                      if (updated.status_summary) {
+                        prescription.status_summary = updated.status_summary;
+                      }
+                      // Update UI again with server data
+                      renderAll();
+                      
+                      // For middle dates, don't reload modal automatically - button already removed optimistically
+                      // Only reload if it's not a middle date (start/end dates update the range, so we need to reload)
+                      // Check if this was a middle date resume
+                      const wasMiddleDate = prescription.cancelled_date_from !== date && prescription.cancelled_date_to !== date;
+                      
+                      if (!wasMiddleDate) {
+                        // Start or end date - reload modal to show updated range
+                        setTimeout(() => {
+                          if ($resumeModal.is(':visible') && resumingPrescriptionIndex !== null) {
+                            const currentPrescription = addedPrescriptions[resumingPrescriptionIndex];
+                            if (currentPrescription && currentPrescription.cancelled_date_from && currentPrescription.cancelled_date_to && 
+                                currentPrescription.cancelled_date_from !== 'null' && currentPrescription.cancelled_date_to !== 'null') {
+                              // Reload modal with updated dates
+                              openResumeModal(resumingPrescriptionIndex);
+                            } else {
+                              // No cancelled dates remaining - close modal
+                              $resumeModal.hide();
+                              resumingPrescriptionIndex = null;
+                            }
+                          }
+                        }, 100);
+                      }
+                      // For middle dates, modal already has the button removed, so no need to reload
+                    }
+                  }
+                }).catch(() => {
+                  // Silently fail - UI already updated with local values
+                  console.log('Failed to reload prescription data from server, using local values');
+                  // Close modal if no cancelled dates remain (only if modal is still open)
+                  setTimeout(() => {
+                    if ($resumeModal.is(':visible') && resumingPrescriptionIndex !== null) {
+                      const currentPrescription = addedPrescriptions[resumingPrescriptionIndex];
+                      if (currentPrescription && currentPrescription.cancelled_date_from && currentPrescription.cancelled_date_to &&
+                          currentPrescription.cancelled_date_from !== 'null' && currentPrescription.cancelled_date_to !== 'null') {
+                        // Reload modal with current data
+                        openResumeModal(resumingPrescriptionIndex);
+                      } else {
+                        // No cancelled dates remaining - close modal
+                        $resumeModal.hide();
+                        resumingPrescriptionIndex = null;
+                      }
+                    }
+                  }, 100);
+                });
+              }, 500);
+            }
           }
         } else {
-          alert('Failed: ' + (j.error || JSON.stringify(j)));
+          console.error('Resume failed:', j);
+          alert('Failed: ' + JSON.stringify(j));
         }
-      }).catch(e => {
-        alert('Network error: ' + (e.message || 'Please try again.'));
+      }).catch(err => {
+        console.error('Resume error:', err);
+        alert('Network error: ' + (err.message || 'Please try again.'));
       });
     } else {
-      // Local resume
-      if (prescription.cancelled_date_from === date && prescription.cancelled_date_to === date) {
-        prescription.status = 'draft';
-        prescription.cancelled_date_from = null;
-        prescription.cancelled_date_to = null;
-        prescription.cancellation_reason = '';
-      } else if (prescription.cancelled_date_from === date) {
-        const nextDate = new Date(date);
-        nextDate.setDate(nextDate.getDate() + 1);
-        prescription.cancelled_date_from = nextDate.toISOString().split('T')[0];
-      } else if (prescription.cancelled_date_to === date) {
-        const prevDate = new Date(date);
-        prevDate.setDate(prevDate.getDate() - 1);
-        prescription.cancelled_date_to = prevDate.toISOString().split('T')[0];
-      }
-      
-      alert('Prescription resumed successfully for ' + formatDate(date) + ' and set to Draft status.');
-      openResumeModal(resumingPrescriptionIndex);
-      renderAll();
+      // Local resume - already updated above, just show message
+      // (alert already shown above)
     }
   });
   
