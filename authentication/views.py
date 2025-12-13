@@ -429,15 +429,17 @@ def gm_hr_dashboard(request):
 
 @login_required
 @super_admin_required
-def superadmin_dashboard(request):
-    """Super admin dashboard view"""
-    return render(request, 'dashboards/superadmin/superadmin_dashboard.html')
+# Removed views for deleted templates (not in navigation):
+# @login_required
+# def superadmin_dashboard(request):
+#     """Super admin dashboard view"""
+#     return render(request, 'dashboards/superadmin/superadmin_dashboard.html')
 
-@login_required
-@role_required(['doctor'])
-def medicin_prescription(request):
-    """Medicine prescription view"""
-    return render(request, 'dashboards/doctorsAndHelpDesk/medicin_prescription.html')
+# @login_required
+# @role_required(['doctor'])
+# def medicin_prescription(request):
+#     """Medicine prescription view"""
+#     return render(request, 'dashboards/doctorsAndHelpDesk/medicin_prescription.html')
 
 @login_required
 @role_required(['patient'])
@@ -445,20 +447,20 @@ def Patient_dashboard(request):
     """Patient dashboard view"""
     return render(request, 'dashboards/patient/Patient_dashboard.html')
 
-@login_required
-def Tenants_dashboard(request):
-    """Tenants dashboard view"""
-    return render(request, 'dashboards/tenants/tenants_dashboard.html')
+# @login_required
+# def Tenants_dashboard(request):
+#     """Tenants dashboard view"""
+#     return render(request, 'dashboards/tenants/tenants_dashboard.html')
 
-@login_required
-def Helpdeskadmindash(request):
-    """Helpdesk admin dashboard view"""
-    return render(request, 'dashboards/helpdesk/helpdesk_dashboard.html')
+# @login_required
+# def Helpdeskadmindash(request):
+#     """Helpdesk admin dashboard view"""
+#     return render(request, 'dashboards/helpdesk/helpdesk_dashboard.html')
 
-@login_required
-def medicin_prescription_table(request):
-    """Medicine prescription table view"""
-    return render(request, 'dashboards/doctorsAndHelpDesk/medicin_prescription_table.html')
+# @login_required
+# def medicin_prescription_table(request):
+#     """Medicine prescription table view"""
+#     return render(request, 'dashboards/doctorsAndHelpDesk/medicin_prescription_table.html')
 
 @login_required
 @super_admin_required
@@ -1565,7 +1567,7 @@ def add_therapy_with_autofill(request):
         'all_therapies': all_therapies,
         'all_slots': all_slots
     }
-    return render(request, 'dashboards/doctorsAndHelpDesk/therapy_entry.html', context)
+    return render(request, 'dashboards/prescriptions/therapy_entry.html', context)
 
 @login_required
 def search_patients(request):

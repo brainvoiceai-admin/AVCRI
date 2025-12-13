@@ -6,49 +6,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Create Role - AVCRI</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            background-color: #f8f9fa;
-        }
-        .sidebar {
-            background-color: #343a40;
-            color: white;
-            min-height: 100vh;
-            position: fixed;
-            width: 18%;
-        }
-        .sidebar a {
-            color: #adb5bd;
-            padding: 10px 15px;
-            display: block;
-            text-decoration: none;
-        }
-        .sidebar a:hover {
-            color: white;
-            background-color: #495057;
-        }
-        .main {
-            padding: 20px;
-            margin-left: 18%;
-            width: calc(100% - 18%);
-            max-width: calc(100vw - 18%);
-            overflow-x: auto;
-        }
-        .card {
-            box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
-        }
-        @media (max-width: 768px) {
-            .sidebar {
-                position: static;
-                width: 100%;
-            }
-            .main {
-                margin-left: 0;
-                padding: 10px;
-            }
-        }
-    </style>
+    
+    <link rel="stylesheet" href="{% static 'css/authentication_create_role.css' %}">
+    <link rel="stylesheet" href="{% static 'css/dashboards_nav.css' %}">
 </head>
 <body>
     <div class="container-fluid">
@@ -179,104 +139,9 @@
         </div>
     </div>
     
-    <script>
-        // Module Search Functionality
-        document.getElementById('moduleSearch').addEventListener('input', function(e) {
-            const searchTerm = e.target.value.toLowerCase();
-            const moduleItems = document.querySelectorAll('.module-item');
-            
-            moduleItems.forEach(item => {
-                const moduleName = item.getAttribute('data-module-name');
-                const moduleDesc = item.getAttribute('data-module-desc') || '';
-                const matches = moduleName.includes(searchTerm) || moduleDesc.includes(searchTerm);
-                
-                if (matches) {
-                    item.style.display = '';
-                } else {
-                    item.style.display = 'none';
-                }
-            });
-            
-            // Hide/show entire categories if all items are hidden
-            document.querySelectorAll('.module-category').forEach(category => {
-                const visibleItems = category.querySelectorAll('.module-item[style=""]').length;
-                const totalItems = category.querySelectorAll('.module-item').length;
-                const categoryCard = category.querySelector('.card');
-                
-                if (visibleItems === 0 && searchTerm !== '') {
-                    categoryCard.style.display = 'none';
-                } else {
-                    categoryCard.style.display = '';
-                }
-            });
-        });
-        
-        // Select All / Deselect All for all modules
-        document.getElementById('selectAllBtn').addEventListener('click', function() {
-            document.querySelectorAll('.module-checkbox').forEach(checkbox => {
-                if (!checkbox.closest('.module-item').style.display || checkbox.closest('.module-item').style.display !== 'none') {
-                    checkbox.checked = true;
-                }
-            });
-        });
-        
-        document.getElementById('deselectAllBtn').addEventListener('click', function() {
-            document.querySelectorAll('.module-checkbox').forEach(checkbox => {
-                checkbox.checked = false;
-            });
-        });
-        
-        // Select All / Deselect All for category
-        document.querySelectorAll('.select-category-all').forEach(btn => {
-            btn.addEventListener('click', function() {
-                const category = this.getAttribute('data-category');
-                const categoryDiv = document.querySelector(`.module-category[data-category="${category}"]`);
-                categoryDiv.querySelectorAll('.module-checkbox').forEach(checkbox => {
-                    if (!checkbox.closest('.module-item').style.display || checkbox.closest('.module-item').style.display !== 'none') {
-                        checkbox.checked = true;
-                    }
-                });
-            });
-        });
-        
-        document.querySelectorAll('.deselect-category-all').forEach(btn => {
-            btn.addEventListener('click', function() {
-                const category = this.getAttribute('data-category');
-                const categoryDiv = document.querySelector(`.module-category[data-category="${category}"]`);
-                categoryDiv.querySelectorAll('.module-checkbox').forEach(checkbox => {
-                    checkbox.checked = false;
-                });
-            });
-        });
-        
-        // Show toast on form submission success
-        document.querySelector('form').addEventListener('submit', function(e) {
-            // Let the form submit normally
-            // The toast will be shown on the role_management page after redirect
-        });
-        
-        // Check for success message in URL or messages
-        const urlParams = new URLSearchParams(window.location.search);
-        if (urlParams.get('created') === '1') {
-            const toastElement = document.getElementById('successToast');
-            if (toastElement) {
-                const toast = new bootstrap.Toast(toastElement);
-                toast.show();
-            }
-        }
-        
-        {% if messages %}
-            {% for message in messages %}
-                {% if message.tags == 'success' %}
-                    const toastElement = document.getElementById('successToast');
-                    if (toastElement) {
-                        const toast = new bootstrap.Toast(toastElement);
-                        toast.show();
-                    }
-                {% endif %}
-            {% endfor %}
-        {% endif %}
-    </script>
+    
+    <script src="{% static 'js/authentication_create_role.js' %}"></script>
+    <script src="{% static 'js/dashboards_nav.js' %}"></script>
 </body>
 </html>
 

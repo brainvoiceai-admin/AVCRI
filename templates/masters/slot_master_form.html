@@ -1,3 +1,4 @@
+{%load static%}
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -7,21 +8,9 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     
-    <style>
-        .main-content {
-            padding-left: 275px;
-        }
-        .form-section {
-            background: #f8f9fa;
-            border-radius: 8px;
-            padding: 1.5rem;
-            margin-bottom: 1.5rem;
-        }
-        .required-field::after {
-            content: " *";
-            color: red;
-        }
-    </style>
+    
+    <link rel="stylesheet" href="{% static 'css/masters_slot_master_form.css' %}">
+    <link rel="stylesheet" href="{% static 'css/dashboards_nav.css' %}">
 </head>
 <body>
     {% include 'dashboards/nav.html' %}
@@ -179,53 +168,8 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
-    <script>
-        // Form validation
-        (function() {
-            'use strict';
-            window.addEventListener('load', function() {
-                var forms = document.getElementsByClassName('needs-validation');
-                var validation = Array.prototype.filter.call(forms, function(form) {
-                    form.addEventListener('submit', function(event) {
-                        if (form.checkValidity() === false) {
-                            event.preventDefault();
-                            event.stopPropagation();
-                        }
-                        form.classList.add('was-validated');
-                    }, false);
-                });
-            }, false);
-        })();
-        
-        // Convert 24-hour time to 12-hour format for preview
-        function formatTime12Hour(time24) {
-            if (!time24) return '-';
-            const [hours, minutes] = time24.split(':');
-            const hour = parseInt(hours, 10);
-            const ampm = hour >= 12 ? 'PM' : 'AM';
-            const hour12 = hour % 12 || 12;
-            return `${hour12}:${minutes} ${ampm}`;
-        }
-        
-        // Update time preview
-        const slotTimeField = document.getElementById('id_slot_time');
-        const timePreview = document.getElementById('timePreview');
-        
-        if (slotTimeField) {
-            slotTimeField.addEventListener('change', function() {
-                const time24 = this.value;
-                if (time24) {
-                    timePreview.textContent = formatTime12Hour(time24);
-                } else {
-                    timePreview.textContent = '-';
-                }
-            });
-            
-            // Set initial preview
-            if (slotTimeField.value) {
-                timePreview.textContent = formatTime12Hour(slotTimeField.value);
-            }
-        }
-    </script>
+    
+    <script src="{% static 'js/masters_slot_master_form.js' %}"></script>
+    <script src="{% static 'js/dashboards_nav.js' %}"></script>
 </body>
 </html>

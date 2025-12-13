@@ -90,12 +90,8 @@
                 <div class="menu-subsection" id="patient-section">
                     {% for module in user_modules %}
                         {% if 'patient' in module.name|lower or 'patient' in module.display_name|lower %}
-                            {% if module.url_name != 'sheduling:patient_therapy' and module.name != 'patient_lookup' and 'master' not in module.name|lower and 'master' not in module.display_name|lower and 'master' not in module.url_name|lower %}
-                                {% if module.url_name == 'treatment_schedule' %}
-                                    <a href="{% url 'patient:patient_list' %}" class="menu-item" data-url="{% url 'patient:patient_list' %}">
-                                        <span>{{ module.icon }}</span> {{ module.display_name }}
-                                    </a>
-                                {% elif ':' in module.url_name %}
+                            {% if module.url_name != 'sheduling:patient_therapy' and module.name != 'patient_lookup' and module.url_name != 'patient_lookup' and module.url_name != 'treatment_schedule' and module.url_name != 'patient_list' and 'master' not in module.name|lower and 'master' not in module.display_name|lower and 'master' not in module.url_name|lower and module.url_name != 'prescription_dash' and module.url_name != 'superadmindash' and module.url_name != 'doctordash' and module.url_name != 'gmdash' and module.url_name != 'ip_pharmacy' and module.url_name != 'medicin_prescription' and module.url_name != 'medicin_prescription_table' and module.url_name != 'Patient_feedback_review' and module.url_name != 'view_patient_details' and module.url_name != 'therapist_feedback_form' and module.url_name != 'review_page' %}
+                                {% if ':' in module.url_name %}
                                     <a href="{% url module.url_name %}" class="menu-item" data-url="{% url module.url_name %}">
                                         <span>{{ module.icon }}</span> {{ module.display_name }}
                                     </a>
@@ -107,11 +103,7 @@
                             {% endif %}
                         {% endif %}
                     {% endfor %}
-                    {% if request.user.role == "doctor_admin" or request.user.role == "doctor" or request.user.role == "super_admin" or request.user.role == "nurse" or request.user.role == "scheduling_staff" %}
-                        <a href="{% url 'patient:patient_list' %}" class="menu-item" data-url="{% url 'patient:patient_list' %}">
-                            <span>📅</span> Treatment Schedule
-                        </a>
-                    {% endif %}
+                    {# Removed Treatment Schedule - not needed #}
                 </div>
             </div>
 
@@ -136,15 +128,13 @@
                     {% endif %} {% endcomment %}
                     {% for module in user_modules %}
                         {% if 'therapy' in module.name|lower or 'prescription' in module.name|lower or 'therapy' in module.display_name|lower or 'prescription' in module.display_name|lower %}
-                            {% if module.url_name != 'prescription_dash' and module.name != 'prescriptions_dashboard' and 'master' not in module.name|lower and 'master' not in module.display_name|lower and 'master' not in module.url_name|lower %}
-                                {% if module.url_name == 'treatment_schedule' %}
-                                    <a href="{% url 'patient:patient_list' %}" class="menu-item" data-url="{% url 'patient:patient_list' %}">
-                                        <span>{{ module.icon }}</span> {{ module.display_name }}
-                                    </a>
-                                {% elif ':' in module.url_name %}
-                                    <a href="{% url module.url_name %}" class="menu-item" data-url="{% url module.url_name %}">
-                                        <span>{{ module.icon }}</span> {{ module.display_name }}
-                                    </a>
+                            {% if module.url_name != 'prescription_dash' and module.name != 'prescriptions_dashboard' and module.url_name != 'superadmindash' and module.url_name != 'doctordash' and module.url_name != 'gmdash' and module.url_name != 'ip_pharmacy' and module.url_name != 'medicin_prescription' and module.url_name != 'medicin_prescription_table' and module.url_name != 'Patient_feedback_review' and module.url_name != 'view_patient_details' and module.url_name != 'therapist_feedback_form' and module.url_name != 'patient_lookup' and module.url_name != 'review_page' and module.url_name != 'treatment_schedule' and module.url_name != 'patient_list' and 'master' not in module.name|lower and 'master' not in module.display_name|lower and 'master' not in module.url_name|lower and module.url_name != 'therapistdash' and 'schedule' not in module.name|lower and 'schedule' not in module.display_name|lower and 'availability' not in module.name|lower and 'dash' not in module.name|lower and 'dashboard' not in module.name|lower and 'dash' not in module.display_name|lower and 'dashboard' not in module.display_name|lower %}
+                                {% if ':' in module.url_name %}
+                                    {% if module.url_name != 'sheduling:patient_therapy' %}
+                                        <a href="{% url module.url_name %}" class="menu-item" data-url="{% url module.url_name %}">
+                                            <span>{{ module.icon }}</span> {{ module.display_name }}
+                                        </a>
+                                    {% endif %}
                                 {% elif module.url_name == 'patient_therapy' or 'add therapy' in module.display_name|lower or 'therapy entry' in module.display_name|lower %}
                                     <a href="/sheduling/therapy-entry/" class="menu-item" data-url="/sheduling/therapy-entry/">
                                         <span>{{ module.icon }}</span> {{ module.display_name }}
@@ -153,14 +143,14 @@
                                     <a href="/sheduling/prescriptions/" class="menu-item" data-url="/sheduling/prescriptions/">
                                         <span>{{ module.icon }}</span> {{ module.display_name }}
                                     </a>
-                                {% elif module.url_name == 'therapistdash' or module.url_name == 'therapistadmindash' or module.url_name == 'doctordash' or module.url_name == 'superadmindash' or module.url_name == 'patientdash' or module.url_name == 'gmdash' or module.url_name == 'housekeepingdash' or module.url_name == 'nurse_dash' or module.url_name == 'ip_pharmacy' or module.url_name == 'Manage_user' or module.url_name == 'user_profile' or module.url_name == 'login' or module.url_name == 'logout' or module.url_name == 'Therapy_Report' or module.url_name == 'Therapy_Audit_Log' or module.url_name == 'Audit_Log' or module.url_name == 'patient_profile' or module.url_name == 'prescription_dash' or module.url_name == 'Patient_feedback_review' or module.url_name == 'medicin_prescription' or module.url_name == 'medicin_prescription_table' or module.url_name == 'view_patient_details' or module.url_name == 'therapist_feedback_form' or module.url_name == 'role_management' or module.url_name == 'create_role' or module.url_name == 'edit_role' or module.url_name == 'delete_role' or module.url_name == 'user_role_assignment' or module.url_name == 'module_management' or module.url_name == 'therapist_schedule' or module.url_name == 'add_therapy_with_autofill' or module.url_name == 'search_patients' or module.url_name == 'get_patient_details' or module.url_name == 'confirm_role_change' or module.url_name == 'execute_role_change' %}
-                                    <a href="{% url 'authentication:'|add:module.url_name %}" class="menu-item" data-url="{% url 'authentication:'|add:module.url_name %}">
-                                        <span>{{ module.icon }}</span> {{ module.display_name }}
-                                    </a>
+                                {% elif module.url_name == 'therapistdash' or module.url_name == 'therapistadmindash' or module.url_name == 'patientdash' or module.url_name == 'housekeepingdash' or module.url_name == 'nurse_dash' or module.url_name == 'Manage_user' or module.url_name == 'user_profile' or module.url_name == 'login' or module.url_name == 'logout' or module.url_name == 'Therapy_Report' or module.url_name == 'Therapy_Audit_Log' or module.url_name == 'Audit_Log' or module.url_name == 'patient_profile' or module.url_name == 'role_management' or module.url_name == 'create_role' or module.url_name == 'edit_role' or module.url_name == 'delete_role' or module.url_name == 'user_role_assignment' or module.url_name == 'module_management' or module.url_name == 'therapist_schedule' or module.url_name == 'add_therapy_with_autofill' or module.url_name == 'search_patients' or module.url_name == 'get_patient_details' or module.url_name == 'confirm_role_change' or module.url_name == 'execute_role_change' %}
+                                    {# Skip - these should appear in their specific sections, not here #}
                                 {% else %}
-                                    <a href="{% url module.url_name %}" class="menu-item" data-url="{% url module.url_name %}">
-                                        <span>{{ module.icon }}</span> {{ module.display_name }}
-                                    </a>
+                                    {% if module.url_name != 'prescription_dash' and module.url_name != 'superadmindash' and module.url_name != 'doctordash' and module.url_name != 'gmdash' and module.url_name != 'ip_pharmacy' and module.url_name != 'medicin_prescription' and module.url_name != 'medicin_prescription_table' and module.url_name != 'Patient_feedback_review' and module.url_name != 'view_patient_details' and module.url_name != 'therapist_feedback_form' and module.url_name != 'patient_lookup' and module.url_name != 'review_page' and module.url_name != 'Tenantsdash' and module.url_name != 'Helpdeskadmindash' and 'schedule' not in module.name|lower and 'schedule' not in module.display_name|lower and 'availability' not in module.name|lower and 'dash' not in module.name|lower and 'dashboard' not in module.name|lower and 'dash' not in module.display_name|lower and 'dashboard' not in module.display_name|lower %}
+                                        <a href="{% url module.url_name %}" class="menu-item" data-url="{% url module.url_name %}">
+                                            <span>{{ module.icon }}</span> {{ module.display_name }}
+                                        </a>
+                                    {% endif %}
                                 {% endif %}
                             {% endif %}
                         {% endif %}
@@ -180,9 +170,6 @@
                         <a href="{% url 'authentication:therapistdash' %}" class="menu-item" data-url="{% url 'authentication:therapistdash' %}">
                             <span>🗓️</span> My Therapy Schedule
                         </a>
-                        <a href="{% url 'authentication:therapist_schedule' %}" class="menu-item" data-url="{% url 'authentication:therapist_schedule' %}">
-                            <span>📅</span> Tomorrow's Schedule
-                        </a>
                     {% endif %}
                     {% if request.user.role == "super_admin" %}
                         <a href="/sheduling/therapist-difficulty/" class="menu-item" data-url="/sheduling/therapist-difficulty/">
@@ -191,22 +178,34 @@
                     {% endif %}
                     {% for module in user_modules %}
                         {% if 'schedule' in module.name|lower or 'schedule' in module.display_name|lower or 'availability' in module.name|lower %}
-                            {% if 'master' not in module.name|lower and 'master' not in module.display_name|lower and 'master' not in module.url_name|lower %}
+                            {% if 'master' not in module.name|lower and 'master' not in module.display_name|lower and 'master' not in module.url_name|lower and module.url_name != 'prescription_dash' and module.url_name != 'superadmindash' and module.url_name != 'doctordash' and module.url_name != 'gmdash' and module.url_name != 'ip_pharmacy' and module.url_name != 'medicin_prescription' and module.url_name != 'medicin_prescription_table' and module.url_name != 'Patient_feedback_review' and module.url_name != 'view_patient_details' and module.url_name != 'therapist_feedback_form' and module.url_name != 'patient_lookup' and module.url_name != 'review_page' and module.url_name != 'treatment_schedule' and module.url_name != 'patient_list' and module.url_name != 'therapistdash' and 'therapy' not in module.name|lower and 'therapy' not in module.display_name|lower and 'dash' not in module.name|lower and 'dashboard' not in module.name|lower and 'dash' not in module.display_name|lower and 'dashboard' not in module.display_name|lower %}
                             {% if ':' in module.url_name %}
-                                <a href="{% url module.url_name %}" class="menu-item" data-url="{% url module.url_name %}">
+                                {% if module.url_name != 'sheduling:patient_therapy' %}
+                                    <a href="{% url module.url_name %}" class="menu-item" data-url="{% url module.url_name %}">
+                                        <span>{{ module.icon }}</span> {{ module.display_name }}
+                                    </a>
+                                {% endif %}
                             {% elif module.url_name == 'therapist_availability_dashboard' %}
                                 <a href="/sheduling/therapist-availability/" class="menu-item" data-url="/sheduling/therapist-availability/">
+                                    <span>{{ module.icon }}</span> {{ module.display_name }}
+                                </a>
                             {% elif module.url_name == 'prescription_scheduling_dashboard' %}
                                 <a href="/sheduling/prescription-scheduling/" class="menu-item" data-url="/sheduling/prescription-scheduling/">
+                                    <span>{{ module.icon }}</span> {{ module.display_name }}
+                                </a>
                             {% elif module.url_name == 'scheduling_dashboard' %}
                                 <a href="/sheduling/scheduling/" class="menu-item" data-url="/sheduling/scheduling/">
-                            {% elif module.url_name == 'therapistdash' or module.url_name == 'therapistadmindash' or module.url_name == 'doctordash' or module.url_name == 'superadmindash' or module.url_name == 'patientdash' or module.url_name == 'gmdash' or module.url_name == 'housekeepingdash' or module.url_name == 'nurse_dash' or module.url_name == 'ip_pharmacy' or module.url_name == 'Manage_user' or module.url_name == 'user_profile' or module.url_name == 'login' or module.url_name == 'logout' or module.url_name == 'Therapy_Report' or module.url_name == 'Therapy_Audit_Log' or module.url_name == 'Audit_Log' or module.url_name == 'patient_profile' or module.url_name == 'prescription_dash' or module.url_name == 'Patient_feedback_review' or module.url_name == 'medicin_prescription' or module.url_name == 'medicin_prescription_table' or module.url_name == 'view_patient_details' or module.url_name == 'therapist_feedback_form' or module.url_name == 'role_management' or module.url_name == 'create_role' or module.url_name == 'edit_role' or module.url_name == 'delete_role' or module.url_name == 'user_role_assignment' or module.url_name == 'module_management' or module.url_name == 'therapist_schedule' or module.url_name == 'add_therapy_with_autofill' or module.url_name == 'search_patients' or module.url_name == 'get_patient_details' or module.url_name == 'confirm_role_change' or module.url_name == 'execute_role_change' %}
-                                <a href="{% url 'authentication:'|add:module.url_name %}" class="menu-item" data-url="{% url 'authentication:'|add:module.url_name %}">
+                                    <span>{{ module.icon }}</span> {{ module.display_name }}
+                                </a>
+                            {% elif module.url_name == 'therapistdash' or module.url_name == 'therapistadmindash' or module.url_name == 'patientdash' or module.url_name == 'housekeepingdash' or module.url_name == 'nurse_dash' or module.url_name == 'Manage_user' or module.url_name == 'user_profile' or module.url_name == 'login' or module.url_name == 'logout' or module.url_name == 'Therapy_Report' or module.url_name == 'Therapy_Audit_Log' or module.url_name == 'Audit_Log' or module.url_name == 'patient_profile' or module.url_name == 'role_management' or module.url_name == 'create_role' or module.url_name == 'edit_role' or module.url_name == 'delete_role' or module.url_name == 'user_role_assignment' or module.url_name == 'module_management' or module.url_name == 'therapist_schedule' or module.url_name == 'add_therapy_with_autofill' or module.url_name == 'search_patients' or module.url_name == 'get_patient_details' or module.url_name == 'confirm_role_change' or module.url_name == 'execute_role_change' %}
+                                {# Skip - these should appear in their specific sections, not here #}
                             {% else %}
-                                <a href="{% url module.url_name %}" class="menu-item" data-url="{% url module.url_name %}">
+                                {% if module.url_name != 'prescription_dash' and module.url_name != 'superadmindash' and module.url_name != 'doctordash' and module.url_name != 'gmdash' and module.url_name != 'ip_pharmacy' and module.url_name != 'medicin_prescription' and module.url_name != 'medicin_prescription_table' and module.url_name != 'Patient_feedback_review' and module.url_name != 'view_patient_details' and module.url_name != 'therapist_feedback_form' and module.url_name != 'patient_lookup' and module.url_name != 'review_page' and module.url_name != 'Tenantsdash' and module.url_name != 'Helpdeskadmindash' and module.url_name != 'therapistdash' and 'therapy' not in module.name|lower and 'therapy' not in module.display_name|lower and 'dash' not in module.name|lower and 'dashboard' not in module.name|lower and 'dash' not in module.display_name|lower and 'dashboard' not in module.display_name|lower %}
+                                    <a href="{% url module.url_name %}" class="menu-item" data-url="{% url module.url_name %}">
+                                        <span>{{ module.icon }}</span> {{ module.display_name }}
+                                    </a>
+                                {% endif %}
                             {% endif %}
-                                <span>{{ module.icon }}</span> {{ module.display_name }}
-                            </a>
                             {% endif %}
                         {% endif %}
                     {% endfor %}
@@ -221,84 +220,47 @@
                     <span class="section-arrow" id="dashboards-section-arrow">▼</span>
                 </div>
                 <div class="menu-subsection" id="dashboards-section">
-                    {% if request.user.role == "therapist" or request.user.role == "super_admin" %}
-                        <a href="{% url 'authentication:therapistdash' %}" class="menu-item" data-url="{% url 'authentication:therapistdash' %}">
-                            <span>👨‍⚕️</span> Therapist Dashboard
-                        </a>
-                    {% endif %}
+                    {# Removed Therapist Dashboard - already shown as "My Therapy Schedule" in Scheduling section #}
                     {% if request.user.role == "nurse" or request.user.role == "super_admin" %}
                         <a href="{% url 'authentication:nurse_dash' %}" class="menu-item" data-url="{% url 'authentication:nurse_dash' %}">
                             <span>🩺</span> Nurse Dashboard
                         </a>
                     {% endif %}
-                    {% if request.user.role == "patient" or request.user.role == "super_admin" %}
-                        <a href="{% url 'patient_dashboard' %}" class="menu-item" data-url="{% url 'patient_dashboard' %}">
-                            <span>🧑‍⚕️</span> Patient Dashboard
-                        </a>
-                    {% endif %}
-                    {% if request.user.role == "doctor_admin" or request.user.role == "doctor" or request.user.role == "super_admin" %}
-                        <a href="{% url 'authentication:doctordash' %}" class="menu-item" data-url="{% url 'authentication:doctordash' %}">
-                            <span>👨‍⚕️</span> Doctor Dashboard
-                        </a>
-                    {% endif %}
-                    {% if request.user.role == "hr" or request.user.role == "super_admin" %}
-                        <a href="{% url 'authentication:gmdash' %}" class="menu-item" data-url="{% url 'authentication:gmdash' %}">
-                            <span>👥</span> HR Dashboard
-                        </a>
-                    {% endif %}
+                    {# Removed Patient Dashboard - not needed #}
                     {% if request.user.role == "housekeeping_staff" or request.user.role == "super_admin" %}
                         <a href="{% url 'authentication:housekeepingdash' %}" class="menu-item" data-url="{% url 'authentication:housekeepingdash' %}">
                             <span>🧹</span> Housekeeping
                         </a>
                     {% endif %}
-                    {% if request.user.role == "ip_pharmacy_staff" or request.user.role == "super_admin" %}
-                        <a href="{% url 'authentication:ip_pharmacy' %}" class="menu-item" data-url="{% url 'authentication:ip_pharmacy' %}">
-                            <span>🏥</span> In-Patient Pharmacy
-                        </a>
-                    {% endif %}
                     {% for module in user_modules %}
                         {% if 'dash' in module.name|lower or 'dashboard' in module.name|lower or 'dash' in module.display_name|lower or 'dashboard' in module.display_name|lower %}
-                            {% if 'master' not in module.name|lower and 'master' not in module.display_name|lower and 'master' not in module.url_name|lower %}
-                            {% if module.url_name == 'treatment_schedule' %}
-                                <a href="{% url 'patient:patient_list' %}" class="menu-item" data-url="{% url 'patient:patient_list' %}">
-                                    <span>{{ module.icon }}</span> {{ module.display_name }}
-                                </a>
-                            {% elif ':' in module.url_name %}
-                                <a href="{% url module.url_name %}" class="menu-item" data-url="{% url module.url_name %}">
-                                    <span>{{ module.icon }}</span> {{ module.display_name }}
-                                </a>
+                            {% if 'master' not in module.name|lower and 'master' not in module.display_name|lower and 'master' not in module.url_name|lower and module.url_name != 'prescription_dash' and module.url_name != 'superadmindash' and module.url_name != 'doctordash' and module.url_name != 'gmdash' and module.url_name != 'ip_pharmacy' and module.url_name != 'medicin_prescription' and module.url_name != 'medicin_prescription_table' and module.url_name != 'Patient_feedback_review' and module.url_name != 'view_patient_details' and module.url_name != 'therapist_feedback_form' and module.url_name != 'patient_lookup' and module.url_name != 'review_page' and module.url_name != 'Tenantsdash' and module.url_name != 'Helpdeskadmindash' and module.url_name != 'treatment_schedule' and module.url_name != 'patient_list' and module.url_name != 'patient_dashboard' and 'schedule' not in module.name|lower and 'schedule' not in module.display_name|lower and 'availability' not in module.name|lower and 'therapy' not in module.name|lower and 'therapy' not in module.display_name|lower and 'prescription' not in module.name|lower and 'prescription' not in module.display_name|lower %}
+                            {% if ':' in module.url_name %}
+                                {% if module.url_name != 'sheduling:patient_therapy' %}
+                                    <a href="{% url module.url_name %}" class="menu-item" data-url="{% url module.url_name %}">
+                                        <span>{{ module.icon }}</span> {{ module.display_name }}
+                                    </a>
+                                {% endif %}
                             {% elif module.url_name == 'therapist_dashboard' %}
                                 <a href="/sheduling/therapist/" class="menu-item" data-url="/sheduling/therapist/">
                                     <span>{{ module.icon }}</span> {{ module.display_name }}
                                 </a>
                             {% elif module.url_name == 'patient_dashboard' %}
-                                <a href="/sheduling/patient/" class="menu-item" data-url="/sheduling/patient/">
-                                    <span>{{ module.icon }}</span> {{ module.display_name }}
-                                </a>
-                            {% elif module.url_name == 'therapist_availability_dashboard' %}
-                                <a href="/sheduling/therapist-availability/" class="menu-item" data-url="/sheduling/therapist-availability/">
-                                    <span>{{ module.icon }}</span> {{ module.display_name }}
-                                </a>
-                            {% elif module.url_name == 'prescription_scheduling_dashboard' %}
-                                <a href="/sheduling/prescription-scheduling/" class="menu-item" data-url="/sheduling/prescription-scheduling/">
-                                    <span>{{ module.icon }}</span> {{ module.display_name }}
-                                </a>
-                            {% elif module.url_name == 'scheduling_dashboard' %}
-                                <a href="/sheduling/scheduling/" class="menu-item" data-url="/sheduling/scheduling/">
-                                    <span>{{ module.icon }}</span> {{ module.display_name }}
-                                </a>
+                                {# Removed Patient Dashboard - not needed #}
+                            {% elif module.url_name == 'therapist_availability_dashboard' or module.url_name == 'prescription_scheduling_dashboard' or module.url_name == 'scheduling_dashboard' %}
+                                {# Skip - these appear in Scheduling section #}
                             {% elif module.url_name == 'procurement_dashboard' %}
                                 <a href="/sheduling/procurement/" class="menu-item" data-url="/sheduling/procurement/">
                                     <span>{{ module.icon }}</span> {{ module.display_name }}
                                 </a>
-                            {% elif module.url_name == 'therapistdash' or module.url_name == 'therapistadmindash' or module.url_name == 'doctordash' or module.url_name == 'superadmindash' or module.url_name == 'patientdash' or module.url_name == 'gmdash' or module.url_name == 'housekeepingdash' or module.url_name == 'nurse_dash' or module.url_name == 'ip_pharmacy' or module.url_name == 'Manage_user' or module.url_name == 'user_profile' or module.url_name == 'login' or module.url_name == 'logout' or module.url_name == 'Therapy_Report' or module.url_name == 'Therapy_Audit_Log' or module.url_name == 'Audit_Log' or module.url_name == 'patient_profile' or module.url_name == 'prescription_dash' or module.url_name == 'Patient_feedback_review' or module.url_name == 'medicin_prescription' or module.url_name == 'medicin_prescription_table' or module.url_name == 'view_patient_details' or module.url_name == 'therapist_feedback_form' or module.url_name == 'role_management' or module.url_name == 'create_role' or module.url_name == 'edit_role' or module.url_name == 'delete_role' or module.url_name == 'user_role_assignment' or module.url_name == 'module_management' or module.url_name == 'therapist_schedule' or module.url_name == 'add_therapy_with_autofill' or module.url_name == 'search_patients' or module.url_name == 'get_patient_details' or module.url_name == 'confirm_role_change' or module.url_name == 'execute_role_change' %}
-                                <a href="{% url 'authentication:'|add:module.url_name %}" class="menu-item" data-url="{% url 'authentication:'|add:module.url_name %}">
-                                    <span>{{ module.icon }}</span> {{ module.display_name }}
-                                </a>
+                            {% elif module.url_name == 'therapistdash' or module.url_name == 'therapistadmindash' or module.url_name == 'patientdash' or module.url_name == 'housekeepingdash' or module.url_name == 'nurse_dash' or module.url_name == 'Manage_user' or module.url_name == 'user_profile' or module.url_name == 'login' or module.url_name == 'logout' or module.url_name == 'Therapy_Report' or module.url_name == 'Therapy_Audit_Log' or module.url_name == 'Audit_Log' or module.url_name == 'patient_profile' or module.url_name == 'role_management' or module.url_name == 'create_role' or module.url_name == 'edit_role' or module.url_name == 'delete_role' or module.url_name == 'user_role_assignment' or module.url_name == 'module_management' or module.url_name == 'therapist_schedule' or module.url_name == 'add_therapy_with_autofill' or module.url_name == 'search_patients' or module.url_name == 'get_patient_details' or module.url_name == 'confirm_role_change' or module.url_name == 'execute_role_change' %}
+                                {# Skip - these should appear in their specific sections, not here #}
                             {% else %}
-                                <a href="{% url module.url_name %}" class="menu-item" data-url="{% url module.url_name %}">
-                                    <span>{{ module.icon }}</span> {{ module.display_name }}
-                                </a>
+                                {% if module.url_name != 'prescription_dash' and module.url_name != 'superadmindash' and module.url_name != 'doctordash' and module.url_name != 'gmdash' and module.url_name != 'ip_pharmacy' and module.url_name != 'medicin_prescription' and module.url_name != 'medicin_prescription_table' and module.url_name != 'Patient_feedback_review' and module.url_name != 'view_patient_details' and module.url_name != 'therapist_feedback_form' and module.url_name != 'patient_lookup' and module.url_name != 'review_page' and module.url_name != 'Tenantsdash' and module.url_name != 'Helpdeskadmindash' and 'therapy' not in module.name|lower and 'therapy' not in module.display_name|lower and 'prescription' not in module.name|lower and 'prescription' not in module.display_name|lower %}
+                                    <a href="{% url module.url_name %}" class="menu-item" data-url="{% url module.url_name %}">
+                                        <span>{{ module.icon }}</span> {{ module.display_name }}
+                                    </a>
+                                {% endif %}
                             {% endif %}
                             {% endif %}
                         {% endif %}
@@ -369,7 +331,7 @@
                     {% if group.list %}
                         {% for module in group.list %}
                             {# Exclude modules that are already categorized in other sections #}
-                            {% if 'patient' not in module.name|lower and 'patient' not in module.display_name|lower and 'therapy' not in module.name|lower and 'therapy' not in module.display_name|lower and 'prescription' not in module.name|lower and 'prescription' not in module.display_name|lower and 'schedule' not in module.name|lower and 'schedule' not in module.display_name|lower and 'availability' not in module.name|lower and 'availability' not in module.display_name|lower and 'dash' not in module.name|lower and 'dashboard' not in module.name|lower and 'dash' not in module.display_name|lower and 'dashboard' not in module.display_name|lower and 'report' not in module.name|lower and 'report' not in module.display_name|lower and 'audit' not in module.name|lower and 'audit' not in module.display_name|lower and 'user' not in module.name|lower and 'user' not in module.display_name|lower and 'role' not in module.name|lower and 'role' not in module.display_name|lower and 'module' not in module.name|lower and 'module' not in module.display_name|lower and 'master' not in module.name|lower and 'master' not in module.display_name|lower and 'master' not in module.url_name|lower and module.url_name != 'sheduling:patient_therapy' and module.url_name != 'prescription_dash' and module.name != 'patient_lookup' and module.name != 'prescriptions_dashboard' and module.url_name != 'user_profile' and module.url_name != 'logout' and module.url_name != 'login' %}
+                            {% if 'patient' not in module.name|lower and 'patient' not in module.display_name|lower and 'therapy' not in module.name|lower and 'therapy' not in module.display_name|lower and 'prescription' not in module.name|lower and 'prescription' not in module.display_name|lower and 'schedule' not in module.name|lower and 'schedule' not in module.display_name|lower and 'availability' not in module.name|lower and 'availability' not in module.display_name|lower and 'dash' not in module.name|lower and 'dashboard' not in module.name|lower and 'dash' not in module.display_name|lower and 'dashboard' not in module.display_name|lower and 'report' not in module.name|lower and 'report' not in module.display_name|lower and 'audit' not in module.name|lower and 'audit' not in module.display_name|lower and 'user' not in module.name|lower and 'user' not in module.display_name|lower and 'role' not in module.name|lower and 'role' not in module.display_name|lower and 'module' not in module.name|lower and 'module' not in module.display_name|lower and 'master' not in module.name|lower and 'master' not in module.display_name|lower and 'master' not in module.url_name|lower and module.url_name != 'sheduling:patient_therapy' and module.url_name != 'prescription_dash' and module.name != 'patient_lookup' and module.name != 'prescriptions_dashboard' and module.url_name != 'user_profile' and module.url_name != 'logout' and module.url_name != 'login' and module.url_name != 'patient_list' and module.url_name != 'treatment_schedule' and module.url_name != 'patient_dashboard' %}
                                 {% if forloop.first %}
                                 <div class="menu-section">
                                     <div class="menu-section-header" onclick="toggleSection('other-section')">
@@ -379,10 +341,8 @@
                                     </div>
                                     <div class="menu-subsection" id="other-section">
                                 {% endif %}
-                                        {% if module.url_name == 'treatment_schedule' %}
-                                            <a href="{% url 'patient:patient_list' %}" class="menu-item" data-url="{% url 'patient:patient_list' %}">
-                                                <span>{{ module.icon }}</span> {{ module.display_name }}
-                                            </a>
+                                        {% if module.url_name == 'treatment_schedule' or module.url_name == 'patient_list' or module.url_name == 'patient_dashboard' %}
+                                            {# Removed Treatment Schedule, Patient List, and Patient Dashboard - not needed #}
                                         {% elif ':' in module.url_name %}
                                             <a href="{% url module.url_name %}" class="menu-item" data-url="{% url module.url_name %}">
                                                 <span>{{ module.icon }}</span> {{ module.display_name }}
@@ -404,9 +364,7 @@
                                                 <span>{{ module.icon }}</span> {{ module.display_name }}
                                             </a>
                                         {% elif module.url_name == 'patient_dashboard' %}
-                                            <a href="/sheduling/patient/" class="menu-item" data-url="/sheduling/patient/">
-                                                <span>{{ module.icon }}</span> {{ module.display_name }}
-                                            </a>
+                                            {# Removed Patient Dashboard - not needed #}
                                         {% elif module.url_name == 'procurement_dashboard' %}
                                             <a href="/sheduling/procurement/" class="menu-item" data-url="/sheduling/procurement/">
                                                 <span>{{ module.icon }}</span> {{ module.display_name }}
@@ -415,14 +373,16 @@
                                             <a href="{% url 'patient:therapy_entry' %}" class="menu-item" data-url="{% url 'patient:therapy_entry' %}">
                                                 <span>{{ module.icon }}</span> {{ module.display_name }}
                                             </a>
-                                        {% elif module.url_name == 'therapistdash' or module.url_name == 'therapistadmindash' or module.url_name == 'doctordash' or module.url_name == 'superadmindash' or module.url_name == 'patientdash' or module.url_name == 'gmdash' or module.url_name == 'housekeepingdash' or module.url_name == 'nurse_dash' or module.url_name == 'ip_pharmacy' or module.url_name == 'Manage_user' or module.url_name == 'Therapy_Report' or module.url_name == 'Therapy_Audit_Log' or module.url_name == 'Audit_Log' or module.url_name == 'patient_profile' or module.url_name == 'prescription_dash' or module.url_name == 'Patient_feedback_review' or module.url_name == 'medicin_prescription' or module.url_name == 'medicin_prescription_table' or module.url_name == 'view_patient_details' or module.url_name == 'therapist_feedback_form' or module.url_name == 'role_management' or module.url_name == 'create_role' or module.url_name == 'edit_role' or module.url_name == 'delete_role' or module.url_name == 'user_role_assignment' or module.url_name == 'module_management' or module.url_name == 'therapist_schedule' or module.url_name == 'add_therapy_with_autofill' or module.url_name == 'search_patients' or module.url_name == 'get_patient_details' or module.url_name == 'confirm_role_change' or module.url_name == 'execute_role_change' %}
+                                        {% elif module.url_name == 'therapistdash' or module.url_name == 'therapistadmindash' or module.url_name == 'patientdash' or module.url_name == 'housekeepingdash' or module.url_name == 'nurse_dash' or module.url_name == 'Manage_user' or module.url_name == 'Therapy_Report' or module.url_name == 'Therapy_Audit_Log' or module.url_name == 'Audit_Log' or module.url_name == 'patient_profile' or module.url_name == 'role_management' or module.url_name == 'create_role' or module.url_name == 'edit_role' or module.url_name == 'delete_role' or module.url_name == 'user_role_assignment' or module.url_name == 'module_management' or module.url_name == 'therapist_schedule' or module.url_name == 'add_therapy_with_autofill' or module.url_name == 'search_patients' or module.url_name == 'get_patient_details' or module.url_name == 'confirm_role_change' or module.url_name == 'execute_role_change' %}
                                             <a href="{% url 'authentication:'|add:module.url_name %}" class="menu-item" data-url="{% url 'authentication:'|add:module.url_name %}">
                                                 <span>{{ module.icon }}</span> {{ module.display_name }}
                                             </a>
                                         {% else %}
-                                            <a href="{% url module.url_name %}" class="menu-item" data-url="{% url module.url_name %}">
-                                                <span>{{ module.icon }}</span> {{ module.display_name }}
-                                            </a>
+                                            {% if module.url_name != 'patient_list' and module.url_name != 'treatment_schedule' and module.url_name != 'patient_dashboard' %}
+                                                <a href="{% url module.url_name %}" class="menu-item" data-url="{% url module.url_name %}">
+                                                    <span>{{ module.icon }}</span> {{ module.display_name }}
+                                                </a>
+                                            {% endif %}
                                         {% endif %}
                                 {% if forloop.last %}
                                     </div>
@@ -466,345 +426,6 @@
     <span></span>
 </button>
 
-<style>
-    body {
-        font-family: Arial, sans-serif;
-        background-color: #f8f9fa;
-        margin: 0;
-        padding: 0;
-    }
-    .sidebar {
-        width: 280px;
-        background: white;
-        border-right: 1px solid #e0f2f1;
-        box-shadow: 4px 0 20px rgba(0, 0, 0, 0.05);
-        position: fixed;
-        height: 100vh;
-        overflow: hidden;
-        z-index: 1000;
-        transition: transform 0.3s ease;
-        display: flex;
-        flex-direction: column;
-    }
-    .sidebar-header {
-        padding: 20px;
-        border-bottom: 1px solid #e0f2f1;
-        background: linear-gradient(135deg, #2ed573, #1e8449);
-        color: white;
-        text-align: center;
-        flex-shrink: 0;
-        position: relative;
-        z-index: 2;
-    }
-    .profile-section {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        flex-direction: column;
-    }
-    .profile-pic {
-        width: 60px;
-        height: 60px;
-        border-radius: 50%;
-        object-fit: cover;
-        border: 2px solid white;
-        margin-bottom: 10px;
-    }
-    .profile-name {
-        font-size: 1.1rem;
-        font-weight: 600;
-    }
-    .sidebar-menu {
-        padding: 10px 0;
-        display: flex;
-        flex-direction: column;
-        flex: 1;
-        overflow-y: auto;
-    }
-    .account-section-wrapper {
-        margin-top: auto;
-        position: relative;
-        background: white;
-        border-top: 1px solid #e0f2f1;
-        padding-top: 5px;
-        z-index: 1;
-    }
-    .menu-section {
-        margin-bottom: 5px;
-    }
-    .menu-section-header {
-        display: flex;
-        align-items: center;
-        padding: 12px 20px;
-        cursor: pointer;
-        user-select: none;
-        transition: all 0.3s ease;
-        font-weight: 600;
-        color: #2c3e50;
-        border-left: 3px solid transparent;
-    }
-    .menu-section-header:hover {
-        background: rgba(46, 213, 115, 0.1);
-        border-left-color: #2ed573;
-        color: #2ed573;
-    }
-    .section-icon {
-        margin-right: 10px;
-        font-size: 1.1rem;
-    }
-    .section-title {
-        flex: 1;
-        font-size: 0.95rem;
-    }
-    .section-arrow {
-        transition: transform 0.3s ease;
-        font-size: 0.8rem;
-        color: #2ed573;
-    }
-    .menu-section-header.collapsed .section-arrow {
-        transform: rotate(-90deg);
-    }
-    .menu-subsection {
-        max-height: 1000px;
-        overflow: hidden;
-        transition: max-height 0.3s ease, opacity 0.3s ease;
-        opacity: 1;
-    }
-    .menu-subsection.collapsed {
-        max-height: 0;
-        opacity: 0;
-    }
-    /* Ensure Account section is always visible and expanded */
-    #account-section,
-    #account-section-debug {
-        display: block !important;
-        visibility: visible !important;
-        max-height: none !important;
-        opacity: 1 !important;
-        height: auto !important;
-    }
-    #account-section.collapsed,
-    #account-section-debug.collapsed {
-        display: block !important;
-        visibility: visible !important;
-        max-height: none !important;
-        opacity: 1 !important;
-        height: auto !important;
-    }
-    .account-section-wrapper {
-        display: block !important;
-        visibility: visible !important;
-        position: relative !important;
-    }
-    .menu-item {
-        display: block;
-        padding: 10px 20px 10px 40px;
-        color: #2c3e50;
-        text-decoration: none;
-        transition: all 0.3s ease;
-        border-left: 3px solid transparent;
-        font-size: 0.9rem;
-    }
-    .menu-item:hover,
-    .menu-item.active {
-        background: rgba(46, 213, 115, 0.1);
-        border-left-color: #2ed573;
-        color: #2ed573;
-    }
-    .menu-item span {
-        margin-right: 8px;
-    }
-    .hamburger {
-        display: none;
-        position: fixed;
-        top: 20px;
-        left: 20px;
-        z-index: 1001;
-        background: white;
-        border: 1px solid #e0f2f1;
-        border-radius: 8px;
-        padding: 10px;
-        cursor: pointer;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
-    }
-    .hamburger span {
-        display: block;
-        width: 20px;
-        height: 2px;
-        background: #2ed573;
-        margin: 4px 0;
-        transition: 0.3s;
-    }
-    @media (max-width: 768px) {
-        .sidebar {
-            transform: translateX(-100%);
-        }
-        .sidebar.open {
-            transform: translateX(0);
-        }
-        .hamburger {
-            display: block;
-        }
-    }
-</style>
 
-<script>
-    function toggleSidebar() {
-        const sidebar = document.getElementById('sidebar');
-        sidebar.classList.toggle('open');
-    }
 
-    function toggleSection(sectionId) {
-        // Prevent Account section from being collapsed
-        if (sectionId === 'account-section') {
-            return;
-        }
-        
-        const section = document.getElementById(sectionId);
-        const header = section.previousElementSibling;
-        const arrow = header.querySelector('.section-arrow');
-        
-        section.classList.toggle('collapsed');
-        header.classList.toggle('collapsed');
-        
-        // Save state to localStorage
-        const isCollapsed = section.classList.contains('collapsed');
-        localStorage.setItem(sectionId + '-collapsed', isCollapsed);
-    }
 
-    // Restore collapsed state from localStorage
-    document.addEventListener('DOMContentLoaded', function() {
-        console.log('=== ACCOUNT SECTION DEBUG ===');
-        
-        // Force Account section to be visible
-        const accountSection = document.getElementById('account-section');
-        const accountWrapper = document.getElementById('account-section-debug');
-        
-        console.log('Account section element:', accountSection);
-        console.log('Account wrapper element:', accountWrapper);
-        
-        if (accountSection) {
-            console.log('Account section found!');
-            console.log('Current display:', window.getComputedStyle(accountSection).display);
-            console.log('Current visibility:', window.getComputedStyle(accountSection).visibility);
-            console.log('Current opacity:', window.getComputedStyle(accountSection).opacity);
-            console.log('Current max-height:', window.getComputedStyle(accountSection).maxHeight);
-            
-            accountSection.style.display = 'block';
-            accountSection.style.maxHeight = 'none';
-            accountSection.style.opacity = '1';
-            accountSection.style.visibility = 'visible';
-            accountSection.classList.remove('collapsed');
-            
-            const accountHeader = accountSection.previousElementSibling;
-            if (accountHeader) {
-                accountHeader.classList.remove('collapsed');
-            }
-            
-            console.log('After setting styles - display:', accountSection.style.display);
-            console.log('Account section parent:', accountSection.parentElement);
-            console.log('Account section offsetHeight:', accountSection.offsetHeight);
-            console.log('Account section offsetTop:', accountSection.offsetTop);
-        } else {
-            console.error('ERROR: Account section element NOT FOUND in DOM!');
-        }
-        
-        if (accountWrapper) {
-            console.log('Account wrapper found!');
-            console.log('Wrapper offsetHeight:', accountWrapper.offsetHeight);
-            console.log('Wrapper offsetTop:', accountWrapper.offsetTop);
-            accountWrapper.style.display = 'block';
-            accountWrapper.style.visibility = 'visible';
-        } else {
-            console.error('ERROR: Account wrapper element NOT FOUND in DOM!');
-        }
-        
-        console.log('=== END DEBUG ===');
-        
-        const sections = document.querySelectorAll('.menu-subsection');
-        sections.forEach(section => {
-            const sectionId = section.id;
-            // Always keep Account section expanded
-            if (sectionId === 'account-section') {
-                section.classList.remove('collapsed');
-                section.style.display = 'block';
-                section.style.maxHeight = 'none';
-                section.style.opacity = '1';
-                const header = section.previousElementSibling;
-                if (header) {
-                    header.classList.remove('collapsed');
-                }
-            } else {
-                const isCollapsed = localStorage.getItem(sectionId + '-collapsed') === 'true';
-                if (isCollapsed) {
-                    section.classList.add('collapsed');
-                    const header = section.previousElementSibling;
-                    if (header) {
-                        header.classList.add('collapsed');
-                    }
-                }
-            }
-        });
-        
-        setActiveMenuItem();
-    });
-
-    document.addEventListener('click', function(event) {
-        const sidebar = document.getElementById('sidebar');
-        const hamburger = document.querySelector('.hamburger');
-        if (window.innerWidth <= 768 &&
-            !sidebar.contains(event.target) &&
-            !hamburger.contains(event.target) &&
-            sidebar.classList.contains('open')) {
-            sidebar.classList.remove('open');
-        }
-    });
-
-    function setActiveMenuItem() {
-        const currentUrl = window.location.href;
-        const menuItems = document.querySelectorAll('.menu-item');
-
-        menuItems.forEach(item => {
-            item.classList.remove('active');
-            const itemUrl = item.getAttribute('href');
-            if (currentUrl.includes(itemUrl) || currentUrl === itemUrl) {
-                item.classList.add('active');
-            }
-        });
-    }
-
-    // Enhanced menu item handling - maintain active state and smooth navigation
-    document.addEventListener('DOMContentLoaded', function() {
-        const menuItems = document.querySelectorAll('.menu-item[data-url]');
-        
-        menuItems.forEach(item => {
-            // Skip logout link - it should work normally
-            if (item.id === 'logout') return;
-            
-            item.addEventListener('click', function(e) {
-                const url = this.getAttribute('data-url');
-                
-                // Remove active class from all items
-                menuItems.forEach(i => i.classList.remove('active'));
-                // Add active class to clicked item
-                this.classList.add('active');
-                
-                // Store active menu state
-                localStorage.setItem('activeMenuItem', url);
-                
-                // Allow normal navigation but ensure menu stays active
-                // The page will load normally, and setActiveMenuItem will handle highlighting
-            });
-        });
-        
-        // Restore active menu item from localStorage
-        const activeMenuItem = localStorage.getItem('activeMenuItem');
-        if (activeMenuItem) {
-            menuItems.forEach(item => {
-                if (item.getAttribute('data-url') === activeMenuItem) {
-                    item.classList.add('active');
-                }
-            });
-        }
-    });
-</script>

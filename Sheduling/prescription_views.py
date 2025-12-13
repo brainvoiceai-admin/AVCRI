@@ -94,7 +94,7 @@ def prescription_scheduling_dashboard(request):
             }
         }
     
-    return render(request, 'prescription_scheduling.html', context)
+    return render(request, 'dashboards/prescriptions/prescription_scheduling.html', context)
 
 @csrf_exempt
 @require_http_methods(["GET"])

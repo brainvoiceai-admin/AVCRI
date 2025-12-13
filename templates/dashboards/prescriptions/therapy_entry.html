@@ -1,0 +1,307 @@
+{# templates/updated_dash/therapy_entry.html #}
+<!doctype html>
+{%load static%}
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Therapy Management System</title>
+
+  <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+  <link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet" />
+  <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+  
+    <link rel="stylesheet" href="{% static 'css/updated_dash_therapy_entry.css' %}">
+    <link rel="stylesheet" href="{% static 'css/dashboards_nav.css' %}">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Include your existing navigation -->
+    {% include 'dashboards/nav.html' %}
+    
+    <div class="main-content">
+      <!-- Top Navigation Bar with Patient Search -->
+      <div class="top-navbar">
+        <div class="nav-brand">
+          <i class="fas fa-spa"></i>
+          <h1>Therapy Manager</h1>
+        </div>
+        
+        <div class="patient-search-section">
+          <div class="patient-search-container">
+            <!-- Search Method Tabs -->
+            <div class="search-tabs" style="display: flex; gap: 8px; margin-bottom: 12px; border-bottom: 2px solid var(--border-light);">
+              <button class="search-tab-btn active" data-tab="name-reg" style="padding: 8px 16px; border: none; background: none; cursor: pointer; border-bottom: 2px solid transparent; color: var(--text-medium); font-weight: 500; transition: all 0.3s;">
+                <i class="fas fa-user me-1"></i> Name/Reg No
+              </button>
+              <button class="search-tab-btn" data-tab="room" style="padding: 8px 16px; border: none; background: none; cursor: pointer; border-bottom: 2px solid transparent; color: var(--text-medium); font-weight: 500; transition: all 0.3s;">
+                <i class="fas fa-bed me-1"></i> Room Number
+              </button>
+            </div>
+            
+            <!-- Name/Reg No Search Tab -->
+            <div id="name-reg-search-tab" class="search-tab-content">
+              <div class="search-input-group">
+                <input type="text" id="header-patient-select" placeholder="Search patient by name or registration number...">
+                <button id="clear-patient-btn" class="btn btn-outline">
+                  <i class="fas fa-times"></i> Clear
+                </button>
+              </div>
+            </div>
+            
+            <!-- Room Number Search Tab -->
+            <div id="room-search-tab" class="search-tab-content" style="display: none;">
+              <div class="search-input-group" style="display: flex; gap: 8px;">
+                <input type="text" id="header-room-search" placeholder="Enter room number (e.g., 101)" style="flex: 1;">
+                <button id="search-room-btn" class="btn btn-outline" style="white-space: nowrap;">
+                  <i class="fas fa-search"></i> Search
+                </button>
+                <button id="clear-room-btn" class="btn btn-outline">
+                  <i class="fas fa-times"></i> Clear
+                </button>
+              </div>
+            </div>
+            
+            <div id="search-results"></div>
+          </div>
+        </div>
+        
+        <div class="nav-actions">
+          <button id="export-json" class="btn btn-outline">
+            <i class="fas fa-file-export"></i> Export
+          </button>
+        </div>
+      </div>
+      
+      <!-- Patient Info Bar -->
+      <div class="patient-info-bar">
+        <div class="patient-details">
+          <div class="patient-avatar" id="patient-avatar">?</div>
+          <div class="patient-main-info">
+            <h2 id="hdr-pat-name">No patient selected</h2>
+            <div class="patient-meta">
+              <span><i class="fas fa-id-card"></i> Registration: <span id="hdr-pat-reg">—</span></span>
+              <span><i class="fas fa-procedures"></i> Room: <span id="hdr-pat-room">—</span></span>
+              <span><i class="fas fa-birthday-cake"></i> Age: <span id="hdr-pat-age">—</span></span>
+              <span><i class="fas fa-venus-mars"></i> Gender: <span id="hdr-pat-gender">—</span></span>
+              <span><i class="fas fa-stethoscope"></i> Type: <span id="hdr-pat-type">—</span></span>
+            </div>
+          </div>
+        </div>
+        
+        <div class="patient-status">
+          <div class="status-badge status-vip" id="hdr-pat-vip-badge" style="display: none;">
+            <i class="fas fa-crown"></i> VIP
+          </div>
+          <div class="status-badge status-ip" id="hdr-pat-ip-badge" style="display: none;">
+            <i class="fas fa-hospital-user"></i> INPATIENT
+          </div>
+        </div>
+      </div>
+      
+      <!-- Main Content Area -->
+      <div class="content-area">
+        <!-- Therapy Form Card -->
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">
+              <i class="fas fa-hand-holding-medical"></i>
+              <span id="form-title">Create New Therapy</span>
+            </div>
+          </div>
+          
+          <div class="form-row">
+            <div class="form-group" style="flex:2">
+              <label for="therapy-select">Therapy</label>
+              <select id="therapy-select"></select>
+            </div>
+
+            <div class="form-group">
+              <label for="therapy-usage-input">Usage</label>
+              <textarea id="therapy-usage-input" rows="2" placeholder="Enter usage instructions (comma or line separated)"></textarea>
+            </div>
+
+            <div class="form-group small">
+              <label for="ext-int-select">External/Internal</label>
+              <select id="ext-int-select"><option value="">-- Select --</option><option>Internal</option><option>External</option></select>
+            </div>
+
+            <div class="form-group small">
+              <label for="slot-select">Slot</label>
+              <select id="slot-select"><option value="">-- Select --</option></select>
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group small">
+              <label for="from-date-input">From Date</label>
+              <input type="date" id="from-date-input">
+            </div>
+            <div class="form-group small">
+              <label for="to-date-input">To Date</label>
+              <input type="date" id="to-date-input" readonly>
+            </div>
+            <div class="form-group small">
+              <label for="days-input">Duration (Days)</label>
+              <input type="number" id="days-input" min="1" placeholder="Enter number of days">
+            </div>
+
+            <div class="form-group small">
+              <label for="procured-select">Procured From</label>
+              <select id="procured-select"><option value="">-- Select --</option></select>
+            </div>
+          </div>
+
+          <h4 style="margin: 20px 0 12px; color: var(--text-dark);">
+            <i class="fas fa-pills"></i> Therapy Items
+          </h4>
+          
+          <div class="item-groups-container">
+            <div class="form-row">
+              <div class="form-group">
+                <label for="item-builder-select">Select Items</label>
+                <select id="item-builder-select" multiple="multiple"></select>
+              </div>
+              <div class="form-group small">
+                <label for="item-builder-dosage">Dosage</label>
+                <input id="item-builder-dosage" type="text" placeholder="e.g. 2 tsp">
+              </div>
+              <div class="form-group small">
+                <label for="item-builder-uno">Unit</label>
+                <select id="item-builder-uno">
+                  <option value="">Select Unit</option>
+                </select>
+              </div>
+              <div class="form-group small">
+                <label for="item-builder-oil-class">Oil Class</label>
+                <select id="item-builder-oil-class"><option value="">-- Select --</option></select>
+              </div>
+              <div style="display:flex;align-items:flex-end;">
+                <button id="add-item-group-btn" class="btn">
+                  <i class="fas fa-plus-circle"></i> Add Group
+                </button>
+              </div>
+            </div>
+            <div id="item-groups-list" style="margin-top:16px"></div>
+          </div>
+
+          <div class="form-actions">
+            <button id="allocate-therapy-btn" class="btn btn-success">
+              <i class="fas fa-save"></i> Save Therapy
+            </button>
+            <button id="update-therapy-btn" class="btn btn-success" style="display:none">
+              <i class="fas fa-sync-alt"></i> Update Therapy
+            </button>
+            <button id="clear-form" class="btn btn-outline">
+              <i class="fas fa-broom"></i> Clear Form
+            </button>
+          </div>
+        </div>
+
+        <!-- Therapies Table Card -->
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">
+              <i class="fas fa-list-alt"></i>
+              <span>Allocated Therapies</span>
+            </div>
+          </div>
+          
+          <div class="table-container">
+            <table>
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Therapy</th>
+                  <th>Usage</th>
+                  <th>Ext/Int</th>
+                  <th>Slot</th>
+                  <th>Items</th>
+                  <th>From</th>
+                  <th>To</th>
+                  <th>Days</th>
+                  <th>Status</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="therapies-table-body">
+                <tr>
+                  <td colspan="11">
+                    <div class="empty-state">
+                      <i class="fas fa-spa"></i>
+                      <h3>No Therapies Found</h3>
+                      <p>Select a patient and create a new therapy to get started</p>
+                    </div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Cancellation Modal -->
+  <div id="cancel-modal-backdrop" class="modal-backdrop">
+    <div class="modal" role="dialog" aria-modal="true">
+      <h3><i class="fas fa-ban"></i> Request Cancellation (Date Range)</h3>
+      <div id="cancel-modal-info" class="small-muted" style="margin-top: 8px;"></div>
+      <div style="margin-top:16px;" class="form-row">
+        <div class="form-group"><label for="cancel-from">Cancel From</label><input type="date" id="cancel-from" /></div>
+        <div class="form-group"><label for="cancel-to">Cancel To</label><input type="date" id="cancel-to" /></div>
+      </div>
+      <div style="margin-top:16px;"><label>Reason for cancellation</label><textarea id="cancel-reason" placeholder="Enter reason for cancellation..." rows="3" style="resize:vertical"></textarea></div>
+      <div class="modal-footer">
+        <button id="cancel-modal-close" class="btn btn-outline">Close</button>
+        <button id="cancel-submit" class="btn btn-danger">Submit Cancellation Request</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Resume Modal -->
+  <div id="resume-modal-backdrop" class="modal-backdrop">
+    <div class="modal" role="dialog" aria-modal="true" style="max-width: 600px;">
+      <h3><i class="fas fa-play-circle"></i> Resume Therapy</h3>
+      <div id="resume-modal-info" class="small-muted" style="margin-top: 8px;"></div>
+      <div id="resume-dates-list" style="margin-top: 16px; max-height: 400px; overflow-y: auto;">
+        <!-- Cancelled dates will be listed here with individual resume buttons -->
+      </div>
+      <div class="modal-footer">
+        <button id="resume-modal-close" class="btn btn-outline">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Allocation Status Modal (minimal: status + mark completed only) -->
+  <div id="status-modal-backdrop" class="modal-backdrop">
+    <div class="modal" role="dialog" aria-modal="true">
+      <h3><i class="fas fa-calendar-check"></i> Allocation Status</h3>
+      <div id="status-modal-info" class="small-muted" style="margin-top: 8px;"></div>
+
+      <div style="margin-top:16px;">
+        <div id="status-header-row" style="display:flex;gap:8px;font-weight:700;padding:12px;border-bottom:1px solid var(--border-light);background:#f8f9fa;">
+          <div style="width:140px">Date</div>
+          <div style="width:120px">Slot</div>
+          <div style="width:200px">Treatment Room</div>
+          <div style="width:150px">Patient Room</div>
+          <div style="width:200px" id="staff-header">Therapist</div>
+          <div style="width:140px">Status</div>
+        </div>
+
+        <div id="status-dates-list"></div>
+      </div>
+
+      <div class="modal-footer">
+        <button id="status-modal-close" class="btn btn-outline">Close</button>
+      </div>
+    </div>
+  </div>
+
+
+    <script src="{% static 'js/updated_dash_therapy_entry.js' %}"></script>
+    <script src="{% static 'js/dashboards_nav.js' %}"></script>
+</body>
+</html>

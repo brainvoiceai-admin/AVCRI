@@ -19,7 +19,7 @@ from authentication.models import CustomUser
 @login_required
 def therapist_availability_dashboard(request):
     """Render the therapist availability dashboard page"""
-    return render(request, 'therapist_availability.html')
+    return render(request, 'dashboards/therapist/therapist_availability.html')
 
 
 @login_required
