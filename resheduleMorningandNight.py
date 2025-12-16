@@ -597,9 +597,10 @@ def find_previous_assigned_therapist_for_booking_patient_only(booking, needs_bat
     return cand
 
 
-def pick_least_loaded_candidate(candidates, target_date, max_daily_normal, max_daily_overtime_extra):
+def pick_least_loaded_candidate(candidates, target_date, max_daily_normal, max_daily_overtime_extra, therapy_category=None):
     """
-    From candidate TherapistMaster list, pick one based on daily load and overtime rules.
+    From candidate TherapistMaster list, pick one based on daily load and overtime rules,
+    with additional balancing for the current therapy difficulty category (Easy/Medium/Hard).
     """
     if not candidates:
         return None
@@ -615,14 +616,38 @@ def pick_least_loaded_candidate(candidates, target_date, max_daily_normal, max_d
     for pk in cand_pks:
         counts.setdefault(pk, 0)
 
+    # Category-specific counts using TherapyMaster FK when available
+    category_counts = {}
+    if therapy_category:
+        try:
+            cat_qs = (TherapistBooking.objects
+                      .filter(
+                          therapist_id__in=cand_pks,
+                          date=target_date,
+                          status='BOOKED',
+                          therapy__therapy_category__iexact=str(therapy_category),
+                      )
+                      .values('therapist_id')
+                      .annotate(cn=Count('pk')))
+            category_counts = {row['therapist_id']: row['cn'] for row in cat_qs}
+        except Exception:
+            category_counts = {}
+    for pk in cand_pks:
+        category_counts.setdefault(pk, 0)
+
+    def sort_key(p):
+        # Prefer therapists with fewer sessions in this difficulty category,
+        # then fewer total sessions, then stable by pk.
+        return (category_counts.get(p, 0), counts.get(p, 0), p)
+
     under_normal = [pk for pk, cnt in counts.items() if cnt < max_daily_normal]
     if under_normal:
-        pick_pk = sorted(under_normal, key=lambda p: (counts[p], p))[0]
+        pick_pk = sorted(under_normal, key=sort_key)[0]
         return next((c for c in candidates if c.pk == pick_pk), None)
 
     under_overtime = [pk for pk, cnt in counts.items() if cnt < (max_daily_normal + max_daily_overtime_extra)]
     if under_overtime:
-        pick_pk = sorted(under_overtime, key=lambda p: (counts[p], p))[0]
+        pick_pk = sorted(under_overtime, key=sort_key)[0]
         return next((c for c in candidates if c.pk == pick_pk), None)
 
     return None
@@ -680,6 +705,10 @@ def process_reassignments(target_date=None, dry_run=True, max_daily_normal=5, ma
         
         slot = booking.time_slot
         therapy_name = getattr(booking, 'therapy_name', None)
+
+        # Determine therapy requirements (to get difficulty category for fair distribution)
+        therapy_req = therapist_requirements(booking) if therapist_requirements else {}
+        therapy_category = therapy_req.get("therapy_category")
         
         # Determine if therapy needs bathing (from TherapyMaster, not just booking flag)
         needs_bathing = False
@@ -790,8 +819,14 @@ def process_reassignments(target_date=None, dry_run=True, max_daily_normal=5, ma
                         summary['failed'].append((booking.pk, str(e)))
             continue
 
-        # 4) pick candidate with daily-load & overtime rules
-        pick = pick_least_loaded_candidate(candidates, target_date, max_daily_normal, max_daily_overtime_extra)
+        # 4) pick candidate with daily-load & overtime rules + difficulty balancing
+        pick = pick_least_loaded_candidate(
+            candidates,
+            target_date,
+            max_daily_normal,
+            max_daily_overtime_extra,
+            therapy_category=therapy_category,
+        )
         if not pick:
             # no pick due to load limits -> treat like no candidates
             if should_cancel_full_treatment(booking, target_date):
@@ -831,8 +866,14 @@ def process_reassignments(target_date=None, dry_run=True, max_daily_normal=5, ma
                 non_senior_bathing = [c for c in candidates if c != pick and getattr(c, 'is_bathing_therapist', False) and 'Senior' not in get_therapist_grade_name(c)]
                 
                 if non_senior_bathing:
-                    # Use non-senior bathing therapist instead
-                    alt_pick = pick_least_loaded_candidate(non_senior_bathing, target_date, max_daily_normal, max_daily_overtime_extra)
+                    # Use non-senior bathing therapist instead (respect difficulty balancing)
+                    alt_pick = pick_least_loaded_candidate(
+                        non_senior_bathing,
+                        target_date,
+                        max_daily_normal,
+                        max_daily_overtime_extra,
+                        therapy_category=therapy_category,
+                    )
                     if alt_pick:
                         pick = alt_pick
                         logger.info("Special treatment: Using non-senior bathing therapist %s instead of senior", getattr(pick, 'therapist_code', pick.pk))

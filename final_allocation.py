@@ -639,7 +639,7 @@ def allocate_treatment_slot(patient_type, therapy_category, used_slots=None):
 # Therapist allocation with EmergencyLeave integration
 # -----------------------
 def allocate_therapists(date, time_slot, therapy_requirements, last_therapists=None, needs_bathing=False, patient_gender=None):
-    from masters.models import TherapistMaster, TherapistLeaveMaster, EmergencyLeave
+    from masters.models import TherapistMaster, TherapistLeaveMaster, EmergencyLeave, TherapyMaster
     from Patient.models import TherapistBooking
 
     day_of_week = date.weekday()
@@ -663,6 +663,26 @@ def allocate_therapists(date, time_slot, therapy_requirements, last_therapists=N
         "Junior Therapist": therapy_requirements.get("junior", 0),
         "Trainee Therapist": therapy_requirements.get("trainee", 0)
     }
+
+    # -----------------------
+    # Difficulty-aware helpers (Easy / Medium / Hard balance)
+    # -----------------------
+    therapy_category = None
+    category_therapy_names = set()
+    try:
+        # Expect therapy_requirements to carry the therapy difficulty category
+        therapy_category = (therapy_requirements or {}).get("therapy_category")
+        if therapy_category:
+            # Collect all therapy names that belong to this category so we can
+            # count per-therapist load of Easy/Medium/Hard for the day.
+            category_therapy_names = set(
+                TherapyMaster.objects.filter(
+                    therapy_category__iexact=str(therapy_category)
+                ).values_list("therapy_name", flat=True)
+            )
+    except Exception:
+        therapy_category = None
+        category_therapy_names = set()
 
     # Preload emergency leaves overlapping the date
     try:
@@ -705,6 +725,25 @@ def allocate_therapists(date, time_slot, therapy_requirements, last_therapists=N
                 therapist=t,
                 date=date,
                 status='BOOKED'
+            ).count()
+        except Exception:
+            return 0
+
+    def get_therapist_daily_category_count(t):
+        """
+        Count how many sessions a therapist already has on this date
+        for the current therapy difficulty category (Easy / Medium / Hard).
+        If category information is missing, this safely returns 0 so that
+        existing behaviour is preserved.
+        """
+        if not category_therapy_names:
+            return 0
+        try:
+            return TherapistBooking.objects.filter(
+                therapist=t,
+                date=date,
+                status='BOOKED',
+                therapy_name__in=category_therapy_names,
             ).count()
         except Exception:
             return 0
@@ -865,24 +904,32 @@ def allocate_therapists(date, time_slot, therapy_requirements, last_therapists=N
             
             # Check daily session limit (prefer therapists with < 5 sessions)
             session_count = get_therapist_daily_session_count(t)
+            category_session_count = get_therapist_daily_category_count(t)
             if session_count < 5:
-                available_candidates.append((t, session_count))
+                available_candidates.append((t, category_session_count, session_count))
             elif session_count == 5:
                 # Keep track of therapists at limit (5 sessions) for potential extra assignment
-                available_candidates.append((t, session_count))
+                available_candidates.append((t, category_session_count, session_count))
         
-        # Sort by session count (prefer therapists with fewer sessions)
-        available_candidates.sort(key=lambda x: x[1])
+        # Sort by difficulty-specific count first, then total sessions, then id for stability.
+        # This ensures per-day Easy/Medium/Hard load is spread fairly across therapists.
+        available_candidates.sort(
+            key=lambda x: (
+                x[1],                                   # category_session_count
+                x[2],                                   # total session_count
+                getattr(x[0], "id", 0) or 0,           # stable tie-breaker
+            )
+        )
         
         # Check if all therapists in this grade have 5 sessions
-        all_at_limit = all(count >= 5 for _, count in available_candidates) if available_candidates else False
+        all_at_limit = all(total_count >= 5 for _, _, total_count in available_candidates) if available_candidates else False
         
         # If all therapists have 5 sessions, allow 1 extra (max 6)
         # Otherwise, only assign to therapists with < 5 sessions
         allow_extra = all_at_limit
         
         # Iterate through available candidates
-        for t, session_count in available_candidates:
+        for t, category_session_count, session_count in available_candidates:
             if needed <= 0:
                 break
             
