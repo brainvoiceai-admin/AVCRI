@@ -189,7 +189,16 @@ MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
 
 STATIC_ROOT = BASE_DIR / 'staticfiles'
-STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
+
+# Configure static files storage
+# Use WhiteNoise storage that works with both STATICFILES_DIRS and STATIC_ROOT
+if DEBUG:
+    # In development, use default storage to serve directly from STATICFILES_DIRS
+    STATICFILES_STORAGE = 'django.contrib.staticfiles.storage.StaticFilesStorage'
+else:
+    # In production, use WhiteNoise storage (requires collectstatic)
+    # For development with DEBUG=False, use WhiteNoise storage that can find files
+    STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 
 # If you have a custom static folder at project level
 STATICFILES_DIRS = [
@@ -264,3 +273,6 @@ CELERY_BEAT_SCHEDULE = {
         'schedule': crontab(hour=6, minute=20, day_of_month='1'),
     },
 }
+
+# Custom error handlers
+CSRF_FAILURE_VIEW = 'AVCRI.error_handlers.csrf_failure'
