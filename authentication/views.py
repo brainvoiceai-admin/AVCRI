@@ -1599,7 +1599,7 @@ def search_patients(request):
                 try:
                     # Fetch with status filter first
                     all_patients = Registration.objects.using('therapy_db').filter(
-                        pat_status__iexact='Active'
+                        pat_status='Y'
                     ).values(
                         'pat_reg_no', 'pat_name', 'pat_sex', 'pat_age', 'pat_room_no', 'pat_ref_id', 'pat_visit_date'
                     ).order_by('-pat_visit_date')[:20]  # Fetch 20, filter to 5 IP patients
@@ -1639,7 +1639,7 @@ def search_patients(request):
                     
                     all_patients = Registration.objects.using('therapy_db').filter(
                         search_q,
-                        pat_status__iexact='Active'
+                        pat_status='Y'
                     ).values(
                         'pat_reg_no', 'pat_name', 'pat_sex', 'pat_age', 'pat_room_no', 'pat_ref_id', 'pat_visit_date'
                     ).order_by('-pat_visit_date')[:100]
@@ -1949,6 +1949,7 @@ def search_patients_by_room(request):
                         # IP patient - check Registration table
                         active_reg = Registration.objects.using('therapy_db').filter(
                             pat_reg_no=reg_no,
+                            pat_status='Y',
                             pat_visit_date__date__gte=thirty_days_ago  # Patients who visited within last 30 days
                         ).exists()
                         if active_reg:
@@ -2040,7 +2041,8 @@ def search_patients_by_room(request):
                 search_q &= Q(pat_visit_date__date__gte=thirty_days_ago)
                 
                 ip_patients_list = Registration.objects.using('therapy_db').filter(
-                    search_q
+                    search_q,
+                    pat_status='Y'
                 ).values(
                     'pat_reg_no', 'pat_name', 'pat_sex', 'pat_age', 'pat_room_no', 'pat_ref_id', 'pat_visit_date', 'pat_room_date'
                 ).order_by('-pat_visit_date', '-pat_room_date')[:100]
