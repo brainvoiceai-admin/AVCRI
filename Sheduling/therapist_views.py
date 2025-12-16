@@ -409,6 +409,8 @@ def get_therapist_difficulty_data(request):
         date_str = target_date.isoformat()
     
     gender_filter = request.GET.get('gender', '').strip().lower()
+    grade_filter = request.GET.get('grade', '').strip()
+    grade_filter_lower = grade_filter.lower()
     
     assignments = (
         BookingAssignment.objects
@@ -474,10 +476,17 @@ def get_therapist_difficulty_data(request):
         therapist_code = therapist.therapist_code
         therapist_info = therapist_masters.get(therapist_code, {})
         therapist_gender = therapist_info.get('gender', 'Male').strip().lower()
+        therapist_grade_name = (therapist_info.get('grade') or '').strip()
         
         # Apply gender filter if specified
         if gender_filter and therapist_gender != gender_filter:
             continue
+        # Apply grade filter if specified (exact, case-insensitive match)
+        if grade_filter:
+            if not therapist_grade_name:
+                continue
+            if therapist_grade_name.lower() != grade_filter_lower:
+                continue
         
         difficulty = therapy_categories.get(booking.allocation.therapy_code, 'Uncategorized')
         difficulty = difficulty.strip() or 'Uncategorized'
@@ -486,7 +495,7 @@ def get_therapist_difficulty_data(request):
         data = therapist_map[therapist_code]
         if not data['name']:
             data['name'] = therapist.therapist_name
-            data['grade'] = therapist_info.get('grade') or getattr(therapist, 'therapist_grade', '')
+            data['grade'] = therapist_grade_name or getattr(therapist, 'therapist_grade', '')
             data['gender'] = therapist_info.get('gender', 'Male')
         data['counts'][difficulty] += 1
         data['total'] += 1
@@ -518,11 +527,19 @@ def get_therapist_difficulty_data(request):
         diff: sum(row['counts'].get(diff, 0) for row in therapists_payload)
         for diff in difficulties_list
     }
+
+    # Aggregate by therapist grade for charts (grade vs difficulty)
+    grade_summary = defaultdict(lambda: {diff: 0 for diff in difficulties_list})
+    for row in therapists_payload:
+        grade = (row.get('therapist_grade') or '').strip() or 'Unknown'
+        for diff in difficulties_list:
+            grade_summary[grade][diff] = grade_summary[grade].get(diff, 0) + row['counts'].get(diff, 0)
     
     summary = {
         'total_assignments': total_assignments,
         'therapist_count': len(therapists_payload),
-        'difficulty_totals': difficulty_totals
+        'difficulty_totals': difficulty_totals,
+        'grade_summary': grade_summary
     }
     
     return JsonResponse({

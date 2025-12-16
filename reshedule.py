@@ -582,7 +582,7 @@ def get_allowed_slot_values(patient_type, therapy_category, used_slots=None):
 # Therapist allocation with Trainee -> Junior substitution (MODIFIED)
 # -----------------------
 def allocate_therapists(date, time_slot, therapy_requirements, last_therapists=None, needs_bathing=False, patient_gender=None):
-    from masters.models import TherapistMaster, TherapistLeaveMaster, EmergencyLeave
+    from masters.models import TherapistMaster, TherapistLeaveMaster, EmergencyLeave, TherapyMaster
     from Patient.models import TherapistBooking
 
     day_of_week = date.weekday()
@@ -606,6 +606,26 @@ def allocate_therapists(date, time_slot, therapy_requirements, last_therapists=N
         "Junior Therapist": therapy_requirements.get("junior", 0),
         "Trainee Therapist": therapy_requirements.get("trainee", 0)
     }
+
+    # -----------------------
+    # Difficulty-aware helpers (Easy / Medium / Hard balance)
+    # -----------------------
+    therapy_category = None
+    category_therapy_names = set()
+    try:
+        # Expect therapy_requirements to carry the therapy difficulty category
+        therapy_category = (therapy_requirements or {}).get("therapy_category")
+        if therapy_category:
+            # Collect all therapy names that belong to this category so we can
+            # count per-therapist load of Easy/Medium/Hard for the day.
+            category_therapy_names = set(
+                TherapyMaster.objects.filter(
+                    therapy_category__iexact=str(therapy_category)
+                ).values_list("therapy_name", flat=True)
+            )
+    except Exception:
+        therapy_category = None
+        category_therapy_names = set()
 
     # Preload emergency leaves overlapping the date
     try:
@@ -640,6 +660,36 @@ def allocate_therapists(date, time_slot, therapy_requirements, last_therapists=N
         except Exception:
             pass
         return None
+
+    def get_therapist_daily_session_count(t):
+        """Count how many therapy sessions a therapist already has on this date"""
+        try:
+            return TherapistBooking.objects.filter(
+                therapist=t,
+                date=date,
+                status='BOOKED'
+            ).count()
+        except Exception:
+            return 0
+
+    def get_therapist_daily_category_count(t):
+        """
+        Count how many sessions a therapist already has on this date
+        for the current therapy difficulty category (Easy / Medium / Hard).
+        If category information is missing, this safely returns 0 so that
+        existing behaviour is preserved.
+        """
+        if not category_therapy_names:
+            return 0
+        try:
+            return TherapistBooking.objects.filter(
+                therapist=t,
+                date=date,
+                status='BOOKED',
+                therapy_name__in=category_therapy_names,
+            ).count()
+        except Exception:
+            return 0
 
     # Use last therapists first
     if last_therapists:
@@ -698,12 +748,13 @@ def allocate_therapists(date, time_slot, therapy_requirements, last_therapists=N
             candidates_qs = candidates_qs.filter(is_bathing_therapist=True)
         
         candidates_iter = list(candidates_qs)
-            
-        # iterate candidates
+
+        # Score candidates by (category-specific count, total count) for fair distribution
+        scored_candidates = []
         for t in candidates_iter:
             if needed <= 0:
                 break
-            
+
             # Check availability constraints
             if t in allocated:
                 continue
@@ -711,19 +762,36 @@ def allocate_therapists(date, time_slot, therapy_requirements, last_therapists=N
                 continue
             if TherapistBooking.objects.filter(therapist=t, date=date, time_slot=time_slot, status='BOOKED').exists():
                 continue
-            
+
             # Double-check gender match (should already be filtered in query, but safety check)
             if desired_gender:
                 t_gender = get_therapist_gender(t)
                 if t_gender != desired_gender:
                     continue
-            
-            # Allocation successful
+
+            total_sessions = get_therapist_daily_session_count(t)
+            category_sessions = get_therapist_daily_category_count(t)
+            scored_candidates.append((t, category_sessions, total_sessions))
+
+        # Prefer therapists with fewer sessions of this difficulty, then fewer total sessions
+        scored_candidates.sort(
+            key=lambda item: (
+                item[1],                              # category_sessions
+                item[2],                              # total_sessions
+                getattr(item[0], "id", 0) or 0,       # stable tie-breaker
+            )
+        )
+
+        # iterate candidates in fair order
+        for t, _, _ in scored_candidates:
+            if needed <= 0:
+                break
+
             allocated.append(t)
-            
+
             # Decrement both the local needed count AND the original grade map count
             needed -= 1
-            grade_map[grade_original] -= 1 # Decrement the original requirement (e.g., Trainee)
+            grade_map[grade_original] -= 1  # Decrement the original requirement (e.g., Trainee)
             
     return allocated
 

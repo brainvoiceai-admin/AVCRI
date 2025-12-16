@@ -27,10 +27,20 @@
                 </div>
                 <div class="filter-group">
                     <label for="gender-filter">Filter by Gender</label>
-                    <select id="gender-filter" style="padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border); min-width: 220px; font-size: 14px;">
-                        <option value="">All Therapists</option>
+                    <select id="gender-filter" style="padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border); min-width: 180px; font-size: 14px;">
+                        <option value="">All</option>
                         <option value="male">Male</option>
                         <option value="female">Female</option>
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <label for="grade-filter">Filter by Grade</label>
+                    <select id="grade-filter" style="padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border); min-width: 220px; font-size: 14px;">
+                        <option value="">All Grades</option>
+                        <option value="Super Senior Therapist">Super Senior Therapist</option>
+                        <option value="Senior Therapist">Senior Therapist</option>
+                        <option value="Junior Therapist">Junior Therapist</option>
+                        <option value="Trainee Therapist">Trainee Therapist</option>
                     </select>
                 </div>
                 <button class="btn btn-primary" id="refresh-btn">
@@ -86,11 +96,22 @@
                 <h3>Difficulty Totals</h3>
                 <div id="difficulty-summary"></div>
             </div>
+
+            <div class="card">
+                <h3>Therapist Difficulty Distribution</h3>
+                <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 10px;">
+                    Each bar shows, for every therapist, how many Easy, Medium and Hard therapies are assigned (respecting the selected filters).
+                </p>
+                <div style="height:260px;">
+                    <canvas id="chart-therapists"></canvas>
+                </div>
+            </div>
         </div>
     </div>
 
     
-    <script src="{% static 'js/dashboards_superadmin_therapist_difficulty_dashboard.js' %}"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="{% static 'js/dashboards_superadmin_therapist_difficulty_dashboard.js' %}?v=4"></script>
     <script src="{% static 'js/dashboards_nav.js' %}"></script>
 </body>
 </html>
