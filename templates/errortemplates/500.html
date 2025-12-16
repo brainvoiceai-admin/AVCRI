@@ -1,0 +1,46 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>500 - Server Error | AVCRI</title>
+    <link rel="stylesheet" href="{% static 'css/errortemplates_error.css' %}">
+</head>
+<body>
+    <div class="error-container error-500">
+        <div class="error-icon">
+            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2" fill="none" opacity="0.2"/>
+                <path d="M12 8v4M12 16h.01" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                <path d="M8 8l8 8M16 8l-8 8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+        </div>
+        <div class="error-code">500</div>
+        <h1 class="error-title">Internal Server Error</h1>
+        <p class="error-message">Something went wrong on our end. We're working to fix it.</p>
+        <p class="error-description">
+            An unexpected error occurred while processing your request. Our team has been notified and is working on a solution.
+        </p>
+        
+        <div class="error-details">
+            <h3>What happened?</h3>
+            <ul>
+                <li>An internal server error occurred</li>
+                <li>Our technical team has been notified</li>
+                <li>Please try again in a few moments</li>
+                <li>If the problem persists, contact support</li>
+            </ul>
+        </div>
+
+        <div class="error-actions">
+            <a href="javascript:location.reload()" class="btn btn-primary">Try Again</a>
+            <a href="javascript:history.back()" class="btn btn-secondary">Go Back</a>
+            <a href="/" class="btn btn-secondary">Go to Home</a>
+        </div>
+    </div>
+
+    <script src="{% static 'js/errortemplates_error.js' %}"></script>
+</body>
+</html>
+

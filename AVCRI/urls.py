@@ -41,3 +41,14 @@ urlpatterns = [
 if settings.DEBUG:
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
 
+# Always serve static files (WhiteNoise handles this in production, but we add fallback)
+# This ensures static files work even when DEBUG=False
+from django.contrib.staticfiles.urls import staticfiles_urlpatterns
+urlpatterns += staticfiles_urlpatterns()
+
+# Custom error handlers
+handler400 = 'AVCRI.error_handlers.handler400'
+handler403 = 'AVCRI.error_handlers.handler403'
+handler404 = 'AVCRI.error_handlers.handler404'
+handler500 = 'AVCRI.error_handlers.handler500'
+

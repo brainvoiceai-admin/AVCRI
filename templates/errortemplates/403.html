@@ -1,0 +1,45 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>403 - Forbidden | AVCRI</title>
+    <link rel="stylesheet" href="{% static 'css/errortemplates_error.css' %}">
+</head>
+<body>
+    <div class="error-container error-403">
+        <div class="error-icon">
+            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2" fill="none" opacity="0.2"/>
+                <path d="M12 8v4M12 16h.01" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                <path d="M9 9l6 6M15 9l-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+        </div>
+        <div class="error-code">403</div>
+        <h1 class="error-title">Access Forbidden</h1>
+        <p class="error-message">You don't have permission to access this resource.</p>
+        <p class="error-description">
+            This page or resource is restricted. You may need to log in with different credentials or contact your administrator for access.
+        </p>
+        
+        <div class="error-details">
+            <h3>Possible reasons:</h3>
+            <ul>
+                <li>You don't have the required permissions</li>
+                <li>Your account doesn't have access to this module</li>
+                <li>Your session may have expired</li>
+                <li>This resource requires special privileges</li>
+            </ul>
+        </div>
+
+        <div class="error-actions">
+            <a href="javascript:history.back()" class="btn btn-secondary">Go Back</a>
+            <a href="/authentication/login/" class="btn btn-primary">Login Again</a>
+        </div>
+    </div>
+
+    <script src="{% static 'js/errortemplates_error.js' %}"></script>
+</body>
+</html>
+
