@@ -26,8 +26,8 @@
                     <input type="date" id="date-filter" value="{{ default_date }}">
                 </div>
                 <div class="filter-group">
-                    <label for="gender-filter">Filter by Gender</label>
-                    <select id="gender-filter" style="padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border); min-width: 180px; font-size: 14px;">
+                    <label for="gender-filter">Therapist Gender</label>
+                    <select id="gender-filter" style="padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border); min-width: 160px; font-size: 14px;">
                         <option value="">All</option>
                         <option value="male">Male</option>
                         <option value="female">Female</option>
@@ -106,12 +106,44 @@
                     <canvas id="chart-therapists"></canvas>
                 </div>
             </div>
+
+            <!-- NEW: Treatment Scheduling by Difficulty Section -->
+            <div class="card">
+                <div class="card-header">
+                    <h3>Treatment Scheduling & Therapist Requirements by Difficulty</h3>
+                    <p style="font-size: 14px; color: var(--text-muted); margin-top: 8px;">
+                        Shows scheduled treatments (Easy/Medium/Hard) and total therapist grade requirements for the selected date.
+                    </p>
+                </div>
+                <div style="padding: 20px;">
+                    <div class="filter-group" style="margin-bottom: 16px; max-width: 220px;">
+                        <label for="patient-gender-filter" style="font-size: 13px; color: var(--text-muted); display:block; margin-bottom:4px;">Patient Gender (for this section)</label>
+                        <select id="patient-gender-filter" style="padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border); width: 100%; font-size: 13px;">
+                            <option value="">All Patients</option>
+                            <option value="male">Male Patients</option>
+                            <option value="female">Female Patients</option>
+                        </select>
+                    </div>
+                    <div style="margin-bottom: 30px;">
+                        <h4 style="margin-bottom: 15px; font-size: 16px;">Scheduled Treatments by Difficulty</h4>
+                        <div style="height: 300px;">
+                            <canvas id="chart-treatment-counts"></canvas>
+                        </div>
+                    </div>
+                    <div>
+                        <h4 style="margin-bottom: 15px; font-size: 16px;">Therapist Requirements by Difficulty</h4>
+                        <div style="height: 300px;">
+                            <canvas id="chart-therapist-requirements"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 
     
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script src="{% static 'js/dashboards_superadmin_therapist_difficulty_dashboard.js' %}?v=4"></script>
+    <script src="{% static 'js/dashboards_superadmin_therapist_difficulty_dashboard.js' %}?v=5"></script>
     <script src="{% static 'js/dashboards_nav.js' %}"></script>
 </body>
 </html>

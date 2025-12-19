@@ -84,12 +84,13 @@ def log_therapy_audit(user, action, therapy_allocation=None, description="", add
 def is_treatment_requiring_senior_tag(therapy_name):
     """
     Check if a treatment requires special senior tag handling.
-    Returns True if the therapy name matches any of the specified treatments.
+    Returns True ONLY if the therapy name exactly matches one of the specified treatments.
     """
     if not therapy_name:
         return False
     
     # List of treatments that require senior tag (only one senior, not bathing)
+    # ONLY these exact treatments should show the senior tag
     special_treatments = [
         'dhara & abh(3)',
         'dhara& pizhichil (4)',
@@ -106,45 +107,13 @@ def is_treatment_requiring_senior_tag(therapy_name):
         'thakradhara& thakrapizhichil(7)',
     ]
     
-    therapy_lower = str(therapy_name).lower().strip()
+    # Normalize therapy name: lowercase, remove extra spaces, keep structure
+    therapy_normalized = ' '.join(str(therapy_name).lower().strip().split())
     
-    # Check if therapy name contains key patterns
-    # Match treatments containing "dhara" or "thakradhara" with variations
-    has_dhara = 'dhara' in therapy_lower
-    has_thakradhara = 'thakradhara' in therapy_lower
-    
-    if not (has_dhara or has_thakradhara):
-        return False
-    
-    # Check for specific patterns in the treatment name
-    # Match treatments with "pizhichil", "pizichil", "abh", "abyangam", "abhyangam", "sudhikalpana", "fbkadee kizhi", "thakrapizhichil"
-    has_pizhichil = 'pizhichil' in therapy_lower or 'pizichil' in therapy_lower
-    has_abh = 'abh' in therapy_lower and 'abhyangam' not in therapy_lower
-    has_abyangam = 'abyangam' in therapy_lower or 'abhyangam' in therapy_lower
-    has_sudhikalpana = 'sudhikalpana' in therapy_lower
-    has_fbkadee = 'fbkadee kizhi' in therapy_lower or 'fbkadee' in therapy_lower
-    has_thakrapizhichil = 'thakrapizhichil' in therapy_lower
-    
-    # Check if it matches any of the special treatment patterns
-    if has_dhara:
-        if has_pizhichil or has_abh or has_abyangam or has_sudhikalpana:
-            return True
-        # Check for "Dhara ( 2 T)" pattern
-        if 'dhara' in therapy_lower and ('2 t' in therapy_lower or '2t' in therapy_lower):
-            return True
-    
-    if has_thakradhara:
-        if has_pizhichil or has_abyangam or has_fbkadee or has_thakrapizhichil:
-            return True
-        # Check for "Thakradhara ( 2 T)" pattern
-        if 'thakradhara' in therapy_lower and ('2 t' in therapy_lower or '2t' in therapy_lower):
-            return True
-    
-    # Also check exact matches (case-insensitive, ignoring extra spaces)
-    normalized_therapy = ' '.join(therapy_lower.split())
+    # Check for exact match (case-insensitive, ignoring extra spaces)
     for special_treatment in special_treatments:
-        normalized_special = ' '.join(special_treatment.split())
-        if normalized_therapy == normalized_special:
+        special_normalized = ' '.join(special_treatment.lower().strip().split())
+        if therapy_normalized == special_normalized:
             return True
     
     return False

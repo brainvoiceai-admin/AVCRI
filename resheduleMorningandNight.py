@@ -151,21 +151,40 @@ except Exception:
 # Define helper functions if not imported
 if not is_treatment_requiring_senior_tag:
     def is_treatment_requiring_senior_tag(therapy_name):
-        """Check if a treatment requires special senior tag handling."""
+        """
+        Check if a treatment requires special senior tag handling.
+        Returns True ONLY if the therapy name exactly matches one of the specified treatments.
+        """
         if not therapy_name:
             return False
-        therapy_lower = str(therapy_name).lower().strip()
-        has_dhara = 'dhara' in therapy_lower
-        has_thakradhara = 'thakradhara' in therapy_lower
-        if not (has_dhara or has_thakradhara):
-            return False
-        has_pizhichil = 'pizhichil' in therapy_lower or 'pizichil' in therapy_lower
-        has_abh = 'abh' in therapy_lower and 'abhyangam' not in therapy_lower
-        has_abyangam = 'abyangam' in therapy_lower or 'abhyangam' in therapy_lower
-        if has_dhara and (has_pizhichil or has_abh or has_abyangam):
-            return True
-        if has_thakradhara and (has_pizhichil or has_abyangam):
-            return True
+        
+        # List of treatments that require senior tag (only one senior, not bathing)
+        # ONLY these exact treatments should show the senior tag
+        special_treatments = [
+            'dhara & abh(3)',
+            'dhara& pizhichil (4)',
+            'dhara & pizhichil (5)',
+            'dhara & pizhichil (6)',
+            'dhara & pizhichil (7)',
+            'dhara & abyangam ( 3 t)',
+            'dhara & sudhikalpana dhara (5t)',
+            'dhara ( 2 t)',
+            'thakradhara & abhyangam (4)',
+            'thakradhara & pizichil(6)',
+            'thakradhara ( 2 t)',
+            'thakradhara&fbkadee kizhi (5 t)',
+            'thakradhara& thakrapizhichil(7)',
+        ]
+        
+        # Normalize therapy name: lowercase, remove extra spaces, keep structure
+        therapy_normalized = ' '.join(str(therapy_name).lower().strip().split())
+        
+        # Check for exact match (case-insensitive, ignoring extra spaces)
+        for special_treatment in special_treatments:
+            special_normalized = ' '.join(special_treatment.lower().strip().split())
+            if therapy_normalized == special_normalized:
+                return True
+        
         return False
 
 if not get_therapist_grade_name:
@@ -824,9 +843,35 @@ def process_reassignments(target_date=None, dry_run=True, max_daily_normal=5, ma
             candidates,
             target_date,
             max_daily_normal,
-            max_daily_overtime_extra,
+            max_daily_excess,
             therapy_category=therapy_category,
         )
+
+        # Enforce senior-tag limit (max 2 special senior-tag tasks per therapist per day)
+        if pick and requires_senior_tag:
+            try:
+                pick_grade = get_therapist_grade_name(pick)
+                if pick_grade and 'Senior' in pick_grade and 'get_senior_tag_count_for_therapist' in dir(reshedule):
+                    senior_count = reshedule.get_senior_tag_count_for_therapist(pick, target_date)
+                    if senior_count >= 2:
+                        logger.info(
+                            "Senior tag limit reached for therapist %s on %s (count=%s). Looking for alternative.",
+                            getattr(pick, 'therapist_code', pick.pk), target_date, senior_count
+                        )
+                        # Remove this candidate and try to pick another one
+                        remaining = [c for c in candidates if c != pick]
+                        if remaining:
+                            pick = pick_least_loaded_candidate(
+                                remaining,
+                                target_date,
+                                max_daily_normal,
+                                max_daily_overtime_extra,
+                                therapy_category=therapy_category,
+                            )
+                        else:
+                            pick = None
+            except Exception as e:
+                logger.debug("Error while enforcing senior-tag limit: %s", e)
         if not pick:
             # no pick due to load limits -> treat like no candidates
             if should_cancel_full_treatment(booking, target_date):

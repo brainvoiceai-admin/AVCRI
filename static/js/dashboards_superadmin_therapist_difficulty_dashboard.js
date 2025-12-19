@@ -1,5 +1,6 @@
 const dateInput = document.getElementById('date-filter');
         const genderInput = document.getElementById('gender-filter');
+        const patientGenderInput = document.getElementById('patient-gender-filter');
         const gradeInput = document.getElementById('grade-filter');
         const refreshBtn = document.getElementById('refresh-btn');
         const tableHeadRow = document.getElementById('difficulty-table-head');
@@ -24,6 +25,7 @@ const dateInput = document.getElementById('date-filter');
                 return;
             }
             const gender = genderInput.value;
+            const patientGender = patientGenderInput ? patientGenderInput.value : '';
             const grade = gradeInput ? gradeInput.value : '';
             setLoading(true);
             let url = `/sheduling/therapist-difficulty/api/data/?date=${date}`;
@@ -32,6 +34,9 @@ const dateInput = document.getElementById('date-filter');
             }
             if (grade) {
                 url += `&grade=${encodeURIComponent(grade)}`;
+            }
+            if (patientGender) {
+                url += `&patient_gender=${encodeURIComponent(patientGender)}`;
             }
             fetch(url)
                 .then(response => response.json())
@@ -96,6 +101,12 @@ const dateInput = document.getElementById('date-filter');
             renderTable(therapists, difficulties);
             renderDifficultySummary(rebuiltTotals);
             renderTherapistChart(therapists, difficulties);
+            
+            // Render new treatment scheduling charts
+            if (summary.treatment_scheduling) {
+                renderTreatmentCountsChart(summary.treatment_scheduling.treatment_counts);
+                renderTherapistRequirementsChart(summary.treatment_scheduling.therapist_requirements);
+            }
         }
 
         function renderTable(therapists, difficulties) {
@@ -232,5 +243,168 @@ const dateInput = document.getElementById('date-filter');
             gradeInput.addEventListener('change', () => {
                 // Automatically refresh when grade filter is changed
                 fetchDifficultyData();
+            });
+        }
+        if (patientGenderInput) {
+            patientGenderInput.addEventListener('change', () => {
+                // Automatically refresh when patient gender filter is changed
+                fetchDifficultyData();
+            });
+        }
+
+        // Chart instances for treatment scheduling
+        let treatmentCountsChart = null;
+        let therapistRequirementsChart = null;
+
+        function renderTreatmentCountsChart(treatmentCounts) {
+            const canvas = document.getElementById('chart-treatment-counts');
+            if (!canvas) return;
+
+            const categories = ['Easy', 'Medium', 'Hard'];
+            const counts = categories.map(cat => treatmentCounts[cat] || 0);
+
+            const data = {
+                labels: categories,
+                datasets: [{
+                    label: 'Scheduled Treatments',
+                    data: counts,
+                    backgroundColor: [
+                        'rgba(16, 185, 129, 0.7)',   // Green for Easy
+                        'rgba(59, 130, 246, 0.7)',   // Blue for Medium
+                        'rgba(239, 68, 68, 0.7)'     // Red for Hard
+                    ],
+                    borderColor: [
+                        'rgba(16, 185, 129, 1)',
+                        'rgba(59, 130, 246, 1)',
+                        'rgba(239, 68, 68, 1)'
+                    ],
+                    borderWidth: 2
+                }]
+            };
+
+            if (treatmentCountsChart) {
+                treatmentCountsChart.data = data;
+                treatmentCountsChart.update();
+                return;
+            }
+
+            treatmentCountsChart = new Chart(canvas.getContext('2d'), {
+                type: 'bar',
+                data: data,
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            enabled: true,
+                            callbacks: {
+                                label: function(context) {
+                                    return `${context.label}: ${context.parsed.y} treatments`;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            ticks: { color: '#4b5563', font: { size: 12 } },
+                            grid: { display: false }
+                        },
+                        y: {
+                            beginAtZero: true,
+                            ticks: {
+                                color: '#6b7280',
+                                stepSize: 1,
+                                callback: function(value) {
+                                    return Number.isInteger(value) ? value : '';
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        function renderTherapistRequirementsChart(therapistRequirements) {
+            const canvas = document.getElementById('chart-therapist-requirements');
+            if (!canvas) return;
+
+            const categories = ['Easy', 'Medium', 'Hard'];
+            const grades = ['super_senior', 'senior', 'junior', 'trainee'];
+            const gradeLabels = {
+                'super_senior': 'Super Senior',
+                'senior': 'Senior',
+                'junior': 'Junior',
+                'trainee': 'Trainee'
+            };
+            const gradeColors = {
+                'super_senior': 'rgba(139, 92, 246, 0.7)',  // Purple
+                'senior': 'rgba(236, 72, 153, 0.7)',        // Pink
+                'junior': 'rgba(251, 191, 36, 0.7)',        // Yellow
+                'trainee': 'rgba(34, 197, 94, 0.7)'        // Green
+            };
+
+            const datasets = grades.map(grade => {
+                const data = categories.map(cat => {
+                    const req = therapistRequirements[cat] || {};
+                    return req[grade] || 0;
+                });
+                return {
+                    label: gradeLabels[grade],
+                    data: data,
+                    backgroundColor: gradeColors[grade],
+                    borderColor: gradeColors[grade].replace('0.7', '1'),
+                    borderWidth: 2
+                };
+            });
+
+            if (therapistRequirementsChart) {
+                therapistRequirementsChart.data.labels = categories;
+                therapistRequirementsChart.data.datasets = datasets;
+                therapistRequirementsChart.update();
+                return;
+            }
+
+            therapistRequirementsChart = new Chart(canvas.getContext('2d'), {
+                type: 'bar',
+                data: {
+                    labels: categories,
+                    datasets: datasets
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            display: true,
+                            position: 'bottom'
+                        },
+                        tooltip: {
+                            enabled: true,
+                            callbacks: {
+                                label: function(context) {
+                                    return `${context.dataset.label}: ${context.parsed.y} therapists`;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            stacked: false,
+                            ticks: { color: '#4b5563', font: { size: 12 } },
+                            grid: { display: false }
+                        },
+                        y: {
+                            beginAtZero: true,
+                            ticks: {
+                                color: '#6b7280',
+                                stepSize: 1,
+                                callback: function(value) {
+                                    return Number.isInteger(value) ? value : '';
+                                }
+                            }
+                        }
+                    }
+                }
             });
         }        

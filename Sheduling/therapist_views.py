@@ -8,6 +8,9 @@ from django.utils import timezone
 from datetime import datetime, date, timedelta
 from collections import defaultdict
 import json
+import logging
+
+logger = logging.getLogger(__name__)
 
 from .models import (
     TherapyAllocation, Booking, BookingItem, BookingAssignment, 
@@ -409,6 +412,7 @@ def get_therapist_difficulty_data(request):
         date_str = target_date.isoformat()
     
     gender_filter = request.GET.get('gender', '').strip().lower()
+    patient_gender_filter = request.GET.get('patient_gender', '').strip().lower()
     grade_filter = request.GET.get('grade', '').strip()
     grade_filter_lower = grade_filter.lower()
     
@@ -475,7 +479,7 @@ def get_therapist_difficulty_data(request):
         # Get gender from TherapistMaster
         therapist_code = therapist.therapist_code
         therapist_info = therapist_masters.get(therapist_code, {})
-        therapist_gender = therapist_info.get('gender', 'Male').strip().lower()
+        therapist_gender = (therapist_info.get('gender', 'Male') or '').strip().lower()
         therapist_grade_name = (therapist_info.get('grade') or '').strip()
         
         # Apply gender filter if specified
@@ -535,11 +539,84 @@ def get_therapist_difficulty_data(request):
         for diff in difficulties_list:
             grade_summary[grade][diff] = grade_summary[grade].get(diff, 0) + row['counts'].get(diff, 0)
     
+    # NEW: Calculate scheduled treatments by difficulty and therapist requirements
+    treatment_scheduling_data = {
+        'treatment_counts': {'Easy': 0, 'Medium': 0, 'Hard': 0, 'Uncategorized': 0},
+        'therapist_requirements': {
+            'Easy': {'super_senior': 0, 'senior': 0, 'junior': 0, 'trainee': 0},
+            'Medium': {'super_senior': 0, 'senior': 0, 'junior': 0, 'trainee': 0},
+            'Hard': {'super_senior': 0, 'senior': 0, 'junior': 0, 'trainee': 0},
+            'Uncategorized': {'super_senior': 0, 'senior': 0, 'junior': 0, 'trainee': 0}
+        }
+    }
+    
+    try:
+        # Get all scheduled bookings for the date
+        scheduled_bookings = Booking.objects.filter(
+            date=target_date,
+            status__in=['scheduled', 'draft']  # Include both scheduled and draft bookings
+        ).select_related('allocation')
+
+        # Optional: filter by patient gender at the Booking/TherapyAllocation level
+        if patient_gender_filter in ('male', 'female'):
+            gender_prefix = 'M' if patient_gender_filter == 'male' else 'F'
+            scheduled_bookings = scheduled_bookings.filter(
+                allocation__patient__pat_sex__istartswith=gender_prefix
+            )
+        
+        # Get unique therapy allocations to avoid double counting
+        seen_allocations = set()
+        for booking in scheduled_bookings:
+            if not booking.allocation:
+                continue
+            
+            # Use allocation + date as unique key (same therapy for same patient on same date = 1 treatment)
+            allocation_key = (booking.allocation.pk, booking.date)
+            if allocation_key in seen_allocations:
+                continue
+            seen_allocations.add(allocation_key)
+            
+            # Get therapy code from allocation
+            therapy_code = getattr(booking.allocation, 'therapy_code', None)
+            if not therapy_code:
+                continue
+            
+            # Get TherapyMaster to get category and requirements
+            try:
+                therapy_master = TherapyMaster.objects.filter(therapy_code=therapy_code).first()
+                if not therapy_master:
+                    continue
+                
+                # Get category
+                category = (therapy_master.therapy_category or therapy_master.therapy_group or 'Uncategorized').strip() or 'Uncategorized'
+                category = category.title()
+                
+                # Normalize to Easy/Medium/Hard/Uncategorized
+                if category not in ['Easy', 'Medium', 'Hard']:
+                    category = 'Uncategorized'
+                
+                # Count treatment
+                treatment_scheduling_data['treatment_counts'][category] = treatment_scheduling_data['treatment_counts'].get(category, 0) + 1
+                
+                # Sum therapist requirements
+                req = treatment_scheduling_data['therapist_requirements'][category]
+                req['super_senior'] += int(getattr(therapy_master, 'no_of_super_senior_therapist', 0) or 0)
+                req['senior'] += int(getattr(therapy_master, 'no_of_senior_therapist', 0) or 0)
+                req['junior'] += int(getattr(therapy_master, 'no_of_junior_therapist', 0) or 0)
+                req['trainee'] += int(getattr(therapy_master, 'no_of_trainee_therapist', 0) or 0)
+                
+            except Exception as e:
+                logger.debug(f"Error processing therapy {therapy_code}: {e}")
+                continue
+    except Exception as e:
+        logger.debug(f"Error calculating treatment scheduling data: {e}")
+    
     summary = {
         'total_assignments': total_assignments,
         'therapist_count': len(therapists_payload),
         'difficulty_totals': difficulty_totals,
-        'grade_summary': grade_summary
+        'grade_summary': grade_summary,
+        'treatment_scheduling': treatment_scheduling_data
     }
     
     return JsonResponse({

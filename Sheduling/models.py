@@ -1,7 +1,8 @@
 from django.conf import settings
 from django.db import models
 from django.utils import timezone
-from Patient.models import TimeSlot,TreatmentRoom,Therapist
+from Patient.models import TimeSlot, TreatmentRoom, Therapist
+from masters.models import SlotMaster, TherapistMaster
 from django.utils.translation import gettext_lazy as _
 # -------------------------
 # Local patient snapshot
@@ -220,6 +221,35 @@ class BookingNurseAssignment(models.Model):
 
     def __str__(self):
         return f"{self.nurse} assigned to {self.booking}"
+
+
+class TherapistContinuityPlan(models.Model):
+    """
+    Pre-planned continuity reservations of therapists for a given date/slot/patient.
+    Built before allocation, read during allocation.
+    """
+    date = models.DateField(db_index=True)  # target date
+    time_slot = models.ForeignKey(SlotMaster, on_delete=models.CASCADE)
+    patient = models.ForeignKey(PatientSnapshot, on_delete=models.CASCADE)
+    allocation = models.ForeignKey(TherapyAllocation, on_delete=models.CASCADE)
+    therapist = models.ForeignKey(TherapistMaster, on_delete=models.CASCADE)
+
+    therapy_name = models.CharField(max_length=255, null=True, blank=True)
+    is_bathing = models.BooleanField(default=False)
+    priority = models.IntegerField(default=0)        # 0 = same therapy yesterday, 1 = same therapy older, 2 = any therapy
+    source_date = models.DateField(null=True, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['date', 'time_slot']),
+            models.Index(fields=['patient', 'date']),
+            models.Index(fields=['allocation', 'date']),
+        ]
+
+    def __str__(self):
+        return f"{self.date} {self.time_slot_id} {self.patient_id} -> {self.therapist.therapist_code}"
 
 
 class CancellationRequest(models.Model):

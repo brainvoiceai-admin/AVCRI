@@ -18,12 +18,13 @@ def daterange(start_date, end_date):
 def is_treatment_requiring_senior_tag(therapy_name):
     """
     Check if a treatment requires special senior tag handling.
-    Returns True if the therapy name matches any of the specified treatments.
+    Returns True ONLY if the therapy name exactly matches one of the specified treatments.
     """
     if not therapy_name:
         return False
     
     # List of treatments that require senior tag (only one senior, not bathing)
+    # ONLY these exact treatments should show the senior tag
     special_treatments = [
         'dhara & abh(3)',
         'dhara& pizhichil (4)',
@@ -40,48 +41,51 @@ def is_treatment_requiring_senior_tag(therapy_name):
         'thakradhara& thakrapizhichil(7)',
     ]
     
-    therapy_lower = str(therapy_name).lower().strip()
+    # Normalize therapy name: lowercase, remove extra spaces, keep structure
+    therapy_normalized = ' '.join(str(therapy_name).lower().strip().split())
     
-    # Check if therapy name contains key patterns
-    # Match treatments containing "dhara" or "thakradhara" with variations
-    has_dhara = 'dhara' in therapy_lower
-    has_thakradhara = 'thakradhara' in therapy_lower
+    # Check for exact match (case-insensitive, ignoring extra spaces)
+    for special_treatment in special_treatments:
+        special_normalized = ' '.join(special_treatment.lower().strip().split())
+        if therapy_normalized == special_normalized:
+            return True
     
-    if not (has_dhara or has_thakradhara):
         return False
     
-    # Check for specific patterns in the treatment name
-    # Match treatments with "pizhichil", "pizichil", "abh", "abyangam", "abhyangam", "sudhikalpana", "fbkadee kizhi", "thakrapizhichil"
-    has_pizhichil = 'pizhichil' in therapy_lower or 'pizichil' in therapy_lower
-    has_abh = 'abh' in therapy_lower and 'abhyangam' not in therapy_lower
-    has_abyangam = 'abyangam' in therapy_lower or 'abhyangam' in therapy_lower
-    has_sudhikalpana = 'sudhikalpana' in therapy_lower
-    has_fbkadee = 'fbkadee kizhi' in therapy_lower or 'fbkadee' in therapy_lower
-    has_thakrapizhichil = 'thakrapizhichil' in therapy_lower
-    
-    # Check if it matches any of the special treatment patterns
-    if has_dhara:
-        if has_pizhichil or has_abh or has_abyangam or has_sudhikalpana:
-            return True
-        # Check for "Dhara ( 2 T)" pattern
-        if 'dhara' in therapy_lower and ('2 t' in therapy_lower or '2t' in therapy_lower):
-            return True
-    
-    if has_thakradhara:
-        if has_pizhichil or has_abyangam or has_fbkadee or has_thakrapizhichil:
-            return True
-        # Check for "Thakradhara ( 2 T)" pattern
-        if 'thakradhara' in therapy_lower and ('2 t' in therapy_lower or '2t' in therapy_lower):
-            return True
-    
-    # Also check exact matches (case-insensitive, ignoring extra spaces)
-    normalized_therapy = ' '.join(therapy_lower.split())
-    for special_treatment in special_treatments:
-        normalized_special = ' '.join(special_treatment.split())
-        if normalized_therapy == normalized_special:
-            return True
-    
-    return False
+# -----------------------
+# Senior tag usage helper (max N per therapist per day)
+# -----------------------
+def get_senior_tag_count_for_therapist(therapist, date):
+    """
+    Count how many special senior-tag treatments a therapist is already assigned to
+    on a given date (based on TherapistBooking records).
+    A \"senior-tag\" assignment is defined as:
+      - TherapistBooking.therapist == therapist
+      - same date
+      - status == 'BOOKED'
+      - is_bathing == False (only non-bathing senior gets the tag)
+      - treatment name is in the special senior list (via is_treatment_requiring_senior_tag)
+    """
+    from Patient.models import TherapistBooking
+
+    try:
+        qs = (TherapistBooking.objects
+              .filter(therapist=therapist, date=date, status='BOOKED')
+              .select_related('therapy', 'visit'))
+    except Exception:
+        return 0
+
+    count = 0
+    for tb in qs:
+        # Only non-bathing sessions can have the senior tag
+        if getattr(tb, 'is_bathing', False):
+            continue
+        name = getattr(tb.therapy, 'therapy_name', None) or getattr(tb, 'therapy_name', None)
+        if not name and getattr(tb, 'visit', None) is not None:
+            name = getattr(tb.visit, 'therapy_name', None)
+        if is_treatment_requiring_senior_tag(name):
+            count += 1
+    return count
 
 # -----------------------
 # Therapy master cache
@@ -213,17 +217,18 @@ def create_therapist_booking_safe(therapist, date, time_slot, therapy_name, pati
             # persist is_bathing if model supports it and we either created or it's not set
             try:
                 if is_bathing and hasattr(tb, 'is_bathing'):
-                    # CRITICAL: Before setting this therapist as bathing, ensure NO OTHER therapist for this visit is marked as bathing
-                    # This ensures only ONE bathing therapist per visit (especially important for Dhara & Pizichil)
-                    if visit:
-                        # Set all other TherapistBooking records for this visit to is_bathing=False
+                    # CRITICAL: Before setting this therapist as bathing, ensure NO OTHER therapist
+                    # for the SAME visit, SAME date and SAME time_slot is marked as bathing.
+                    if visit and time_slot:
                         TherapistBooking.objects.filter(
                             visit=visit,
+                            date=date,
+                            time_slot=time_slot,
                             status='BOOKED'
                         ).exclude(
                             pk=tb.pk  # Exclude current record
                         ).update(is_bathing=False)
-                        print(f"[DEBUG create_therapist_booking_safe] Cleared is_bathing for other therapists in visit {visit.pk}")
+                        print(f"[DEBUG create_therapist_booking_safe] Cleared is_bathing for other therapists in visit {visit.pk} on {date} at {time_slot}")
                     
                     if getattr(tb, 'is_bathing', False) != bool(is_bathing):
                         tb.is_bathing = bool(is_bathing)
@@ -236,16 +241,18 @@ def create_therapist_booking_safe(therapist, date, time_slot, therapy_name, pati
         # attempt to mark is_bathing if possible (best-effort, non-fatal)
         try:
             if tb and is_bathing and hasattr(tb, 'is_bathing'):
-                # CRITICAL: Before setting this therapist as bathing, ensure NO OTHER therapist for this visit is marked as bathing
-                if visit and tb.visit:
-                    # Set all other TherapistBooking records for this visit to is_bathing=False
+                # CRITICAL: Before setting this therapist as bathing, ensure NO OTHER therapist
+                # for the SAME visit, SAME date and SAME time_slot is marked as bathing.
+                if tb.visit and tb.time_slot:
                     TherapistBooking.objects.filter(
                         visit=tb.visit,
+                        date=tb.date,
+                        time_slot=tb.time_slot,
                         status='BOOKED'
                     ).exclude(
                         pk=tb.pk  # Exclude current record
                     ).update(is_bathing=False)
-                    print(f"[DEBUG create_therapist_booking_safe] Cleared is_bathing for other therapists in visit {tb.visit.pk}")
+                    print(f"[DEBUG create_therapist_booking_safe] Cleared is_bathing for other therapists in visit {tb.visit.pk} on {tb.date} at {tb.time_slot}")
                 
                 if not tb.is_bathing:
                     tb.is_bathing = True
@@ -748,13 +755,13 @@ def allocate_therapists(date, time_slot, therapy_requirements, last_therapists=N
             candidates_qs = candidates_qs.filter(is_bathing_therapist=True)
         
         candidates_iter = list(candidates_qs)
-
+            
         # Score candidates by (category-specific count, total count) for fair distribution
         scored_candidates = []
         for t in candidates_iter:
             if needed <= 0:
                 break
-
+            
             # Check availability constraints
             if t in allocated:
                 continue
@@ -762,13 +769,13 @@ def allocate_therapists(date, time_slot, therapy_requirements, last_therapists=N
                 continue
             if TherapistBooking.objects.filter(therapist=t, date=date, time_slot=time_slot, status='BOOKED').exists():
                 continue
-
+            
             # Double-check gender match (should already be filtered in query, but safety check)
             if desired_gender:
                 t_gender = get_therapist_gender(t)
                 if t_gender != desired_gender:
                     continue
-
+            
             total_sessions = get_therapist_daily_session_count(t)
             category_sessions = get_therapist_daily_category_count(t)
             scored_candidates.append((t, category_sessions, total_sessions))
@@ -788,7 +795,7 @@ def allocate_therapists(date, time_slot, therapy_requirements, last_therapists=N
                 break
 
             allocated.append(t)
-
+            
             # Decrement both the local needed count AND the original grade map count
             needed -= 1
             grade_map[grade_original] -= 1  # Decrement the original requirement (e.g., Trainee)
@@ -905,83 +912,165 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
             "therapists": []
         }, False, reason)
 
-    # Check for previous bathing therapist BEFORE allocation (to prioritize them)
+    # Check for previous therapists (bathing + others) for continuity
+    # If ALL previous therapists are available together, assign them as a group
     previous_bathing_therapist = None
-    if needs_bath_flag:
-        try:
-            from Patient.models import TherapistBooking
-            from masters.models import TherapistMaster, TherapistLeaveMaster, EmergencyLeave
-            from django.db.models import Q
-            # Find most recent TherapistBooking for this patient with is_bathing=True
-            prev_bath_booking = TherapistBooking.objects.filter(
+    previous_therapist_group = []  # All previous therapists (bathing + non-bathing) from most recent day
+    try:
+        from Patient.models import TherapistBooking
+        from masters.models import TherapistMaster, TherapistLeaveMaster, EmergencyLeave
+        from django.db.models import Q
+        from django.db.models import Max
+        
+        # Find the most recent date where this patient had therapists assigned
+        most_recent_date = TherapistBooking.objects.filter(
+            patient_id=patient_id,
+            status='BOOKED'
+        ).exclude(
+            visit=allocation  # Exclude current allocation
+        ).aggregate(Max('date'))['date__max']
+        
+        if most_recent_date:
+            # Get ALL therapists from that most recent date (same time slot if possible, or any slot)
+            # Note: TherapistBooking.therapist is a ForeignKey to TherapistMaster, so we get TherapistMaster objects directly
+            prev_bookings = TherapistBooking.objects.filter(
                 patient_id=patient_id,
-                is_bathing=True,
+                date=most_recent_date,
                 status='BOOKED'
             ).exclude(
-                visit=allocation  # Exclude current allocation
-            ).select_related('therapist').order_by('-date', '-created_at').first()
+                visit=allocation
+            ).select_related('therapist').order_by('time_slot')
             
-            if prev_bath_booking and prev_bath_booking.therapist:
-                # Get TherapistMaster for this therapist
-                previous_bathing_therapist = TherapistMaster.objects.filter(
-                    therapist_code=prev_bath_booking.therapist.therapist_code
-                ).first()
+            # Extract TherapistMaster objects directly (no need to lookup by code)
+            previous_therapist_masters = []
+            seen_therapist_ids = set()
+            for prev_booking in prev_bookings:
+                if prev_booking.therapist:
+                    # prev_booking.therapist is already a TherapistMaster object
+                    therapist_id = prev_booking.therapist.pk
+                    if therapist_id not in seen_therapist_ids:
+                        previous_therapist_masters.append(prev_booking.therapist)
+                        seen_therapist_ids.add(therapist_id)
+            
+            # Check if ALL previous therapists are available together
+            day_of_week = date.weekday()
+            all_available = True
+            available_previous_therapists = []
+            
+            for prev_tm in previous_therapist_masters:
+                is_available = True
                 
-                # Verify this therapist is still a bathing therapist and available
-                if previous_bathing_therapist and getattr(previous_bathing_therapist, 'is_bathing_therapist', False):
-                    # Check if therapist is not already booked at this date/time_slot
-                    if TherapistBooking.objects.filter(
-                        therapist=previous_bathing_therapist,
-                        date=date,
-                        time_slot=canonical_slot,
+                # Check if therapist is already booked at this date/time_slot
+                if TherapistBooking.objects.filter(
+                    therapist=prev_tm,
+                    date=date,
+                    time_slot=canonical_slot,
+                    status='BOOKED'
+                ).exists():
+                    is_available = False
+                # Check if therapist is on recurring leave
+                elif TherapistLeaveMaster.objects.filter(
+                    therapist=prev_tm,
+                    leave_day=day_of_week
+                ).exists():
+                    is_available = False
+                # Check emergency leave
+                elif EmergencyLeave.objects.filter(
+                    from_date__lte=date,
+                    to_date__gte=date
+                ).filter(
+                    Q(therapist=prev_tm) | 
+                    Q(employee_code=prev_tm.employee_code)
+                ).exists():
+                    is_available = False
+                
+                if is_available:
+                    available_previous_therapists.append(prev_tm)
+                else:
+                    all_available = False
+                    break
+            
+            # If ALL previous therapists are available, use them as a group
+            if all_available and len(available_previous_therapists) > 0:
+                previous_therapist_group = available_previous_therapists
+                print(f"[DEBUG] Found complete previous therapist group ({len(previous_therapist_group)} therapists) for patient {patient_id} - will assign together for continuity")
+                
+                # Identify bathing therapist from the group
+                if needs_bath_flag:
+                    for prev_tm in previous_therapist_group:
+                        if getattr(prev_tm, 'is_bathing_therapist', False):
+                            previous_bathing_therapist = prev_tm
+                            break
+            else:
+                # Not all available - fall back to individual checks
+                # Still try to find previous bathing therapist if needed
+                if needs_bath_flag:
+                    prev_bath_booking = TherapistBooking.objects.filter(
+                        patient_id=patient_id,
+                        is_bathing=True,
                         status='BOOKED'
-                    ).exists():
-                        is_available = False
-                    else:
-                        # Check if therapist is not on leave
-                        day_of_week = date.weekday()
-                        if TherapistLeaveMaster.objects.filter(
-                            therapist=previous_bathing_therapist,
-                            leave_day=day_of_week
-                        ).exists():
-                            is_available = False
-                        else:
-                            # Check emergency leave
-                            if EmergencyLeave.objects.filter(
+                    ).exclude(
+                        visit=allocation
+                    ).select_related('therapist').order_by('-date', '-created_at').first()
+                    
+                    if prev_bath_booking and prev_bath_booking.therapist:
+                        previous_bathing_therapist = TherapistMaster.objects.filter(
+                            therapist_code=prev_bath_booking.therapist.therapist_code
+                        ).first()
+                        
+                        if previous_bathing_therapist and getattr(previous_bathing_therapist, 'is_bathing_therapist', False):
+                            # Check availability
+                            if TherapistBooking.objects.filter(
+                                therapist=previous_bathing_therapist,
+                                date=date,
+                                time_slot=canonical_slot,
+                                status='BOOKED'
+                            ).exists():
+                                previous_bathing_therapist = None
+                            elif TherapistLeaveMaster.objects.filter(
+                                therapist=previous_bathing_therapist,
+                                leave_day=day_of_week
+                            ).exists():
+                                previous_bathing_therapist = None
+                            elif EmergencyLeave.objects.filter(
                                 from_date__lte=date,
                                 to_date__gte=date
                             ).filter(
                                 Q(therapist=previous_bathing_therapist) | 
                                 Q(employee_code=previous_bathing_therapist.employee_code)
                             ).exists():
-                                is_available = False
+                                previous_bathing_therapist = None
+                            
+                            if previous_bathing_therapist:
+                                print(f"[DEBUG] Found previous bathing therapist {previous_bathing_therapist.therapist_code} for patient {patient_id} (not all previous therapists available)")
                             else:
-                                is_available = True
-                    
-                    if not is_available:
-                        previous_bathing_therapist = None  # Not available, will use different one
-                        print(f"[DEBUG] Previous bathing therapist {prev_bath_booking.therapist.therapist_code} not available for patient {patient_id}")
-                    else:
-                        print(f"[DEBUG] Found previous bathing therapist {previous_bathing_therapist.therapist_code} for patient {patient_id}")
-        except Exception as e:
-            print(f"[DEBUG] Error checking previous bathing therapist: {e}")
-            import traceback
-            traceback.print_exc()
+                                print(f"[DEBUG] Previous bathing therapist not available for patient {patient_id}")
+    except Exception as e:
+        print(f"[DEBUG] Error checking previous therapists: {e}")
+        import traceback
+        traceback.print_exc()
     
     # candidate therapists
     candidate_therapists = []
     try:
         # Derive patient gender from allocation patient snapshot (e.g., 'Male'/'Female')
         pat_sex = getattr(getattr(allocation, 'patient', None), 'pat_sex', None)
-        # Build last_therapists list: include previous bathing therapist if available, plus any from last_allocation
-        last_therapists = []
-        if previous_bathing_therapist:
-            last_therapists.append(previous_bathing_therapist.therapist_code)
-        if last_allocation.get("last_therapist_codes"):
-            # Add other last therapists, avoiding duplicates
-            for code in last_allocation.get("last_therapist_codes", []):
-                if code not in last_therapists:
-                    last_therapists.append(code)
+        
+        # If we have a complete previous therapist group, prioritize them
+        if previous_therapist_group and len(previous_therapist_group) > 0:
+            # Use the complete group as last_therapists
+            last_therapists = [tm.therapist_code for tm in previous_therapist_group]
+            print(f"[DEBUG] Using complete previous therapist group for continuity: {last_therapists}")
+        else:
+            # Build last_therapists list: include previous bathing therapist if available, plus any from last_allocation
+            last_therapists = []
+            if previous_bathing_therapist:
+                last_therapists.append(previous_bathing_therapist.therapist_code)
+            if last_allocation.get("last_therapist_codes"):
+                # Add other last therapists, avoiding duplicates
+                for code in last_allocation.get("last_therapist_codes", []):
+                    if code not in last_therapists:
+                        last_therapists.append(code)
         
         candidate_therapists = allocate_therapists(
             date,
@@ -1075,15 +1164,30 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
     requires_senior_tag = is_treatment_requiring_senior_tag(therapy_name)
     senior_therapist = None
     
-    # For special treatments: Identify the senior therapist from assigned therapists
+    # For special treatments: identify a senior therapist candidate with available senior-tag capacity
     if requires_senior_tag:
-        # Find senior therapist (Senior Therapist or Super Senior Therapist)
+        senior_candidates = []
         for t in assigned_therapists:
             grade_name = getattr(getattr(t, 'therapist_grade', None), 'name', '') if hasattr(t, 'therapist_grade') else ''
             if 'Senior' in grade_name:
-                senior_therapist = t
-                print(f"[DEBUG] Dhara & Pizichil: Identified senior therapist {t.therapist_code} (grade: {grade_name})")
-                break
+                senior_candidates.append((t, grade_name))
+        if senior_candidates:
+            from math import inf
+            best = None
+            best_count = inf
+            for t, grade_name in senior_candidates:
+                current = get_senior_tag_count_for_therapist(t, date)
+                # Prefer therapists below the limit of 2; among them pick the one with fewest senior tags
+                if current < 2 and current < best_count:
+                    best = t
+                    best_count = current
+            if best is not None:
+                senior_therapist = best
+                print(f"[DEBUG] Senior tag: selected senior {best.therapist_code} with existing senior-tag count={best_count} on {date}")
+            else:
+                # All potential seniors are already at or above the limit -> no senior tag for this booking
+                requires_senior_tag = False
+                print(f"[DEBUG] Senior tag: no available senior below daily limit for {therapy_name} on {date}")
     
     if needs_bath_flag and assigned_therapists:
         # For special treatments: Senior therapist should NOT be the bathing therapist
@@ -1107,7 +1211,7 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
                 
                 # Get all available senior therapists (excluding current senior)
                 alternative_seniors = TherapistMaster.objects.filter(
-                    therapist_grade__name__in=['Senior Therapist', 'Super Senior Therapist']
+                    therapist_grade__name='Senior Therapist'
                 ).exclude(
                     therapist_code=senior_therapist.therapist_code
                 )
