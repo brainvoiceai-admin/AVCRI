@@ -4696,3 +4696,258 @@ def reschedule_all_failed_api(request):
         return JsonResponse({'error': 'Invalid JSON'}, status=400)
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=500)
+
+
+# ============================================================================
+# STANDALONE BULK EXCEL UPLOAD/DOWNLOAD FOR TESTING ALLOCATION ALGORITHM
+# ============================================================================
+# This is a completely separate page for testing purposes only.
+# It does NOT interfere with any existing therapy entry or scheduling logic.
+# ============================================================================
+
+def therapy_bulk_excel(request):
+    """
+    Standalone page for bulk Excel upload/download to test allocation algorithm.
+    
+    - GET + ?action=download&date=YYYY-MM-DD: Download Excel with therapy data for that date
+    - POST + action=upload: Upload Excel file to create TherapyAllocation + Booking records for testing
+    
+    This is completely isolated from existing therapy_entry and scheduling logic.
+    """
+    import io
+    import pandas as pd
+    from django.shortcuts import redirect
+    from django.contrib import messages
+    from django.http import HttpResponse
+    from Sheduling.models import TherapyAllocation, Booking, PatientSnapshot
+    from masters.models import SlotMaster, TherapyMaster
+    
+    action = (request.GET.get('action') or request.POST.get('action') or '').strip().lower()
+    
+    # ---- DOWNLOAD: GET with ?action=download&date=YYYY-MM-DD ----
+    if request.method == 'GET' and action == 'download':
+        date_str = (request.GET.get('date') or '').strip()
+        target_date = parse_date(date_str) if date_str else None
+        if not target_date:
+            messages.error(request, "Please provide a valid date (YYYY-MM-DD).")
+            return redirect('therapy_bulk_excel')
+        
+        # Get all bookings for that date
+        bookings = (
+            Booking.objects
+            .select_related('allocation', 'allocation__patient', 'timeslot', 'room')
+            .filter(date=target_date)
+            .order_by('timeslot__slot_number', 'allocation__patient__pat_reg_no')
+        )
+        
+        rows = []
+        for b in bookings:
+            alloc = b.allocation
+            patient = getattr(alloc, 'patient', None)
+            timeslot = b.timeslot
+            required_roles = getattr(alloc, 'required_therapist_roles', []) or []
+            
+            rows.append({
+                "patient_reg_no": getattr(patient, 'pat_reg_no', '') if patient else '',
+                "patient_name": getattr(patient, 'pat_name', '') if patient else '',
+                "therapy_code": alloc.therapy_code if alloc else '',
+                "therapy_name": alloc.therapy_name if alloc else '',
+                # Use slot_number as the portable code for import/export
+                "timeslot_code": str(getattr(timeslot, 'slot_number', '')) if timeslot else '',
+                "timeslot_label": str(timeslot) if timeslot else '',
+                "date": b.date.isoformat(),
+                "required_therapist_roles_json": json.dumps(required_roles, ensure_ascii=False),
+                "ext_int": alloc.ext_int if alloc else '',
+                "notes": alloc.notes if alloc else '',
+            })
+        
+        # If no data, create template with headers only
+        if not rows:
+            rows.append({
+                "patient_reg_no": "",
+                "patient_name": "",
+                "therapy_code": "",
+                "therapy_name": "",
+                "timeslot_code": "",
+                "timeslot_label": "",
+                "date": target_date.isoformat(),
+                "required_therapist_roles_json": "[]",
+                "ext_int": "",
+                "notes": "",
+            })
+        
+        # Create Excel file
+        df = pd.DataFrame(rows)
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            df.to_excel(writer, index=False, sheet_name='Therapies')
+        output.seek(0)
+        
+        filename = f"therapy_data_{target_date.isoformat()}.xlsx"
+        response = HttpResponse(
+            output.read(),
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        return response
+    
+    # ---- UPLOAD: POST with Excel file ----
+    if request.method == 'POST' and action == 'upload':
+        date_str = (request.POST.get('target_date') or '').strip()
+        target_date = parse_date(date_str) if date_str else None
+        file = request.FILES.get('excel_file')
+        
+        if not target_date:
+            messages.error(request, "Please provide a valid target date (YYYY-MM-DD).")
+            return redirect('therapy_bulk_excel')
+        if not file:
+            messages.error(request, "Please choose an Excel (.xlsx) file to upload.")
+            return redirect('therapy_bulk_excel')
+        
+        # Read Excel
+        try:
+            df = pd.read_excel(file)
+        except Exception as e:
+            messages.error(request, f"Error reading Excel file: {e}")
+            return redirect('therapy_bulk_excel')
+        
+        # Normalize column names (case-insensitive)
+        df_columns = {str(c).strip().lower(): c for c in df.columns}
+        required_cols = ["patient_reg_no", "therapy_code", "therapy_name", "timeslot_code"]
+        missing = [c for c in required_cols if c not in df_columns]
+        if missing:
+            messages.error(
+                request,
+                f"Missing required columns in Excel: {', '.join(missing)}. "
+                "Please download a sample file and use the same headers."
+            )
+            return redirect('therapy_bulk_excel')
+        
+        created_alloc = 0
+        created_bookings = 0
+        skipped_rows = 0
+        errors = []
+        
+        with transaction.atomic():
+            # Delete existing draft bookings for target date (clean slate for testing)
+            Booking.objects.filter(date=target_date, status='draft').delete()
+            
+            for idx, row in df.iterrows():
+                try:
+                    pat_reg_no = str(row[df_columns["patient_reg_no"]]).strip()
+                    therapy_code = str(row[df_columns["therapy_code"]]).strip()
+                    therapy_name = str(row[df_columns["therapy_name"]]).strip()
+                    timeslot_code = str(row[df_columns["timeslot_code"]]).strip()
+                    
+                    # Skip empty rows
+                    if not pat_reg_no or (not therapy_code and not therapy_name) or not timeslot_code:
+                        skipped_rows += 1
+                        continue
+                    
+                    # Use per-row date if provided, else use target_date
+                    row_date = target_date
+                    if "date" in df_columns:
+                        try:
+                            cell = row[df_columns["date"]]
+                            if pd.notna(cell):
+                                if isinstance(cell, str):
+                                    d = parse_date(cell)
+                                else:
+                                    d = cell.date() if hasattr(cell, "date") else cell
+                                if d:
+                                    row_date = d
+                        except Exception:
+                            pass
+                    
+                    # Find patient
+                    patient = PatientSnapshot.objects.filter(pat_reg_no=pat_reg_no).first()
+                    if not patient:
+                        errors.append(f"Row {idx+2}: Patient '{pat_reg_no}' not found; skipped.")
+                        skipped_rows += 1
+                        continue
+                    
+                    # Find timeslot
+                    # We use SlotMaster.slot_number as the code in Excel; fall back to slot_name if needed
+                    slot = None
+                    if timeslot_code.isdigit():
+                        try:
+                            slot = SlotMaster.objects.filter(slot_number=int(timeslot_code)).first()
+                        except Exception:
+                            slot = None
+                    if not slot:
+                        slot = SlotMaster.objects.filter(slot_name__iexact=timeslot_code).first()
+                    if not slot:
+                        errors.append(f"Row {idx+2}: Timeslot '{timeslot_code}' not found; skipped.")
+                        skipped_rows += 1
+                        continue
+                    
+                    # Find therapy master
+                    therapy_master = None
+                    if therapy_code:
+                        therapy_master = TherapyMaster.objects.filter(therapy_code__iexact=therapy_code).first()
+                    if not therapy_master and therapy_name:
+                        therapy_master = TherapyMaster.objects.filter(therapy_name__iexact=therapy_name).first()
+                    
+                    # Parse required_therapist_roles JSON
+                    required_roles = []
+                    if "required_therapist_roles_json" in df_columns:
+                        raw = row[df_columns["required_therapist_roles_json"]]
+                        if pd.notna(raw):
+                            try:
+                                required_roles = json.loads(str(raw))
+                            except Exception:
+                                pass
+                    
+                    # Create TherapyAllocation
+                    alloc = TherapyAllocation.objects.create(
+                        patient=patient,
+                        therapy_code=therapy_master.therapy_code if therapy_master else therapy_code,
+                        therapy_name=therapy_master.therapy_name if therapy_master else therapy_name,
+                        ext_int=getattr(therapy_master, 'ext_int', '') if therapy_master else (str(row.get(df_columns.get("ext_int", ""), "")) if "ext_int" in df_columns else ''),
+                        timeslot=slot,
+                        room=None,
+                        items_groups=[],
+                        oil_class=getattr(therapy_master, 'oil_class', '') if therapy_master else '',
+                        usage=getattr(therapy_master, 'usage', '') if therapy_master else '',
+                        procured_from='',
+                        from_date=row_date,
+                        to_date=row_date,
+                        days=1,
+                        required_therapist_roles=required_roles,
+                        allocated_by=request.user if request.user.is_authenticated else None,
+                        locked=False,
+                        notes=str(row.get(df_columns.get("notes", ""), "")) if "notes" in df_columns else '',
+                        status='draft',
+                    )
+                    created_alloc += 1
+                    
+                    # Create Booking
+                    Booking.objects.create(
+                        allocation=alloc,
+                        date=row_date,
+                        timeslot=slot,
+                        room=None,
+                        status='draft',
+                        therapist_note='',
+                    )
+                    created_bookings += 1
+                    
+                except Exception as e:
+                    errors.append(f"Row {idx+2}: {str(e)}")
+                    skipped_rows += 1
+        
+        # Show results
+        msg = f"Import completed. Created {created_alloc} allocations and {created_bookings} bookings for date {target_date.isoformat()}."
+        if skipped_rows:
+            msg += f" Skipped {skipped_rows} rows."
+        messages.success(request, msg)
+        if errors:
+            for e in errors[:10]:
+                messages.warning(request, e)
+            if len(errors) > 10:
+                messages.warning(request, f"...and {len(errors)-10} more errors (see server logs).")
+        
+        return redirect('therapy_bulk_excel')
+    
+    # Default: render the page
+    return render(request, "dashboards/scheduling/therapy_bulk_excel.html")

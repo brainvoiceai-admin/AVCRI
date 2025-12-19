@@ -1,0 +1,183 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Therapy Bulk Excel - Testing</title>
+    <link rel="stylesheet" href="{% static 'css/scheduling.css' %}">
+    <link rel="stylesheet" href="{% static 'css/dashboards_nav.css' %}">
+</head>
+<body>
+{% include 'dashboards/nav.html' %}
+<div class="main-content">
+
+<div class="container-fluid">
+    <div class="row">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header">
+                    <h3 class="card-title">📥 Therapy Bulk Excel - Testing Tool</h3>
+                    <p class="text-muted">Download therapy data for any date or upload Excel to create test data for allocation algorithm</p>
+                </div>
+                <div class="card-body">
+                    {% if messages %}
+                        {% for message in messages %}
+                            <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
+                                {{ message }}
+                                <button type="button" class="close" data-dismiss="alert" aria-label="Close">
+                                    <span aria-hidden="true">&times;</span>
+                                </button>
+                            </div>
+                        {% endfor %}
+                    {% endif %}
+
+                    <div class="row">
+                        <!-- Download Section -->
+                        <div class="col-md-6">
+                            <div class="card border-primary">
+                                <div class="card-header bg-primary text-white">
+                                    <h5>📥 Download Therapy Data</h5>
+                                </div>
+                                <div class="card-body">
+                                    <p>Download existing therapy data for any date in Excel format. You can then modify the date column and re-upload for testing.</p>
+                                    <form method="GET" action="{% url 'therapy_bulk_excel' %}">
+                                        <input type="hidden" name="action" value="download">
+                                        <div class="form-group">
+                                            <label for="download_date">Select Date:</label>
+                                            <input type="date" class="form-control" id="download_date" name="date" required value="{{ today|date:'Y-m-d' }}">
+                                        </div>
+                                        <button type="submit" class="btn btn-primary">
+                                            <i class="fas fa-download"></i> Download Excel
+                                        </button>
+                                    </form>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Upload Section -->
+                        <div class="col-md-6">
+                            <div class="card border-success">
+                                <div class="card-header bg-success text-white">
+                                    <h5>📤 Upload Therapy Data</h5>
+                                </div>
+                                <div class="card-body">
+                                    <p>Upload Excel file to create TherapyAllocation and Booking records for testing. Existing draft bookings for the target date will be deleted.</p>
+                                    <form method="POST" action="{% url 'therapy_bulk_excel' %}" enctype="multipart/form-data">
+                                        {% csrf_token %}
+                                        <input type="hidden" name="action" value="upload">
+                                        <div class="form-group">
+                                            <label for="target_date">Target Date (for import):</label>
+                                            <input type="date" class="form-control" id="target_date" name="target_date" required value="{{ today|date:'Y-m-d' }}">
+                                        </div>
+                                        <div class="form-group">
+                                            <label for="excel_file">Excel File (.xlsx):</label>
+                                            <input type="file" class="form-control-file" id="excel_file" name="excel_file" accept=".xlsx" required>
+                                        </div>
+                                        <button type="submit" class="btn btn-success">
+                                            <i class="fas fa-upload"></i> Upload Excel
+                                        </button>
+                                    </form>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <hr>
+
+                    <!-- Instructions -->
+                    <div class="alert alert-info">
+                        <h5><i class="fas fa-info-circle"></i> Instructions:</h5>
+                        <ol>
+                            <li><strong>Download:</strong> Select a date and download the Excel file with existing therapy data.</li>
+                            <li><strong>Modify:</strong> Open the Excel file. You can change the date column to a different date for testing.</li>
+                            <li><strong>Upload:</strong> Select the target date and upload the modified Excel file. This will create new TherapyAllocation and Booking records (status='draft') for that date.</li>
+                            <li><strong>Test:</strong> Go to the Scheduling page and click "Schedule" for the target date to test the allocation algorithm.</li>
+                        </ol>
+                        <p class="mb-0"><strong>Note:</strong> This tool only creates draft records. It does not interfere with existing scheduled therapies.</p>
+                    </div>
+
+                    <!-- Excel Format Info -->
+                    <div class="card border-secondary mt-3">
+                        <div class="card-header">
+                            <h5>📋 Required Excel Columns:</h5>
+                        </div>
+                        <div class="card-body">
+                            <table class="table table-sm table-bordered">
+                                <thead>
+                                    <tr>
+                                        <th>Column Name</th>
+                                        <th>Required</th>
+                                        <th>Description</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr>
+                                        <td><code>patient_reg_no</code></td>
+                                        <td><span class="badge badge-danger">Required</span></td>
+                                        <td>Patient registration number</td>
+                                    </tr>
+                                    <tr>
+                                        <td><code>therapy_code</code></td>
+                                        <td><span class="badge badge-warning">Required*</span></td>
+                                        <td>Therapy code (or therapy_name)</td>
+                                    </tr>
+                                    <tr>
+                                        <td><code>therapy_name</code></td>
+                                        <td><span class="badge badge-warning">Required*</span></td>
+                                        <td>Therapy name (or therapy_code)</td>
+                                    </tr>
+                                    <tr>
+                                        <td><code>timeslot_code</code></td>
+                                        <td><span class="badge badge-danger">Required</span></td>
+                                        <td>Time slot code (e.g., SLOT1, SLOT2)</td>
+                                    </tr>
+                                    <tr>
+                                        <td><code>date</code></td>
+                                        <td><span class="badge badge-secondary">Optional</span></td>
+                                        <td>Date (YYYY-MM-DD). If not provided, uses target_date from form.</td>
+                                    </tr>
+                                    <tr>
+                                        <td><code>required_therapist_roles_json</code></td>
+                                        <td><span class="badge badge-secondary">Optional</span></td>
+                                        <td>JSON array of required therapist roles</td>
+                                    </tr>
+                                    <tr>
+                                        <td><code>ext_int</code></td>
+                                        <td><span class="badge badge-secondary">Optional</span></td>
+                                        <td>External/Internal indicator</td>
+                                    </tr>
+                                    <tr>
+                                        <td><code>notes</code></td>
+                                        <td><span class="badge badge-secondary">Optional</span></td>
+                                        <td>Additional notes</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                            <p class="text-muted"><small>* Either therapy_code or therapy_name must be provided.</small></p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // Set today's date as default
+    document.addEventListener('DOMContentLoaded', function() {
+        const today = new Date().toISOString().split('T')[0];
+        const downloadDate = document.getElementById('download_date');
+        const targetDate = document.getElementById('target_date');
+        if (downloadDate && !downloadDate.value) {
+            downloadDate.value = today;
+        }
+        if (targetDate && !targetDate.value) {
+            targetDate.value = today;
+        }
+    });
+</script>
+</div> {# main-content #}
+</body>
+</html>
+
