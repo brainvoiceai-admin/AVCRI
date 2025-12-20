@@ -1408,59 +1408,78 @@ def therapy_entry(request):
 
                     # Check which dates have Final Schedule run - run algorithm for those dates immediately
                     # Other dates will remain in draft and can be scheduled via Final Schedule button in dashboard
+                    # IMPORTANT: Use bulk_allocate_for_date to ensure PASS 1 (continuity) and PASS 2 are both executed
                     try:
                         from .models import FinalScheduleRun
-                        from final_allocation import expand_therapies_for_visit
+                        from final_allocation import bulk_allocate_for_date
 
                         any_succeeded = False
                         any_failed = False
                         
-                        # Process each date in the range
+                        # Group dates by Final Schedule status
+                        dates_with_final_schedule = []
                         for d in daterange(fdate, tdate):
-                            # Check if Final Schedule has been run for this date
-                            # If yes, run the algorithm immediately for this date
-                            final_schedule_run = FinalScheduleRun.objects.filter(run_date=d).exists()
-                            
-                            # If Final Schedule run exists, run algorithm immediately
-                            if final_schedule_run:
-                                try:
-                                    tasks = expand_therapies_for_visit(
-                                        alloc.id,
-                                        d.strftime('%Y-%m-%d'),
-                                        create_bookings=True
-                                    )
-                                    if isinstance(tasks, list):
-                                        booked_tasks = [t for t in tasks if t.get('status') == 'BOOKED']
-                                        failed_tasks = [t for t in tasks if t.get('status') == 'FAILED']
-                                        
-                                        if booked_tasks:
-                                            any_succeeded = True
-                                            # Update booking status for this date
-                                            Booking.objects.filter(allocation=alloc, date=d).update(status='scheduled')
-                                            # Update booking items status for this date
-                                            BookingItem.objects.filter(booking__allocation=alloc, booking__date=d).update(status='scheduled')
-                                            status_counts['draft'] -= 1
-                                            status_counts['allocated'] += 1
-                                            date_status_map[d.isoformat()] = 'allocated'
-                                        elif failed_tasks:
-                                            any_failed = True
-                                            Booking.objects.filter(allocation=alloc, date=d).update(status='failed')
-                                            BookingItem.objects.filter(booking__allocation=alloc, booking__date=d).update(status='failed')
-                                            status_counts['draft'] -= 1
-                                            status_counts['failed'] += 1
-                                            date_status_map[d.isoformat()] = 'failed'
-                                    elif isinstance(tasks, dict) and 'error' in tasks:
-                                        # Algorithm returned an error
+                            if FinalScheduleRun.objects.filter(run_date=d).exists():
+                                dates_with_final_schedule.append(d)
+                        
+                        # Process each date that has Final Schedule run
+                        # Use bulk_allocate_for_date which includes PASS 1 (continuity) and PASS 2
+                        for d in dates_with_final_schedule:
+                            try:
+                                print(f"[THERAPY ENTRY] Running bulk_allocate_for_date for date {d.isoformat()} to ensure continuity (PASS 1 + PASS 2)")
+                                result = bulk_allocate_for_date(d.strftime('%Y-%m-%d'))
+                                
+                                if result.get('success', False):
+                                    # Check if our allocation was processed successfully
+                                    # bulk_allocate_for_date processes all draft bookings for the date
+                                    # Check the status of bookings for this specific allocation
+                                    allocation_bookings = Booking.objects.filter(allocation=alloc, date=d)
+                                    
+                                    scheduled_count = allocation_bookings.filter(status='scheduled').count()
+                                    failed_count = allocation_bookings.filter(status='failed').count()
+                                    draft_count = allocation_bookings.filter(status='draft').count()
+                                    
+                                    if scheduled_count > 0:
+                                        any_succeeded = True
+                                        # Update booking items status for this date
+                                        BookingItem.objects.filter(booking__allocation=alloc, booking__date=d).update(status='scheduled')
+                                        status_counts['draft'] -= draft_count
+                                        status_counts['allocated'] += scheduled_count
+                                        date_status_map[d.isoformat()] = 'allocated'
+                                        print(f"[THERAPY ENTRY] ✓ Date {d.isoformat()}: {scheduled_count} booking(s) scheduled with continuity")
+                                    elif failed_count > 0:
                                         any_failed = True
-                                        Booking.objects.filter(allocation=alloc, date=d).update(status='failed')
                                         BookingItem.objects.filter(booking__allocation=alloc, booking__date=d).update(status='failed')
-                                        status_counts['draft'] -= 1
-                                        status_counts['failed'] += 1
+                                        status_counts['draft'] -= draft_count
+                                        status_counts['failed'] += failed_count
                                         date_status_map[d.isoformat()] = 'failed'
-                                except Exception as _e:
-                                    # Continue to next date on error
-                                    print(f"Error processing date {d.isoformat()} for allocation {alloc.id}: {_e}")
-                                    pass
+                                        print(f"[THERAPY ENTRY] ✗ Date {d.isoformat()}: {failed_count} booking(s) failed")
+                                    else:
+                                        # Still in draft - might not have been processed
+                                        print(f"[THERAPY ENTRY] ? Date {d.isoformat()}: {draft_count} booking(s) still in draft")
+                                else:
+                                    # bulk_allocate_for_date returned an error
+                                    error_msg = result.get('error', 'Unknown error')
+                                    print(f"[THERAPY ENTRY] ✗ Error in bulk_allocate_for_date for {d.isoformat()}: {error_msg}")
+                                    any_failed = True
+                                    allocation_bookings = Booking.objects.filter(allocation=alloc, date=d)
+                                    draft_count = allocation_bookings.filter(status='draft').count()
+                                    Booking.objects.filter(allocation=alloc, date=d).update(status='failed')
+                                    BookingItem.objects.filter(booking__allocation=alloc, booking__date=d).update(status='failed')
+                                    status_counts['draft'] -= draft_count
+                                    status_counts['failed'] += draft_count
+                                    date_status_map[d.isoformat()] = 'failed'
+                            except Exception as _e:
+                                # Continue to next date on error
+                                print(f"[THERAPY ENTRY] ✗ Error processing date {d.isoformat()} for allocation {alloc.id}: {_e}")
+                                import traceback
+                                print(f"[THERAPY ENTRY] Traceback: {traceback.format_exc()}")
+                                any_failed = True
+                                Booking.objects.filter(allocation=alloc, date=d).update(status='failed')
+                                BookingItem.objects.filter(booking__allocation=alloc, booking__date=d).update(status='failed')
+                                status_counts['draft'] -= Booking.objects.filter(allocation=alloc, date=d, status='draft').count()
+                                status_counts['failed'] += Booking.objects.filter(allocation=alloc, date=d, status='failed').count()
+                                date_status_map[d.isoformat()] = 'failed'
 
                         # Update overall allocation status based on results
                         if any_succeeded:
