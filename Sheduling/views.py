@@ -4136,13 +4136,16 @@ def get_therapy_data_api(request):
                         therapist_masters = {tm.therapist_code: tm for tm in TherapistMaster.objects.filter(
                             therapist_code__in=therapist_codes
                         )}
-                        # Get all TherapistBooking records for this visit and therapists
+                        # Get all TherapistBooking records for this visit, therapists, date, and time_slot
+                        # IMPORTANT: Must filter by date and time_slot to get the correct records for this specific booking
                         if therapist_masters and allocation:
                             tb_list = TherapistBooking.objects.filter(
                                 visit=allocation,
                                 therapist__in=therapist_masters.values(),
+                                date=booking.date,  # Filter by booking date
+                                time_slot=booking.timeslot,  # Filter by booking time_slot
                                 status='BOOKED'
-                            ).select_related('therapist', 'visit')
+                            ).select_related('therapist', 'visit', 'time_slot')
                             # Create a map: therapist_code -> is_bathing
                             # ONLY use TherapistBooking.is_bathing field from Patient module
                             # IMPORTANT: For Dhara & Pizichil, ensure only ONE therapist is marked as bathing
@@ -4358,30 +4361,47 @@ def get_therapy_data_api(request):
                         )}
                     
                     # Pre-fetch TherapistBooking records to check bathing status
+                    # Group by booking date and time_slot to get correct is_bathing flags per booking
                     therapist_bookings_dict = {}
                     if allocation and therapist_masters_dict:
-                        tb_list = TherapistBooking.objects.filter(
-                            visit=allocation,
-                            therapist__in=therapist_masters_dict.values(),
-                            status='BOOKED'
-                        ).select_related('therapist')
-                        for tb in tb_list:
-                            if tb.therapist:
-                                therapist_code = tb.therapist.therapist_code
-                                therapist_bookings_dict[therapist_code] = tb.is_bathing
+                        # Get all bookings for this allocation to process each separately
+                        for booking in allocation.bookings.all():
+                            booking_date = booking.date
+                            booking_timeslot = booking.timeslot
+                            if not booking_date or not booking_timeslot:
+                                continue
+                            # Get TherapistBooking records for this specific booking (date + time_slot)
+                            tb_list = TherapistBooking.objects.filter(
+                                visit=allocation,
+                                therapist__in=therapist_masters_dict.values(),
+                                date=booking_date,  # Filter by booking date
+                                time_slot=booking_timeslot,  # Filter by booking time_slot
+                                status='BOOKED'
+                            ).select_related('therapist', 'time_slot')
+                            # Create a map: (therapist_code, booking_date, booking_timeslot) -> is_bathing
+                            # This ensures we get the correct is_bathing flag for each booking
+                            for tb in tb_list:
+                                if tb.therapist:
+                                    therapist_code = tb.therapist.therapist_code
+                                    # Use a composite key to handle multiple bookings for same therapist
+                                    key = (therapist_code, booking_date, booking_timeslot.id if booking_timeslot else None)
+                                    therapist_bookings_dict[key] = tb.is_bathing
                     
                     # First pass: collect all therapists and identify seniors who are not bathing
                     therapist_data_list = []
                     senior_non_bathing_therapist_code = None
                     
                     for booking in allocation.bookings.all():
+                        booking_date = booking.date
+                        booking_timeslot = booking.timeslot
                         for assignment in booking.assignments.all():
                             therapist_code = assignment.therapist.therapist_code
                             # Get TherapistMaster to check grade (use TherapistMaster, not Patient.models.Therapist)
                             therapist_master = therapist_masters_dict.get(therapist_code)
                             
-                            # Get is_bathing flag
-                            is_bathing = therapist_bookings_dict.get(therapist_code, False)
+                            # Get is_bathing flag using composite key (therapist_code, date, time_slot)
+                            key = (therapist_code, booking_date, booking_timeslot.id if booking_timeslot else None)
+                            is_bathing = therapist_bookings_dict.get(key, False)
                             
                             # Check if this therapist is senior
                             is_senior_grade = False
