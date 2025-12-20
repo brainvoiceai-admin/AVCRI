@@ -1761,6 +1761,182 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                 elif previous_bathing_therapist:
                     # Fallback: Pass previous bathing therapist as last_therapists if no group found
                     last_therapists = [previous_bathing_therapist.therapist_code]
+                else:
+                    # PASS 2: Check PatientHistory for previous years' therapists if no recent treatment
+                    # This helps assign therapists who treated the patient in previous years
+                    print(f"[CONTINUITY FROM PATIENT HISTORY MODEL] ========== CHECKING PATIENT HISTORY FOR BOOKING {booking_id} ==========")
+                    try:
+                        patient_obj = getattr(allocation, 'patient', None)
+                        if patient_obj:
+                            patient_reg_no = getattr(patient_obj, 'pat_reg_no', None)
+                            patient_name = getattr(patient_obj, 'pat_name', 'Unknown')
+                            if patient_reg_no:
+                                print(f"[CONTINUITY FROM PATIENT HISTORY MODEL] Patient: {patient_name} (Reg No: {patient_reg_no})")
+                                print(f"[CONTINUITY FROM PATIENT HISTORY MODEL] Target Date: {target_date}, Slot: {getattr(allocate_slot, 'id', None) if allocate_slot else None}")
+                                
+                                from Patient.models import PatientHistory, Repeated_Visitors
+                                from masters.models import TherapistMaster, TherapistLeaveMaster
+                                from Patient.models import TherapistBooking
+                                
+                                # First check if patient exists in Repeated_Visitors model
+                                # Only proceed with PatientHistory check if patient is a repeated visitor
+                                is_repeated_visitor = False
+                                try:
+                                    # Try to convert patient_reg_no to integer for Repeated_Visitors lookup
+                                    # Extract digits from patient_reg_no (handles cases like "12345" or "OP-12345")
+                                    reg_no_digits = ''.join(ch for ch in str(patient_reg_no) if ch.isdigit())
+                                    if reg_no_digits:
+                                        reg_no_int = int(reg_no_digits)
+                                        is_repeated_visitor = Repeated_Visitors.objects.filter(
+                                            register_number=reg_no_int
+                                        ).exists()
+                                        
+                                        if is_repeated_visitor:
+                                            repeated_visitor = Repeated_Visitors.objects.filter(
+                                                register_number=reg_no_int
+                                            ).first()
+                                            total_visits = getattr(repeated_visitor, 'total_visits', 0) if repeated_visitor else 0
+                                            is_vip = getattr(repeated_visitor, 'is_vip', False) if repeated_visitor else False
+                                            print(f"[CONTINUITY FROM PATIENT HISTORY MODEL] ✓ Patient is a REPEATED VISITOR (Total visits: {total_visits}, VIP: {is_vip})")
+                                            print(f"[CONTINUITY FROM PATIENT HISTORY MODEL] Proceeding with PatientHistory check...")
+                                        else:
+                                            print(f"[CONTINUITY FROM PATIENT HISTORY MODEL] ✗ Patient is NOT a repeated visitor - Skipping PatientHistory check")
+                                    else:
+                                        print(f"[CONTINUITY FROM PATIENT HISTORY MODEL] ✗ Could not extract registration number digits - Skipping PatientHistory check")
+                                except (ValueError, TypeError) as e:
+                                    print(f"[CONTINUITY FROM PATIENT HISTORY MODEL] ✗ Error checking Repeated_Visitors: {e} - Skipping PatientHistory check")
+                                
+                                # Only query PatientHistory if patient is a repeated visitor
+                                if is_repeated_visitor:
+                                    # Query PatientHistory by preg_no (patient registration number)
+                                    history_records = PatientHistory.objects.filter(
+                                        preg_no=str(patient_reg_no)
+                                    ).order_by('-date')
+                                    
+                                    total_history_count = history_records.count()
+                                    print(f"[CONTINUITY FROM PATIENT HISTORY MODEL] Found {total_history_count} total history record(s) for patient {patient_reg_no}")
+                                    
+                                    if history_records.exists():
+                                        # Group by date and get the most recent date's therapists
+                                        most_recent_date = history_records.first().date
+                                        recent_history = history_records.filter(date=most_recent_date)
+                                        
+                                        print(f"[CONTINUITY FROM PATIENT HISTORY MODEL] Most recent treatment date: {most_recent_date}")
+                                        print(f"[CONTINUITY FROM PATIENT HISTORY MODEL] Found {recent_history.count()} record(s) on most recent date")
+                                        
+                                        # Get unique therapist codes from that date
+                                        therapist_codes_from_history = list(
+                                            set([h.therapist_code for h in recent_history if h.therapist_code])
+                                        )
+                                        
+                                        if therapist_codes_from_history:
+                                            print(f"[CONTINUITY FROM PATIENT HISTORY MODEL] ✓ Found {len(therapist_codes_from_history)} unique therapist(s) from history:")
+                                            for idx, tc in enumerate(therapist_codes_from_history, 1):
+                                                therapist_name = next((h.therapist_name for h in recent_history if h.therapist_code == tc), 'Unknown')
+                                                print(f"[CONTINUITY FROM PATIENT HISTORY MODEL]   {idx}. {therapist_name} (Code: {tc})")
+                                            
+                                            # Map therapist codes to TherapistMaster objects and check availability
+                                            available_history_therapists = []
+                                            unavailable_therapists = []
+                                            day_of_week = target_date.weekday()
+                                            
+                                            print(f"[CONTINUITY FROM PATIENT HISTORY MODEL] Checking availability for target date {target_date} (day of week: {day_of_week})...")
+                                            
+                                            for therapist_code in therapist_codes_from_history:
+                                                try:
+                                                    therapist = TherapistMaster.objects.filter(
+                                                        therapist_code=therapist_code
+                                                    ).first()
+                                                    
+                                                    if not therapist:
+                                                        print(f"[CONTINUITY FROM PATIENT HISTORY MODEL] ✗ Therapist {therapist_code} NOT FOUND in TherapistMaster - skipping")
+                                                        unavailable_therapists.append((therapist_code, "Not found in TherapistMaster"))
+                                                        continue
+                                                    
+                                                    therapist_name = getattr(therapist, 'therapist_name', 'Unknown')
+                                                    print(f"[CONTINUITY FROM PATIENT HISTORY MODEL] Checking therapist: {therapist_name} ({therapist_code})...")
+                                                    
+                                                    # Check if therapist is available
+                                                    # 1. Check weekly leave
+                                                    if TherapistLeaveMaster.objects.filter(
+                                                        therapist=therapist, 
+                                                        leave_day=day_of_week
+                                                    ).exists():
+                                                        print(f"[CONTINUITY FROM PATIENT HISTORY MODEL] ✗ {therapist_name} ({therapist_code}) is on weekly leave - NOT AVAILABLE")
+                                                        unavailable_therapists.append((therapist_code, "On weekly leave"))
+                                                        continue
+                                                    
+                                                    # 2. Check if already booked at this date+time_slot
+                                                    if allocate_slot and TherapistBooking.objects.filter(
+                                                        therapist=therapist,
+                                                        date=target_date,
+                                                        time_slot=allocate_slot,
+                                                        status='BOOKED'
+                                                    ).exists():
+                                                        print(f"[CONTINUITY FROM PATIENT HISTORY MODEL] ✗ {therapist_name} ({therapist_code}) already booked at {target_date} slot {getattr(allocate_slot, 'id', None)} - NOT AVAILABLE")
+                                                        unavailable_therapists.append((therapist_code, f"Already booked at {target_date} slot {getattr(allocate_slot, 'id', None)}"))
+                                                        continue
+                                                    
+                                                    # 3. Check daily session limit (max 6 sessions)
+                                                    session_count = TherapistBooking.objects.filter(
+                                                        therapist=therapist,
+                                                        date=target_date,
+                                                        status='BOOKED'
+                                                    ).count()
+                                                    
+                                                    if session_count >= 6:
+                                                        print(f"[CONTINUITY FROM PATIENT HISTORY MODEL] ✗ {therapist_name} ({therapist_code}) has reached max sessions ({session_count}/6) - NOT AVAILABLE")
+                                                        unavailable_therapists.append((therapist_code, f"Max sessions reached ({session_count}/6)"))
+                                                        continue
+                                                    
+                                                    # Therapist is available
+                                                    available_history_therapists.append(therapist_code)
+                                                    print(f"[CONTINUITY FROM PATIENT HISTORY MODEL] ✓ {therapist_name} ({therapist_code}) is AVAILABLE (sessions: {session_count}/6) - WILL BE ASSIGNED")
+                                                    
+                                                except Exception as e:
+                                                    print(f"[CONTINUITY FROM PATIENT HISTORY MODEL] ✗ Error checking therapist {therapist_code}: {e}")
+                                                    unavailable_therapists.append((therapist_code, f"Error: {str(e)}"))
+                                                    continue
+                                            
+                                            # Summary of availability check
+                                            print(f"[CONTINUITY FROM PATIENT HISTORY MODEL] ========== AVAILABILITY SUMMARY ==========")
+                                            print(f"[CONTINUITY FROM PATIENT HISTORY MODEL] Total therapists from history: {len(therapist_codes_from_history)}")
+                                            print(f"[CONTINUITY FROM PATIENT HISTORY MODEL] Available therapists: {len(available_history_therapists)}")
+                                            print(f"[CONTINUITY FROM PATIENT HISTORY MODEL] Unavailable therapists: {len(unavailable_therapists)}")
+                                            
+                                            if unavailable_therapists:
+                                                print(f"[CONTINUITY FROM PATIENT HISTORY MODEL] Unavailable therapist details:")
+                                                for tc, reason in unavailable_therapists:
+                                                    print(f"[CONTINUITY FROM PATIENT HISTORY MODEL]   - {tc}: {reason}")
+                                            
+                                            if available_history_therapists:
+                                                last_therapists = available_history_therapists
+                                                print(f"[CONTINUITY FROM PATIENT HISTORY MODEL] ========== ASSIGNMENT RESULT ==========")
+                                                print(f"[CONTINUITY FROM PATIENT HISTORY MODEL] ✓ ASSIGNED {len(available_history_therapists)} therapist(s) from PatientHistory as last_therapists:")
+                                                for idx, tc in enumerate(available_history_therapists, 1):
+                                                    therapist = TherapistMaster.objects.filter(therapist_code=tc).first()
+                                                    therapist_name = getattr(therapist, 'therapist_name', 'Unknown') if therapist else 'Unknown'
+                                                    print(f"[CONTINUITY FROM PATIENT HISTORY MODEL]   {idx}. {therapist_name} ({tc})")
+                                                print(f"[CONTINUITY FROM PATIENT HISTORY MODEL] These therapists will be preferred in allocation: {available_history_therapists}")
+                                            else:
+                                                print(f"[CONTINUITY FROM PATIENT HISTORY MODEL] ✗ NO THERAPISTS ASSIGNED - All therapists from history are unavailable")
+                                                print(f"[CONTINUITY FROM PATIENT HISTORY MODEL] Allocation will proceed with normal therapist selection")
+                                        else:
+                                            print(f"[CONTINUITY FROM PATIENT HISTORY MODEL] ✗ No therapist codes found in history records for date {most_recent_date}")
+                                    else:
+                                        print(f"[CONTINUITY FROM PATIENT HISTORY MODEL] ✗ No history records found for patient {patient_reg_no}")
+                                else:
+                                    print(f"[CONTINUITY FROM PATIENT HISTORY MODEL] ========== END PATIENT HISTORY CHECK (Not a repeated visitor) ==========")
+                            else:
+                                print(f"[CONTINUITY FROM PATIENT HISTORY MODEL] ✗ Patient registration number not found")
+                        else:
+                            print(f"[CONTINUITY FROM PATIENT HISTORY MODEL] ✗ Patient object not found in allocation")
+                    except Exception as e:
+                        print(f"[CONTINUITY FROM PATIENT HISTORY MODEL] ✗ ERROR querying PatientHistory: {e}")
+                        import traceback
+                        print(f"[CONTINUITY FROM PATIENT HISTORY MODEL] Traceback: {traceback.format_exc()}")
+                        # Continue with normal allocation if PatientHistory check fails
+                    print(f"[CONTINUITY FROM PATIENT HISTORY MODEL] ========== END PATIENT HISTORY CHECK ==========")
 
                 # Determine avoid_therapists for this slot **and same therapy**.
                 # We avoid using therapists who are reserved as continuity for OTHER patients
