@@ -10,7 +10,6 @@ db.sqlite3
 # --- Django ---
 # Ignore user-uploaded files, collected static files, and logs.
 /media/
-/staticfiles/
 *.log
 
 # --- Python ---
