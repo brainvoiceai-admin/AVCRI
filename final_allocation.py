@@ -1297,25 +1297,36 @@ def assign_continuity_therapists_pass1(booking, allocation, target_date, locked_
         print(f"[CONTINUITY PASS1]   - Added to locked_therapist_slots: (therapist_id={t.id}, slot_id={slot_master.id})")
         print(f"[CONTINUITY PASS1]   - Will create TherapistBooking to LOCK this therapist-slot combination")
     
-    # Assign bathing therapist if needed
+    # Assign bathing therapist FIRST (maintain continuity for bathing)
+    # Priority: Previous bathing therapist should remain as bathing therapist
     if needs_bath_flag and assigned_continuity:
         if previous_bathing_therapist and previous_bathing_therapist in assigned_continuity:
             result['bath_assigned'] = previous_bathing_therapist
+            print(f"[CONTINUITY PASS1] Using previous bathing therapist: {previous_bathing_therapist.therapist_code} (maintaining continuity)")
         else:
             # Find first bathing therapist from assigned list
             for t in assigned_continuity:
                 if getattr(t, 'is_bathing_therapist', False):
                     result['bath_assigned'] = t
+                    print(f"[CONTINUITY PASS1] Assigned bathing therapist: {t.therapist_code}")
                     break
     
     # Check for senior tag assignment (special treatments)
+    # CRITICAL: Senior therapist MUST be different from bathing therapist
+    # Priority: Maintain bathing therapist continuity, assign senior tag to different senior
     requires_senior_tag = is_treatment_requiring_senior_tag(therapy_name)
     if requires_senior_tag and assigned_continuity:
         senior_candidates = []
+        bath_assigned = result.get('bath_assigned')
+        
         for t in assigned_continuity:
             grade_name = get_therapist_grade_name(t)
             if 'Senior' in grade_name:
-                senior_candidates.append((t, grade_name))
+                # Exclude bathing therapist from senior tag assignment
+                if t != bath_assigned:
+                    senior_candidates.append((t, grade_name))
+                else:
+                    print(f"[CONTINUITY PASS1] Excluding bathing therapist {t.therapist_code} from senior tag (must be different)")
         
         if senior_candidates:
             from math import inf
@@ -1328,6 +1339,19 @@ def assign_continuity_therapists_pass1(booking, allocation, target_date, locked_
                     best_count = current
             if best is not None:
                 result['senior_therapist'] = best
+                print(f"[CONTINUITY PASS1] Assigned senior_therapist: {best.therapist_code} (senior tag count: {best_count}, different from bathing {bath_assigned.therapist_code if bath_assigned else None})")
+            else:
+                print(f"[CONTINUITY PASS1] ⚠ No senior therapist available for senior tag (excluding bathing therapist)")
+        else:
+            print(f"[CONTINUITY PASS1] ⚠ No senior candidates available (excluding bathing therapist)")
+    
+    # Final validation: Ensure bathing and senior therapists are different for special treatments
+    if requires_senior_tag and result.get('senior_therapist') and result.get('bath_assigned'):
+        if result['senior_therapist'] == result['bath_assigned']:
+            print(f"[CONTINUITY PASS1] ⚠ ERROR: Senior therapist {result['senior_therapist'].therapist_code} is same as bathing therapist!")
+            print(f"[CONTINUITY PASS1] This should not happen - clearing senior assignment, will be reassigned in PASS 2")
+            # Clear senior assignment - it will be reassigned in PASS 2 with proper exclusion
+            result['senior_therapist'] = None
     
     # Create TherapistBooking records to lock the therapists
     if assigned_continuity:
@@ -2110,6 +2134,17 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
             bath_assigned = continuity_assigned.get('bath_assigned', None)
             senior_therapist = continuity_assigned.get('senior_therapist', None)
             requires_senior_tag = is_treatment_requiring_senior_tag(therapy_name) and (senior_therapist is not None)
+            
+            # CRITICAL VALIDATION: For special treatments, bathing and senior therapists MUST be different
+            # Priority: Maintain bathing therapist continuity, reassign senior tag to different senior
+            if requires_senior_tag and bath_assigned and senior_therapist:
+                if bath_assigned == senior_therapist:
+                    print(f"[CONTINUITY PASS2] ⚠ PASS 1 assigned same therapist as both bathing and senior: {bath_assigned.therapist_code}")
+                    print(f"[CONTINUITY PASS2] Fixing: Keeping bathing therapist {bath_assigned.therapist_code} (maintain continuity), will reassign senior tag to different senior")
+                    # Clear senior assignment - will be reassigned below to a different senior
+                    senior_therapist = None
+                    requires_senior_tag = is_treatment_requiring_senior_tag(therapy_name)  # Re-enable senior tag requirement
+            
             print(f"[CONTINUITY PASS2] Using bath_assigned={bath_assigned.therapist_code if bath_assigned else None}, senior_therapist={senior_therapist.therapist_code if senior_therapist else None} from PASS 1")
         else:
             # Check if this treatment requires special senior therapist handling
@@ -2173,95 +2208,110 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                 continue  # Skip to next booking
             
             # For special treatments: Senior therapist should NOT be the bathing therapist
+            # Priority: Maintain bathing therapist continuity (previous bathing therapist should stay as bathing)
             if requires_senior_tag and senior_therapist:
-                # Exclude senior therapist from bathing assignment
-                bathing_candidates = [t for t in assigned_therapists if t != senior_therapist and getattr(t, 'is_bathing_therapist', False)]
-                
-                if previous_bathing_therapist and previous_bathing_therapist in bathing_candidates:
-                    # Previous bathing therapist is available and not the senior - use them
-                    bath_assigned = previous_bathing_therapist
-                    print(f"[DEBUG] Dhara & Pizichil: Using previous bathing therapist {previous_bathing_therapist.therapist_code} (senior {senior_therapist.therapist_code} excluded)")
-                elif bathing_candidates:
-                    # Pick first available bathing therapist (excluding senior)
-                    bath_assigned = bathing_candidates[0]
-                    print(f"[DEBUG] Dhara & Pizichil: Assigned bathing therapist {bath_assigned.therapist_code} (senior {senior_therapist.therapist_code} excluded)")
+                if previous_bathing_therapist and previous_bathing_therapist in assigned_therapists:
+                    if previous_bathing_therapist != senior_therapist:
+                        # Previous bathing therapist is available and different from senior - use them (maintain continuity)
+                        bath_assigned = previous_bathing_therapist
+                        print(f"[DEBUG] Dhara & Pizichil: Using previous bathing therapist {previous_bathing_therapist.therapist_code} (maintaining continuity, senior {senior_therapist.therapist_code} is different)")
+                    else:
+                        # Previous bathing therapist IS the senior - reassign senior tag to different senior
+                        print(f"[DEBUG] Dhara & Pizichil: Previous bathing therapist {previous_bathing_therapist.therapist_code} IS the senior - reassigning senior tag to different senior")
+                        bath_assigned = previous_bathing_therapist
+                        senior_candidates = [t for t in assigned_therapists if t != bath_assigned and 'Senior' in getattr(getattr(t, 'therapist_grade', None), 'name', '')]
+                        if senior_candidates:
+                            from math import inf
+                            best = None
+                            best_count = inf
+                            for t in senior_candidates:
+                                current = get_senior_tag_count_for_therapist(t, target_date)
+                                if current < 2 and current < best_count:
+                                    best = t
+                                    best_count = current
+                            if best:
+                                senior_therapist = best
+                                print(f"[DEBUG] Dhara & Pizichil: Reassigned senior tag to {best.therapist_code} (bathing {bath_assigned.therapist_code} maintained)")
+                        else:
+                            print(f"[DEBUG] Dhara & Pizichil: No alternative senior available - keeping senior tag on {senior_therapist.therapist_code} (same as bathing)")
                 else:
-                    # No bathing therapist available except senior - need to find another senior or fail
-                    # Try to find next available senior therapist who is also a bathing therapist
-                    print(f"[DEBUG] Dhara & Pizichil: Senior {senior_therapist.therapist_code} is the only bathing therapist. Looking for alternative senior...")
-                    
-                    # Get all available senior therapists (excluding current senior)
-                    from masters.models import TherapistMaster
-                    from Patient.models import TherapistBooking
-                    day_of_week = target_date.weekday()
-                    
-                    alternative_seniors = TherapistMaster.objects.filter(
-                        therapist_grade__name__in=['Senior Therapist', 'Super Senior Therapist']
-                    ).exclude(
-                        therapist_code=senior_therapist.therapist_code
-                    )
-                    
-                    # Filter by gender if needed
-                    pat_sex = getattr(getattr(allocation, 'patient', None), 'pat_sex', None)
-                    if pat_sex:
-                        desired_gender = 'female' if str(pat_sex).strip().lower().startswith('f') else 'male'
-                        alternative_seniors = alternative_seniors.filter(therapist_gender__istartswith=desired_gender[0])
-                    
-                    # Filter by bathing therapist requirement
-                    alternative_seniors = alternative_seniors.filter(is_bathing_therapist=True)
-                    
-                    # Exclude those on leave or booked
-                    for alt_senior in alternative_seniors:
-                        if TherapistBooking.objects.filter(therapist=alt_senior, date=target_date, time_slot=allocate_slot, status='BOOKED').exists():
-                            continue
-                        if TherapistLeaveMaster.objects.filter(therapist=alt_senior, leave_day=day_of_week).exists():
-                            continue
-                        # Check emergency leave
-                        from masters.models import EmergencyLeave
-                        from django.db.models import Q
-                        if EmergencyLeave.objects.filter(
-                            from_date__lte=target_date, to_date__gte=target_date
-                        ).filter(
-                            Q(therapist=alt_senior) | Q(employee_code=alt_senior.employee_code)
-                        ).exists():
-                            continue
+                    # No previous bathing therapist - exclude senior from bathing assignment
+                    bathing_candidates = [t for t in assigned_therapists if t != senior_therapist and getattr(t, 'is_bathing_therapist', False)]
+                    if bathing_candidates:
+                        bath_assigned = bathing_candidates[0]
+                        print(f"[DEBUG] Dhara & Pizichil: Assigned bathing therapist {bath_assigned.therapist_code} (senior {senior_therapist.therapist_code} excluded)")
+                    else:
+                        # No bathing therapist available except senior - need to find another senior or fail
+                        print(f"[DEBUG] Dhara & Pizichil: Senior {senior_therapist.therapist_code} is the only bathing therapist. Looking for alternative senior...")
+                        from masters.models import TherapistMaster
+                        from Patient.models import TherapistBooking
+                        day_of_week = target_date.weekday()
                         
-                        # Found alternative senior - replace current senior and use this one for bathing
-                        print(f"[DEBUG] Dhara & Pizichil: Found alternative senior {alt_senior.therapist_code} who can be bathing therapist")
-                        # Replace senior in assigned list
-                        assigned_therapists = [alt_senior if t == senior_therapist else t for t in assigned_therapists]
-                        senior_therapist = alt_senior
-                        bath_assigned = alt_senior
-                        break
-                    
-                    if not bath_assigned:
-                        # No alternative senior found - fail allocation
-                        reason = "bathing_therapist_unavailable: Senior therapist for Dhara & Pizichil cannot be bathing therapist, and no alternative senior available"
-                        print(f"[DEBUG] FAILING allocation: Dhara & Pizichil - Senior {senior_therapist.therapist_code} is only bathing therapist and no alternative found. Patient: {patient_id}, Date: {target_date}")
+                        alternative_seniors = TherapistMaster.objects.filter(
+                            therapist_grade__name__in=['Senior Therapist', 'Super Senior Therapist']
+                        ).exclude(
+                            therapist_code=senior_therapist.therapist_code
+                        )
                         
-                        try:
-                            booking.status = 'failed'
-                            booking.save(update_fields=['status', 'updated_at'])
-                        except Exception as e:
-                            print(f"Error updating booking {booking_id} to failed: {e}")
+                        # Filter by gender if needed
+                        pat_sex = getattr(getattr(allocation, 'patient', None), 'pat_sex', None)
+                        if pat_sex:
+                            desired_gender = 'female' if str(pat_sex).strip().lower().startswith('f') else 'male'
+                            alternative_seniors = alternative_seniors.filter(therapist_gender__istartswith=desired_gender[0])
                         
-                        therapists_for_audit = [therapist_entry(t, False) for t in assigned_therapists]
-                        if AllocationAttempt:
+                        # Filter by bathing therapist requirement
+                        alternative_seniors = alternative_seniors.filter(is_bathing_therapist=True)
+                        
+                        # Exclude those on leave or booked
+                        for alt_senior in alternative_seniors:
+                            if TherapistBooking.objects.filter(therapist=alt_senior, date=target_date, time_slot=allocate_slot, status='BOOKED').exists():
+                                continue
+                            if TherapistLeaveMaster.objects.filter(therapist=alt_senior, leave_day=day_of_week).exists():
+                                continue
+                            from masters.models import EmergencyLeave
+                            from django.db.models import Q
+                            if EmergencyLeave.objects.filter(
+                                from_date__lte=target_date, to_date__gte=target_date
+                            ).filter(
+                                Q(therapist=alt_senior) | Q(employee_code=alt_senior.employee_code)
+                            ).exists():
+                                continue
+                            
+                            # Found alternative senior - replace current senior and use this one for bathing
+                            print(f"[DEBUG] Dhara & Pizichil: Found alternative senior {alt_senior.therapist_code} who can be bathing therapist")
+                            assigned_therapists = [alt_senior if t == senior_therapist else t for t in assigned_therapists]
+                            senior_therapist = alt_senior
+                            bath_assigned = alt_senior
+                            break
+                        
+                        if not bath_assigned:
+                            # No alternative senior found - fail allocation
+                            reason = "bathing_therapist_unavailable: Senior therapist for Dhara & Pizichil cannot be bathing therapist, and no alternative senior available"
+                            print(f"[DEBUG] FAILING allocation: Dhara & Pizichil - Senior {senior_therapist.therapist_code} is only bathing therapist and no alternative found. Patient: {patient_id}, Date: {target_date}")
+                            
                             try:
-                                AllocationAttempt.objects.create(
-                                    visit=None, therapy=None, date=target_date,
-                                    requested_time_slot=allocate_slot, requested_time_slot_value=requested_slot_value or '',
-                                    status='FAILED', reason=reason,
-                                    extra={"required": req_total, "found": len(candidate_therapists), "booking_id": booking_id, "therapists": therapists_for_audit, "bathing_required": True, "senior_therapist": senior_therapist.therapist_code if senior_therapist else None}
-                                )
-                            except Exception:
-                                pass
-                        tasks.append({
-                            "booking_id": booking_id, "allocation_id": therapy_allocation_id, "date": target_date.isoformat(),
-                            "therapy_name": therapy_name, "slot": requested_slot_value, "status": "FAILED", "reason": reason,
-                            "room_no": getattr(booking.room, 'room_no', None) if getattr(booking, 'room', None) else None, "therapists": therapists_for_audit
-                        })
-                        continue  # Skip to next booking
+                                booking.status = 'failed'
+                                booking.save(update_fields=['status', 'updated_at'])
+                            except Exception as e:
+                                print(f"Error updating booking {booking_id} to failed: {e}")
+                            
+                            therapists_for_audit = [therapist_entry(t, False) for t in assigned_therapists]
+                            if AllocationAttempt:
+                                try:
+                                    AllocationAttempt.objects.create(
+                                        visit=None, therapy=None, date=target_date,
+                                        requested_time_slot=allocate_slot, requested_time_slot_value=requested_slot_value or '',
+                                        status='FAILED', reason=reason,
+                                        extra={"required": req_total, "found": len(candidate_therapists), "booking_id": booking_id, "therapists": therapists_for_audit, "bathing_required": True, "senior_therapist": senior_therapist.therapist_code if senior_therapist else None}
+                                    )
+                                except Exception:
+                                    pass
+                            tasks.append({
+                                "booking_id": booking_id, "allocation_id": therapy_allocation_id, "date": target_date.isoformat(),
+                                "therapy_name": therapy_name, "slot": requested_slot_value, "status": "FAILED", "reason": reason,
+                                "room_no": getattr(booking.room, 'room_no', None) if getattr(booking, 'room', None) else None, "therapists": therapists_for_audit
+                            })
+                            continue  # Skip to next booking
             else:
                 # Not Dhara & Pizichil or no senior therapist - use normal logic
                 # Previous bathing therapist should already be prioritized in candidate_therapists

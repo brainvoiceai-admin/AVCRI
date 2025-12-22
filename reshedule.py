@@ -1056,21 +1056,163 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
         # Derive patient gender from allocation patient snapshot (e.g., 'Male'/'Female')
         pat_sex = getattr(getattr(allocation, 'patient', None), 'pat_sex', None)
         
-        # If we have a complete previous therapist group, prioritize them
-        if previous_therapist_group and len(previous_therapist_group) > 0:
+        # First check if we have continuity therapists from PASS 1 (via last_allocation)
+        last_therapists = []
+        if last_allocation and isinstance(last_allocation, dict):
+            continuity_assigned = last_allocation.get('continuity_assigned', {})
+            if continuity_assigned:
+                assigned_therapists = continuity_assigned.get('assigned_therapists', [])
+                last_therapists = [getattr(t, 'therapist_code', None) for t in assigned_therapists if getattr(t, 'therapist_code', None)]
+                print(f"[RESCHEDULE PASS2] Using {len(last_therapists)} continuity therapists from PASS 1: {last_therapists}")
+            elif last_allocation.get('therapists'):
+                last_therapists = last_allocation.get('therapists', [])
+                print(f"[RESCHEDULE PASS2] Using continuity therapists from last_allocation: {last_therapists}")
+        
+        # If we have a complete previous therapist group, prioritize them (fallback if no PASS 1 continuity)
+        if not last_therapists and previous_therapist_group and len(previous_therapist_group) > 0:
             # Use the complete group as last_therapists
             last_therapists = [tm.therapist_code for tm in previous_therapist_group]
             print(f"[DEBUG] Using complete previous therapist group for continuity: {last_therapists}")
-        else:
+        
+        if not last_therapists:
             # Build last_therapists list: include previous bathing therapist if available, plus any from last_allocation
-            last_therapists = []
             if previous_bathing_therapist:
                 last_therapists.append(previous_bathing_therapist.therapist_code)
-            if last_allocation.get("last_therapist_codes"):
+            if last_allocation and isinstance(last_allocation, dict) and last_allocation.get("last_therapist_codes"):
                 # Add other last therapists, avoiding duplicates
                 for code in last_allocation.get("last_therapist_codes", []):
                     if code not in last_therapists:
                         last_therapists.append(code)
+        
+        # PASS 2: Check PatientHistory for previous years' therapists if no recent treatment
+        # This helps assign therapists who treated the patient in previous years
+        if not last_therapists:
+            print(f"[RESCHEDULE PASS2] ========== CHECKING PATIENT HISTORY FOR BOOKING {booking_id} ==========")
+            try:
+                patient_obj = getattr(allocation, 'patient', None)
+                if patient_obj:
+                    patient_reg_no = getattr(patient_obj, 'pat_reg_no', None)
+                    patient_name = getattr(patient_obj, 'pat_name', 'Unknown')
+                    if patient_reg_no:
+                        print(f"[RESCHEDULE PASS2] Patient: {patient_name} (Reg No: {patient_reg_no})")
+                        print(f"[RESCHEDULE PASS2] Target Date: {target_date}, Slot: {getattr(canonical_slot, 'id', None) if canonical_slot else None}")
+                        
+                        from Patient.models import PatientHistory, Repeated_Visitors
+                        from masters.models import TherapistMaster, TherapistLeaveMaster
+                        from Patient.models import TherapistBooking
+                        
+                        # First check if patient exists in Repeated_Visitors model
+                        is_repeated_visitor = False
+                        try:
+                            reg_no_digits = ''.join(ch for ch in str(patient_reg_no) if ch.isdigit())
+                            if reg_no_digits:
+                                reg_no_int = int(reg_no_digits)
+                                is_repeated_visitor = Repeated_Visitors.objects.filter(
+                                    register_number=reg_no_int
+                                ).exists()
+                                
+                                if is_repeated_visitor:
+                                    repeated_visitor = Repeated_Visitors.objects.filter(
+                                        register_number=reg_no_int
+                                    ).first()
+                                    total_visits = getattr(repeated_visitor, 'total_visits', 0) if repeated_visitor else 0
+                                    is_vip = getattr(repeated_visitor, 'is_vip', False) if repeated_visitor else False
+                                    print(f"[RESCHEDULE PASS2] ✓ Patient is a REPEATED VISITOR (Total visits: {total_visits}, VIP: {is_vip})")
+                                    print(f"[RESCHEDULE PASS2] Proceeding with PatientHistory check...")
+                                else:
+                                    print(f"[RESCHEDULE PASS2] ✗ Patient is NOT a repeated visitor - Skipping PatientHistory check")
+                            else:
+                                print(f"[RESCHEDULE PASS2] ✗ Could not extract registration number digits - Skipping PatientHistory check")
+                        except (ValueError, TypeError) as e:
+                            print(f"[RESCHEDULE PASS2] ✗ Error checking Repeated_Visitors: {e} - Skipping PatientHistory check")
+                        
+                        # Only query PatientHistory if patient is a repeated visitor
+                        if is_repeated_visitor:
+                            # Query PatientHistory by preg_no (patient registration number)
+                            history_records = PatientHistory.objects.filter(
+                                preg_no=str(patient_reg_no)
+                            ).order_by('-date')
+                            
+                            if history_records.exists():
+                                # Group by date and get the most recent date's therapists
+                                most_recent_date = history_records.first().date
+                                recent_history = history_records.filter(date=most_recent_date)
+                                
+                                # Get unique therapist codes from that date
+                                therapist_codes_from_history = list(
+                                    set([h.therapist_code for h in recent_history if h.therapist_code])
+                                )
+                                
+                                if therapist_codes_from_history:
+                                    print(f"[RESCHEDULE PASS2] ✓ Found {len(therapist_codes_from_history)} unique therapist(s) from history")
+                                    
+                                    # Map therapist codes to TherapistMaster objects and check availability
+                                    available_history_therapists = []
+                                    day_of_week = date.weekday()
+                                    
+                                    for therapist_code in therapist_codes_from_history:
+                                        try:
+                                            therapist = TherapistMaster.objects.filter(
+                                                therapist_code=therapist_code
+                                            ).first()
+                                            
+                                            if therapist:
+                                                # Check if therapist is available
+                                                # 1. Check weekly leave
+                                                if TherapistLeaveMaster.objects.filter(
+                                                    therapist=therapist, 
+                                                    leave_day=day_of_week
+                                                ).exists():
+                                                    print(f"[RESCHEDULE PASS2] Therapist {therapist_code} is on weekly leave - skipping")
+                                                    continue
+                                                
+                                                # 2. Check if already booked at this date+time_slot
+                                                if canonical_slot and TherapistBooking.objects.filter(
+                                                    therapist=therapist,
+                                                    date=date,
+                                                    time_slot=canonical_slot,
+                                                    status='BOOKED'
+                                                ).exists():
+                                                    print(f"[RESCHEDULE PASS2] Therapist {therapist_code} already booked at {date} {canonical_slot} - skipping")
+                                                    continue
+                                                
+                                                # 3. Check daily session limit (max 6 sessions)
+                                                session_count = TherapistBooking.objects.filter(
+                                                    therapist=therapist,
+                                                    date=date,
+                                                    status='BOOKED'
+                                                ).count()
+                                                
+                                                if session_count >= 6:
+                                                    print(f"[RESCHEDULE PASS2] Therapist {therapist_code} has reached max sessions (6) - skipping")
+                                                    continue
+                                                
+                                                # Therapist is available
+                                                available_history_therapists.append(therapist_code)
+                                                print(f"[RESCHEDULE PASS2] Therapist {therapist_code} is available - adding to last_therapists")
+                                                
+                                        except Exception as e:
+                                            print(f"[RESCHEDULE PASS2] Error checking therapist {therapist_code}: {e}")
+                                            continue
+                                    
+                                    if available_history_therapists:
+                                        last_therapists = available_history_therapists
+                                        print(f"[RESCHEDULE PASS2] ✓ ASSIGNED {len(available_history_therapists)} therapist(s) from PatientHistory: {available_history_therapists}")
+                                else:
+                                    print(f"[RESCHEDULE PASS2] ✗ No therapist codes found in history records")
+                            else:
+                                print(f"[RESCHEDULE PASS2] ✗ No history records found for patient {patient_reg_no}")
+                        else:
+                            print(f"[RESCHEDULE PASS2] ========== END PATIENT HISTORY CHECK (Not a repeated visitor) ==========")
+                    else:
+                        print(f"[RESCHEDULE PASS2] ✗ Patient registration number not found")
+                else:
+                    print(f"[RESCHEDULE PASS2] ✗ Patient object not found in allocation")
+            except Exception as e:
+                print(f"[RESCHEDULE PASS2] ✗ ERROR querying PatientHistory: {e}")
+                import traceback
+                traceback.print_exc()
+            print(f"[RESCHEDULE PASS2] ========== END PATIENT HISTORY CHECK ==========")
         
         candidate_therapists = allocate_therapists(
             date,
@@ -1606,9 +1748,384 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
         }, False, reason)
 
 # -----------------------
+# PASS 1: Continuity Priority Pass
+# -----------------------
+def assign_continuity_therapists_pass1(booking, allocation, target_date, locked_therapist_slots):
+    """
+    PASS 1 - Continuity Priority Pass:
+    Assigns ONLY previous-day therapists for a booking and locks them.
+    Does NOT fill remaining slots - that's done in PASS 2.
+    
+    Args:
+        booking: Booking instance
+        allocation: TherapyAllocation instance
+        target_date: Date for allocation
+        locked_therapist_slots: Set of (therapist_id, slot_id) tuples that are already locked
+    
+    Returns:
+        dict with keys:
+            - 'assigned_therapists': List of TherapistMaster objects assigned (continuity only)
+            - 'remaining_requirements': Dict of remaining therapist requirements
+            - 'bath_assigned': TherapistMaster assigned for bathing (if needed)
+            - 'senior_therapist': TherapistMaster with senior tag (if special treatment)
+            - 'success': bool indicating if any continuity therapists were assigned
+    """
+    from Patient.models import TherapistBooking
+    from Sheduling.models import TherapistContinuityPlan
+    from masters.models import SlotMaster, TherapistMaster, TherapistLeaveMaster, EmergencyLeave
+    from datetime import timedelta
+    
+    result = {
+        'assigned_therapists': [],
+        'remaining_requirements': {},
+        'bath_assigned': None,
+        'senior_therapist': None,
+        'success': False
+    }
+    
+    # Get therapy requirements
+    try:
+        therapy_req = therapist_requirements(allocation)
+    except Exception:
+        therapy_req = {"total": 1, "super_senior": 0, "senior": 0, "junior": 0, "trainee": 0, "therapy_category": None}
+    
+    req_total = int(therapy_req.get("total", 1) or 1)
+    if req_total == 0:
+        return result
+    
+    # Get patient info
+    patient_id = getattr(allocation.patient, 'id', None)
+    patient_gender = getattr(getattr(allocation, 'patient', None), 'pat_sex', None)
+    needs_bath_flag = therapy_needs_bath(allocation) if therapy_needs_bath else False
+    therapy_name = allocation.therapy_name
+    
+    # Get slot
+    slot = getattr(booking, 'timeslot', None)
+    if not slot:
+        return result
+    
+    # Resolve SlotMaster
+    slot_master = None
+    if isinstance(slot, SlotMaster):
+        slot_master = slot
+    else:
+        slot_time = getattr(slot, 'slot_time', None)
+        if slot_time:
+            slot_master = SlotMaster.objects.filter(slot_time=slot_time, is_active=True).first()
+    
+    if not slot_master:
+        return result
+    
+    # Get continuity therapists from plan
+    continuity_therapists = []
+    previous_bathing_therapist = None
+    
+    if patient_id:
+        try:
+            continuity_qs = TherapistContinuityPlan.objects.filter(
+                date=target_date,
+                time_slot=slot_master,
+                allocation_id=allocation.id,
+                patient_id=patient_id,
+            ).select_related('therapist').order_by('priority', 'therapist_id')
+            
+            continuity_therapists = [row.therapist for row in continuity_qs if row.therapist]
+            
+            if needs_bath_flag:
+                bath_row = next((row for row in continuity_qs if row.is_bathing and getattr(row.therapist, 'is_bathing_therapist', False)), None)
+                if bath_row:
+                    previous_bathing_therapist = bath_row.therapist
+                else:
+                    for t in continuity_therapists:
+                        if getattr(t, 'is_bathing_therapist', False):
+                            previous_bathing_therapist = t
+                            break
+            
+            print(f"[RESCHEDULE PASS1] Booking {booking.pk}: Found {len(continuity_therapists)} continuity therapists from TherapistContinuityPlan")
+            if continuity_therapists:
+                print(f"[RESCHEDULE PASS1]   Continuity therapists: {[getattr(t, 'therapist_code', 'UNKNOWN') for t in continuity_therapists]}")
+        except Exception as e:
+            print(f"[RESCHEDULE PASS1] Error reading continuity plan: {e}")
+            continuity_therapists = []
+    
+    # If no continuity plan, try to find previous day therapists from TherapistBooking
+    if not continuity_therapists and patient_id:
+        try:
+            from django.db.models import Max
+            # Find the most recent date where this patient had therapists assigned
+            most_recent_date = TherapistBooking.objects.filter(
+                patient_id=patient_id,
+                status='BOOKED'
+            ).exclude(
+                visit=allocation  # Exclude current allocation
+            ).aggregate(Max('date'))['date__max']
+            
+            if most_recent_date:
+                # Get ALL therapists from that most recent date (same time slot if possible, or any slot)
+                prev_bookings = TherapistBooking.objects.filter(
+                    patient_id=patient_id,
+                    date=most_recent_date,
+                    status='BOOKED'
+                ).exclude(
+                    visit=allocation
+                ).select_related('therapist').order_by('time_slot')
+                
+                # Extract TherapistMaster objects directly
+                previous_therapist_masters = []
+                seen_therapist_ids = set()
+                for prev_booking in prev_bookings:
+                    if prev_booking.therapist:
+                        therapist_id = prev_booking.therapist.pk
+                        if therapist_id not in seen_therapist_ids:
+                            previous_therapist_masters.append(prev_booking.therapist)
+                            seen_therapist_ids.add(therapist_id)
+                
+                if previous_therapist_masters:
+                    continuity_therapists = previous_therapist_masters
+                    print(f"[RESCHEDULE PASS1] Booking {booking.pk}: Found {len(continuity_therapists)} continuity therapists from previous day ({most_recent_date})")
+                    if needs_bath_flag:
+                        for t in continuity_therapists:
+                            if getattr(t, 'is_bathing_therapist', False):
+                                previous_bathing_therapist = t
+                                break
+        except Exception as e:
+            print(f"[RESCHEDULE PASS1] Error finding previous day therapists: {e}")
+            continuity_therapists = []
+    
+    if not continuity_therapists:
+        # No continuity therapists - skip this booking in PASS 1
+        result['remaining_requirements'] = therapy_req.copy()
+        return result
+    
+    # Check which continuity therapists are available and can be assigned
+    day_of_week = target_date.weekday()
+    assigned_continuity = []
+    grade_map = {
+        "Super Senior Therapist": therapy_req.get("super_senior", 0),
+        "Senior Therapist": therapy_req.get("senior", 0),
+        "Junior Therapist": therapy_req.get("junior", 0),
+        "Trainee Therapist": therapy_req.get("trainee", 0)
+    }
+    
+    # Normalize patient gender
+    desired_gender = None
+    if patient_gender:
+        g = str(patient_gender).strip().lower()
+        if g.startswith('f'):
+            desired_gender = 'female'
+        else:
+            desired_gender = 'male'
+    
+    # Check emergency leaves
+    try:
+        em_leaves_qs = EmergencyLeave.objects.filter(from_date__lte=target_date, to_date__gte=target_date)
+        emergency_leave_therapist_ids = set(em_leaves_qs.exclude(therapist__isnull=True).values_list('therapist_id', flat=True))
+        emergency_leave_employee_codes = set(em_leaves_qs.exclude(employee_code__isnull=True).values_list('employee_code', flat=True))
+    except Exception:
+        emergency_leave_therapist_ids = set()
+        emergency_leave_employee_codes = set()
+    
+    def therapist_on_leave(t):
+        if TherapistLeaveMaster.objects.filter(therapist=t, leave_day=day_of_week).exists():
+            return True
+        if getattr(t, 'id', None) in emergency_leave_therapist_ids:
+            return True
+        emp_code = getattr(t, 'employee_code', None)
+        if emp_code and emp_code in emergency_leave_employee_codes:
+            return True
+        return False
+    
+    def get_therapist_gender(t):
+        try:
+            v = getattr(t, 'therapist_gender', None)
+            if v:
+                v_str = str(v).strip()
+                if v_str.lower().startswith('m'):
+                    return 'male'
+                if v_str.lower().startswith('f'):
+                    return 'female'
+        except Exception:
+            pass
+        return None
+    
+    def get_therapist_grade_name(t):
+        if not t:
+            return ''
+        if hasattr(t, 'therapist_grade') and t.therapist_grade:
+            if hasattr(t.therapist_grade, 'name'):
+                return t.therapist_grade.name
+        return ''
+    
+    # Try to assign continuity therapists
+    for t in continuity_therapists:
+        if len(assigned_continuity) >= req_total:
+            break
+        
+        # Check if therapist is already locked by another booking
+        lock_key = (t.id, slot_master.id)
+        if lock_key in locked_therapist_slots:
+            print(f"[RESCHEDULE PASS1] Therapist {t.therapist_code} already locked for slot {slot_master.id}")
+            continue
+        
+        # Check availability constraints
+        if therapist_on_leave(t):
+            print(f"[RESCHEDULE PASS1] Therapist {t.therapist_code} on leave - skipping")
+            continue
+        
+        # Check if already booked at this slot
+        if TherapistBooking.objects.filter(therapist=t, date=target_date, time_slot=slot_master, status='BOOKED').exists():
+            print(f"[RESCHEDULE PASS1] Therapist {t.therapist_code} already booked at {target_date} {slot_master} - skipping")
+            continue
+        
+        # Check gender match
+        if desired_gender:
+            t_gender = get_therapist_gender(t)
+            if t_gender != desired_gender:
+                print(f"[RESCHEDULE PASS1] Therapist {t.therapist_code} gender mismatch ({t_gender} vs {desired_gender}) - skipping")
+                continue
+        
+        # Check if grade is still needed (with substitution support)
+        therapist_grade_name = get_therapist_grade_name(t)
+        
+        # Grade substitution hierarchy: Senior can be replaced by Super Senior
+        substitution_map = {
+            "Senior Therapist": ["Super Senior Therapist"],
+            "Junior Therapist": ["Senior Therapist", "Super Senior Therapist"],
+            "Trainee Therapist": ["Junior Therapist", "Senior Therapist", "Super Senior Therapist"],
+            "Super Senior Therapist": []  # No substitution for highest grade
+        }
+        
+        grade_needed = False
+        if grade_map.get(therapist_grade_name, 0) > 0:
+            grade_needed = True
+        else:
+            # Check if this grade can substitute for a needed grade
+            for needed_grade, substitutes in substitution_map.items():
+                if therapist_grade_name in substitutes and grade_map.get(needed_grade, 0) > 0:
+                    grade_needed = True
+                    print(f"[RESCHEDULE PASS1] Therapist {t.therapist_code} grade {therapist_grade_name} can substitute for needed {needed_grade}")
+                    break
+        
+        if not grade_needed:
+            print(f"[RESCHEDULE PASS1] Therapist {t.therapist_code} grade {therapist_grade_name} not needed and cannot substitute - skipping")
+            continue
+        
+        # Check bathing requirement
+        if needs_bath_flag and not getattr(t, 'is_bathing_therapist', False):
+            # Only skip if we haven't assigned a bathing therapist yet
+            if not result['bath_assigned']:
+                print(f"[RESCHEDULE PASS1] Therapist {t.therapist_code} not a bathing therapist but bathing required - skipping")
+                continue
+        
+        # Check daily session limit (max 6 sessions)
+        session_count = TherapistBooking.objects.filter(
+            therapist=t,
+            date=target_date,
+            status='BOOKED'
+        ).count()
+        
+        if session_count >= 6:
+            print(f"[RESCHEDULE PASS1] Therapist {t.therapist_code} at max sessions (6) - skipping")
+            continue
+        
+        # All checks passed - assign this continuity therapist
+        assigned_continuity.append(t)
+        
+        # Decrement grade map (handle substitution)
+        if grade_map.get(therapist_grade_name, 0) > 0:
+            grade_map[therapist_grade_name] -= 1
+        else:
+            # This is a substitution - find which grade this substitutes for
+            for needed_grade, substitutes in substitution_map.items():
+                if therapist_grade_name in substitutes and grade_map.get(needed_grade, 0) > 0:
+                    grade_map[needed_grade] -= 1
+                    print(f"[RESCHEDULE PASS1] Using {therapist_grade_name} to substitute for {needed_grade}")
+                    break
+        
+        locked_therapist_slots.add(lock_key)
+        
+        therapist_code = getattr(t, 'therapist_code', 'UNKNOWN')
+        print(f"[RESCHEDULE PASS1] ✓ SELECTED continuity therapist {therapist_code} ({therapist_grade_name}) for booking {booking.pk}")
+    
+    # Assign bathing therapist if needed
+    if needs_bath_flag and assigned_continuity:
+        if previous_bathing_therapist and previous_bathing_therapist in assigned_continuity:
+            result['bath_assigned'] = previous_bathing_therapist
+        else:
+            # Find first bathing therapist from assigned list
+            for t in assigned_continuity:
+                if getattr(t, 'is_bathing_therapist', False):
+                    result['bath_assigned'] = t
+                    break
+    
+    # Check for senior tag assignment (special treatments)
+    requires_senior_tag = is_treatment_requiring_senior_tag(therapy_name)
+    if requires_senior_tag and assigned_continuity:
+        senior_candidates = []
+        for t in assigned_continuity:
+            grade_name = get_therapist_grade_name(t)
+            if 'Senior' in grade_name:
+                senior_candidates.append((t, grade_name))
+        
+        if senior_candidates:
+            from math import inf
+            best = None
+            best_count = inf
+            for t, _ in senior_candidates:
+                current = get_senior_tag_count_for_therapist(t, target_date)
+                if current < 2 and current < best_count:
+                    best = t
+                    best_count = current
+            if best is not None:
+                result['senior_therapist'] = best
+    
+    # Create TherapistBooking records to lock the therapists
+    if assigned_continuity:
+        print(f"[RESCHEDULE PASS1] ===== LOCKING {len(assigned_continuity)} THERAPISTS FOR BOOKING {booking.pk} =====")
+        try:
+            for t in assigned_continuity:
+                is_bath = (t == result['bath_assigned'])
+                therapist_code = getattr(t, 'therapist_code', 'UNKNOWN')
+                therapist_id = getattr(t, 'id', None)
+                slot_id = getattr(slot_master, 'id', None)
+                
+                print(f"[RESCHEDULE PASS1] Creating TherapistBooking to LOCK: therapist={therapist_code} (id={therapist_id}), date={target_date}, slot_id={slot_id}, booking_id={booking.pk}")
+                
+                # Create TherapistBooking to lock the therapist-slot
+                tb_obj, tb_created = create_therapist_booking_safe(
+                    t, target_date, slot_master, therapy_name, patient_id, allocation, is_bathing=is_bath
+                )
+                
+                if tb_created:
+                    print(f"[RESCHEDULE PASS1] ✓✓✓ LOCKED therapist {therapist_code} (id={therapist_id}) with TherapistBooking pk={tb_obj.pk} for booking {booking.pk}")
+                else:
+                    print(f"[RESCHEDULE PASS1] ⚠ TherapistBooking already exists for {therapist_code} (id={therapist_id}) - therapist already locked")
+        except Exception as e:
+            print(f"[RESCHEDULE PASS1] ❌ ERROR creating TherapistBooking locks for booking {booking.pk}: {e}")
+            import traceback
+            traceback.print_exc()
+        print(f"[RESCHEDULE PASS1] ===== FINISHED LOCKING THERAPISTS FOR BOOKING {booking.pk} =====")
+    
+    # Calculate remaining requirements
+    result['assigned_therapists'] = assigned_continuity
+    result['remaining_requirements'] = {
+        "super_senior": grade_map.get("Super Senior Therapist", 0),
+        "senior": grade_map.get("Senior Therapist", 0),
+        "junior": grade_map.get("Junior Therapist", 0),
+        "trainee": grade_map.get("Trainee Therapist", 0),
+        "total": req_total - len(assigned_continuity),
+        "therapy_category": therapy_req.get("therapy_category", None)
+    }
+    result['success'] = len(assigned_continuity) > 0
+    
+    print(f"[RESCHEDULE PASS1] Booking {booking.pk}: Assigned {len(assigned_continuity)}/{req_total} continuity therapists. Remaining: {result['remaining_requirements']['total']}")
+    
+    return result
+
+# -----------------------
 # Main: strict preferred-slot-first allocation with automatic fallback
 # -----------------------
-def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookings=True):
+def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookings=True, booking_continuity_map=None):
     """
     Preferred-slot-first allocation using Booking rows.
     If preferred slot fails due to capacity/conflicts, attempts automatic slot allocation
@@ -1655,9 +2172,30 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
     def therapist_entry(t_obj, is_bath=False):
         return {"therapist_code": getattr(t_obj, 'therapist_code', None) or str(t_obj), "is_bathing": bool(is_bath)}
 
+    # PASS 2: booking_continuity_map contains continuity assignments from PASS 1
+    # Maps booking_id -> continuity_assigned dict
+    if booking_continuity_map is None:
+        booking_continuity_map = {}
+    
+    print(f"[RESCHEDULE PASS2] booking_continuity_map has {len(booking_continuity_map)} entries (from PASS 1)")
+
     for booking in bookings_qs:
         booking_id = booking.pk
         therapy_name = allocation.therapy_name
+
+        # Get continuity therapists from PASS 1 if available
+        continuity_assigned = booking_continuity_map.get(booking_id, {})
+        last_therapists_from_continuity = []
+        if continuity_assigned:
+            assigned_therapists = continuity_assigned.get('assigned_therapists', [])
+            last_therapists_from_continuity = [getattr(t, 'therapist_code', None) for t in assigned_therapists if getattr(t, 'therapist_code', None)]
+            print(f"[RESCHEDULE PASS2] Booking {booking_id}: Using {len(last_therapists_from_continuity)} continuity therapists from PASS 1: {last_therapists_from_continuity}")
+        
+        # Build last_allocation dict with continuity info
+        last_allocation = {
+            'therapists': last_therapists_from_continuity,
+            'continuity_assigned': continuity_assigned
+        }
 
         # preferred slot
         pref_slot = getattr(booking, 'timeslot', None) or getattr(allocation, 'timeslot', None)
@@ -1676,25 +2214,65 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
             therapy_req = therapist_requirements(allocation)
             allowed_slot_values = get_allowed_slot_values(patient_type, therapy_req.get("therapy_category"), used_slots)
             allocated_here = False
-            for sv in allowed_slot_values:
-                # map to canonical slot model instance
-                try:
-                    parsed_time = datetime.strptime(sv, "%H:%M").time()
-                    canonical_slot = SlotMaster.objects.filter(slot_time=parsed_time).first()
-                except Exception:
-                    canonical_slot = None
-                if not canonical_slot:
+            
+            # TIER 1: Try slots WITH continuity (if continuity exists)
+            if last_therapists_from_continuity or continuity_assigned:
+                print(f"[DEBUG Reschedule] No preferred slot - TIER 1: Trying slots WITH continuity")
+                for sv in allowed_slot_values:
+                    # map to canonical slot model instance
+                    try:
+                        parsed_time = datetime.strptime(sv, "%H:%M").time()
+                        canonical_slot = SlotMaster.objects.filter(slot_time=parsed_time).first()
+                    except Exception:
+                        canonical_slot = None
+                    if not canonical_slot:
+                        continue
+                    print(f"[DEBUG Reschedule] Trying slot WITH continuity: {sv} (continuity therapists: {last_therapists_from_continuity})")
+                    task, success, reason = attempt_allocate_slot(allocation, booking, target_date, canonical_slot, therapy_req, therapy_needs_room(allocation), therapy_needs_bath(allocation), used_slots, create_bookings, patient_id, last_allocation, AllocationAttempt)
+                    if success:
+                        task["continuity_maintained"] = True
+                        tasks.append(task)
+                        any_success = True
+                        allocated_here = True
+                        print(f"[DEBUG Reschedule] ✓ Successfully allocated to slot {sv} WITH continuity")
+                        break
+                    # else continue trying next slot
+                
+                if allocated_here:
                     continue
-                task, success, reason = attempt_allocate_slot(allocation, booking, target_date, canonical_slot, therapy_req, therapy_needs_room(allocation), therapy_needs_bath(allocation), used_slots, create_bookings, patient_id, {}, AllocationAttempt)
-                if success:
-                    tasks.append(task)
-                    any_success = True
-                    allocated_here = True
-                    break
-                # else continue trying next slot
+            
+            # TIER 2: Try slots WITHOUT continuity (fallback)
             if not allocated_here:
-                # Could not allocate any automatic slot
+                print(f"[DEBUG Reschedule] No preferred slot - TIER 2: Trying slots WITHOUT continuity (fallback)")
+                # Create empty last_allocation to disable continuity
+                last_allocation_no_continuity = {
+                    'therapists': [],
+                    'continuity_assigned': {}
+                }
+                for sv in allowed_slot_values:
+                    # map to canonical slot model instance
+                    try:
+                        parsed_time = datetime.strptime(sv, "%H:%M").time()
+                        canonical_slot = SlotMaster.objects.filter(slot_time=parsed_time).first()
+                    except Exception:
+                        canonical_slot = None
+                    if not canonical_slot:
+                        continue
+                    print(f"[DEBUG Reschedule] Trying slot WITHOUT continuity: {sv}")
+                    task, success, reason = attempt_allocate_slot(allocation, booking, target_date, canonical_slot, therapy_req, therapy_needs_room(allocation), therapy_needs_bath(allocation), used_slots, create_bookings, patient_id, last_allocation_no_continuity, AllocationAttempt)
+                    if success:
+                        task["continuity_maintained"] = False
+                        tasks.append(task)
+                        any_success = True
+                        allocated_here = True
+                        print(f"[DEBUG Reschedule] ✓ Successfully allocated to slot {sv} WITHOUT continuity")
+                        break
+                    # else continue trying next slot
+            
+            if not allocated_here:
+                # Could not allocate any automatic slot (neither with nor without continuity)
                 reason = "no_slot_available_auto"
+                print(f"[DEBUG Reschedule] ✗ Could not allocate to any slot (tried WITH and WITHOUT continuity)")
                 tasks.append({
                     "booking_id": booking_id,
                     "allocation_id": therapy_allocation_id,
@@ -1715,7 +2293,7 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
         needs_room_flag = therapy_needs_room(allocation)
         needs_bath_flag = therapy_needs_bath(allocation)
 
-        task, success, reason = attempt_allocate_slot(allocation, booking, target_date, canonical_pref, therapy_req, needs_room_flag, needs_bath_flag, used_slots, create_bookings, patient_id, {}, AllocationAttempt)
+        task, success, reason = attempt_allocate_slot(allocation, booking, target_date, canonical_pref, therapy_req, needs_room_flag, needs_bath_flag, used_slots, create_bookings, patient_id, last_allocation, AllocationAttempt)
         if success:
             tasks.append(task)
             any_success = True
@@ -1781,6 +2359,50 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                 print(f"[DEBUG Reschedule] After removing preferred slot {pref_val}, remaining slots: {allowed_slot_values}")
                 
                 allocated_here = False
+                
+                # TIER 1: Try alternate slots WITH continuity (if continuity exists)
+                if last_therapists_from_continuity or continuity_assigned:
+                    print(f"[DEBUG Reschedule] ===== TIER 1: Trying alternate slots WITH continuity =====")
+                    for sv in allowed_slot_values:
+                        try:
+                            parsed_time = datetime.strptime(sv, "%H:%M").time()
+                            canonical_slot = SlotMaster.objects.filter(slot_time=parsed_time).first()
+                        except Exception:
+                            canonical_slot = None
+                        if not canonical_slot:
+                            print(f"[DEBUG Reschedule] Could not find SlotMaster for time {sv}")
+                            continue
+                        
+                        print(f"[DEBUG Reschedule] Trying alternate slot WITH continuity: {sv} (continuity therapists: {last_therapists_from_continuity})")
+                        task2, success2, reason2 = attempt_allocate_slot(allocation, booking, target_date, canonical_slot, therapy_req, needs_room_flag, needs_bath_flag, used_slots, create_bookings, patient_id, last_allocation, AllocationAttempt)
+                        print(f"[DEBUG Reschedule] Alternate slot {sv} WITH continuity result: success={success2}, reason={reason2}")
+                        
+                        if success2:
+                            # flag slot_changed so caller knows we used an alternate slot
+                            task2["slot_changed"] = True
+                            task2["preferred_slot"] = pref_val
+                            task2["continuity_maintained"] = True
+                            tasks.append(task2)
+                            any_success = True
+                            allocated_here = True
+                            print(f"[DEBUG Reschedule] ✓ Successfully allocated to alternate slot {sv} WITH continuity (preferred was {pref_val})")
+                            break
+                        else:
+                            print(f"[DEBUG Reschedule] Alternate slot {sv} WITH continuity failed: {reason2}")
+                    
+                    if allocated_here:
+                        continue
+                    else:
+                        print(f"[DEBUG Reschedule] ✗ All alternate slots WITH continuity failed. Trying WITHOUT continuity...")
+                
+                # TIER 2: Try alternate slots WITHOUT continuity (fallback)
+                print(f"[DEBUG Reschedule] ===== TIER 2: Trying alternate slots WITHOUT continuity (fallback) =====")
+                # Create empty last_allocation to disable continuity
+                last_allocation_no_continuity = {
+                    'therapists': [],
+                    'continuity_assigned': {}
+                }
+                
                 for sv in allowed_slot_values:
                     try:
                         parsed_time = datetime.strptime(sv, "%H:%M").time()
@@ -1791,26 +2413,27 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                         print(f"[DEBUG Reschedule] Could not find SlotMaster for time {sv}")
                         continue
                     
-                    print(f"[DEBUG Reschedule] Trying alternate slot: {sv}")
-                    task2, success2, reason2 = attempt_allocate_slot(allocation, booking, target_date, canonical_slot, therapy_req, needs_room_flag, needs_bath_flag, used_slots, create_bookings, patient_id, {}, AllocationAttempt)
-                    print(f"[DEBUG Reschedule] Alternate slot {sv} result: success={success2}, reason={reason2}")
+                    print(f"[DEBUG Reschedule] Trying alternate slot WITHOUT continuity: {sv}")
+                    task2, success2, reason2 = attempt_allocate_slot(allocation, booking, target_date, canonical_slot, therapy_req, needs_room_flag, needs_bath_flag, used_slots, create_bookings, patient_id, last_allocation_no_continuity, AllocationAttempt)
+                    print(f"[DEBUG Reschedule] Alternate slot {sv} WITHOUT continuity result: success={success2}, reason={reason2}")
                     
                     if success2:
                         # flag slot_changed so caller knows we used an alternate slot
                         task2["slot_changed"] = True
                         task2["preferred_slot"] = pref_val
+                        task2["continuity_maintained"] = False
                         tasks.append(task2)
                         any_success = True
                         allocated_here = True
-                        print(f"[DEBUG Reschedule] Successfully allocated to alternate slot {sv} (preferred was {pref_val})")
+                        print(f"[DEBUG Reschedule] ✓ Successfully allocated to alternate slot {sv} WITHOUT continuity (preferred was {pref_val})")
                         break
                     else:
-                        print(f"[DEBUG Reschedule] Alternate slot {sv} failed: {reason2}")
+                        print(f"[DEBUG Reschedule] Alternate slot {sv} WITHOUT continuity failed: {reason2}")
                 
                 if allocated_here:
                     continue
                 else:
-                    print(f"[DEBUG Reschedule] All alternate slots failed. Original failure reason: {reason}")
+                    print(f"[DEBUG Reschedule] ✗ All alternate slots failed (both WITH and WITHOUT continuity). Original failure reason: {reason}")
                 # else fall through to return original failure reason task
             # Preferred failed and no fallback succeeded -> include the failure task (task contains reason)
             tasks.append(task)

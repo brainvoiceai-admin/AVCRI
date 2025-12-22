@@ -1613,18 +1613,8 @@ def search_patients(request):
                             if len(ip_patients_list) >= 5:
                                 break
                     
-                    if not ip_patients_list:
-                        # Try without status filter
-                        all_patients = Registration.objects.using('therapy_db').all().values(
-                            'pat_reg_no', 'pat_name', 'pat_sex', 'pat_age', 'pat_room_no', 'pat_ref_id', 'pat_visit_date'
-                        ).order_by('-pat_visit_date')[:20]
-                        for p in all_patients:
-                            reg_no_str = str(p['pat_reg_no']).strip() if p['pat_reg_no'] else ''
-                            digits_only = ''.join(ch for ch in reg_no_str if ch.isdigit())
-                            if len(digits_only) != 5:
-                                ip_patients_list.append(p)
-                                if len(ip_patients_list) >= 5:
-                                    break
+                    # Removed fallback without status filter - always check status='Y' for active patients only
+                    # If no active patients found, ip_patients_list will remain empty
                     
                     print(f"[DEBUG] Initial load - Found {len(ip_patients_list)} IP patients")
                 except Exception as e:
@@ -1639,7 +1629,7 @@ def search_patients(request):
                     
                     all_patients = Registration.objects.using('therapy_db').filter(
                         search_q,
-                        pat_status='Y'
+                        pat_status='Y'  # Always filter by active status
                     ).values(
                         'pat_reg_no', 'pat_name', 'pat_sex', 'pat_age', 'pat_room_no', 'pat_ref_id', 'pat_visit_date'
                     ).order_by('-pat_visit_date')[:100]
@@ -1650,21 +1640,7 @@ def search_patients(request):
                         if len(digits_only) != 5:  # Not OP (5 digits)
                             ip_patients_list.append(p)
                     
-                    if not ip_patients_list:
-                        # Try without status filter
-                        # Build Q object for search - only search by name and reg no
-                        search_q = Q(pat_reg_no__icontains=query) | Q(pat_name__icontains=query)
-                        
-                        all_patients = Registration.objects.using('therapy_db').filter(
-                            search_q
-                        ).values(
-                            'pat_reg_no', 'pat_name', 'pat_sex', 'pat_age', 'pat_room_no', 'pat_ref_id', 'pat_visit_date'
-                        ).order_by('-pat_visit_date')[:100]
-                        for p in all_patients:
-                            reg_no_str = str(p['pat_reg_no']).strip() if p['pat_reg_no'] else ''
-                            digits_only = ''.join(ch for ch in reg_no_str if ch.isdigit())
-                            if len(digits_only) != 5:
-                                ip_patients_list.append(p)
+                    # Removed fallback without status filter - always check status='Y' for active patients only
                     
                     print(f"[DEBUG] Query search - Found {len(ip_patients_list)} IP patients for query: '{query}'")
                 except Exception as e:
@@ -1833,6 +1809,8 @@ def search_patients_by_room(request):
         from masters.models import get_staying_room_display_number, StayingRoom
         
         patients = []
+        # Track added registration numbers to prevent duplicates
+        added_reg_nos = set()
         
         # Try to convert room query to integer for direct match
         room_query_int = None
@@ -2116,6 +2094,13 @@ def search_patients_by_room(request):
                 print(f"[DEBUG] No matching room found for query: '{room_query}'")
             
             for patient in ip_patients_list:
+                # Normalize registration number to string for comparison
+                reg_no_str = str(patient['pat_reg_no']).strip()
+                
+                # Skip if already added
+                if reg_no_str in added_reg_nos:
+                    continue
+                
                 # Check VIP status
                 vip_status = False
                 try:
@@ -2147,6 +2132,9 @@ def search_patients_by_room(request):
                     'is_vip': vip_status,
                     'source': 'IP'
                 })
+                
+                # Mark as added
+                added_reg_nos.add(reg_no_str)
         except Exception as e:
             print(f"Error searching IP patients by room: {e}")
             import traceback
@@ -2161,8 +2149,11 @@ def search_patients_by_room(request):
         
         # Fetch patient details from Registration or OPMaster
         for reg_no in treatment_reg_nos:
+            # Normalize registration number to string for comparison
+            reg_no_str = str(reg_no).strip()
+            
             # Skip if already added from IP search
-            if any(p.get('registration_number') == reg_no for p in patients):
+            if reg_no_str in added_reg_nos:
                 continue
             
             try:
@@ -2212,21 +2203,28 @@ def search_patients_by_room(request):
                     except Exception:
                         mapped_room = room_no
                     
-                    patients.append({
-                        'registration_number': ip_patient['pat_reg_no'],
-                        'patient_name': ip_patient['pat_name'],
-                        'sex': ip_patient['pat_sex'],
-                        'age': ip_patient['pat_age'],
-                        'room_number': mapped_room or room_no,
-                        'ip_number': ip_patient['pat_reg_no'],
-                        'pat_ref_id': ip_patient.get('pat_ref_id'),
-                        'phone': None,
-                        'email': None,
-                        'registration_date': None,
-                        'patient_type': 'IP',
-                        'is_vip': vip_status,
-                        'source': 'IP'
-                    })
+                    # Normalize registration number
+                    ip_reg_no_str = str(ip_patient['pat_reg_no']).strip()
+                    
+                    # Skip if already added
+                    if ip_reg_no_str not in added_reg_nos:
+                        patients.append({
+                            'registration_number': ip_patient['pat_reg_no'],
+                            'patient_name': ip_patient['pat_name'],
+                            'sex': ip_patient['pat_sex'],
+                            'age': ip_patient['pat_age'],
+                            'room_number': mapped_room or room_no,
+                            'ip_number': ip_patient['pat_reg_no'],
+                            'pat_ref_id': ip_patient.get('pat_ref_id'),
+                            'phone': None,
+                            'email': None,
+                            'registration_date': None,
+                            'patient_type': 'IP',
+                            'is_vip': vip_status,
+                            'source': 'IP'
+                        })
+                        # Mark as added
+                        added_reg_nos.add(ip_reg_no_str)
                 else:
                     # Try to find in OP patients (OPMaster table)
                     op_patient = None
@@ -2240,38 +2238,45 @@ def search_patients_by_room(request):
                         pass
                     
                     if op_patient:
-                        # OP patient found
-                        vip_status = False
-                        try:
-                            repeated_visitor = Repeated_Visitors.objects.get(
-                                register_number=op_patient['NPat_Reg_No']
-                            )
-                            vip_status = repeated_visitor.total_visits > 2
-                        except (Repeated_Visitors.DoesNotExist, Exception):
+                        # Normalize registration number
+                        op_reg_no_str = str(op_patient['NPat_Reg_No']).strip()
+                        
+                        # Skip if already added
+                        if op_reg_no_str not in added_reg_nos:
+                            # OP patient found
                             vip_status = False
-                        
-                        # Get room number from treatment or snapshot
-                        room_no = None
-                        for tp in all_patient_sources:
-                            if tp['reg_no'] == reg_no:
-                                room_no = tp.get('room_no')
-                                break
-                        
-                        patients.append({
-                            'registration_number': op_patient['NPat_Reg_No'],
-                            'patient_name': op_patient['NPat_Name'],
-                            'sex': op_patient['NPat_Sex'],
-                            'age': None,
-                            'room_number': room_no,
-                            'ip_number': None,
-                            'pat_ref_id': None,
-                            'phone': None,
-                            'email': None,
-                            'registration_date': op_patient['Reg_Date'].strftime('%Y-%m-%d') if op_patient.get('Reg_Date') else None,
-                            'patient_type': 'OP',
-                            'is_vip': vip_status,
-                            'source': 'OP'
-                        })
+                            try:
+                                repeated_visitor = Repeated_Visitors.objects.get(
+                                    register_number=op_patient['NPat_Reg_No']
+                                )
+                                vip_status = repeated_visitor.total_visits > 2
+                            except (Repeated_Visitors.DoesNotExist, Exception):
+                                vip_status = False
+                            
+                            # Get room number from treatment or snapshot
+                            room_no = None
+                            for tp in all_patient_sources:
+                                if tp['reg_no'] == reg_no:
+                                    room_no = tp.get('room_no')
+                                    break
+                            
+                            patients.append({
+                                'registration_number': op_patient['NPat_Reg_No'],
+                                'patient_name': op_patient['NPat_Name'],
+                                'sex': op_patient['NPat_Sex'],
+                                'age': None,
+                                'room_number': room_no,
+                                'ip_number': None,
+                                'pat_ref_id': None,
+                                'phone': None,
+                                'email': None,
+                                'registration_date': op_patient['Reg_Date'].strftime('%Y-%m-%d') if op_patient.get('Reg_Date') else None,
+                                'patient_type': 'OP',
+                                'is_vip': vip_status,
+                                'source': 'OP'
+                            })
+                            # Mark as added
+                            added_reg_nos.add(op_reg_no_str)
             except Exception as e:
                 print(f"[DEBUG] Error processing treatment patient {reg_no}: {e}")
                 import traceback
