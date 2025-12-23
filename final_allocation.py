@@ -2130,8 +2130,10 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
         booking_failure_reason = None
         
         # Use bath_assigned and senior_therapist from PASS 1 if provided
+        bath_assigned_from_pass1 = None
         if continuity_assigned and isinstance(continuity_assigned, dict):
-            bath_assigned = continuity_assigned.get('bath_assigned', None)
+            bath_assigned_from_pass1 = continuity_assigned.get('bath_assigned', None)
+            bath_assigned = bath_assigned_from_pass1
             senior_therapist = continuity_assigned.get('senior_therapist', None)
             requires_senior_tag = is_treatment_requiring_senior_tag(therapy_name) and (senior_therapist is not None)
             
@@ -2145,7 +2147,9 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                     senior_therapist = None
                     requires_senior_tag = is_treatment_requiring_senior_tag(therapy_name)  # Re-enable senior tag requirement
             
-            print(f"[CONTINUITY PASS2] Using bath_assigned={bath_assigned.therapist_code if bath_assigned else None}, senior_therapist={senior_therapist.therapist_code if senior_therapist else None} from PASS 1")
+            print(f"[CONTINUITY PASS2] PASS 1 provided: bath_assigned={bath_assigned.therapist_code if bath_assigned else None}, senior_therapist={senior_therapist.therapist_code if senior_therapist else None}")
+            print(f"[CONTINUITY PASS2] Previous bathing therapist: {previous_bathing_therapist.therapist_code if previous_bathing_therapist else None}")
+            print(f"[CONTINUITY PASS2] Previous bathing therapist in assigned_therapists: {previous_bathing_therapist in assigned_therapists if previous_bathing_therapist else False}")
         else:
             # Check if this treatment requires special senior therapist handling
             requires_senior_tag = is_treatment_requiring_senior_tag(therapy_name)
@@ -2314,19 +2318,29 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                             continue  # Skip to next booking
             else:
                 # Not Dhara & Pizichil or no senior therapist - use normal logic
-                # Previous bathing therapist should already be prioritized in candidate_therapists
-                # (we passed it as last_therapists to allocate_therapists)
-                # Now check if previous therapist is in assigned list, otherwise pick first from list
+                # CRITICAL: Always prioritize previous bathing therapist for continuity
+                # Even if PASS 1 assigned a different bathing therapist, we should use the previous one if available
                 if previous_bathing_therapist and previous_bathing_therapist in assigned_therapists:
-                    # Previous bathing therapist is in assigned list - use them
+                    # Previous bathing therapist is in assigned list - ALWAYS use them for continuity
+                    if bath_assigned != previous_bathing_therapist:
+                        print(f"[DEBUG] ⚠ Overriding PASS 1 bathing therapist {bath_assigned.therapist_code if bath_assigned else None} with previous bathing therapist {previous_bathing_therapist.therapist_code} for continuity")
                     bath_assigned = previous_bathing_therapist
-                    print(f"[DEBUG] Using previous bathing therapist {previous_bathing_therapist.therapist_code} for patient {patient_id}")
+                    print(f"[DEBUG] ✓ Using previous bathing therapist {previous_bathing_therapist.therapist_code} for patient {patient_id} (maintaining continuity)")
+                elif bath_assigned_from_pass1 and bath_assigned_from_pass1 in assigned_therapists:
+                    # PASS 1 assigned a bathing therapist and they're still in the list - keep them
+                    bath_assigned = bath_assigned_from_pass1
+                    print(f"[DEBUG] ✓ Using PASS 1 bathing therapist {bath_assigned.therapist_code} for patient {patient_id} (no previous therapist found)")
                 else:
-                    # Pick first bathing therapist from assigned list (all should be bathing therapists if needs_bathing=True)
+                    # No previous therapist and no PASS 1 assignment - pick first from assigned list
                     bath_assigned = assigned_therapists[0] if assigned_therapists else None
+                    if bath_assigned:
+                        print(f"[DEBUG] Using first assigned therapist {bath_assigned.therapist_code} for patient {patient_id} (no continuity available)")
+                
                 if not bath_assigned:
                     # Find any bathing therapist from assigned list
                     bath_assigned = next((t for t in assigned_therapists if getattr(t, 'is_bathing_therapist', False)), None)
+                    if bath_assigned:
+                        print(f"[DEBUG] Found bathing therapist {bath_assigned.therapist_code} from assigned list for patient {patient_id}")
                     
                     # If no bathing therapist available in assigned list, FAIL the allocation
                     if not bath_assigned:

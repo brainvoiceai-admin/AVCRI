@@ -1301,6 +1301,18 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
     # choose bathing assignee
     assigned_therapists = candidate_therapists[:req_total]
     bath_assigned = None
+    bath_assigned_from_pass1 = None
+    
+    # Extract bath_assigned from PASS 1 continuity if available
+    if last_allocation and isinstance(last_allocation, dict):
+        continuity_assigned = last_allocation.get('continuity_assigned', {})
+        if continuity_assigned and isinstance(continuity_assigned, dict):
+            bath_assigned_from_pass1 = continuity_assigned.get('bath_assigned', None)
+            if bath_assigned_from_pass1:
+                bath_assigned = bath_assigned_from_pass1
+                print(f"[RESCHEDULE PASS2] PASS 1 provided bath_assigned: {bath_assigned_from_pass1.therapist_code if bath_assigned_from_pass1 else None}")
+                print(f"[RESCHEDULE PASS2] Previous bathing therapist: {previous_bathing_therapist.therapist_code if previous_bathing_therapist else None}")
+                print(f"[RESCHEDULE PASS2] Previous bathing therapist in assigned_therapists: {previous_bathing_therapist in assigned_therapists if previous_bathing_therapist else False}")
     
     # Check if this treatment requires special senior therapist handling
     requires_senior_tag = is_treatment_requiring_senior_tag(therapy_name)
@@ -1333,19 +1345,53 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
     
     if needs_bath_flag and assigned_therapists:
         # For special treatments: Senior therapist should NOT be the bathing therapist
+        # CRITICAL VALIDATION: Check if PASS 1 assigned same therapist as both bathing and senior
+        if requires_senior_tag and senior_therapist and bath_assigned_from_pass1:
+            if bath_assigned_from_pass1 == senior_therapist:
+                print(f"[RESCHEDULE] ⚠ PASS 1 assigned same therapist as both bathing and senior: {bath_assigned_from_pass1.therapist_code}")
+                print(f"[RESCHEDULE] Fixing: Keeping bathing therapist {bath_assigned_from_pass1.therapist_code} (maintain continuity), will reassign senior tag to different senior")
+                # Clear senior assignment - will be reassigned below to a different senior
+                senior_therapist = None
+                requires_senior_tag = is_treatment_requiring_senior_tag(therapy_name)  # Re-enable senior tag requirement
+                # Re-select senior therapist from assigned list (excluding bathing therapist)
+                senior_candidates = []
+                for t in assigned_therapists:
+                    grade_name = getattr(getattr(t, 'therapist_grade', None), 'name', '') if hasattr(t, 'therapist_grade') else ''
+                    if 'Senior' in grade_name and t != bath_assigned_from_pass1:
+                        senior_candidates.append((t, grade_name))
+                if senior_candidates:
+                    from math import inf
+                    best = None
+                    best_count = inf
+                    for t, _ in senior_candidates:
+                        current = get_senior_tag_count_for_therapist(t, date)
+                        if current < 2 and current < best_count:
+                            best = t
+                            best_count = current
+                    if best:
+                        senior_therapist = best
+                        print(f"[RESCHEDULE] ✓ Reassigned senior tag to {best.therapist_code} (bathing {bath_assigned_from_pass1.therapist_code} maintained)")
+        
         if requires_senior_tag and senior_therapist:
             # Exclude senior therapist from bathing assignment
             bathing_candidates = [t for t in assigned_therapists if t != senior_therapist and getattr(t, 'is_bathing_therapist', False)]
             
-            # Prioritize previous bathing therapist if available and not the senior
+            # CRITICAL: Always prioritize previous bathing therapist for continuity (even for special treatments)
+            # Even if PASS 1 assigned a different bathing therapist, we should use the previous one if available
             if previous_bathing_therapist and previous_bathing_therapist in bathing_candidates:
-                # Previous bathing therapist is available and not the senior - use them
+                # Previous bathing therapist is available and not the senior - ALWAYS use them for continuity
+                if bath_assigned != previous_bathing_therapist:
+                    print(f"[RESCHEDULE] ⚠ Special treatment: Overriding PASS 1 bathing therapist {bath_assigned.therapist_code if bath_assigned else None} with previous bathing therapist {previous_bathing_therapist.therapist_code} for continuity")
                 bath_assigned = previous_bathing_therapist
-                print(f"[DEBUG] Special treatment: Using previous bathing therapist {previous_bathing_therapist.therapist_code} (senior {senior_therapist.therapist_code} excluded)")
+                print(f"[RESCHEDULE] ✓ Special treatment: Using previous bathing therapist {previous_bathing_therapist.therapist_code} (maintaining continuity, senior {senior_therapist.therapist_code} excluded)")
+            elif bath_assigned_from_pass1 and bath_assigned_from_pass1 in bathing_candidates:
+                # PASS 1 assigned a bathing therapist and they're still in the list - keep them
+                bath_assigned = bath_assigned_from_pass1
+                print(f"[RESCHEDULE] ✓ Special treatment: Using PASS 1 bathing therapist {bath_assigned.therapist_code} (senior {senior_therapist.therapist_code} excluded)")
             elif bathing_candidates:
                 # Pick first available bathing therapist (excluding senior)
                 bath_assigned = bathing_candidates[0]
-                print(f"[DEBUG] Special treatment: Assigned bathing therapist {bath_assigned.therapist_code} (senior {senior_therapist.therapist_code} excluded)")
+                print(f"[RESCHEDULE] Special treatment: Assigned bathing therapist {bath_assigned.therapist_code} (senior {senior_therapist.therapist_code} excluded)")
             else:
                 # No bathing therapist available except senior - need to find another senior or fail
                 # Try to find next available senior therapist who is also a bathing therapist
@@ -1425,14 +1471,24 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
                     }, False, reason)
         else:
             # Not special treatment or no senior therapist - use normal logic
-            # Prioritize previous bathing therapist if available and in assigned list
+            # CRITICAL: Always prioritize previous bathing therapist for continuity
+            # Even if PASS 1 assigned a different bathing therapist, we should use the previous one if available
             if previous_bathing_therapist and previous_bathing_therapist in assigned_therapists:
+                # Previous bathing therapist is in assigned list - ALWAYS use them for continuity
+                if bath_assigned != previous_bathing_therapist:
+                    print(f"[RESCHEDULE] ⚠ Overriding PASS 1 bathing therapist {bath_assigned.therapist_code if bath_assigned else None} with previous bathing therapist {previous_bathing_therapist.therapist_code} for continuity")
                 bath_assigned = previous_bathing_therapist
-                print(f"[DEBUG] Reusing previous bathing therapist {previous_bathing_therapist.therapist_code} for patient {patient_id}")
+                print(f"[RESCHEDULE] ✓ Using previous bathing therapist {previous_bathing_therapist.therapist_code} for patient {patient_id} (maintaining continuity)")
+            elif bath_assigned_from_pass1 and bath_assigned_from_pass1 in assigned_therapists:
+                # PASS 1 assigned a bathing therapist and they're still in the list - keep them
+                bath_assigned = bath_assigned_from_pass1
+                print(f"[RESCHEDULE] ✓ Using PASS 1 bathing therapist {bath_assigned.therapist_code} for patient {patient_id} (no previous therapist found)")
             elif not bath_assigned:
-                # If no previous bathing therapist found or not available, pick from assigned therapists
+                # No previous therapist and no PASS 1 assignment - pick from assigned therapists
                 # Find any bathing therapist from assigned list
                 bath_assigned = next((t for t in assigned_therapists if getattr(t, 'is_bathing_therapist', False)), None)
+                if bath_assigned:
+                    print(f"[RESCHEDULE] Using first assigned bathing therapist {bath_assigned.therapist_code} for patient {patient_id} (no continuity available)")
                 
                 # If no bathing therapist available in assigned list, FAIL the allocation
                 if not bath_assigned:
@@ -2059,13 +2115,21 @@ def assign_continuity_therapists_pass1(booking, allocation, target_date, locked_
                     break
     
     # Check for senior tag assignment (special treatments)
+    # CRITICAL: Senior therapist MUST be different from bathing therapist
+    # Priority: Maintain bathing therapist continuity, assign senior tag to different senior
     requires_senior_tag = is_treatment_requiring_senior_tag(therapy_name)
     if requires_senior_tag and assigned_continuity:
         senior_candidates = []
+        bath_assigned = result.get('bath_assigned')
+        
         for t in assigned_continuity:
             grade_name = get_therapist_grade_name(t)
             if 'Senior' in grade_name:
-                senior_candidates.append((t, grade_name))
+                # Exclude bathing therapist from senior tag assignment
+                if t != bath_assigned:
+                    senior_candidates.append((t, grade_name))
+                else:
+                    print(f"[RESCHEDULE PASS1] Excluding bathing therapist {t.therapist_code} from senior tag (must be different)")
         
         if senior_candidates:
             from math import inf
@@ -2078,6 +2142,11 @@ def assign_continuity_therapists_pass1(booking, allocation, target_date, locked_
                     best_count = current
             if best is not None:
                 result['senior_therapist'] = best
+                print(f"[RESCHEDULE PASS1] ✓ Assigned senior therapist {best.therapist_code} for senior tag (bathing therapist: {bath_assigned.therapist_code if bath_assigned else None})")
+            else:
+                print(f"[RESCHEDULE PASS1] ⚠ No suitable senior therapist found for senior tag (all at limit or are bathing therapist)")
+        else:
+            print(f"[RESCHEDULE PASS1] ⚠ No senior candidates available (excluding bathing therapist)")
     
     # Create TherapistBooking records to lock the therapists
     if assigned_continuity:
