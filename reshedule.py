@@ -547,10 +547,16 @@ def allocate_treatment_room(date, time_slot, last_room=None, therapy_name=None, 
 # -----------------------
 # Slot helpers: return allowed slots (list) for patient type
 # -----------------------
-def get_allowed_slot_values(patient_type, therapy_category, used_slots=None):
+def get_allowed_slot_values(patient_type, therapy_category, used_slots=None, therapy_name=None):
     """
     Return ordered list of allowed slot strings "HH:MM" for this patient_type and therapy_category.
     Excludes any used_slots provided (list of slot model instances).
+    
+    Args:
+        patient_type: Patient type (OP/IP)
+        therapy_category: Therapy category (easy/medium/hard/special)
+        used_slots: List of slot model instances that are already used
+        therapy_name: Name of the therapy (for treatment-specific restrictions)
     """
     general_slots = ["06:30","08:30","10:00","11:30","14:30","16:00","17:30"]
 
@@ -577,6 +583,14 @@ def get_allowed_slot_values(patient_type, therapy_category, used_slots=None):
     except Exception:
         # fail-safe: ignore errors in category check
         pass
+
+    # RESTRICTION: Lepam treatment should not be assigned to 6.30 slot
+    if therapy_name:
+        therapy_name_lower = str(therapy_name).strip().lower()
+        if 'lepam' in therapy_name_lower:
+            # Remove 06:30 from allowed slots for Lepam
+            allowed_slots = [s for s in allowed_slots if s != "06:30"]
+            print(f"[SLOT RESTRICTION] Lepam treatment detected - excluding 06:30 slot. Allowed slots: {allowed_slots}")
 
     # remove any used slots (used_slots is list of slot model instances)
     if used_slots:
@@ -800,6 +814,230 @@ def allocate_therapists(date, time_slot, therapy_requirements, last_therapists=N
             needed -= 1
             grade_map[grade_original] -= 1  # Decrement the original requirement (e.g., Trainee)
             
+    return allocated
+
+# -----------------------
+# FALLBACK: Therapist allocation with aggressive grade substitution
+# Allows Senior/Super Senior to substitute for Junior/Trainee when they're unavailable
+# This is used as a fallback when normal allocation fails
+# -----------------------
+def allocate_therapists_with_grade_substitution(date, time_slot, therapy_requirements, last_therapists=None, needs_bathing=False, patient_gender=None):
+    """
+    Fallback allocation function that allows aggressive grade substitution:
+    - Senior/Super Senior can substitute for Junior/Trainee when they're unavailable
+    - Senior and Super Senior can substitute for each other (bidirectional)
+    - This helps handle more failed schedules by using available therapists
+    
+    Returns list of allocated TherapistMaster objects.
+    """
+    from masters.models import TherapistMaster, TherapistLeaveMaster, EmergencyLeave, TherapyMaster
+    from Patient.models import TherapistBooking
+
+    day_of_week = date.weekday()
+    allocated = []
+
+    # Normalize patient gender
+    desired_gender = None
+    try:
+        if patient_gender:
+            g = str(patient_gender).strip().lower()
+            if g.startswith('f'):
+                desired_gender = 'female'
+            else:
+                desired_gender = 'male'
+    except Exception:
+        desired_gender = 'male'
+
+    # Start with original requirements
+    grade_map = {
+        "Super Senior Therapist": therapy_requirements.get("super_senior", 0),
+        "Senior Therapist": therapy_requirements.get("senior", 0),
+        "Junior Therapist": therapy_requirements.get("junior", 0),
+        "Trainee Therapist": therapy_requirements.get("trainee", 0)
+    }
+
+    # Preload emergency leaves
+    try:
+        em_leaves_qs = EmergencyLeave.objects.filter(from_date__lte=date, to_date__gte=date)
+        emergency_leave_therapist_ids = set(em_leaves_qs.exclude(therapist__isnull=True).values_list('therapist_id', flat=True))
+        emergency_leave_employee_codes = set(em_leaves_qs.exclude(employee_code__isnull=True).values_list('employee_code', flat=True))
+    except Exception:
+        emergency_leave_therapist_ids = set()
+        emergency_leave_employee_codes = set()
+
+    def therapist_on_leave(t):
+        if TherapistLeaveMaster.objects.filter(therapist=t, leave_day=day_of_week).exists():
+            return True
+        if getattr(t, 'id', None) in emergency_leave_therapist_ids:
+            return True
+        emp_code = getattr(t, 'employee_code', None)
+        if emp_code and emp_code in emergency_leave_employee_codes:
+            return True
+        return False
+
+    def get_therapist_gender(t):
+        try:
+            v = getattr(t, 'therapist_gender', None)
+            if v:
+                v_str = str(v).strip()
+                if v_str.lower().startswith('m'):
+                    return 'male'
+                if v_str.lower().startswith('f'):
+                    return 'female'
+        except Exception:
+            pass
+        return None
+
+    def get_therapist_grade_name(t):
+        if not t:
+            return ''
+        if hasattr(t, 'therapist_grade') and t.therapist_grade:
+            if hasattr(t.therapist_grade, 'name'):
+                return t.therapist_grade.name
+        return ''
+
+    def get_therapist_daily_session_count(t):
+        try:
+            return TherapistBooking.objects.filter(
+                therapist=t,
+                date=date,
+                status='BOOKED'
+            ).count()
+        except Exception:
+            return 0
+
+    # Use last therapists first (if available)
+    if last_therapists:
+        for code in last_therapists:
+            try:
+                t = TherapistMaster.objects.get(therapist_code=code)
+            except TherapistMaster.DoesNotExist:
+                continue
+            therapist_grade_name = get_therapist_grade_name(t)
+            
+            # Check if this therapist can fill any needed grade (with substitution)
+            can_use = False
+            target_grade = None
+            
+            # Direct match
+            if grade_map.get(therapist_grade_name, 0) > 0:
+                can_use = True
+                target_grade = therapist_grade_name
+            else:
+                # Check substitution with bidirectional Senior <-> Super Senior substitution
+                if therapist_grade_name == "Senior Therapist":
+                    # Senior can substitute for: Super Senior, Junior, Trainee
+                    if grade_map.get("Super Senior Therapist", 0) > 0:
+                        can_use = True
+                        target_grade = "Super Senior Therapist"
+                    elif grade_map.get("Junior Therapist", 0) > 0:
+                        can_use = True
+                        target_grade = "Junior Therapist"
+                    elif grade_map.get("Trainee Therapist", 0) > 0:
+                        can_use = True
+                        target_grade = "Trainee Therapist"
+                elif therapist_grade_name == "Super Senior Therapist":
+                    # Super Senior can substitute for: Senior, Junior, Trainee
+                    if grade_map.get("Senior Therapist", 0) > 0:
+                        can_use = True
+                        target_grade = "Senior Therapist"
+                    elif grade_map.get("Junior Therapist", 0) > 0:
+                        can_use = True
+                        target_grade = "Junior Therapist"
+                    elif grade_map.get("Trainee Therapist", 0) > 0:
+                        can_use = True
+                        target_grade = "Trainee Therapist"
+            
+            if not can_use:
+                continue
+            
+            # Check constraints
+            if desired_gender:
+                t_gender = get_therapist_gender(t)
+                if t_gender != desired_gender:
+                    continue
+            if needs_bathing and not getattr(t, 'is_bathing_therapist', False):
+                continue
+            if therapist_on_leave(t):
+                continue
+            if TherapistBooking.objects.filter(therapist=t, date=date, time_slot=time_slot, status='BOOKED').exists():
+                continue
+            
+            allocated.append(t)
+            grade_map[target_grade] -= 1
+            print(f"[FALLBACK Grade Substitution] Assigned {therapist_grade_name} {t.therapist_code} to fill {target_grade} requirement")
+
+    # Allocate remaining with aggressive substitution
+    # Process grades in order: Trainee -> Junior -> Senior -> Super Senior
+    grade_order = ["Trainee Therapist", "Junior Therapist", "Senior Therapist", "Super Senior Therapist"]
+    
+    for target_grade in grade_order:
+        needed = grade_map.get(target_grade, 0)
+        if needed <= 0:
+            continue
+        
+        # Try to find therapists for this grade
+        # If not enough, allow substitution with bidirectional Senior <-> Super Senior substitution
+        substitution_grades = []
+        if target_grade == "Trainee Therapist":
+            substitution_grades = ["Junior Therapist", "Senior Therapist", "Super Senior Therapist"]
+        elif target_grade == "Junior Therapist":
+            substitution_grades = ["Senior Therapist", "Super Senior Therapist"]
+        elif target_grade == "Senior Therapist":
+            # Senior can be replaced by Super Senior (and vice versa)
+            substitution_grades = ["Super Senior Therapist"]
+        elif target_grade == "Super Senior Therapist":
+            # Super Senior can be replaced by Senior if no Super Senior available
+            substitution_grades = ["Senior Therapist"]
+        
+        # Try exact grade first
+        grades_to_try = [target_grade] + substitution_grades
+        
+        for search_grade in grades_to_try:
+            if needed <= 0:
+                break
+            
+            candidates_qs = TherapistMaster.objects.filter(therapist_grade__name=search_grade)
+            
+            if desired_gender:
+                candidates_qs = candidates_qs.filter(therapist_gender__istartswith=desired_gender[0])
+            
+            if needs_bathing:
+                candidates_qs = candidates_qs.filter(is_bathing_therapist=True)
+            
+            candidates_list = list(candidates_qs)
+            scored_candidates = []
+            
+            for t in candidates_list:
+                if t in allocated:
+                    continue
+                if therapist_on_leave(t):
+                    continue
+                if TherapistBooking.objects.filter(therapist=t, date=date, time_slot=time_slot, status='BOOKED').exists():
+                    continue
+                
+                if desired_gender:
+                    t_gender = get_therapist_gender(t)
+                    if t_gender != desired_gender:
+                        continue
+                
+                session_count = get_therapist_daily_session_count(t)
+                scored_candidates.append((t, session_count))
+            
+            # Sort by session count (prefer therapists with fewer sessions)
+            scored_candidates.sort(key=lambda x: (x[1], getattr(x[0], "id", 0) or 0))
+            
+            for t, _ in scored_candidates:
+                if needed <= 0:
+                    break
+                
+                allocated.append(t)
+                needed -= 1
+                grade_map[target_grade] -= 1
+                
+                if search_grade != target_grade:
+                    print(f"[FALLBACK Grade Substitution] Assigned {search_grade} {t.therapist_code} to fill {target_grade} requirement (substitution)")
+    
     return allocated
 
 # -----------------------
@@ -1095,7 +1333,7 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
                     patient_name = getattr(patient_obj, 'pat_name', 'Unknown')
                     if patient_reg_no:
                         print(f"[RESCHEDULE PASS2] Patient: {patient_name} (Reg No: {patient_reg_no})")
-                        print(f"[RESCHEDULE PASS2] Target Date: {target_date}, Slot: {getattr(canonical_slot, 'id', None) if canonical_slot else None}")
+                        print(f"[RESCHEDULE PASS2] Target Date: {date}, Slot: {getattr(canonical_slot, 'id', None) if canonical_slot else None}")
                         
                         from Patient.models import PatientHistory, Repeated_Visitors
                         from masters.models import TherapistMaster, TherapistLeaveMaster
@@ -1226,6 +1464,34 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
         candidate_therapists = []
 
     req_total = int(therapy_req.get("total", 1) or 1)
+    
+    # FALLBACK: If normal allocation failed, try with aggressive grade substitution
+    use_grade_substitution = False
+    if len(candidate_therapists) < req_total:
+        print(f"[RESCHEDULE FALLBACK] Normal allocation failed: found {len(candidate_therapists)}/{req_total} therapists")
+        print(f"[RESCHEDULE FALLBACK] Attempting allocation with grade substitution (Senior/Super Senior can fill Junior/Trainee slots)")
+        
+        try:
+            candidate_therapists_fallback = allocate_therapists_with_grade_substitution(
+                date,
+                canonical_slot,
+                therapy_req,
+                last_therapists if last_therapists else None,
+                needs_bath_flag,
+                patient_gender=pat_sex
+            )
+            
+            if len(candidate_therapists_fallback) >= req_total:
+                candidate_therapists = candidate_therapists_fallback
+                use_grade_substitution = True
+                print(f"[RESCHEDULE FALLBACK] ✓ Grade substitution successful: found {len(candidate_therapists)}/{req_total} therapists")
+            else:
+                print(f"[RESCHEDULE FALLBACK] ✗ Grade substitution also failed: found {len(candidate_therapists_fallback)}/{req_total} therapists")
+        except Exception as e:
+            print(f"[RESCHEDULE FALLBACK] Error in grade substitution fallback: {e}")
+            import traceback
+            traceback.print_exc()
+    
     if len(candidate_therapists) < req_total:
         reason = "insufficient_therapists_available"
         # Gender availability insight (non-blocking, for debugging/UX)
@@ -1303,6 +1569,81 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
     bath_assigned = None
     bath_assigned_from_pass1 = None
     
+    # CRITICAL FIX: Ensure previous bathing therapist is in assigned_therapists if available
+    # This fixes the issue where previous bathing therapist might be available but not in first req_total positions
+    if needs_bath_flag and previous_bathing_therapist:
+        if previous_bathing_therapist in candidate_therapists:
+            # Previous bathing therapist is in candidate list but might not be in assigned_therapists
+            if previous_bathing_therapist not in assigned_therapists:
+                # Previous bathing therapist is available but not in assigned_therapists
+                # Force them into assigned_therapists by replacing the last therapist if needed
+                print(f"[RESCHEDULE PASS2] ⚠ Previous bathing therapist {previous_bathing_therapist.therapist_code} is available but not in first {req_total} positions")
+                print(f"[RESCHEDULE PASS2]   Forcing previous bathing therapist into assigned_therapists for continuity")
+                
+                # Remove last therapist if we're at capacity, or just add if we have space
+                if len(assigned_therapists) >= req_total:
+                    # Replace last therapist with previous bathing therapist
+                    removed = assigned_therapists.pop()
+                    print(f"[RESCHEDULE PASS2]   Removed {removed.therapist_code} to make room for previous bathing therapist")
+                assigned_therapists.append(previous_bathing_therapist)
+                print(f"[RESCHEDULE PASS2] ✓ Previous bathing therapist {previous_bathing_therapist.therapist_code} now in assigned_therapists")
+        else:
+            # Previous bathing therapist is NOT in candidate_therapists - check if they're still available
+            # This might happen if they were filtered out due to session limit or other constraints
+            # Try to add them if they meet basic requirements
+            print(f"[RESCHEDULE PASS2] ⚠ Previous bathing therapist {previous_bathing_therapist.therapist_code} is NOT in candidate_therapists")
+            print(f"[RESCHEDULE PASS2]   Checking if they can still be added for continuity...")
+            
+            # Check basic availability
+            from masters.models import TherapistLeaveMaster, EmergencyLeave
+            from django.db.models import Q
+            day_of_week = date.weekday()
+            can_add = True
+            
+            # Check if on leave
+            if TherapistLeaveMaster.objects.filter(therapist=previous_bathing_therapist, leave_day=day_of_week).exists():
+                can_add = False
+                print(f"[RESCHEDULE PASS2]   Previous bathing therapist is on leave - cannot add")
+            # Check emergency leave
+            elif EmergencyLeave.objects.filter(
+                from_date__lte=date,
+                to_date__gte=date
+            ).filter(
+                Q(therapist=previous_bathing_therapist) | 
+                Q(employee_code=previous_bathing_therapist.employee_code)
+            ).exists():
+                can_add = False
+                print(f"[RESCHEDULE PASS2]   Previous bathing therapist is on emergency leave - cannot add")
+            # Check if already booked
+            elif TherapistBooking.objects.filter(
+                therapist=previous_bathing_therapist,
+                date=date,
+                time_slot=canonical_slot,
+                status='BOOKED'
+            ).exists():
+                can_add = False
+                print(f"[RESCHEDULE PASS2]   Previous bathing therapist already booked at this slot - cannot add")
+            # Check gender match
+            elif pat_sex:
+                desired_gender = 'female' if str(pat_sex).strip().lower().startswith('f') else 'male'
+                t_gender = getattr(previous_bathing_therapist, 'therapist_gender', None)
+                if t_gender:
+                    t_gender_str = str(t_gender).strip().lower()
+                    t_gender_normalized = 'female' if t_gender_str.startswith('f') else 'male'
+                    if t_gender_normalized != desired_gender:
+                        can_add = False
+                        print(f"[RESCHEDULE PASS2]   Previous bathing therapist gender mismatch ({t_gender_normalized} vs {desired_gender}) - cannot add")
+            
+            if can_add:
+                # Previous bathing therapist is available - add them to assigned_therapists
+                if len(assigned_therapists) >= req_total:
+                    removed = assigned_therapists.pop()
+                    print(f"[RESCHEDULE PASS2]   Removed {removed.therapist_code} to make room for previous bathing therapist")
+                assigned_therapists.append(previous_bathing_therapist)
+                print(f"[RESCHEDULE PASS2] ✓ Added previous bathing therapist {previous_bathing_therapist.therapist_code} to assigned_therapists for continuity")
+            else:
+                print(f"[RESCHEDULE PASS2]   Previous bathing therapist cannot be added due to constraints")
+    
     # Extract bath_assigned from PASS 1 continuity if available
     if last_allocation and isinstance(last_allocation, dict):
         continuity_assigned = last_allocation.get('continuity_assigned', {})
@@ -1319,12 +1660,15 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
     senior_therapist = None
     
     # For special treatments: identify a senior therapist candidate with available senior-tag capacity
+    # When grade substitution is used, Super Senior can also get the senior tag
     if requires_senior_tag:
         senior_candidates = []
         for t in assigned_therapists:
             grade_name = getattr(getattr(t, 'therapist_grade', None), 'name', '') if hasattr(t, 'therapist_grade') else ''
+            # Allow both Senior and Super Senior to get senior tag (especially when grade substitution is used)
             if 'Senior' in grade_name:
                 senior_candidates.append((t, grade_name))
+        
         if senior_candidates:
             from math import inf
             best = None
@@ -1337,7 +1681,11 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
                     best_count = current
             if best is not None:
                 senior_therapist = best
-                print(f"[DEBUG] Senior tag: selected senior {best.therapist_code} with existing senior-tag count={best_count} on {date}")
+                grade_name_best = getattr(getattr(best, 'therapist_grade', None), 'name', '') if hasattr(best, 'therapist_grade') else ''
+                if use_grade_substitution and 'Super Senior' in grade_name_best:
+                    print(f"[DEBUG] Senior tag (with grade substitution): selected Super Senior {best.therapist_code} with existing senior-tag count={best_count} on {date}")
+                else:
+                    print(f"[DEBUG] Senior tag: selected senior {best.therapist_code} with existing senior-tag count={best_count} on {date}")
             else:
                 # All potential seniors are already at or above the limit -> no senior tag for this booking
                 requires_senior_tag = False
@@ -1398,11 +1746,20 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
                 print(f"[DEBUG] Dhara & Pizichil: Senior {senior_therapist.therapist_code} is the only bathing therapist. Looking for alternative senior...")
                 
                 # Get all available senior therapists (excluding current senior)
-                alternative_seniors = TherapistMaster.objects.filter(
-                    therapist_grade__name='Senior Therapist'
-                ).exclude(
-                    therapist_code=senior_therapist.therapist_code
-                )
+                # When grade substitution is used, also consider Super Senior therapists
+                if use_grade_substitution:
+                    alternative_seniors = TherapistMaster.objects.filter(
+                        therapist_grade__name__in=['Senior Therapist', 'Super Senior Therapist']
+                    ).exclude(
+                        therapist_code=senior_therapist.therapist_code
+                    )
+                    print(f"[DEBUG] Grade substitution active: Also considering Super Senior therapists as alternatives")
+                else:
+                    alternative_seniors = TherapistMaster.objects.filter(
+                        therapist_grade__name='Senior Therapist'
+                    ).exclude(
+                        therapist_code=senior_therapist.therapist_code
+                    )
                 
                 # Filter by gender if needed
                 pat_sex = getattr(getattr(allocation, 'patient', None), 'pat_sex', None)
@@ -1692,9 +2049,18 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
             # success audit
             if AllocationAttempt:
                 try:
+                    extra_data = {
+                        "room_no": getattr(room_candidate,'room_no',None) if room_candidate else None,
+                        "therapists": therapists_for_audit,
+                        "booking_id": booking_id
+                    }
+                    # Add grade substitution flag if used
+                    if use_grade_substitution:
+                        extra_data["grade_substitution_used"] = True
+                        extra_data["substitution_note"] = "Senior/Super Senior therapists used to fill Junior/Trainee requirements"
                     AllocationAttempt.objects.create(visit=None, therapy=None, date=date,
                                                      requested_time_slot=canonical_slot, requested_time_slot_value=requested_slot_value or '',
-                                                     status='SUCCESS', reason='slot_booked', extra={"room_no": getattr(room_candidate,'room_no',None) if room_candidate else None, "therapists": therapists_for_audit, "booking_id": booking_id})
+                                                     status='SUCCESS', reason='slot_booked', extra=extra_data)
                 except Exception:
                     pass
 
@@ -1761,6 +2127,10 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
                 "room_no": getattr(room_candidate,"room_no",None) if room_candidate else getattr(booking.room,"room_no",None) if getattr(booking,"room",None) else None,
                 "therapists": therapists_for_audit
             }
+            # Add grade substitution flag if used
+            if use_grade_substitution:
+                task["grade_substitution_used"] = True
+                task["substitution_note"] = "Senior/Super Senior therapists used to fill Junior/Trainee requirements"
             return (task, True, None)
     except RuntimeError as rte:
         reason = str(rte)
@@ -1940,10 +2310,27 @@ def assign_continuity_therapists_pass1(booking, allocation, target_date, locked_
                     continuity_therapists = previous_therapist_masters
                     print(f"[RESCHEDULE PASS1] Booking {booking.pk}: Found {len(continuity_therapists)} continuity therapists from previous day ({most_recent_date})")
                     if needs_bath_flag:
-                        for t in continuity_therapists:
-                            if getattr(t, 'is_bathing_therapist', False):
-                                previous_bathing_therapist = t
-                                break
+                        # CRITICAL FIX: First try to find the actual previous bathing therapist by checking is_bathing=True flag
+                        prev_bath_booking = TherapistBooking.objects.filter(
+                            patient_id=patient_id,
+                            date=most_recent_date,
+                            is_bathing=True,
+                            status='BOOKED'
+                        ).exclude(
+                            visit=allocation
+                        ).select_related('therapist').order_by('-created_at').first()
+                        
+                        if prev_bath_booking and prev_bath_booking.therapist:
+                            # Found the actual previous bathing therapist from is_bathing=True flag
+                            previous_bathing_therapist = prev_bath_booking.therapist
+                            print(f"[RESCHEDULE PASS1] ✓ Found previous bathing therapist {previous_bathing_therapist.therapist_code} from is_bathing=True flag")
+                        else:
+                            # Fallback: Look for bathing therapist in continuity list (but log warning)
+                            for t in continuity_therapists:
+                                if getattr(t, 'is_bathing_therapist', False):
+                                    previous_bathing_therapist = t
+                                    print(f"[RESCHEDULE PASS1] ⚠ Using fallback: Found bathing therapist {t.therapist_code} but could not verify is_bathing=True flag")
+                                    break
         except Exception as e:
             print(f"[RESCHEDULE PASS1] Error finding previous day therapists: {e}")
             continuity_therapists = []
@@ -2281,7 +2668,7 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
             # No preferred -> use automatic slot allocation immediately (do not fail early)
             # Prepare allowed slots for this patient (OP/IP aware)
             therapy_req = therapist_requirements(allocation)
-            allowed_slot_values = get_allowed_slot_values(patient_type, therapy_req.get("therapy_category"), used_slots)
+            allowed_slot_values = get_allowed_slot_values(patient_type, therapy_req.get("therapy_category"), used_slots, therapy_name)
             allocated_here = False
             
             # TIER 1: Try slots WITH continuity (if continuity exists)
@@ -2357,12 +2744,35 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
 
         # if preferred exists -> try preferred first
         canonical_pref = map_to_canonical_slot(pref_slot) or pref_slot
+        
+        # RESTRICTION: Check if preferred slot is 06:30 for Lepam treatment - reject it
+        if therapy_name and canonical_pref:
+            therapy_name_lower = str(therapy_name).strip().lower()
+            if 'lepam' in therapy_name_lower:
+                try:
+                    pref_slot_time = getattr(canonical_pref, 'slot_time', None) or getattr(canonical_pref, 'start_time', None)
+                    if pref_slot_time:
+                        pref_slot_str = pref_slot_time.strftime("%H:%M") if hasattr(pref_slot_time, 'strftime') else str(pref_slot_time)
+                        if pref_slot_str == "06:30":
+                            print(f"[SLOT RESTRICTION] Lepam treatment cannot use 06:30 slot. Rejecting preferred slot and trying alternatives.")
+                            canonical_pref = None  # Force fallback to automatic slot allocation
+                except Exception as e:
+                    print(f"[SLOT RESTRICTION] Error checking preferred slot for Lepam: {e}")
 
         therapy_req = therapist_requirements(allocation)
         needs_room_flag = therapy_needs_room(allocation)
         needs_bath_flag = therapy_needs_bath(allocation)
 
-        task, success, reason = attempt_allocate_slot(allocation, booking, target_date, canonical_pref, therapy_req, needs_room_flag, needs_bath_flag, used_slots, create_bookings, patient_id, last_allocation, AllocationAttempt)
+        # If preferred slot was rejected for Lepam (canonical_pref is None), skip attempting it
+        if not canonical_pref:
+            # Force fallback to automatic slot allocation
+            task = None
+            success = False
+            reason = "lepam_cannot_use_0630_slot"
+            print(f"[SLOT RESTRICTION] Lepam treatment: Preferred slot 06:30 rejected. Will try alternate slots.")
+        else:
+            task, success, reason = attempt_allocate_slot(allocation, booking, target_date, canonical_pref, therapy_req, needs_room_flag, needs_bath_flag, used_slots, create_bookings, patient_id, last_allocation, AllocationAttempt)
+        
         if success:
             tasks.append(task)
             any_success = True
@@ -2416,7 +2826,7 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
             
             if should_try_fallback:
                 # attempt other allowed slots (OP/IP aware)
-                allowed_slot_values = get_allowed_slot_values(patient_type, therapy_req.get("therapy_category"), used_slots)
+                allowed_slot_values = get_allowed_slot_values(patient_type, therapy_req.get("therapy_category"), used_slots, therapy_name)
                 print(f"[DEBUG Reschedule] Allowed slot values for patient_type={patient_type}, category={therapy_req.get('therapy_category')}: {allowed_slot_values}")
                 
                 # remove preferred if present

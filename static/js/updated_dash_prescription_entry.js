@@ -55,11 +55,20 @@ $(function(){
   const $commonUsageSelect = $('#common-usage-select');
   let usageSelectionOrder = []; // Track selection order for usage field
   
+  // Flag to prevent reordering during unselect operations
+  let isUnselecting = false;
+  
   // Function to reorder selected tags in the DOM to match selection order (global function)
   function reorderUsageTags() {
+    // Don't reorder if we're in the middle of an unselect operation
+    if (isUnselecting) return;
+    
     // Use requestAnimationFrame for smoother updates
     requestAnimationFrame(() => {
       setTimeout(() => {
+        // Double-check flag after timeout
+        if (isUnselecting) return;
+        
         const $select2Container = $commonUsageSelect.next('.select2-container');
         if (!$select2Container.length) return;
         
@@ -99,7 +108,25 @@ $(function(){
         if (Object.keys(tagMap).length === orderedValues.length) {
           orderedValues.forEach(val => {
             if (tagMap[val]) {
-              tagMap[val].detach().appendTo($choicesContainer);
+              // Use a more gentle approach that preserves event handlers
+              const $tag = tagMap[val];
+              if ($tag.parent()[0] !== $choicesContainer[0]) {
+                $tag.appendTo($choicesContainer);
+              } else {
+                // If already in the right container, just move to correct position
+                const currentIndex = $tag.index();
+                const targetIndex = orderedValues.indexOf(val);
+                if (currentIndex !== targetIndex) {
+                  if (targetIndex === 0) {
+                    $tag.prependTo($choicesContainer);
+                  } else {
+                    const $prevTag = tagMap[orderedValues[targetIndex - 1]];
+                    if ($prevTag && $prevTag.length) {
+                      $tag.insertAfter($prevTag);
+                    }
+                  }
+                }
+              }
             }
           });
         }
@@ -449,54 +476,75 @@ $(function(){
         if (usageSelectionOrder.indexOf(selectedValue) === -1) {
           usageSelectionOrder.push(selectedValue);
         }
-        // Reorder tags immediately and multiple times to ensure it sticks
-        // Select2 may re-render, so we need to catch it multiple times
-        reorderUsageTags();
-        setTimeout(reorderUsageTags, 10);
-        setTimeout(reorderUsageTags, 50);
-        setTimeout(reorderUsageTags, 150);
+        // Reorder tags after Select2 has rendered the new tag
+        // Use a single delayed call to avoid race conditions
+        setTimeout(() => {
+          if (!isUnselecting) {
+            reorderUsageTags();
+          }
+        }, 100);
       });
       
       $u.on('select2:unselect', function(e) {
+        // Set flag to prevent reordering during unselect
+        isUnselecting = true;
+        
         const unselectedValue = e.params.data.id;
         const index = usageSelectionOrder.indexOf(unselectedValue);
         if (index > -1) {
           usageSelectionOrder.splice(index, 1);
         }
-        // Reorder remaining tags
-        reorderUsageTags();
-        setTimeout(reorderUsageTags, 10);
-        setTimeout(reorderUsageTags, 50);
+        
+        // Clear flag after a short delay to allow Select2 to complete the unselect
+        setTimeout(() => {
+          isUnselecting = false;
+          // Reorder remaining tags after unselect is complete
+          reorderUsageTags();
+        }, 100);
       });
       
       // Also reorder when values are set programmatically (like when loading for edit)
       $u.on('change', function() {
-        reorderUsageTags();
-        setTimeout(reorderUsageTags, 100);
+        if (!isUnselecting) {
+          setTimeout(() => {
+            if (!isUnselecting) {
+              reorderUsageTags();
+            }
+          }, 100);
+        }
       });
       
-      // Reorder after Select2 opens/closes to ensure correct order
-      $u.on('select2:open', function() {
-        setTimeout(reorderUsageTags, 10);
-      });
-      
+      // Reorder after Select2 closes to ensure correct order (but not on open to avoid interference)
       $u.on('select2:close', function() {
-        setTimeout(reorderUsageTags, 10);
+        if (!isUnselecting) {
+          setTimeout(() => {
+            if (!isUnselecting) {
+              reorderUsageTags();
+            }
+          }, 50);
+        }
       });
       
       // Use MutationObserver to watch for DOM changes and reorder automatically
+      // But be careful not to interfere with Select2's native unselect behavior
       setTimeout(() => {
         const $select2Container = $u.next('.select2-container');
         if ($select2Container.length) {
           const $choicesContainer = $select2Container.find('.select2-selection__rendered');
           if ($choicesContainer.length && $choicesContainer[0]) {
             const observer = new MutationObserver(function(mutations) {
-              // Only reorder if tags were added/removed
-              const hasChanges = mutations.some(m => 
-                m.addedNodes.length > 0 || m.removedNodes.length > 0
-              );
-              if (hasChanges) {
-                reorderUsageTags();
+              // Don't reorder if we're in the middle of an unselect operation
+              if (isUnselecting) return;
+              
+              // Only reorder if tags were added (not removed, as removal is handled by select2:unselect)
+              const hasAdditions = mutations.some(m => m.addedNodes.length > 0);
+              if (hasAdditions) {
+                // Use a small delay to ensure Select2 has finished its operations
+                setTimeout(() => {
+                  if (!isUnselecting) {
+                    reorderUsageTags();
+                  }
+                }, 50);
               }
             });
             
@@ -512,41 +560,7 @@ $(function(){
     // Populate Oil Class in item builder section
     ajax({action:'masters', type:'oil'}).then(list => { $itemBuilderOilClass.empty().append('<option value="">-- Select --</option>'); (list||[]).forEach(o => $itemBuilderOilClass.append(new Option(o.name, o.name))); }).catch(()=>{ $itemBuilderOilClass.empty().append('<option value="">-- Select --</option>'); });
     
-    // Populate ingredients
-    ajax({action:'masters', type:'ingredient'}).then(list => {
-      const $ing = $('#item-builder-ingredients');
-      if ($ing.length) {
-        // Clear any existing options
-        $ing.empty();
-        
-        // Add options from API response
-        (list || []).forEach(i => {
-          const text = i.ingredient_name || i.ingredient_code || 'N/A';
-          $ing.append(new Option(text, i.id, false, false));
-        });
-        
-        // Initialize Select2 for multiselect
-        if (!$ing.hasClass('select2-hidden-accessible')) {
-          $ing.select2({
-            placeholder: 'Select Ingredients (multiple)',
-            allowClear: true,
-            multiple: true,
-            width: '100%'
-          });
-        }
-      }
-    }).catch(() => {
-      // Initialize empty select2 if API fails
-      const $ing = $('#item-builder-ingredients');
-      if ($ing.length && !$ing.hasClass('select2-hidden-accessible')) {
-        $ing.select2({
-          placeholder: 'Select Ingredients (multiple)',
-          allowClear: true,
-          multiple: true,
-          width: '100%'
-        });
-      }
-    });
+    // Ingredients field is now a free text input - no need to populate from API
   }
   populateMasters();
 
@@ -659,10 +673,12 @@ $(function(){
     const uno = $('#item-builder-uno').val().trim();
     const oilClass = $itemBuilderOilClass.val() || '';
     const procuredFrom = $itemBuilderProcuredFrom.val() || '';
-    const ingredientSelect = $('#item-builder-ingredients');
-    const ingredientData = ingredientSelect.select2('data') || [];
-    const ingredients = ingredientData.map(i => ({ id: i.id, ingredient_name: i.text || i.id }));
-    const ingredientIds = ingredientData.map(i => i.id);
+    // Ingredients is now a free text field
+    const ingredientInput = $('#item-builder-ingredients');
+    const ingredientsText = (ingredientInput.val() || '').trim();
+    // Store as text string and also as array for backward compatibility
+    const ingredients = ingredientsText ? [{ ingredient_name: ingredientsText }] : [];
+    const ingredientIds = []; // No IDs for free text
     
     // Validate mandatory fields
     if (!selected || selected.length === 0) {
@@ -680,7 +696,7 @@ $(function(){
     $('#item-builder-uno').val('');
     $itemBuilderOilClass.val('');
     $itemBuilderProcuredFrom.val('');
-    ingredientSelect.val(null).trigger('change');
+    ingredientInput.val(''); // Clear text input
     renderItemGroups();
   });
 
@@ -699,9 +715,20 @@ $(function(){
     // Show each group separately with edit/remove buttons, but in the same format as final display
     itemGroups.forEach((g,i) => {
       const itemNames = (g.items || []).map(it => esc(it.item_name)).join(', ');
-      const ingredientsDisplay = (g.ingredients && g.ingredients.length > 0) 
-        ? g.ingredients.map(ing => esc(ing.ingredient_name)).join(', ')
-        : '—';
+      // Handle ingredients - can be array of objects, array of strings, or a single string
+      let ingredientsDisplay = '—';
+      if (g.ingredients) {
+        if (Array.isArray(g.ingredients) && g.ingredients.length > 0) {
+          // Array format (old or new)
+          ingredientsDisplay = g.ingredients.map(ing => {
+            if (typeof ing === 'string') return esc(ing);
+            return esc(ing.ingredient_name || ing.text || '');
+          }).filter(Boolean).join(', ');
+        } else if (typeof g.ingredients === 'string' && g.ingredients.trim()) {
+          // String format (new free text)
+          ingredientsDisplay = esc(g.ingredients);
+        }
+      }
       const timeDisplay = g.time ? esc(g.time) : '—';
       const oilClassDisplay = g.oil_class ? esc(g.oil_class) : '—';
       const procuredFromDisplay = g.procured_from ? esc(g.procured_from) : '—';
@@ -771,12 +798,17 @@ $(function(){
     $('#item-builder-uno').val(g.uno||'');
     $itemBuilderOilClass.val(g.oil_class||''); 
     $itemBuilderProcuredFrom.val(g.procured_from||''); 
-    // Handle ingredients
-    const ingredientSelect = $('#item-builder-ingredients');
-    if (g.ingredient_ids && Array.isArray(g.ingredient_ids) && g.ingredient_ids.length > 0) {
-      ingredientSelect.val(g.ingredient_ids).trigger('change');
+    // Handle ingredients - now a free text field
+    const ingredientInput = $('#item-builder-ingredients');
+    if (g.ingredients && Array.isArray(g.ingredients) && g.ingredients.length > 0) {
+      // Extract ingredient names from array and join them
+      const ingredientText = g.ingredients.map(ing => ing.ingredient_name || ing.text || '').filter(Boolean).join(', ');
+      ingredientInput.val(ingredientText);
+    } else if (typeof g.ingredients === 'string') {
+      // Handle case where ingredients is stored as a string
+      ingredientInput.val(g.ingredients);
     } else {
-      ingredientSelect.val(null).trigger('change');
+      ingredientInput.val('');
     }
     itemGroups = itemGroups.filter(x=>x.id!==id); 
     renderItemGroups(); 
@@ -966,10 +998,18 @@ $(function(){
           doseDisplay = unoRaw;
         }
 
-        // Ingredients
-        const ingredientsDisplay = (g.ingredients && g.ingredients.length > 0)
-          ? g.ingredients.map(ing => esc(ing.ingredient_name || ing.text || '')).join(', ')
-          : '';
+        // Ingredients - handle both array and string formats
+        let ingredientsDisplay = '';
+        if (g.ingredients) {
+          if (Array.isArray(g.ingredients) && g.ingredients.length > 0) {
+            ingredientsDisplay = g.ingredients.map(ing => {
+              if (typeof ing === 'string') return esc(ing);
+              return esc(ing.ingredient_name || ing.text || '');
+            }).filter(Boolean).join(', ');
+          } else if (typeof g.ingredients === 'string' && g.ingredients.trim()) {
+            ingredientsDisplay = esc(g.ingredients);
+          }
+        }
 
         const time = g.time ? esc(g.time) : '';
         const extInt = g.internal_external ? esc(g.internal_external) : '';

@@ -142,6 +142,103 @@
     
     <script src="{% static 'js/authentication_create_role.js' %}"></script>
     <script src="{% static 'js/dashboards_nav.js' %}"></script>
+    
+    <!-- Inline script to ensure select all/deselect all works -->
+    <script>
+    (function() {
+        function selectAllModules() {
+            var checkboxes = document.querySelectorAll('input[name="modules"][type="checkbox"]');
+            console.log('Select All: Found', checkboxes.length, 'checkboxes');
+            for (var i = 0; i < checkboxes.length; i++) {
+                var item = checkboxes[i].closest('.module-item');
+                if (!item || item.offsetParent !== null) {
+                    checkboxes[i].checked = true;
+                }
+            }
+        }
+        
+        function deselectAllModules() {
+            var checkboxes = document.querySelectorAll('input[name="modules"][type="checkbox"]');
+            console.log('Deselect All: Found', checkboxes.length, 'checkboxes');
+            for (var i = 0; i < checkboxes.length; i++) {
+                checkboxes[i].checked = false;
+            }
+        }
+        
+        // Wait for DOM to be ready
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', initButtons);
+        } else {
+            initButtons();
+        }
+        
+        function initButtons() {
+            // Select All button
+            var selectAllBtn = document.getElementById('selectAllBtn');
+            if (selectAllBtn) {
+                selectAllBtn.onclick = function(e) {
+                    e.preventDefault();
+                    selectAllModules();
+                    return false;
+                };
+                console.log('Select All button initialized');
+            } else {
+                console.error('Select All button not found');
+            }
+            
+            // Deselect All button
+            var deselectAllBtn = document.getElementById('deselectAllBtn');
+            if (deselectAllBtn) {
+                deselectAllBtn.onclick = function(e) {
+                    e.preventDefault();
+                    deselectAllModules();
+                    return false;
+                };
+                console.log('Deselect All button initialized');
+            } else {
+                console.error('Deselect All button not found');
+            }
+            
+            // Category buttons
+            var categorySelectBtns = document.querySelectorAll('.select-category-all');
+            categorySelectBtns.forEach(function(btn) {
+                btn.onclick = function(e) {
+                    e.preventDefault();
+                    var category = this.getAttribute('data-category');
+                    var categoryDiv = document.querySelector('.module-category[data-category="' + category + '"]');
+                    if (categoryDiv) {
+                        var checkboxes = categoryDiv.querySelectorAll('input[name="modules"][type="checkbox"]');
+                        for (var i = 0; i < checkboxes.length; i++) {
+                            var item = checkboxes[i].closest('.module-item');
+                            if (!item || item.offsetParent !== null) {
+                                checkboxes[i].checked = true;
+                            }
+                        }
+                    }
+                    return false;
+                };
+            });
+            
+            var categoryDeselectBtns = document.querySelectorAll('.deselect-category-all');
+            categoryDeselectBtns.forEach(function(btn) {
+                btn.onclick = function(e) {
+                    e.preventDefault();
+                    var category = this.getAttribute('data-category');
+                    var categoryDiv = document.querySelector('.module-category[data-category="' + category + '"]');
+                    if (categoryDiv) {
+                        var checkboxes = categoryDiv.querySelectorAll('input[name="modules"][type="checkbox"]');
+                        for (var i = 0; i < checkboxes.length; i++) {
+                            checkboxes[i].checked = false;
+                        }
+                    }
+                    return false;
+                };
+            });
+            
+            console.log('All buttons initialized. Category buttons:', categorySelectBtns.length);
+        }
+    })();
+    </script>
 </body>
 </html>
 

@@ -299,9 +299,16 @@ def search_therapies_api(request):
         if TherapyMaster is not None:
             qs = TherapyMaster.objects.filter(is_active=True)
             
-            # Filter by patient type if provided (IP or OP)
-            if patient_type in ('IP', 'OP'):
-                qs = qs.filter(patient_type=patient_type)
+            # Filter by patient type based on requirements:
+            # - For IP patients: Show only IP treatments
+            # - For OP patients: Show both OP and IP treatments
+            if patient_type == 'IP':
+                # IP patients: Only IP treatments
+                qs = qs.filter(patient_type='IP')
+            elif patient_type == 'OP':
+                # OP patients: Both OP and IP treatments
+                qs = qs.filter(Q(patient_type='OP') | Q(patient_type='IP'))
+            # If patient_type is not provided or empty, show all (backward compatibility)
             
             if query:
                 qs = qs.filter(Q(therapy_name__icontains=query) | Q(therapy_code__icontains=query))

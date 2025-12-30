@@ -1603,9 +1603,16 @@ def therapy_entry(request):
         if TherapyMaster is not None:
             qs = TherapyMaster.objects.filter(is_active=True).all()  # Use local master table
             
-            # Filter by patient type if provided (IP or OP)
-            if patient_type in ('IP', 'OP'):
-                qs = qs.filter(patient_type=patient_type)
+            # Filter by patient type based on requirements:
+            # - For IP patients: Show only IP treatments
+            # - For OP patients: Show both OP and IP treatments
+            if patient_type == 'IP':
+                # IP patients: Only IP treatments
+                qs = qs.filter(patient_type='IP')
+            elif patient_type == 'OP':
+                # OP patients: Both OP and IP treatments
+                qs = qs.filter(Q(patient_type='OP') | Q(patient_type='IP'))
+            # If patient_type is not provided or empty, show all (backward compatibility)
             
             if q:
                 qs = qs.filter(Q(therapy_name__icontains=q) | Q(therapy_code__icontains=q))
@@ -1618,8 +1625,7 @@ def therapy_entry(request):
                 })
         
         # Add nurse treatments from NurseTreatmentMaster
-        # Note: Nurse treatments are typically for IP patients, but we include them for both
-        # You can add patient_type field to NurseTreatmentMaster later if needed
+        # Nurse treatments are shown for both IP and OP patients
         if NurseTreatmentMaster is not None:
             qs = NurseTreatmentMaster.objects.filter(is_active=True).all()
             if q:
@@ -3699,6 +3705,10 @@ def scheduling_dashboard(request):
             bookings__status='failed'
         ).distinct().select_related('patient', 'room', 'timeslot').prefetch_related('bookings__assignments__therapist')
         
+        # Filter out therapies with zero therapist requirements
+        from reshedule import therapist_requirements
+        failed_allocations = [alloc for alloc in failed_allocations if therapist_requirements(alloc).get("total", 1) > 0]
+        
         # Scheduled: show allocations that have scheduled bookings for this date
         scheduled_allocations = TherapyAllocation.objects.filter(
             from_date__lte=filter_date,
@@ -3716,6 +3726,10 @@ def scheduling_dashboard(request):
         failed_allocations = TherapyAllocation.objects.filter(
             bookings__status='failed'
         ).distinct().select_related('patient', 'room', 'timeslot').prefetch_related('bookings__assignments__therapist')
+        
+        # Filter out therapies with zero therapist requirements
+        from reshedule import therapist_requirements
+        failed_allocations = [alloc for alloc in failed_allocations if therapist_requirements(alloc).get("total", 1) > 0]
         
         scheduled_allocations = TherapyAllocation.objects.filter(
             bookings__status='scheduled'
@@ -3791,7 +3805,7 @@ def scheduling_dashboard(request):
         'date_filter': date_filter or '',
         'stats': {
             'draft_count': draft_bookings.count() if filter_date else draft_allocations.count(),
-            'failed_count': failed_allocations.count(),
+            'failed_count': len(failed_allocations) if isinstance(failed_allocations, list) else failed_allocations.count(),
             'scheduled_count': scheduled_bookings.count() if filter_date else scheduled_allocations.count(),
         }
     }
@@ -4117,9 +4131,13 @@ def get_therapy_data_api(request):
                 )
                 
                 from .nurse_allocation import is_nurse_treatment
+                from reshedule import therapist_requirements
                 
                 # Convert bookings to JSON format
                 for booking in bookings:
+                    # Skip therapies with zero therapist requirements
+                    if therapist_requirements(booking.allocation).get("total", 1) == 0:
+                        continue
                     # Get assigned therapists for this booking
                     therapists = []
                     # Pre-fetch all TherapistBooking records for this booking to avoid N+1 queries
@@ -4338,8 +4356,12 @@ def get_therapy_data_api(request):
             
             # Convert to JSON format
             from .nurse_allocation import is_nurse_treatment
+            from reshedule import therapist_requirements
             
             for allocation in allocations:
+                # Skip therapies with zero therapist requirements (only for failed status)
+                if status_filter == 'failed' and therapist_requirements(allocation).get("total", 1) == 0:
+                    continue
                     # Check if this treatment requires special senior tag handling
                     requires_senior_tag = False
                     if allocation and allocation.therapy_name:

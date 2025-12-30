@@ -1,36 +1,116 @@
-function deleteUser(userId, username) {
-      if (confirm(`Are you sure you want to delete user "${username}"? This action cannot be undone.`)) {
-        const form = document.createElement('form');
-        form.method = 'POST';
-        form.innerHTML = `
-          {% csrf_token %}
-          <input type="hidden" name="action" value="delete_user">
-          <input type="hidden" name="user_id" value="${userId}">
-        `;
-        document.body.appendChild(form);
-        form.submit();
+// Get CSRF token from meta tag or cookie
+function getCsrfToken() {
+  // Try to get from meta tag first
+  const metaTag = document.querySelector('meta[name="csrf-token"]');
+  if (metaTag) {
+    return metaTag.getAttribute('content');
+  }
+  // Fallback: try to get from cookie
+  const name = 'csrftoken';
+  let cookieValue = null;
+  if (document.cookie && document.cookie !== '') {
+    const cookies = document.cookie.split(';');
+    for (let i = 0; i < cookies.length; i++) {
+      const cookie = cookies[i].trim();
+      if (cookie.substring(0, name.length + 1) === (name + '=')) {
+        cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+        break;
       }
     }
+  }
+  return cookieValue;
+}
 
-    function toggleUserStatus(userId, username, activate) {
-      const action = activate ? 'activate' : 'deactivate';
-      const confirmMsg = activate 
-        ? `Are you sure you want to activate user "${username}"?`
-        : `Are you sure you want to deactivate user "${username}"?`;
-      
-      if (confirm(confirmMsg)) {
-        const form = document.createElement('form');
-        form.method = 'POST';
-        form.innerHTML = `
-          {% csrf_token %}
-          <input type="hidden" name="action" value="toggle_user_status">
-          <input type="hidden" name="user_id" value="${userId}">
-          <input type="hidden" name="is_active" value="${activate ? 'true' : 'false'}">
-        `;
-        document.body.appendChild(form);
-        form.submit();
-      }
+function deleteUser(userId, username) {
+  if (confirm(`Are you sure you want to delete user "${username}"? This action cannot be undone.`)) {
+    const csrfToken = getCsrfToken();
+    if (!csrfToken) {
+      alert('Error: CSRF token not found. Please refresh the page and try again.');
+      return;
     }
+    const form = document.createElement('form');
+    form.method = 'POST';
+    form.action = window.location.pathname;
+    form.innerHTML = `
+      <input type="hidden" name="csrfmiddlewaretoken" value="${csrfToken}">
+      <input type="hidden" name="action" value="delete_user">
+      <input type="hidden" name="user_id" value="${userId}">
+    `;
+    document.body.appendChild(form);
+    form.submit();
+  }
+}
+
+function toggleUserStatus(userId, username, activate) {
+  console.log('toggleUserStatus called with:', { userId, username, activate });
+  try {
+    // Ensure username is a string and escape it for display
+    const safeUsername = String(username || 'Unknown');
+    const action = activate ? 'activate' : 'deactivate';
+    const confirmMsg = activate 
+      ? `Are you sure you want to activate user "${safeUsername}"?`
+      : `Are you sure you want to deactivate user "${safeUsername}"?`;
+    
+    if (confirm(confirmMsg)) {
+      const csrfToken = getCsrfToken();
+      if (!csrfToken) {
+        alert('Error: CSRF token not found. Please refresh the page and try again.');
+        console.error('CSRF token not found');
+        return false;
+      }
+      
+      // Create form element
+      const form = document.createElement('form');
+      form.method = 'POST';
+      form.action = window.location.pathname + window.location.search; // Preserve query parameters
+      form.style.display = 'none';
+      
+      // Create CSRF token input
+      const csrfInput = document.createElement('input');
+      csrfInput.type = 'hidden';
+      csrfInput.name = 'csrfmiddlewaretoken';
+      csrfInput.value = csrfToken;
+      form.appendChild(csrfInput);
+      
+      // Create action input
+      const actionInput = document.createElement('input');
+      actionInput.type = 'hidden';
+      actionInput.name = 'action';
+      actionInput.value = 'toggle_user_status';
+      form.appendChild(actionInput);
+      
+      // Create user_id input
+      const userIdInput = document.createElement('input');
+      userIdInput.type = 'hidden';
+      userIdInput.name = 'user_id';
+      userIdInput.value = String(userId);
+      form.appendChild(userIdInput);
+      
+      // Create is_active input
+      const isActiveInput = document.createElement('input');
+      isActiveInput.type = 'hidden';
+      isActiveInput.name = 'is_active';
+      isActiveInput.value = activate ? 'true' : 'false';
+      form.appendChild(isActiveInput);
+      
+      // Append form to body and submit
+      document.body.appendChild(form);
+      console.log('Submitting toggle user status form:', {
+        user_id: userId,
+        username: safeUsername,
+        is_active: activate ? 'true' : 'false'
+      });
+      form.submit();
+    }
+  } catch (error) {
+    console.error('Error in toggleUserStatus:', error);
+    alert('An error occurred. Please check the console for details.');
+  }
+  return false;
+}
+
+// Make sure function is globally accessible
+window.toggleUserStatus = toggleUserStatus;
 
     // Validation for add user form
     let usernameCheckTimeout;
@@ -289,6 +369,73 @@ function deleteUser(userId, username) {
           toggleRoleSpecificFields('role');
         });
       }
+      
+      // Handle toggle status buttons using event delegation
+      // Use event delegation on the document body to catch all clicks
+      document.body.addEventListener('click', function(e) {
+        // Check if clicked element or its parent has the toggle-status-btn class
+        let button = e.target;
+        while (button && !button.classList.contains('toggle-status-btn')) {
+          button = button.parentElement;
+        }
+        
+        if (button && button.classList.contains('toggle-status-btn')) {
+          e.preventDefault();
+          e.stopPropagation();
+          
+          console.log('Toggle status button clicked:', button);
+          
+          const userId = button.getAttribute('data-user-id');
+          const username = button.getAttribute('data-username');
+          const activate = button.getAttribute('data-activate') === 'true';
+          
+          console.log('Button data:', { userId, username, activate });
+          
+          if (userId && username !== null) {
+            // Verify function exists
+            if (typeof toggleUserStatus === 'function') {
+              console.log('Calling toggleUserStatus function');
+              toggleUserStatus(parseInt(userId), username, activate);
+            } else {
+              console.error('toggleUserStatus function not found!');
+              alert('Error: Function not loaded. Please refresh the page.');
+            }
+          } else {
+            console.error('Missing data attributes on toggle button:', button);
+            alert('Error: Missing user information. Please refresh the page.');
+          }
+          return false;
+        }
+      });
+      
+      // Also add direct event listeners to all existing toggle buttons as backup
+      const toggleButtons = document.querySelectorAll('.toggle-status-btn');
+      console.log('Found toggle buttons:', toggleButtons.length);
+      toggleButtons.forEach(function(button) {
+        button.addEventListener('click', function(e) {
+          e.preventDefault();
+          e.stopPropagation();
+          console.log('Direct click handler triggered on button:', this);
+          const userId = this.getAttribute('data-user-id');
+          const username = this.getAttribute('data-username');
+          const activate = this.getAttribute('data-activate') === 'true';
+          
+          console.log('Button data:', { userId, username, activate });
+          console.log('toggleUserStatus function exists:', typeof toggleUserStatus);
+          
+          if (userId && username !== null) {
+            if (typeof toggleUserStatus === 'function') {
+              toggleUserStatus(parseInt(userId), username, activate);
+            } else {
+              console.error('toggleUserStatus is not a function!');
+              alert('Error: Function not loaded. Please refresh the page.');
+            }
+          } else {
+            console.error('Missing data on button:', { userId, username });
+          }
+          return false;
+        }, true); // Use capture phase to catch event early
+      });
       
       // Handle edit modals
       {% for user in users %}
