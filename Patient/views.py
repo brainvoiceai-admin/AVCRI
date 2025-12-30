@@ -57,16 +57,31 @@ def search_patients_api(request):
         
         # Search in OP patients (OPMaster table)
         try:
+            from MySql_Data_pull.models import Treatment
             op_patients = OPMaster.objects.using('hospital_db').filter(
                 Q(NPat_Reg_No__icontains=query) | Q(NPat_Name__icontains=query)
             ).values('NPat_Reg_No', 'NPat_Name')[:10]
             print(op_patients)
             for patient in op_patients:
-                patients.append({
-                    'pat_reg_no': str(patient['NPat_Reg_No']),
-                    'pat_name': patient['NPat_Name'] or 'Unknown',
-                    'patient_type': 'OP'
-                })
+                pat_reg_no_str = str(patient['NPat_Reg_No'])
+                # Check if patient has active status in Treatment table (Status = 'ON')
+                try:
+                    # Use exists() to avoid fetching datetime fields that may cause timezone issues
+                    has_active_treatment = Treatment.objects.using('iptherapy_db').filter(
+                        Pat_Reg_No=pat_reg_no_str,
+                        Status='ON'
+                    ).exists()
+                    # Only include OP patients with active status (Status = 'ON')
+                    if has_active_treatment:
+                        patients.append({
+                            'pat_reg_no': pat_reg_no_str,
+                            'pat_name': patient['NPat_Name'] or 'Unknown',
+                            'patient_type': 'OP'
+                        })
+                except Exception as e:
+                    print(f"Error checking Treatment status for OP patient {pat_reg_no_str}: {e}")
+                    import traceback
+                    traceback.print_exc()
         except Exception as e:
             print(f"Error searching OP patients: {e}")
         
