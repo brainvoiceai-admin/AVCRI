@@ -1372,23 +1372,38 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
                             ).order_by('-date')
                             
                             if history_records.exists():
-                                # Group by date and get the most recent date's therapists
-                                most_recent_date = history_records.first().date
-                                recent_history = history_records.filter(date=most_recent_date)
+                                # Get up to 50 unique dates in most recent order
+                                unique_dates = history_records.values_list('date', flat=True).distinct().order_by('-date')[:50]
                                 
-                                # Get unique therapist codes from that date
-                                therapist_codes_from_history = list(
-                                    set([h.therapist_code for h in recent_history if h.therapist_code])
-                                )
+                                print(f"[RESCHEDULE PASS2] Found {len(unique_dates)} unique date(s) in PatientHistory (checking up to 50 most recent)")
                                 
-                                if therapist_codes_from_history:
-                                    print(f"[RESCHEDULE PASS2] ✓ Found {len(therapist_codes_from_history)} unique therapist(s) from history")
+                                # Check each date in order until we find available therapists
+                                available_history_therapists = []
+                                day_of_week = date.weekday()
+                                dates_checked = 0
+                                
+                                for check_date in unique_dates:
+                                    dates_checked += 1
+                                    print(f"[RESCHEDULE PASS2] Checking date {dates_checked}/{len(unique_dates)}: {check_date}")
                                     
-                                    # Map therapist codes to TherapistMaster objects and check availability
-                                    available_history_therapists = []
-                                    day_of_week = date.weekday()
+                                    # Get all history records for this date
+                                    date_history = history_records.filter(date=check_date)
                                     
-                                    for therapist_code in therapist_codes_from_history:
+                                    # Get unique therapist codes from this date
+                                    therapist_codes_from_date = list(
+                                        set([h.therapist_code for h in date_history if h.therapist_code])
+                                    )
+                                    
+                                    if not therapist_codes_from_date:
+                                        print(f"[RESCHEDULE PASS2]   No therapists found for date {check_date} - checking next date")
+                                        continue
+                                    
+                                    print(f"[RESCHEDULE PASS2]   Found {len(therapist_codes_from_date)} unique therapist(s) from date {check_date}")
+                                    
+                                    # Check availability for therapists from this date
+                                    date_available_therapists = []
+                                    
+                                    for therapist_code in therapist_codes_from_date:
                                         try:
                                             therapist = TherapistMaster.objects.filter(
                                                 therapist_code=therapist_code
@@ -1401,7 +1416,7 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
                                                     therapist=therapist, 
                                                     leave_day=day_of_week
                                                 ).exists():
-                                                    print(f"[RESCHEDULE PASS2] Therapist {therapist_code} is on weekly leave - skipping")
+                                                    print(f"[RESCHEDULE PASS2]   Therapist {therapist_code} is on weekly leave - skipping")
                                                     continue
                                                 
                                                 # 2. Check if already booked at this date+time_slot
@@ -1411,7 +1426,7 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
                                                     time_slot=canonical_slot,
                                                     status='BOOKED'
                                                 ).exists():
-                                                    print(f"[RESCHEDULE PASS2] Therapist {therapist_code} already booked at {date} {canonical_slot} - skipping")
+                                                    print(f"[RESCHEDULE PASS2]   Therapist {therapist_code} already booked at {date} {canonical_slot} - skipping")
                                                     continue
                                                 
                                                 # 3. Check daily session limit (max 6 sessions)
@@ -1422,22 +1437,30 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
                                                 ).count()
                                                 
                                                 if session_count >= 6:
-                                                    print(f"[RESCHEDULE PASS2] Therapist {therapist_code} has reached max sessions (6) - skipping")
+                                                    print(f"[RESCHEDULE PASS2]   Therapist {therapist_code} has reached max sessions (6) - skipping")
                                                     continue
                                                 
                                                 # Therapist is available
-                                                available_history_therapists.append(therapist_code)
-                                                print(f"[RESCHEDULE PASS2] Therapist {therapist_code} is available - adding to last_therapists")
+                                                if therapist_code not in available_history_therapists:
+                                                    date_available_therapists.append(therapist_code)
+                                                    available_history_therapists.append(therapist_code)
+                                                    print(f"[RESCHEDULE PASS2]   ✓ Therapist {therapist_code} is available - adding to last_therapists")
                                                 
                                         except Exception as e:
-                                            print(f"[RESCHEDULE PASS2] Error checking therapist {therapist_code}: {e}")
+                                            print(f"[RESCHEDULE PASS2]   Error checking therapist {therapist_code}: {e}")
                                             continue
                                     
-                                    if available_history_therapists:
-                                        last_therapists = available_history_therapists
-                                        print(f"[RESCHEDULE PASS2] ✓ ASSIGNED {len(available_history_therapists)} therapist(s) from PatientHistory: {available_history_therapists}")
+                                    # If we found available therapists from this date, we can stop checking further dates
+                                    # (prioritize most recent date's therapists)
+                                    if date_available_therapists:
+                                        print(f"[RESCHEDULE PASS2] ✓ Found {len(date_available_therapists)} available therapist(s) from date {check_date} - stopping date check")
+                                        break
+                                
+                                if available_history_therapists:
+                                    last_therapists = available_history_therapists
+                                    print(f"[RESCHEDULE PASS2] ✓ ASSIGNED {len(available_history_therapists)} therapist(s) from PatientHistory (checked {dates_checked} date(s)): {available_history_therapists}")
                                 else:
-                                    print(f"[RESCHEDULE PASS2] ✗ No therapist codes found in history records")
+                                    print(f"[RESCHEDULE PASS2] ✗ No available therapists found after checking {dates_checked} date(s) from PatientHistory")
                             else:
                                 print(f"[RESCHEDULE PASS2] ✗ No history records found for patient {patient_reg_no}")
                         else:

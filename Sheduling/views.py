@@ -4135,9 +4135,15 @@ def get_therapy_data_api(request):
                 
                 # Convert bookings to JSON format
                 for booking in bookings:
-                    # Skip therapies with zero therapist requirements
-                    if therapist_requirements(booking.allocation).get("total", 1) == 0:
-                        continue
+                    # Skip therapies with zero therapist requirements ONLY for failed status
+                    # Nurse treatments have zero therapist requirements but should be shown in draft/scheduled
+                    if status_filter == 'failed':
+                        # Check if it's a nurse treatment - nurse treatments should not be in failed anyway
+                        is_nurse = is_nurse_treatment(booking.allocation.therapy_code, booking.allocation.therapy_name)
+                        # Only filter out non-nurse treatments with zero therapist requirements from failed status
+                        if not is_nurse and therapist_requirements(booking.allocation).get("total", 1) == 0:
+                            continue
+                    # For draft and scheduled status, show all therapies including nurse treatments (which have zero therapist requirements)
                     # Get assigned therapists for this booking
                     therapists = []
                     # Pre-fetch all TherapistBooking records for this booking to avoid N+1 queries
