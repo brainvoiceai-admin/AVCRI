@@ -15,15 +15,38 @@
             });
         });
 
-        // Search functionality
-        document.getElementById('searchInput').addEventListener('input', function() {
-            filterTable();
-        });
-
-        // Filter functionality
-        document.getElementById('statusFilter').addEventListener('change', function() {
-            filterTable();
-        });
+        // Auto-submit form on filter change (server-side filtering)
+        const statusFilter = document.getElementById('statusFilter');
+        const searchInput = document.getElementById('searchInput');
+        const filterForm = document.getElementById('filterForm');
+        
+        if (statusFilter && filterForm) {
+            statusFilter.addEventListener('change', function() {
+                filterForm.submit();
+            });
+        }
+        
+        // Search functionality - server-side filtering
+        if (searchInput && filterForm) {
+            let searchTimeout;
+            
+            // Submit on Enter key
+            searchInput.addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    clearTimeout(searchTimeout);
+                    filterForm.submit();
+                }
+            });
+            
+            // Auto-submit after user stops typing (500ms delay)
+            searchInput.addEventListener('input', function() {
+                clearTimeout(searchTimeout);
+                searchTimeout = setTimeout(function() {
+                    filterForm.submit();
+                }, 500);
+            });
+        }
 
         function filterTable() {
             const searchTerm = document.getElementById('searchInput').value.toLowerCase();
@@ -77,7 +100,6 @@
         }
 
         function clearFilters() {
-            document.getElementById('searchInput').value = '';
-            document.getElementById('statusFilter').value = '';
-            filterTable();
+            // Redirect to the page without any filters (server-side)
+            window.location.href = window.location.pathname;
         }

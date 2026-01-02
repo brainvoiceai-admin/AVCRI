@@ -15,69 +15,23 @@
             });
         });
 
-        // Search functionality
-        document.getElementById('searchInput').addEventListener('input', function() {
-            filterTable();
-        });
-
-        // Filter functionality
-        document.getElementById('statusFilter').addEventListener('change', function() {
-            filterTable();
-        });
-
-        function filterTable() {
-            const searchTerm = document.getElementById('searchInput').value.toLowerCase();
-            const statusFilter = document.getElementById('statusFilter').value;
-            const table = document.getElementById('usageTable');
+        // Form submission only on button click - no auto-filtering
+        document.addEventListener('DOMContentLoaded', function() {
+            const searchInput = document.getElementById('searchInput');
+            const filterForm = document.getElementById('filterForm');
             
-            if (!table) return;
-            
-            const rows = table.getElementsByTagName('tbody')[0].getElementsByTagName('tr');
-            
-            let visibleCount = 0;
-            
-            for (let i = 0; i < rows.length; i++) {
-                const row = rows[i];
-                const cells = row.getElementsByTagName('td');
-                
-                if (cells.length === 0) continue; // Skip empty rows
-                
-                const usageName = cells[0].textContent.toLowerCase();
-                const status = cells[1].textContent.toLowerCase();
-                
-                let showRow = true;
-                
-                // Search filter
-                if (searchTerm && !usageName.includes(searchTerm)) {
-                    showRow = false;
-                }
-                
-                // Status filter
-                if (statusFilter) {
-                    if (statusFilter === 'active' && !status.includes('active')) {
-                        showRow = false;
-                    } else if (statusFilter === 'inactive' && !status.includes('inactive')) {
-                        showRow = false;
+            // Allow Enter key to submit the form
+            if (searchInput && filterForm) {
+                searchInput.addEventListener('keypress', function(e) {
+                    if (e.key === 'Enter') {
+                        e.preventDefault();
+                        filterForm.submit();
                     }
-                }
-                
-                if (showRow) {
-                    row.style.display = '';
-                    visibleCount++;
-                } else {
-                    row.style.display = 'none';
-                }
+                });
             }
-            
-            // Update count badge
-            const countBadge = document.getElementById('totalCount');
-            if (countBadge) {
-                countBadge.textContent = visibleCount;
-            }
-        }
+        });
 
         function clearFilters() {
-            document.getElementById('searchInput').value = '';
-            document.getElementById('statusFilter').value = '';
-            filterTable();
+            // Redirect to the page without any filters (server-side)
+            window.location.href = window.location.pathname;
         }

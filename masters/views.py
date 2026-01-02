@@ -237,7 +237,24 @@ class ProcuredManagementView(ListView):
     paginate_by = 20
 
     def get_queryset(self):
-        return Procured.objects.all().order_by('name')
+        queryset = Procured.objects.all()
+        
+        # Search filter
+        search = self.request.GET.get('search', '').strip()
+        if search:
+            queryset = queryset.filter(
+                db_models.Q(name__icontains=search)
+            )
+        
+        # Status filter
+        status = self.request.GET.get('status', '').strip().lower()
+        if status == 'active':
+            queryset = queryset.filter(is_active=True)
+        elif status == 'inactive':
+            queryset = queryset.filter(is_active=False)
+        # If status is empty, show all (no filter applied)
+        
+        return queryset.order_by('name')
     
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -245,6 +262,8 @@ class ProcuredManagementView(ListView):
         context['master_name'] = 'Procurement Sources'
         context['required_fields'] = ['name']
         context['optional_fields'] = ['is_active']
+        context['search'] = self.request.GET.get('search', '')
+        context['status_filter'] = self.request.GET.get('status', '')
         return context
     
     def post(self, request, *args, **kwargs):
@@ -314,19 +333,22 @@ class OilClassManagementView(ListView):
     paginate_by = 20
 
     def get_queryset(self):
-        queryset = OilClass.objects.all()
+        # Get status filter FIRST
+        status = self.request.GET.get('status', '').strip().lower()
+        
+        # Start with base queryset and apply status filter immediately
+        if status == 'active':
+            queryset = OilClass.objects.filter(is_active=True)
+        elif status == 'inactive':
+            queryset = OilClass.objects.filter(is_active=False)
+        else:
+            # No status filter - show all
+            queryset = OilClass.objects.all()
         
         # Search filter
-        search = self.request.GET.get('search', '')
+        search = self.request.GET.get('search', '').strip()
         if search:
             queryset = queryset.filter(name__icontains=search)
-        
-        # Status filter
-        status = self.request.GET.get('status', '')
-        if status == 'active':
-            queryset = queryset.filter(is_active=True)
-        elif status == 'inactive':
-            queryset = queryset.filter(is_active=False)
         
         return queryset.order_by('name')
     
@@ -407,20 +429,31 @@ class UsageTypeManagementView(ListView):
     paginate_by = 20
 
     def get_queryset(self):
-        queryset = UsageType.objects.all()
+        # Get status filter FIRST - ensure it's read correctly
+        status_param = self.request.GET.get('status', '')
+        if status_param:
+            status = status_param.strip().lower()
+        else:
+            status = ''
         
-        # Search filter
-        search = self.request.GET.get('search', '')
+        # Start with base queryset and apply status filter immediately
+        # This ensures the filter is applied at the base queryset level
+        if status == 'active':
+            # Explicitly filter for active items only
+            queryset = UsageType.objects.filter(is_active__exact=True)
+        elif status == 'inactive':
+            # Explicitly filter for inactive items only
+            queryset = UsageType.objects.filter(is_active__exact=False)
+        else:
+            # No status filter - show all
+            queryset = UsageType.objects.all()
+        
+        # Search filter - apply after status filter
+        search = self.request.GET.get('search', '').strip()
         if search:
             queryset = queryset.filter(name__icontains=search)
         
-        # Status filter
-        status = self.request.GET.get('status', '')
-        if status == 'active':
-            queryset = queryset.filter(is_active=True)
-        elif status == 'inactive':
-            queryset = queryset.filter(is_active=False)
-        
+        # Return ordered queryset
         return queryset.order_by('name')
     
     def get_context_data(self, **kwargs):
@@ -1765,23 +1798,29 @@ class TherapistMasterManagementView(ListView):
     paginate_by = 20
 
     def get_queryset(self):
-        queryset = TherapistMaster.objects.prefetch_related('leaves', 'therapist_grade').all()
+        # Get status filter FIRST
+        status = self.request.GET.get('status', '').strip().lower()
+        
+        # Start with base queryset and apply status filter immediately
+        if status == 'active':
+            queryset = TherapistMaster.objects.filter(is_active=True)
+        elif status == 'inactive':
+            queryset = TherapistMaster.objects.filter(is_active=False)
+        else:
+            # No status filter - show all
+            queryset = TherapistMaster.objects.all()
+        
+        # Apply prefetch_related after filtering
+        queryset = queryset.prefetch_related('leaves', 'therapist_grade')
         
         # Search filter
-        search = self.request.GET.get('search', '')
+        search = self.request.GET.get('search', '').strip()
         if search:
             queryset = queryset.filter(
                 db_models.Q(therapist_code__icontains=search) |
                 db_models.Q(therapist_name__icontains=search) |
                 db_models.Q(employee_code__icontains=search)
             )
-        
-        # Status filter
-        status = self.request.GET.get('status', '')
-        if status == 'active':
-            queryset = queryset.filter(is_active=True)
-        elif status == 'inactive':
-            queryset = queryset.filter(is_active=False)
         
         # Grade filter
         grade = self.request.GET.get('grade', '')
@@ -2947,7 +2986,30 @@ class TherapistGradeManagementView(ListView):
     paginate_by = 20
 
     def get_queryset(self):
-        return TherapistGrade.objects.all().order_by('display_order', 'name')
+        queryset = TherapistGrade.objects.all()
+        
+        # Search filter
+        search = self.request.GET.get('search', '').strip()
+        if search:
+            queryset = queryset.filter(
+                db_models.Q(name__icontains=search)
+            )
+        
+        # Status filter
+        status = self.request.GET.get('status', '')
+        if status == 'active':
+            queryset = queryset.filter(is_active=True)
+        elif status == 'inactive':
+            queryset = queryset.filter(is_active=False)
+        # If status is empty or 'all', show all grades (no filter applied)
+        
+        return queryset.order_by('display_order', 'name')
+    
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['search'] = self.request.GET.get('search', '')
+        context['status_filter'] = self.request.GET.get('status', '')
+        return context
 
 class TherapistGradeCreateView(CreateView):
     model = TherapistGrade

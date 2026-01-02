@@ -15,16 +15,37 @@
             });
         });
 
-        // Auto-submit form on filter change
-        document.getElementById('statusFilter').addEventListener('change', function() {
-            document.getElementById('filterForm').submit();
-        });
-
-        // Optional: Auto-submit on search after debounce
-        let searchTimeout;
-        document.getElementById('searchInput').addEventListener('input', function() {
-            clearTimeout(searchTimeout);
-            searchTimeout = setTimeout(function() {
-                document.getElementById('filterForm').submit();
-            }, 500); // Submit after 500ms of no typing
+        // Auto-submit form on filter change (server-side filtering)
+        document.addEventListener('DOMContentLoaded', function() {
+            const statusFilter = document.getElementById('statusFilter');
+            const searchInput = document.getElementById('searchInput');
+            const filterForm = document.getElementById('filterForm');
+            
+            if (statusFilter && filterForm) {
+                statusFilter.addEventListener('change', function() {
+                    filterForm.submit();
+                });
+            }
+            
+            // Search functionality - server-side filtering
+            if (searchInput && filterForm) {
+                let searchTimeout;
+                
+                // Submit on Enter key
+                searchInput.addEventListener('keypress', function(e) {
+                    if (e.key === 'Enter') {
+                        e.preventDefault();
+                        clearTimeout(searchTimeout);
+                        filterForm.submit();
+                    }
+                });
+                
+                // Auto-submit after user stops typing (500ms delay)
+                searchInput.addEventListener('input', function() {
+                    clearTimeout(searchTimeout);
+                    searchTimeout = setTimeout(function() {
+                        filterForm.submit();
+                    }, 500);
+                });
+            }
         });
