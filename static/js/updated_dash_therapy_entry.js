@@ -619,8 +619,17 @@ $(function(){
     const uno = $('#item-builder-uno').val().trim();
     const oilClass = $itemBuilderOilClass.val() || ''; // Get Oil Class from item builder
     
-    // All fields are now optional - no validation required
-    // Users can add item groups with empty or partial data, or submit therapy without any items
+    // Validate that at least one field is selected/filled
+    const hasItems = selected && selected.length > 0;
+    const hasDosage = dosage && dosage.length > 0;
+    const hasUnit = uno && uno.length > 0;
+    const hasOilClass = oilClass && oilClass.length > 0;
+    
+    // Check if all fields are empty
+    if (!hasItems && !hasDosage && !hasUnit && !hasOilClass) {
+      alert('Please select any field and add');
+      return;
+    }
     
     const items = selected.length > 0 ? selected.map(s => ({ item_code: s.id, item_name: s.text || s.id })) : [];
     const grp = { id: Math.random().toString(36).slice(2,9), items, dosage, uno, oil_class: oilClass };

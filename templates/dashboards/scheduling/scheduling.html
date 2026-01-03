@@ -341,6 +341,7 @@
                                     <tr>
                                         <th>Patient Name</th>
                                         <th>Treatment Name</th>
+                                        <th>Date</th>
                                         <th>Patient Room No</th>
                                         <th>Nurse Assigned</th>
                                     </tr>
@@ -356,6 +357,7 @@
                                                 </button>
                                             </td>
                                             <td>{{ booking.allocation.therapy_name }}</td>
+                                            <td>{{ booking.date|date:"Y-m-d" }}</td>
                                             <td>
                                                 {% if booking.allocation.patient.pat_room_no %}
                                                     {% with room_no=booking.allocation.patient.pat_room_no|get_staying_room_display %}
@@ -380,7 +382,7 @@
                                         {% endfor %}
                                     {% else %}
                                         <tr>
-                                            <td colspan="4" class="empty-state">
+                                            <td colspan="5" class="empty-state">
                                                 <div class="empty-state-icon">✅</div>
                                                 <div>No nurse schedules found for this date.</div>
                                             </td>

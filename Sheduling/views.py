@@ -4543,17 +4543,18 @@ def reschedule_therapy_api(request):
         from reshedule import allocate_therapy_for_visit
         
         try:
-            allocation = TherapyAllocation.objects.get(id=allocation_id, status='failed')
+            # Get allocation - don't require status='failed' since failed is determined by booking status
+            allocation = TherapyAllocation.objects.get(id=allocation_id)
             
             # Parse date
             target_date = parse_date(date)
             if not target_date:
                 return JsonResponse({'error': 'Invalid date format. Use YYYY-MM-DD.'}, status=400)
             
-            # Ensure booking exists for this date
+            # Check if there's a failed booking for this date
             booking = Booking.objects.filter(allocation=allocation, date=target_date).first()
             if not booking:
-                # Create booking if it doesn't exist
+                # Create booking if it doesn't exist (for rescheduling)
                 booking = Booking.objects.create(
                     allocation=allocation,
                     date=target_date,
@@ -4561,6 +4562,10 @@ def reschedule_therapy_api(request):
                     room=allocation.room,
                     status='draft'
                 )
+            elif booking.status != 'failed':
+                # If booking exists but is not failed, we can still reschedule it
+                # This allows rescheduling draft or other status bookings
+                pass
             
             # Call rescheduling algorithm
             try:
@@ -4616,7 +4621,7 @@ def reschedule_therapy_api(request):
                 }, status=500)
                 
         except TherapyAllocation.DoesNotExist:
-            return JsonResponse({'error': 'Therapy allocation not found or not in failed status'}, status=404)
+            return JsonResponse({'error': 'Therapy allocation not found'}, status=404)
             
     except json.JSONDecodeError:
         return JsonResponse({'error': 'Invalid JSON'}, status=400)

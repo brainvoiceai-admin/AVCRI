@@ -275,7 +275,7 @@ def get_therapists_on_leave_api(request):
                 'leave_date': target_date.strftime('%Y-%m-%d'),
                 'leave_day': leave_record.leave_day,
                 'leave_day_name': leave_record.leave_day_name,
-                'leave_type': 'Recurring Leave',
+                'leave_type': 'Week Off',  # Changed from 'Recurring Leave' to 'Week Off'
                 'from_date': target_date.strftime('%Y-%m-%d'),
                 'to_date': target_date.strftime('%Y-%m-%d'),
                 'reason': '',  # No reason field in current model
@@ -355,10 +355,10 @@ def get_therapists_on_leave_api(request):
                     'leave_date': target_date.strftime('%Y-%m-%d'),
                     'leave_day': None,
                     'leave_day_name': None,
-                    'leave_type': em_leave.leave_type or 'Emergency Leave',
+                    'leave_type': 'Emergency Leave',  # Always show as 'Emergency Leave'
                     'from_date': em_leave.from_date.strftime('%Y-%m-%d'),
                     'to_date': em_leave.to_date.strftime('%Y-%m-%d'),
-                    'reason': '',
+                    'reason': em_leave.leave_type or '',  # Show leave_type as reason if available
                     'is_bathing': therapist.is_bathing_therapist,
                     'is_active': True
                 }

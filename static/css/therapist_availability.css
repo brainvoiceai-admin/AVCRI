@@ -252,6 +252,32 @@
       font-weight: 500;
     }
 
+    .leave-badge {
+      display: inline-block;
+      padding: 3px 10px;
+      border-radius: 12px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      margin-left: 8px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .leave-badge.week-off {
+      background: #ff9800;
+      color: white;
+    }
+
+    .leave-badge.emergency-leave {
+      background: #f44336;
+      color: white;
+    }
+
+    .leave-badge:not(.week-off):not(.emergency-leave) {
+      background: #9e9e9e;
+      color: white;
+    }
+
     .no-result {
       text-align: center;
       padding: 20px;

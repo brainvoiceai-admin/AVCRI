@@ -106,6 +106,9 @@
       if (therapists.length > 0) {
         resultDiv.innerHTML = `
           <h3><i class="fas fa-list"></i> Available Therapists (${totalCount})</h3>
+          <p style="font-size: 0.85rem; color: var(--gray); margin-bottom: 15px; font-style: italic;">
+            <i class="fas fa-info-circle"></i> Results exclude therapists on Week Off and Emergency Leave
+          </p>
           <ul class="therapist-list">
             ${therapists.map(t => {
               // Get gender from API response (should be 'Male', 'Female', or 'Unknown')
@@ -208,6 +211,20 @@
               const genderClass = isMale ? 'male' : (isFemale ? 'female' : 'male'); // Default to male for avatar
               const gradeDisplay = t.grade || 'N/A';
               
+              // Determine leave type badge
+              const leaveTypeBadge = t.leave_type === 'Week Off' 
+                ? '<span class="leave-badge week-off">Week Off</span>'
+                : t.leave_type === 'Emergency Leave'
+                ? '<span class="leave-badge emergency-leave">Emergency Leave</span>'
+                : t.leave_type 
+                ? `<span class="leave-badge">${t.leave_type}</span>`
+                : '';
+              
+              // Show date range if different from single date
+              const dateRange = (t.from_date && t.to_date && t.from_date !== t.to_date)
+                ? ` (${t.from_date} to ${t.to_date})`
+                : '';
+              
               return `
               <li class="therapist-item">
                 <div class="therapist-avatar ${genderClass}">
@@ -217,8 +234,10 @@
                   <div class="therapist-name">${t.name}</div>
                   <div class="therapist-details">
                     ${genderDisplay} Therapist • ${gradeDisplay}
-                    ${t.leave_type ? ` • ${t.leave_type}` : ''}
+                    ${leaveTypeBadge}
+                    ${dateRange}
                     ${t.reason ? ` • ${t.reason}` : ''}
+                    ${t.leave_day_name ? ` • ${t.leave_day_name}` : ''}
                   </div>
                 </div>
               </li>

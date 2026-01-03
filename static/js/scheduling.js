@@ -95,9 +95,16 @@
             
             // Individual reschedule buttons (schedule buttons removed)
             document.addEventListener('click', function(e) {
-                if (e.target.classList.contains('reschedule-single')) {
-                    const id = parseInt(e.target.dataset.id);
-                    rescheduleSingleFailed(id);
+                // Use closest to handle clicks on button children (text, icons, etc.)
+                const rescheduleBtn = e.target.closest ? e.target.closest('.reschedule-single') : null;
+                if (rescheduleBtn) {
+                    const id = parseInt(rescheduleBtn.dataset.id);
+                    if (!isNaN(id)) {
+                        rescheduleSingleFailed(id);
+                    } else {
+                        console.error('Invalid allocation ID:', rescheduleBtn.dataset.id);
+                        alert('Error: Invalid therapy ID. Please refresh the page and try again.');
+                    }
                     return;
                 }
                 
@@ -379,7 +386,7 @@
                 if (nurseData.length === 0) {
                     nurseTbody.innerHTML = `
                         <tr>
-                            <td colspan="4" class="empty-state">
+                            <td colspan="5" class="empty-state">
                                 <div class="empty-state-icon">✅</div>
                                 <div>No nurse schedules found for this date.</div>
                             </td>
@@ -401,6 +408,7 @@
                                 </button>
                             </td>
                             <td>${escapeHtml(item.therapy_name)}</td>
+                            <td>${scheduleDate || '—'}</td>
                             <td>${escapeHtml(item.patient_room_no || '—')}</td>
                             <td>${nursesHtml}</td>
                         `;
@@ -597,6 +605,19 @@
             .then(data => {
                 hideLoading('draft');
                 if (data.success) {
+                    // Extract success and failure counts
+                    let successful = 0;
+                    let failed = 0;
+                    
+                    if (data.allocation_update && data.allocation_update.success && data.allocation_update.result) {
+                        successful = data.allocation_update.result.successful || 0;
+                        failed = data.allocation_update.result.failed || 0;
+                    }
+                    
+                    // Show confirmation popup
+                    alert(`Schedule is done.\n${successful} treatments successful, ${failed} treatments failed`);
+                    
+                    // Also show detailed alert for additional info
                     let message = `Final Schedule completed for ${selectedDate}\n\n`;
                     
                     if (data.leave_update && data.leave_update.success) {
@@ -655,6 +676,12 @@
                 return;
             }
             
+            if (!id || isNaN(id)) {
+                console.error('Invalid allocation ID:', id);
+                alert('Error: Invalid therapy ID. Please refresh the page and try again.');
+                return;
+            }
+            
             showLoading('failed');
             
             const requestData = {
@@ -671,7 +698,14 @@
                 },
                 body: JSON.stringify(requestData)
             })
-            .then(response => response.json())
+            .then(response => {
+                if (!response.ok) {
+                    return response.json().then(err => {
+                        throw new Error(err.error || `Server error: ${response.status}`);
+                    });
+                }
+                return response.json();
+            })
             .then(data => {
                 hideLoading('failed');
                 if (data.success) {
@@ -692,7 +726,12 @@
             })
             .catch(error => {
                 hideLoading('failed');
-                showAlert('error', 'Error rescheduling therapy: ' + error.message);
+                console.error('Error rescheduling therapy:', error);
+                showAlert('error', 'Error rescheduling therapy: ' + (error.message || error));
+                // Reload failed data to show current status
+                if (targetDate) {
+                    loadTherapyData('failed', targetDate);
+                }
             });
         }
 
@@ -728,6 +767,19 @@
             .then(data => {
                 hideLoading('failed');
                 if (data.success) {
+                    // Extract success and failure counts
+                    let successful = 0;
+                    let failed = 0;
+                    
+                    if (data.stats) {
+                        successful = data.stats.successful || 0;
+                        failed = data.stats.failed || 0;
+                    }
+                    
+                    // Show confirmation popup
+                    alert(`Schedule is done.\n${successful} treatments successful, ${failed} treatments failed`);
+                    
+                    // Also show detailed alert for additional info
                     let message = data.message || 'Rescheduling completed';
                     if (data.stats) {
                         message += ` - ${data.stats.successful} successful, ${data.stats.failed} failed out of ${data.stats.total} total`;
@@ -965,6 +1017,7 @@
                     'Patient Name': item.patient_name || '—',
                     'Patient Reg No': item.patient_reg_no || '—',
                     'Treatment Name': item.therapy_name || '—',
+                    'Date': item.date || item.from_date || '—',
                     'Patient Room No': item.patient_room_no || '—',
                     'Nurse Assigned': nurses
                 };
@@ -1340,6 +1393,7 @@
                         item.patient_room_no || '—',
                         item.patient_name || 'N/A',
                         item.therapy_name || 'N/A',
+                        item.date || item.from_date || '—',
                         item.nurses && item.nurses.length > 0 
                             ? item.nurses.map(n => n.name || n.code || n).join(', ') 
                             : '—'
@@ -1351,7 +1405,7 @@
                     
                     // Generate table for nurse treatments
                     doc.autoTable({
-                        head: [['Patient Room', 'Patient Name', 'Treatment Name', 'Nurse Assigned']],
+                        head: [['Patient Room', 'Patient Name', 'Treatment Name', 'Date', 'Nurse Assigned']],
                         body: nurseTableData,
                         startY: yPos,
                         margin: { left: margin, right: margin },
