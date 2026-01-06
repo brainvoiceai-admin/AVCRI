@@ -227,6 +227,19 @@ def create_therapist_booking_safe(therapist, date, time_slot, therapy_name, pati
     from masters.models import TherapyMaster
     print(f"[DEBUG create_therapist_booking_safe] Called with: therapist={therapist} (pk={therapist.pk if therapist else None}), date={date}, time_slot={time_slot} (type={type(time_slot)}, pk={time_slot.pk if time_slot else None}), visit={visit} (type={type(visit)}, pk={visit.pk if visit else None})")
 
+    # CRITICAL: Final check - prevent creating booking if therapist already has 6 sessions
+    # This is an atomic database check to prevent race conditions
+    if therapist and date:
+        current_session_count = TherapistBooking.objects.filter(
+            therapist=therapist,
+            date=date,
+            status='BOOKED'
+        ).count()
+        if current_session_count >= 6:
+            print(f"[DEBUG create_therapist_booking_safe] BLOCKED: Therapist {getattr(therapist, 'therapist_code', 'UNKNOWN')} already has {current_session_count} sessions (max 6) - refusing to create booking")
+            # Return None and False to indicate booking was not created due to session limit
+            return None, False
+
     # Resolve TherapyMaster FK so TherapistBooking.therapy is never left null when possible
     therapy_obj = None
     try:
@@ -764,13 +777,17 @@ def allocate_therapists(
     def get_therapist_daily_session_count(t):
         """Count how many therapy sessions a therapist already has on this date"""
         try:
-            return TherapistBooking.objects.filter(
+            db_count = TherapistBooking.objects.filter(
                 therapist=t,
                 date=date,
                 status='BOOKED'
             ).count()
+            # Add count of times this therapist has been allocated in current run
+            # This prevents assigning 7+ sessions when multiple therapies are allocated in same run
+            current_run_count = sum(1 for a in allocated if a == t)
+            return db_count + current_run_count
         except Exception:
-            return 0
+            return sum(1 for a in allocated if a == t)
 
     def get_therapist_daily_category_count(t):
         """
@@ -1266,14 +1283,17 @@ def assign_continuity_therapists_pass1(booking, allocation, target_date, locked_
                 continue
         
         # Check daily session limit (max 5, or 6 if all therapists are at limit)
-        session_count = TherapistBooking.objects.filter(
+        # Include therapists already assigned in this pass to prevent exceeding 6 sessions
+        db_count = TherapistBooking.objects.filter(
             therapist=t,
             date=target_date,
             status='BOOKED'
         ).count()
+        current_pass_count = sum(1 for a in assigned_continuity if a == t)
+        session_count = db_count + current_pass_count
         
         if session_count >= 6:
-            print(f"[CONTINUITY PASS1] Therapist {t.therapist_code} at max sessions (6) - skipping")
+            print(f"[CONTINUITY PASS1] Therapist {t.therapist_code} at max sessions ({session_count}/6) - skipping")
             continue
         
         # All checks passed - assign this continuity therapist
@@ -1371,7 +1391,12 @@ def assign_continuity_therapists_pass1(booking, allocation, target_date, locked_
                     t, target_date, slot_master, therapy_name, patient_id, allocation, is_bathing=is_bath
                 )
                 
-                if tb_created:
+                if tb_obj is None:
+                    print(f"[CONTINUITY PASS1] ✗ ERROR: Cannot create TherapistBooking for {therapist_code} - session limit exceeded (>= 6 sessions)")
+                    # Remove from assigned list since we couldn't create the booking
+                    result['assigned_therapists'] = [at for at in result['assigned_therapists'] if at != t]
+                    continue
+                elif tb_created:
                     print(f"[CONTINUITY PASS1] ✓✓✓ LOCKED therapist {therapist_code} (id={therapist_id}) with TherapistBooking pk={tb_obj.pk} for booking {booking.pk}")
                     print(f"[CONTINUITY PASS1]   - TherapistBooking: pk={tb_obj.pk}, therapist_id={tb_obj.therapist_id}, date={tb_obj.date}, slot_id={tb_obj.time_slot_id}, status={tb_obj.status}")
                 else:
@@ -1918,6 +1943,8 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                                                         continue
                                                     
                                                     # 3. Check daily session limit (max 6 sessions)
+                                                    # Note: This is in a different context (patient history), so we can't track current run
+                                                    # But we should still check the database count
                                                     session_count = TherapistBooking.objects.filter(
                                                         therapist=therapist,
                                                         date=target_date,
@@ -2703,6 +2730,10 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                                     # Should not happen - continuity therapist should have TherapistBooking from PASS 1
                                     print(f"[CONTINUITY PASS2] ⚠ WARNING: Continuity therapist {t.therapist_code} has no TherapistBooking - creating one")
                                     tb_obj, tb_created = create_therapist_booking_safe(t, target_date, slot_master, therapy_name, patient_id, allocation, is_bathing=is_bath_for_t)
+                                    if tb_obj is None:
+                                        print(f"[CONTINUITY PASS2] ✗ ERROR: Cannot create TherapistBooking for {t.therapist_code} - session limit exceeded (>= 6 sessions)")
+                                        # This should not happen if checks were done correctly, but handle gracefully
+                                        continue
                                     tb_objs.append(tb_obj)
                             else:
                                 # New therapist - create TherapistBooking
@@ -2710,6 +2741,10 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                                 # Pass allocation (TherapyAllocation) instead of None for visit FK
                                 # Use slot_master (resolved SlotMaster) instead of canonical_slot to ensure FK is valid
                                 tb_obj, tb_created = create_therapist_booking_safe(t, target_date, slot_master, therapy_name, patient_id, allocation, is_bathing=is_bath_for_t)
+                                if tb_obj is None:
+                                    print(f"[CONTINUITY PASS2] ✗ ERROR: Cannot create TherapistBooking for {t.therapist_code} - session limit exceeded (>= 6 sessions)")
+                                    # This should not happen if checks were done correctly, but handle gracefully
+                                    continue
                                 print(f"[CONTINUITY PASS2] TherapistBooking created: {tb_obj}, created={tb_created}")
                                 if not tb_created:
                                     # This is OK - therapist might have been booked by another process

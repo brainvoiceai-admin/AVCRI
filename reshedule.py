@@ -198,6 +198,21 @@ def create_therapist_booking_safe(therapist, date, time_slot, therapy_name, pati
     Returns (therapist_booking_instance, created_bool)
     """
     from Patient.models import TherapistBooking
+    from django.db import transaction
+    
+    # CRITICAL: Final check - prevent creating booking if therapist already has 6 sessions
+    # This is an atomic database check to prevent race conditions
+    if therapist and date:
+        current_session_count = TherapistBooking.objects.filter(
+            therapist=therapist,
+            date=date,
+            status='BOOKED'
+        ).count()
+        if current_session_count >= 6:
+            print(f"[DEBUG create_therapist_booking_safe] BLOCKED: Therapist {getattr(therapist, 'therapist_code', 'UNKNOWN')} already has {current_session_count} sessions (max 6) - refusing to create booking")
+            # Return None and False to indicate booking was not created due to session limit
+            return None, False
+    
     try:
         with transaction.atomic():
             tb, created = TherapistBooking.objects.get_or_create(
@@ -685,13 +700,17 @@ def allocate_therapists(date, time_slot, therapy_requirements, last_therapists=N
     def get_therapist_daily_session_count(t):
         """Count how many therapy sessions a therapist already has on this date"""
         try:
-            return TherapistBooking.objects.filter(
+            db_count = TherapistBooking.objects.filter(
                 therapist=t,
                 date=date,
                 status='BOOKED'
             ).count()
+            # Add count of times this therapist has been allocated in current run
+            # This prevents assigning 7+ sessions when multiple therapies are allocated in same run
+            current_run_count = sum(1 for a in allocated if a == t)
+            return db_count + current_run_count
         except Exception:
-            return 0
+            return sum(1 for a in allocated if a == t)
 
     def get_therapist_daily_category_count(t):
         """
@@ -733,6 +752,13 @@ def allocate_therapists(date, time_slot, therapy_requirements, last_therapists=N
                     continue
                 if TherapistBooking.objects.filter(therapist=t, date=date, time_slot=time_slot, status='BOOKED').exists():
                     continue
+                
+                # Check daily session limit (max 6 sessions)
+                session_count = get_therapist_daily_session_count(t)
+                if session_count >= 6:
+                    print(f"[DEBUG Allocation] Therapist {t.therapist_code} at max sessions ({session_count}/6) - skipping")
+                    continue
+                
                 allocated.append(t)
                 grade_map[therapist_grade_name] -= 1
 
@@ -804,9 +830,15 @@ def allocate_therapists(date, time_slot, therapy_requirements, last_therapists=N
         )
 
         # iterate candidates in fair order
-        for t, _, _ in scored_candidates:
+        for t, category_sessions, total_sessions in scored_candidates:
             if needed <= 0:
                 break
+
+            # Check daily session limit (max 6 sessions)
+            # Use total_sessions from scoring, which already includes current run allocations
+            if total_sessions >= 6:
+                print(f"[DEBUG Allocation] Therapist {t.therapist_code} at max sessions ({total_sessions}/6) - skipping")
+                continue
 
             allocated.append(t)
             
@@ -963,6 +995,12 @@ def allocate_therapists_with_grade_substitution(date, time_slot, therapy_require
             if TherapistBooking.objects.filter(therapist=t, date=date, time_slot=time_slot, status='BOOKED').exists():
                 continue
             
+            # Check daily session limit (max 6 sessions)
+            session_count = get_therapist_daily_session_count(t)
+            if session_count >= 6:
+                print(f"[FALLBACK Grade Substitution] Therapist {t.therapist_code} at max sessions ({session_count}/6) - skipping")
+                continue
+            
             allocated.append(t)
             grade_map[target_grade] -= 1
             print(f"[FALLBACK Grade Substitution] Assigned {therapist_grade_name} {t.therapist_code} to fill {target_grade} requirement")
@@ -1027,9 +1065,15 @@ def allocate_therapists_with_grade_substitution(date, time_slot, therapy_require
             # Sort by session count (prefer therapists with fewer sessions)
             scored_candidates.sort(key=lambda x: (x[1], getattr(x[0], "id", 0) or 0))
             
-            for t, _ in scored_candidates:
+            for t, session_count in scored_candidates:
                 if needed <= 0:
                     break
+                
+                # Check daily session limit (max 6 sessions)
+                # Use session_count from scoring, which already includes current run allocations
+                if session_count >= 6:
+                    print(f"[FALLBACK Grade Substitution] Therapist {t.therapist_code} at max sessions ({session_count}/6) - skipping")
+                    continue
                 
                 allocated.append(t)
                 needed -= 1
@@ -2063,7 +2107,11 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
                 if create_bookings:
                     # Pass allocation (TherapyAllocation) as visit parameter - CRITICAL for is_bathing flag to work
                     tb_obj, tb_created = create_therapist_booking_safe(t, date, canonical_slot, therapy_name, patient_id, allocation, is_bathing=is_bath_for_t)
+                    if tb_obj is None:
+                        # Booking was blocked due to session limit (>= 6 sessions)
+                        raise RuntimeError(f"therapist_session_limit_exceeded:{getattr(t,'therapist_code',str(t))}")
                     if not tb_created:
+                        # Booking already exists (race condition or duplicate)
                         raise RuntimeError(f"therapist_already_booked:{getattr(t,'therapist_code',str(t))}")
                     tb_objs.append(tb_obj)
                 else:
@@ -2484,14 +2532,17 @@ def assign_continuity_therapists_pass1(booking, allocation, target_date, locked_
                 continue
         
         # Check daily session limit (max 6 sessions)
-        session_count = TherapistBooking.objects.filter(
+        # Include therapists already assigned in this pass to prevent exceeding 6 sessions
+        db_count = TherapistBooking.objects.filter(
             therapist=t,
             date=target_date,
             status='BOOKED'
         ).count()
+        current_pass_count = sum(1 for a in assigned_continuity if a == t)
+        session_count = db_count + current_pass_count
         
         if session_count >= 6:
-            print(f"[RESCHEDULE PASS1] Therapist {t.therapist_code} at max sessions (6) - skipping")
+            print(f"[RESCHEDULE PASS1] Therapist {t.therapist_code} at max sessions ({session_count}/6) - skipping")
             continue
         
         # All checks passed - assign this continuity therapist
@@ -2575,7 +2626,12 @@ def assign_continuity_therapists_pass1(booking, allocation, target_date, locked_
                     t, target_date, slot_master, therapy_name, patient_id, allocation, is_bathing=is_bath
                 )
                 
-                if tb_created:
+                if tb_obj is None:
+                    print(f"[RESCHEDULE PASS1] ✗ ERROR: Cannot create TherapistBooking for {therapist_code} - session limit exceeded (>= 6 sessions)")
+                    # Remove from assigned list since we couldn't create the booking
+                    result['assigned_therapists'] = [at for at in result['assigned_therapists'] if at != t]
+                    continue
+                elif tb_created:
                     print(f"[RESCHEDULE PASS1] ✓✓✓ LOCKED therapist {therapist_code} (id={therapist_id}) with TherapistBooking pk={tb_obj.pk} for booking {booking.pk}")
                 else:
                     print(f"[RESCHEDULE PASS1] ⚠ TherapistBooking already exists for {therapist_code} (id={therapist_id}) - therapist already locked")
