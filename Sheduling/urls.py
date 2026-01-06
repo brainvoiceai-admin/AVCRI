@@ -39,10 +39,15 @@ urlpatterns = [
     path('therapist/api/therapist-data/', therapist_views.get_therapist_data_api, name='get_therapist_data_api'),
     path('therapist/api/sessions-by-date/', therapist_views.get_therapist_sessions_by_date_api, name='get_therapist_sessions_by_date_api'),
     path('therapist/', therapist_views.therapist_dashboard, name='therapist_dashboard'),
+    path('therapist-difficulty/', therapist_views.therapist_difficulty_dashboard, name='therapist_difficulty_dashboard'),
+    path('therapist-difficulty/api/data/', therapist_views.get_therapist_difficulty_data, name='therapist_difficulty_data'),
     
     # Therapist Availability URLs
     path('therapist-availability/', availability_views.therapist_availability_dashboard, name='therapist_availability_dashboard'),
     path('therapist-availability/api/available-therapists/', availability_views.get_available_therapists_api, name='get_available_therapists_api'),
     path('therapist-availability/api/therapists-on-leave/', availability_views.get_therapists_on_leave_api, name='get_therapists_on_leave_api'),
     path('therapist-availability/api/time-slots/', availability_views.get_time_slots_api, name='get_time_slots_api'),
+    
+    # Bulk Excel Upload/Download for Testing
+    path('therapy-bulk-excel/', views.therapy_bulk_excel, name='therapy_bulk_excel'),
 ]

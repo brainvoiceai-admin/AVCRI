@@ -17,7 +17,7 @@ def procurement_dashboard(request):
     """
     Display the procurement dashboard for prescription preparation and dispatch.
     """
-    return render(request, 'procurement_dashboard.html')
+    return render(request, 'dashboards/procurement/procurement_dashboard.html')
 
 @csrf_exempt
 @require_http_methods(["GET"])
@@ -436,6 +436,14 @@ def get_prescription_details_api(request):
         
         # Process all allocations and use items_groups exactly as stored
         for allocation in allocations:
+            # Check if this allocation is cancelled for the current date
+            # An allocation is cancelled for a date only if:
+            # 1. The allocation status is 'cancelled', AND
+            # 2. The date falls within the cancelled_date_from and cancelled_date_to range
+            is_cancelled_for_this_date = False
+            if allocation.status == 'cancelled' and allocation.cancelled_date_from and allocation.cancelled_date_to:
+                if allocation.cancelled_date_from <= filter_date <= allocation.cancelled_date_to:
+                    is_cancelled_for_this_date = True
             
             # Use the original items_groups structure from allocation - exactly as stored
             if allocation.items_groups:
@@ -471,14 +479,28 @@ def get_prescription_details_api(request):
                                 'status': 'active'
                             })
                     
-                    # Add the group exactly as it appears in items_groups
+                    # Fallback: use allocation-level usage/scope if group-level missing
+                    alloc_usage = getattr(allocation, 'usage', '')
+                    alloc_scope = getattr(allocation, 'scope', '')
+                    group_usage = group.get('usage', '') or alloc_usage
+                    usage_array = group.get('usage_array', [])
+                    internal_external = group.get('internal_external', '') or alloc_scope
+                    
+                    # Add the group exactly as it appears in items_groups (with fallbacks)
+                    # Use is_cancelled_for_this_date instead of just checking allocation.status
                     prescription_groups.append({
                         'group_id': f"prescription_group_{allocation.id}_{group_idx}",
                         'time': group.get('time', 'M'),
                         'dose': group.get('dosage', ''),
+                        'usage': group_usage,
+                        'usage_array': usage_array,
+                        'internal_external': internal_external,
                         'notes': group.get('uno', ''),
+                        'oil_class': group.get('oil_class', ''),
+                        'ingredients': group.get('ingredients', []),
+                        'ingredient_ids': group.get('ingredient_ids', []),
                         'items': group_items,
-                        'is_cancelled': allocation.status == 'cancelled',
+                        'is_cancelled': is_cancelled_for_this_date,  # Use date-specific cancellation check
                         'is_group': True
                     })
         
@@ -495,6 +517,8 @@ def get_prescription_details_api(request):
                         'group_id': f"prescription_item_{item.id}",
                         'time': item.time or '',
                         'dose': item.dose or '',
+                        'usage': getattr(item, 'usage', '') or '',
+                        'internal_external': getattr(item, 'internal_external', '') or '',
                         'notes': item.notes or '',
                         'items': [{
                             'id': f'prescription_{item.id}',
@@ -503,6 +527,8 @@ def get_prescription_details_api(request):
                             'dose': item.dose or '',
                             'quantity': item.quantity or '',
                             'time': item.time or '',
+                            'usage': getattr(item, 'usage', '') or '',
+                            'internal_external': getattr(item, 'internal_external', '') or '',
                             'notes': item.notes or '',
                             'status': getattr(item, 'status', 'active') if hasattr(item, 'status') else 'active'
                         }],
@@ -559,6 +585,9 @@ def get_prescription_details_api(request):
                             'therapy_name': therapy_name,
                             'therapy_id': allocation.id,
                             'dosage': dosage,
+                            'usage': group.get('usage', ''),
+                            'usage_array': group.get('usage_array', []),
+                            'internal_external': group.get('internal_external', ''),
                             'uno': uno,
                             'booking_id': booking.id,
                             'booking_status': booking.status,
@@ -620,6 +649,9 @@ def get_prescription_details_api(request):
                         'therapy_name': therapy_name,
                         'therapy_id': allocation.id,
                         'dosage': '',
+                        'usage': '',
+                        'usage_array': [],
+                        'internal_external': '',
                         'uno': '',
                         'booking_id': booking.id,
                         'booking_status': booking.status,
@@ -658,6 +690,9 @@ def get_prescription_details_api(request):
                 'therapy_name': group_data['therapy_name'],
                 'therapy_id': group_data['therapy_id'],
                 'dosage': group_data['dosage'],
+                'usage': group_data.get('usage', ''),
+                'usage_array': group_data.get('usage_array', []),
+                'internal_external': group_data.get('internal_external', ''),
                 'uno': group_data['uno'],
                 'booking_id': group_data['booking_id'],
                 'booking_status': group_data['booking_status'],

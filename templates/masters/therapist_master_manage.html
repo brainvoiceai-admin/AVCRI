@@ -1,3 +1,4 @@
+{%load static%}
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -7,15 +8,9 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     
-    <style>
-        .main-content {
-            padding-left: 275px;
-        }
-        .table-responsive {
-            max-height: 600px;
-            overflow-y: auto;
-        }
-    </style>
+    
+    <link rel="stylesheet" href="{% static 'css/masters_therapist_master_manage.css' %}">
+    <link rel="stylesheet" href="{% static 'css/dashboards_nav.css' %}">
 </head>
 <body>
     {% include 'dashboards/nav.html' %}
@@ -24,6 +19,14 @@
         <div class="d-flex justify-content-between align-items-center mb-4">
             <h2><i class="fas fa-user-md text-primary"></i> Therapist Master Management</h2>
             <div>
+                {% if master_type %}
+                <button type="button" class="btn btn-info me-2" data-bs-toggle="modal" data-bs-target="#bulkUploadModal">
+                    <i class="fas fa-file-excel me-2"></i>Bulk Upload Excel
+                </button>
+                {% endif %}
+                <a href="{% url 'therapist_master_export_excel' %}" class="btn btn-info me-2">
+                    <i class="fas fa-file-excel me-2"></i>Export to Excel
+                </a>
                 <a href="{% url 'therapist_master_add' %}" class="btn btn-success">
                     <i class="fas fa-plus me-2"></i>Add New Therapist
                 </a>
@@ -103,6 +106,7 @@
                                 <th>Therapist Name</th>
                                 <th>Grade</th>
                                 <th>Employee Code</th>
+                                <th>Gender</th>
                                 <th>Bathing Therapist</th>
                                 <th>Leave Days</th>
                                 <th>Status</th>
@@ -122,6 +126,9 @@
                                 </td>
                                 <td>
                                     <code>{{ therapist.employee_code }}</code>
+                                </td>
+                                <td>
+                                    <span class="badge bg-primary">{{ therapist.therapist_gender|default:"N/A" }}</span>
                                 </td>
                                 <td>
                                     {% if therapist.is_bathing_therapist %}
@@ -176,7 +183,7 @@
                             </tr>
                             {% empty %}
                             <tr>
-                                <td colspan="8" class="text-center py-4">
+                                <td colspan="10" class="text-center py-4">
                                     <div class="text-muted">
                                         <i class="fas fa-user-md fa-3x mb-3"></i>
                                         <p>No therapists found. <a href="{% url 'therapist_master_add' %}">Add the first therapist</a></p>
@@ -196,10 +203,10 @@
             <ul class="pagination justify-content-center">
                 {% if page_obj.has_previous %}
                     <li class="page-item">
-                        <a class="page-link" href="?page=1">&laquo; First</a>
+                        <a class="page-link" href="?page=1{% if search %}&search={{ search }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if grade_filter %}&grade={{ grade_filter }}{% endif %}">&laquo; First</a>
                     </li>
                     <li class="page-item">
-                        <a class="page-link" href="?page={{ page_obj.previous_page_number }}">Previous</a>
+                        <a class="page-link" href="?page={{ page_obj.previous_page_number }}{% if search %}&search={{ search }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if grade_filter %}&grade={{ grade_filter }}{% endif %}">Previous</a>
                     </li>
                 {% endif %}
 
@@ -211,10 +218,10 @@
 
                 {% if page_obj.has_next %}
                     <li class="page-item">
-                        <a class="page-link" href="?page={{ page_obj.next_page_number }}">Next</a>
+                        <a class="page-link" href="?page={{ page_obj.next_page_number }}{% if search %}&search={{ search }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if grade_filter %}&grade={{ grade_filter }}{% endif %}">Next</a>
                     </li>
                     <li class="page-item">
-                        <a class="page-link" href="?page={{ page_obj.paginator.num_pages }}">Last &raquo;</a>
+                        <a class="page-link" href="?page={{ page_obj.paginator.num_pages }}{% if search %}&search={{ search }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if grade_filter %}&grade={{ grade_filter }}{% endif %}">Last &raquo;</a>
                     </li>
                 {% endif %}
             </ul>
@@ -223,15 +230,12 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
-    <script>
-        // Auto-submit form on filter change (optional - can be removed if you prefer manual submit)
-        document.getElementById('statusFilter').addEventListener('change', function() {
-            document.getElementById('filterForm').submit();
-        });
-
-        document.getElementById('gradeFilter').addEventListener('change', function() {
-            document.getElementById('filterForm').submit();
-        });
-    </script>
+    
+    {% if master_type %}
+    {% include 'masters/bulk_upload_modal.html' %}
+    <script src="{% static 'js/masters_bulk_upload_modal.js' %}"></script>
+    {% endif %}
+    <script src="{% static 'js/masters_therapist_master_manage.js' %}"></script>
+    <script src="{% static 'js/dashboards_nav.js' %}"></script>
 </body>
 </html>

@@ -1,0 +1,14 @@
+.main-content {
+            padding-left: 275px;
+        }
+        .warning-box {
+            background-color: #fff3cd;
+            border: 1px solid #ffeaa7;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        .mandatory-field {
+            border-left: 4px solid #dc3545;
+            background-color: #f8f9fa;
+        }

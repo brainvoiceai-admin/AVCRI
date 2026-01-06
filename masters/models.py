@@ -52,6 +52,58 @@ class UsageType(models.Model):
         verbose_name_plural = "Usage Types"
         ordering = ["name"]
 
+#Prescription Usage Master
+class PrescriptionUsage(models.Model):
+    """Master list of usage types specifically for prescriptions."""
+    name = models.CharField(max_length=100, unique=True, verbose_name="Prescription Usage Name")
+    is_active = models.BooleanField(default=True, verbose_name="Active")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Created At")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="Updated At")
+
+    def __str__(self):
+        return self.name
+
+    class Meta:
+        verbose_name = "Prescription Usage"
+        verbose_name_plural = "Prescription Usages"
+        ordering = ["name"]
+
+
+class NurseTreatmentMaster(models.Model):
+    """Master list of nurse treatments with required nurse count."""
+    treatment_code = models.CharField(max_length=50, unique=True, verbose_name="Treatment Code")
+    name = models.CharField(max_length=200, verbose_name="Treatment Name")
+    number_of_nurse_required = models.PositiveIntegerField(default=1, verbose_name="Number of Nurses Required")
+    is_active = models.BooleanField(default=True, verbose_name="Active")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Created At")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="Updated At")
+
+    def __str__(self):
+        return f"{self.treatment_code} - {self.name}"
+
+    class Meta:
+        verbose_name = "Nurse Treatment"
+        verbose_name_plural = "Nurse Treatments"
+        ordering = ["treatment_code"]
+
+
+class NurseMaster(models.Model):
+    """Master list of nurses with their codes, names, and designations."""
+    nurse_code = models.CharField(max_length=50, unique=True, verbose_name="Nurse Code")
+    nurse_name = models.CharField(max_length=200, verbose_name="Nurse Name")
+    designation = models.CharField(max_length=100, verbose_name="Designation")
+    is_active = models.BooleanField(default=True, verbose_name="Active")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Created At")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="Updated At")
+
+    def __str__(self):
+        return f"{self.nurse_code} - {self.nurse_name}"
+
+    class Meta:
+        verbose_name = "Nurse"
+        verbose_name_plural = "Nurses"
+        ordering = ["nurse_code"]
+
 
 #Prescription time master
 class PrescriptionTime(models.Model):
@@ -113,6 +165,15 @@ class TherapyMaster(models.Model):
     treatment_room_required = models.CharField(max_length=10, null=True, blank=True, verbose_name="Room Required")
     cost_of_therapy = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, verbose_name="Cost")
     
+    # Patient type field (IP or OP)
+    patient_type = models.CharField(
+        max_length=2,
+        choices=[('IP', 'IP (Inpatient)'), ('OP', 'OP (Outpatient)')],
+        default='IP',
+        verbose_name="Patient Type",
+        help_text="Select whether this therapy is for Inpatient (IP) or Outpatient (OP) patients"
+    )
+    
     # Therapist count fields (from original TherapyDetails model)
     no_of_super_senior_therapist = models.IntegerField(default=0, verbose_name="Super Senior Therapists")
     no_of_senior_therapist = models.IntegerField(default=0, verbose_name="Senior Therapists")
@@ -139,6 +200,7 @@ class ItemMaster(models.Model):
     item_name = models.CharField(max_length=255, verbose_name="Item Name")
     item_category = models.CharField(max_length=100, null=True, blank=True, verbose_name="Category")
     unit_of_measure = models.CharField(max_length=50, null=True, blank=True, verbose_name="Unit")
+    procured_from = models.ForeignKey('Procured', on_delete=models.SET_NULL, null=True, blank=True, verbose_name="Procured From")
     is_active = models.BooleanField(default=True, verbose_name="Active")
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="Created At")
     updated_at = models.DateTimeField(auto_now=True, verbose_name="Updated At")
@@ -170,6 +232,24 @@ class SlotMaster(models.Model):
         verbose_name = "Slot Master"
         verbose_name_plural = "Slot Masters"
         ordering = ["slot_number"]
+
+# Ingredient Master
+class IngredientMaster(models.Model):
+    """Master list of ingredients used in prescriptions."""
+    ingredient_code = models.CharField(max_length=20, unique=True, verbose_name="Ingredient Code")
+    ingredient_name = models.CharField(max_length=255, verbose_name="Ingredient Name")
+    description = models.TextField(null=True, blank=True, verbose_name="Description")
+    is_active = models.BooleanField(default=True, verbose_name="Active")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Created At")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="Updated At")
+
+    def __str__(self):
+        return f"{self.ingredient_code} - {self.ingredient_name}"
+
+    class Meta:
+        verbose_name = "Ingredient Master"
+        verbose_name_plural = "Ingredient Masters"
+        ordering = ["ingredient_name"]
 
 # Therapist Grade Master
 class TherapistGrade(models.Model):
@@ -247,6 +327,43 @@ class TherapistLeaveMaster(models.Model):
         ordering = ["therapist__therapist_name", "leave_day"]
         unique_together = ['therapist', 'leave_day']
 
+
+
+class StayingRoom(models.Model):
+    """Master list for staying rooms."""
+    number = models.CharField(max_length=20, unique=True, verbose_name="No")
+    room_desc = models.CharField(max_length=255, verbose_name="Room Description")
+    room_no = models.CharField(max_length=50, verbose_name="Room Number")
+    is_active = models.BooleanField(default=True, verbose_name="Active")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Created At")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="Updated At")
+
+    class Meta:
+        verbose_name = "Staying Room"
+        verbose_name_plural = "Staying Rooms"
+        ordering = ["number"]
+
+    def __str__(self):
+        return f"{self.number} - {self.room_no}"
+
+
+def get_staying_room_display_number(room_number):
+    """
+    Given a room identifier (No), return the corresponding StayingRoom.room_no.
+    Falls back to the original value if no match is found.
+    """
+    if room_number in (None, ''):
+        return room_number
+    lookup = str(room_number).strip()
+    if not lookup:
+        return room_number
+    try:
+        staying_room = StayingRoom.objects.filter(number__iexact=lookup).first()
+        if staying_room and staying_room.room_no:
+            return staying_room.room_no
+    except Exception:
+        pass
+    return room_number
 
 
 class EmergencyLeave(models.Model):
