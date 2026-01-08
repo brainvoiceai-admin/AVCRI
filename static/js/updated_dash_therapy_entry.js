@@ -74,6 +74,39 @@ $(function(){
   let cancelingTherapyIndex = null;
   let resumingTherapyIndex = null;
   let selectedPatient = null;
+  let therapyActionById = {};
+
+  // Track the last action performed on each therapy so we can color-code rows
+  function rememberTherapyAction(id, action){
+    if (!id) return;
+    // Store with string key to ensure matching
+    const key = String(id);
+    therapyActionById[key] = action;
+  }
+  function decorateTherapyList(list){
+    return (list || []).map(t => {
+      // Try multiple key formats to match what we stored
+      const key1 = t.allocation_id ? String(t.allocation_id) : null;
+      const key2 = t.id ? String(t.id) : null;
+      const key3 = t.therapy_code ? String(t.therapy_code) : null;
+      const remembered = (key1 && therapyActionById[key1]) || 
+                         (key2 && therapyActionById[key2]) || 
+                         (key3 && therapyActionById[key3]) || '';
+      // Only use derived from server if it's 'cancelled' (server knows cancellation state)
+      // Otherwise, ignore server's last_action and use remembered or default to 'added'
+      const derived = (t.status === 'cancelled' ? 'cancelled' : '') || 
+                      (t.last_action === 'cancelled' ? 'cancelled' : '');
+      // Priority: remembered > derived (only cancelled) > default to 'added' for new therapies
+      // If no remembered action and not cancelled, ALWAYS default to 'added' (blue)
+      let finalAction = remembered || derived;
+      if (!finalAction && key1 && t.status !== 'cancelled') {
+        finalAction = 'added';  // Default to blue for new/active therapies
+      }
+      // Ensure we never return empty string - default to 'added' if somehow we got empty
+      // This ensures all therapies have a last_action value
+      return { ...t, last_action: finalAction || 'added' };
+    });
+  }
 
   // Patient search with auto-fill functionality
   let searchTimeout;
@@ -314,6 +347,8 @@ $(function(){
     resumingTherapyIndex = null;
     viewingStatusTherapyIndex = null;
     pendingSlotValue = null;
+    // Clear remembered actions when switching patients to avoid stale data
+    therapyActionById = {};
     
     // Close any open modals
     $cancelModal.hide();
@@ -358,6 +393,7 @@ $(function(){
     $updateBtn.hide();
     
     // Clear therapies and bookings - will be reloaded for new patient
+    therapyActionById = {};
     addedTherapies = [];
     bookings = [];
     
@@ -377,7 +413,7 @@ $(function(){
     const patientRegNo = patient.pat_reg_no || patient.pat_op_reg_no;
     ajax({action:'patient_therapies', patient_reg_no: patientRegNo}).then(list => {
       // Completely replace therapies list with new patient's data
-      addedTherapies = list || [];
+      addedTherapies = decorateTherapyList(list);
       bookings = [];
       addedTherapies.forEach((t, idx) => {
         if (t.from_date && t.to_date) getDateRange(t.from_date, t.to_date).forEach(d => bookings.push({ id: Math.random().toString(36).slice(2,9), allocation_id: t.allocation_id || t.allocation_id || t.allocation_id, therapyIndex: idx, date:d, slot: t.slot||'', room: t.room||'', therapist: t.therapist||'', status: 'scheduled' }));
@@ -385,6 +421,7 @@ $(function(){
       renderAll();
     }).catch(()=>{ 
       // On error, still render to show empty state
+      therapyActionById = {};
       addedTherapies = [];
       bookings = [];
       renderAll(); 
@@ -404,6 +441,7 @@ $(function(){
     $('#hdr-pat-age').html('—');
     $('#hdr-pat-gender').html('—');
     $('#hdr-pat-type').html('—');
+    therapyActionById = {};
     addedTherapies = [];
     bookings = [];
     renderAll();
@@ -832,8 +870,14 @@ $(function(){
           status: data.overall_status || 'draft', // Use overall status from server
           status_counts: data.status_counts || {},
           status_summary: data.status_summary || {},
-          date_status_map: data.date_status_map || {}
+          date_status_map: data.date_status_map || {},
+          last_action: 'added'
         };
+        // Remember the action with string key BEFORE adding to list
+        const allocationKey = String(newTherapy.allocation_id || newTherapy.therapy_code || newTherapy.id || '');
+        if (allocationKey) {
+          rememberTherapyAction(allocationKey, 'added');
+        }
         addedTherapies.push(newTherapy);
         
         // Reset form
@@ -847,7 +891,12 @@ $(function(){
         if (selectedPatient) {
           const patientRegNo = selectedPatient.pat_reg_no || selectedPatient.pat_op_reg_no;
           ajax({action:'patient_therapies', patient_reg_no: patientRegNo}).then(list => {
-            addedTherapies = list || [];
+            // Ensure newly added therapy is remembered as 'added' before decorating
+            const newAllocationId = String(data.allocation_id || '');
+            if (newAllocationId) {
+              rememberTherapyAction(newAllocationId, 'added');
+            }
+            addedTherapies = decorateTherapyList(list || []);
             bookings = [];
             addedTherapies.forEach((t, idx) => {
               if (t.from_date && t.to_date) getDateRange(t.from_date, t.to_date).forEach(d => bookings.push({ id: Math.random().toString(36).slice(2,9), allocation_id: t.allocation_id || t.allocation_id || t.allocation_id, therapyIndex: idx, date:d, slot: t.slot||'', room: t.room||'', therapist: t.therapist||'', status: 'scheduled' }));
@@ -868,6 +917,55 @@ $(function(){
       alert('Error saving therapy to server: ' + errorMessage);
     });
   });
+
+  // Build color class for today's status:
+  // - Added  -> blue
+  // - Updated -> yellow
+  // - Resumed -> green
+  // - Cancelled -> red (only if fully cancelled today)
+  function getTodayTherapyColorClass(t){
+    if (!t) return '';
+    const today = new Date().toISOString().slice(0,10);
+
+    // Treat a therapy as "cancelled for today" only if today's date lies entirely
+    // inside its cancelled range, and the main range covers today.
+    const inMainRange =
+      t.from_date && t.to_date &&
+      today >= String(t.from_date) && today <= String(t.to_date);
+    const inCancelledRange =
+      t.cancelled_date_from && t.cancelled_date_to &&
+      t.cancelled_date_from !== 'null' && t.cancelled_date_to !== 'null' &&
+      today >= String(t.cancelled_date_from) && today <= String(t.cancelled_date_to);
+
+    if (inMainRange && inCancelledRange) {
+      // Fully cancelled for today
+      return 'action-cancelled';
+    }
+
+    if (!inMainRange) {
+      // No active therapy for today – no special color
+      return '';
+    }
+
+    // At this point therapy is active for today (not cancelled for today)
+    // Use last_action to determine color based on sequence: Add → Update → Cancel → Resume
+    
+    // Ensure last_action is a string for comparison
+    const lastAction = String(t.last_action || '').toLowerCase().trim();
+    
+    // Priority order: Resumed > Updated > Added
+    if (lastAction === 'resumed' || t.resumed_at) {
+      return 'action-resumed';  // Green
+    }
+    
+    if (lastAction === 'updated') {
+      return 'action-updated';  // Yellow
+    }
+    
+    // Default to blue for 'added' or empty/undefined (newly added)
+    // This ensures new therapies show blue, not yellow
+    return 'action-added';  // Blue
+  }
 
   // render therapies table
   function renderTherapies(){
@@ -980,7 +1078,8 @@ $(function(){
         }
       }
       
-      const row = `<tr class="${statusClass}">
+      const rowActionClass = getTodayTherapyColorClass(t);
+      const row = `<tr class="${statusClass} ${rowActionClass}">
         <td>${i+1}</td>
         <td>${esc(t.therapy_name)}</td>
         <td>${therapyUsageDisplay !== '—' ? esc(therapyUsageDisplay) : '—'}</td>
@@ -1292,6 +1391,18 @@ $(function(){
     t.status = 'cancelled';
     t.cancellation_reason = reason;
     
+    // Only set last_action to 'cancelled' if today is in the cancelled range
+    // Otherwise, preserve the previous last_action (e.g., 'updated')
+    const today = new Date().toISOString().slice(0,10);
+    const todayCancelled = today >= cfrom && today <= cto;
+    if (todayCancelled) {
+      t.last_action = 'cancelled';
+      rememberTherapyAction(t.allocation_id || t.therapy_code || t.id, 'cancelled');
+    } else {
+      // Today is not cancelled - preserve previous action (e.g., 'updated')
+      // Don't change last_action or rememberTherapyAction
+    }
+    
     // IMMEDIATELY update UI - don't wait for server - EXACTLY like prescription entry
     $cancelModal.hide();
     renderAll();
@@ -1317,6 +1428,8 @@ $(function(){
                   if (updated) {
                     // Update all fields from server response
                     Object.assign(t, updated);
+                    const rememberedAction = therapyActionById[t.allocation_id || t.therapy_code || t.id];
+                    t.last_action = rememberedAction || t.last_action || 'cancelled';
                     // Explicitly set cancelled dates (handle null/undefined/string 'null')
                     t.cancelled_date_from = (updated.cancelled_date_from && updated.cancelled_date_from !== 'null') ? updated.cancelled_date_from : null;
                     t.cancelled_date_to = (updated.cancelled_date_to && updated.cancelled_date_to !== 'null') ? updated.cancelled_date_to : null;
@@ -1536,6 +1649,8 @@ $(function(){
       }).then(r => r.json()).then(j => {
         if (j.status === 'ok') {
           alert('Therapy updated successfully on server.');
+          t.last_action = 'updated';
+          rememberTherapyAction(t.allocation_id || t.therapy_code || t.id, 'updated');
           resetFormState();
           
           // Reload therapy data from server to get accurate days and other fields
@@ -1544,7 +1659,8 @@ $(function(){
             if (patientRegNo) {
               ajax({action:'patient_therapies', patient_reg_no: patientRegNo}).then(therapies => {
                 if (therapies && Array.isArray(therapies)) {
-                  const updated = therapies.find(th => th.allocation_id === t.allocation_id);
+                  const merged = decorateTherapyList(therapies);
+                  const updated = merged.find(th => th.allocation_id === t.allocation_id);
                   if (updated) {
                     // Update all fields from server response, including days
                     Object.assign(t, updated);
@@ -1576,6 +1692,8 @@ $(function(){
       });
     } else {
       // Local update only (for unsaved therapies)
+      t.last_action = 'updated';
+      rememberTherapyAction(t.allocation_id || t.therapy_code || t.id, 'updated');
       alert('Therapy updated locally.');
       resetFormState(); 
       renderAll();
@@ -1786,6 +1904,10 @@ $(function(){
       return;
     }
     
+    // Mark as resumed for color coding FIRST, before rendering
+    therapy.last_action = 'resumed';
+    rememberTherapyAction(therapy.allocation_id || therapy.therapy_code || therapy.id, 'resumed');
+    
     // IMMEDIATELY update local data BEFORE server call
     // Update status_summary optimistically to reflect the resume action
     if (!therapy.status_summary) {
@@ -1860,7 +1982,6 @@ $(function(){
         resumingTherapyIndex = null;
       }
     }
-    
     alert('Therapy resumed successfully for ' + formatDate(date) + '.');
     
     if (therapy.allocation_id) {
@@ -1881,8 +2002,40 @@ $(function(){
                 if (therapies && Array.isArray(therapies)) {
                   const updated = therapies.find(th => th.allocation_id === therapy.allocation_id);
                   if (updated) {
+                    // Preserve last_action before updating - use string keys to match storage
+                    const key1 = therapy.allocation_id ? String(therapy.allocation_id) : null;
+                    const key2 = therapy.id ? String(therapy.id) : null;
+                    const key3 = therapy.therapy_code ? String(therapy.therapy_code) : null;
+                    const rememberedAction = (key1 && therapyActionById[key1]) || 
+                                           (key2 && therapyActionById[key2]) || 
+                                           (key3 && therapyActionById[key3]) || '';
                     // Update all fields from server response
                     Object.assign(therapy, updated);
+                    // Restore last_action if it was remembered (always restore to preserve resumed/updated state)
+                    // This is critical - we must restore the remembered action to preserve color coding
+                    if (rememberedAction) {
+                      therapy.last_action = rememberedAction;
+                      // Also update the stored action to ensure it persists
+                      if (key1) {
+                        rememberTherapyAction(key1, rememberedAction);
+                      } else if (key2) {
+                        rememberTherapyAction(key2, rememberedAction);
+                      } else if (key3) {
+                        rememberTherapyAction(key3, rememberedAction);
+                      }
+                    } else if (therapy.last_action === 'resumed') {
+                      // If we just resumed, ensure it stays as resumed
+                      therapy.last_action = 'resumed';
+                      if (key1) {
+                        rememberTherapyAction(key1, 'resumed');
+                      } else if (key2) {
+                        rememberTherapyAction(key2, 'resumed');
+                      } else if (key3) {
+                        rememberTherapyAction(key3, 'resumed');
+                      }
+                    }
+                    // Re-render to show updated color
+                    renderAll();
                     // Explicitly set cancelled dates (handle null/undefined/string 'null')
                     therapy.cancelled_date_from = (updated.cancelled_date_from && updated.cancelled_date_from !== 'null') ? updated.cancelled_date_from : null;
                     therapy.cancelled_date_to = (updated.cancelled_date_to && updated.cancelled_date_to !== 'null') ? updated.cancelled_date_to : null;

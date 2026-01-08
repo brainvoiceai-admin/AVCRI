@@ -454,6 +454,69 @@
       border: 1px solid #ffeaa7;
     }
 
+    /* Status + action badges */
+    .status-badges {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      align-items: flex-start;
+    }
+
+    .action-pill {
+      padding: 5px 10px;
+      border-radius: 14px;
+      font-weight: 700;
+      font-size: 0.78rem;
+      display: inline-block;
+      border: 1px solid transparent;
+    }
+
+    /* Row color legend (today only):
+       Added   -> Blue
+       Updated -> Yellow
+       Resumed -> Green
+       Cancelled -> Red
+    */
+    .action-added {
+      background: #e8f1ff;
+      color: #0d3c8c;
+      border-color: #cddcff;
+    }
+
+    .action-updated {
+      background: #fff9e6;
+      color: #856404;
+      border-color: #ffeaa7;
+    }
+
+    .action-resumed {
+      background: #e7f9ed;
+      color: #1b5e20;
+      border-color: #cdeed8;
+    }
+
+    .action-cancelled {
+      background: #ffe6e6;
+      color: #a1191f;
+      border-color: #ffc2c2;
+    }
+
+    tr.action-added {
+      background: #f4f7ff;
+    }
+
+    tr.action-updated {
+      background: #fffbe5;
+    }
+
+    tr.action-resumed {
+      background: #f6fff9;
+    }
+
+    tr.action-cancelled {
+      background: #fff5f5;
+    }
+
     /* Action Buttons */
     .action-btn {
       margin-right: 8px;
