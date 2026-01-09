@@ -55,7 +55,7 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name='itemmaster',
             name='umo_fk',
-            field=models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='+', to='masters.unitno', verbose_name='UMO'),
+            field=models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='+', to='masters.unitno', verbose_name='UOM'),
         ),
         # Migrate data from CharField to ForeignKey
         migrations.RunPython(migrate_umo_data, reverse_migrate_umo_data),

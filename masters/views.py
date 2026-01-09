@@ -1592,7 +1592,7 @@ class ItemMasterForm(forms.ModelForm):
             ).order_by('unit_name')
         else:
             self.fields['umo'].queryset = UnitNo.objects.filter(is_active=True).order_by('unit_name')
-        self.fields['umo'].empty_label = '-- Select UMO --'
+        self.fields['umo'].empty_label = '-- Select UOM --'
         # Show item_code as read-only if editing
         if self.instance and self.instance.pk:
             self.fields['item_code'] = forms.CharField(
