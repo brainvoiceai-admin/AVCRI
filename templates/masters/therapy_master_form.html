@@ -68,9 +68,14 @@
                 <div class="row">
                     <div class="col-md-6 mb-3">
                         <label for="id_therapy_group" class="form-label">Therapy Group</label>
-                        <input type="text" class="form-control" id="id_therapy_group" name="therapy_group" 
-                               value="{{ form.therapy_group.value|default:'' }}" 
-                               placeholder="e.g., Oil Therapy, Herbal Treatment">
+                        {{ form.therapy_group }}
+                        {% if form.therapy_group.errors %}
+                            <div class="text-danger small">
+                                {% for error in form.therapy_group.errors %}
+                                    {{ error }}
+                                {% endfor %}
+                            </div>
+                        {% endif %}
                     </div>
                     <div class="col-md-6 mb-3">
                         <label for="id_therapy_category" class="form-label">Therapy Category</label>

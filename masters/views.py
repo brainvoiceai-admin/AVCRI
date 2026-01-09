@@ -12,7 +12,7 @@ from django import forms
 from authentication.decorators import super_admin_required, module_access_required
 from .models import (
     Procured, OilClass, UsageType, PrescriptionUsage, PrescriptionTime, 
-    PrescriptionScope, UnitNo, TherapyMaster, ItemMaster, SlotMaster,
+    PrescriptionScope, UnitNo, TherapyMaster, TherapyGroup, ItemMaster, ItemGroup, SlotMaster,
     TherapistGrade, TherapistMaster, TherapistLeaveMaster, NurseTreatmentMaster,
     NurseMaster, IngredientMaster
 )
@@ -32,12 +32,16 @@ def get_master_data(request):
     try:
         if master_type == 'therapy':
             data = list(TherapyMaster.objects.filter(is_active=True).values(
-                'therapy_code', 'therapy_name', 'therapy_group', 'therapy_category'
+                'therapy_code', 'therapy_name', 'therapy_group__name', 'therapy_category'
             ))
+        elif master_type == 'therapy_group':
+            data = list(TherapyGroup.objects.filter(is_active=True).values('id', 'name'))
         elif master_type == 'item':
             data = list(ItemMaster.objects.filter(is_active=True).values(
-                'item_code', 'item_name', 'item_category'
+                'item_code', 'item_name', 'item_group__name'
             ))
+        elif master_type == 'item_group':
+            data = list(ItemGroup.objects.filter(is_active=True).values('id', 'name'))
         elif master_type == 'slot':
             data = list(SlotMaster.objects.filter(is_active=True).values(
                 'slot_number', 'slot_name', 'slot_time'
@@ -87,10 +91,21 @@ def create_master_item(request):
         master_type = data.get('type', '')
         
         if master_type == 'therapy':
+            # Get therapy_group if provided
+            therapy_group = None
+            if data.get('therapy_group'):
+                try:
+                    if isinstance(data.get('therapy_group'), int):
+                        therapy_group = TherapyGroup.objects.get(id=data.get('therapy_group'))
+                    else:
+                        therapy_group = TherapyGroup.objects.get(name=data.get('therapy_group'))
+                except TherapyGroup.DoesNotExist:
+                    pass
+            
             item = TherapyMaster.objects.create(
                 therapy_code=data['therapy_code'],
                 therapy_name=data['therapy_name'],
-                therapy_group=data.get('therapy_group', ''),
+                therapy_group=therapy_group,
                 therapy_category=data.get('therapy_category', ''),
                 therapy_duration=data.get('therapy_duration', ''),
                 bathing_required=data.get('bathing_required', ''),
@@ -98,11 +113,22 @@ def create_master_item(request):
                 cost_of_therapy=data.get('cost_of_therapy', 0)
             )
         elif master_type == 'item':
+            # Get item_group if provided
+            item_group = None
+            if data.get('item_group'):
+                try:
+                    if isinstance(data.get('item_group'), int):
+                        item_group = ItemGroup.objects.get(id=data.get('item_group'))
+                    else:
+                        item_group = ItemGroup.objects.get(name=data.get('item_group'))
+                except ItemGroup.DoesNotExist:
+                    pass
+            
             item = ItemMaster.objects.create(
-                item_code=data['item_code'],
                 item_name=data['item_name'],
-                item_category=data.get('item_category', ''),
-                unit_of_measure=data.get('unit_of_measure', '')
+                item_group=item_group,
+                umo=data.get('umo', ''),
+                min_max=data.get('min_max', '')
             )
         elif master_type == 'slot':
             from datetime import datetime
@@ -148,13 +174,47 @@ def update_master_item(request, item_id):
         if master_type == 'therapy':
             item = TherapyMaster.objects.get(id=item_id)
             item.therapy_name = data.get('therapy_name', item.therapy_name)
-            item.therapy_group = data.get('therapy_group', item.therapy_group)
+            # Handle therapy_group as ForeignKey - can be ID or name
+            therapy_group_data = data.get('therapy_group')
+            if therapy_group_data:
+                if isinstance(therapy_group_data, int):
+                    try:
+                        item.therapy_group = TherapyGroup.objects.get(id=therapy_group_data)
+                    except TherapyGroup.DoesNotExist:
+                        item.therapy_group = None
+                elif isinstance(therapy_group_data, str):
+                    try:
+                        item.therapy_group = TherapyGroup.objects.get(name=therapy_group_data)
+                    except TherapyGroup.DoesNotExist:
+                        item.therapy_group = None
+                else:
+                    item.therapy_group = None
+            else:
+                item.therapy_group = None
             item.therapy_category = data.get('therapy_category', item.therapy_category)
             item.is_active = data.get('is_active', item.is_active)
         elif master_type == 'item':
             item = ItemMaster.objects.get(id=item_id)
             item.item_name = data.get('item_name', item.item_name)
-            item.item_category = data.get('item_category', item.item_category)
+            # Handle item_group as ForeignKey - can be ID or name
+            item_group_data = data.get('item_group')
+            if item_group_data:
+                if isinstance(item_group_data, int):
+                    try:
+                        item.item_group = ItemGroup.objects.get(id=item_group_data)
+                    except ItemGroup.DoesNotExist:
+                        item.item_group = None
+                elif isinstance(item_group_data, str):
+                    try:
+                        item.item_group = ItemGroup.objects.get(name=item_group_data)
+                    except ItemGroup.DoesNotExist:
+                        item.item_group = None
+                else:
+                    item.item_group = None
+            else:
+                item.item_group = None
+            item.umo = data.get('umo', item.umo)
+            item.min_max = data.get('min_max', item.min_max)
             # Handle procured_from as ForeignKey - can be ID or name
             procured_from_data = data.get('procured_from')
             if procured_from_data:
@@ -1151,12 +1211,28 @@ def master_management_dashboard(request):
                 'active_count': TherapyMaster.objects.filter(is_active=True).count(),
             },
             {
+                'name': 'Therapy Group Master',
+                'model': 'TherapyGroup',
+                'url': 'therapy_group_manage',
+                'description': 'Manage therapy groups/categories',
+                'count': TherapyGroup.objects.count(),
+                'active_count': TherapyGroup.objects.filter(is_active=True).count(),
+            },
+            {
                 'name': 'Item Master',
                 'model': 'ItemMaster',
                 'url': 'item_master_manage',
                 'description': 'Manage items used in therapies',
                 'count': ItemMaster.objects.count(),
                 'active_count': ItemMaster.objects.filter(is_active=True).count(),
+            },
+            {
+                'name': 'Item Group Master',
+                'model': 'ItemGroup',
+                'url': 'item_group_manage',
+                'description': 'Manage item groups/categories',
+                'count': ItemGroup.objects.count(),
+                'active_count': ItemGroup.objects.filter(is_active=True).count(),
             },
             {
                 'name': 'Slot Master',
@@ -1258,7 +1334,7 @@ class TherapyMasterManagementView(ListView):
             queryset = queryset.filter(
                 db_models.Q(therapy_code__icontains=search) |
                 db_models.Q(therapy_name__icontains=search) |
-                db_models.Q(therapy_group__icontains=search)
+                db_models.Q(therapy_group__name__icontains=search)
             )
         
         # Status filter (server-side)
@@ -1298,6 +1374,11 @@ class TherapyMasterCreateView(CreateView):
         # Make therapy_code read-only/hidden since it's auto-generated
         if 'therapy_code' in form.fields:
             form.fields['therapy_code'].widget.attrs['readonly'] = True
+        # Filter therapy_group to show only active groups
+        if 'therapy_group' in form.fields:
+            form.fields['therapy_group'].queryset = TherapyGroup.objects.filter(is_active=True).order_by('name')
+            form.fields['therapy_group'].empty_label = '-- Select Group --'
+            form.fields['therapy_group'].widget.attrs['class'] = 'form-control'
         # Update therapy_category to use dropdown with Medium, Hard, Easy
         if 'therapy_category' in form.fields:
             form.fields['therapy_category'].widget = forms.Select(choices=[
@@ -1361,6 +1442,18 @@ class TherapyMasterUpdateView(UpdateView):
         # Make therapy_code read-only since it shouldn't be changed
         if 'therapy_code' in form.fields:
             form.fields['therapy_code'].widget.attrs['readonly'] = True
+        # Filter therapy_group to show only active groups (and current group if inactive)
+        if 'therapy_group' in form.fields:
+            current_group = self.object.therapy_group
+            if current_group:
+                # Include current group even if inactive
+                form.fields['therapy_group'].queryset = TherapyGroup.objects.filter(
+                    db_models.Q(is_active=True) | db_models.Q(pk=current_group.pk)
+                ).order_by('name')
+            else:
+                form.fields['therapy_group'].queryset = TherapyGroup.objects.filter(is_active=True).order_by('name')
+            form.fields['therapy_group'].empty_label = '-- Select Group --'
+            form.fields['therapy_group'].widget.attrs['class'] = 'form-control'
         # Update therapy_category to use dropdown with Medium, Hard, Easy
         if 'therapy_category' in form.fields:
             form.fields['therapy_category'].widget = forms.Select(choices=[
@@ -1411,7 +1504,7 @@ class ItemMasterManagementView(ListView):
             queryset = queryset.filter(
                 db_models.Q(item_code__icontains=search) |
                 db_models.Q(item_name__icontains=search) |
-                db_models.Q(item_category__icontains=search) |
+                db_models.Q(item_group__name__icontains=search) |
                 db_models.Q(procured_from__name__icontains=search)
             )
         
@@ -1422,10 +1515,10 @@ class ItemMasterManagementView(ListView):
         elif status == 'inactive':
             queryset = queryset.filter(is_active=False)
         
-        # Category filter
-        category = self.request.GET.get('category', '')
-        if category:
-            queryset = queryset.filter(item_category=category)
+        # Group filter
+        group = self.request.GET.get('group', '')
+        if group:
+            queryset = queryset.filter(item_group_id=group)
         
         return queryset.order_by('item_name')
     
@@ -1433,23 +1526,24 @@ class ItemMasterManagementView(ListView):
         context = super().get_context_data(**kwargs)
         context['master_type'] = 'item'
         context['master_name'] = 'Item Master'
-        context['required_fields'] = ['item_code', 'item_name']
-        context['optional_fields'] = ['item_category', 'unit_of_measure', 'procured_from', 'is_active']
+        context['required_fields'] = ['item_name']
+        context['optional_fields'] = ['item_group', 'umo', 'min_max', 'procured_from', 'is_active']
         context['search'] = self.request.GET.get('search', '')
         context['status_filter'] = self.request.GET.get('status', '')
-        context['category_filter'] = self.request.GET.get('category', '')
+        context['group_filter'] = self.request.GET.get('group', '')
+        context['item_groups'] = ItemGroup.objects.filter(is_active=True).order_by('name')
         return context
 
 class ItemMasterForm(forms.ModelForm):
     """Custom form for ItemMaster with filtered procured_from dropdown"""
     class Meta:
         model = ItemMaster
-        fields = ['item_code', 'item_name', 'item_category', 'unit_of_measure', 'procured_from', 'is_active']
+        fields = ['item_name', 'item_group', 'umo', 'min_max', 'procured_from', 'is_active']
         widgets = {
-            'item_code': forms.TextInput(attrs={'class': 'form-control'}),
             'item_name': forms.TextInput(attrs={'class': 'form-control'}),
-            'item_category': forms.TextInput(attrs={'class': 'form-control'}),
-            'unit_of_measure': forms.TextInput(attrs={'class': 'form-control'}),
+            'item_group': forms.Select(attrs={'class': 'form-control'}),
+            'umo': forms.TextInput(attrs={'class': 'form-control'}),
+            'min_max': forms.TextInput(attrs={'class': 'form-control'}),
             'procured_from': forms.Select(attrs={'class': 'form-control'}),
             'is_active': forms.CheckboxInput(attrs={'class': 'form-check-input'}),
         }
@@ -1459,6 +1553,16 @@ class ItemMasterForm(forms.ModelForm):
         # Filter procured_from to show only active sources
         self.fields['procured_from'].queryset = Procured.objects.filter(is_active=True).order_by('name')
         self.fields['procured_from'].empty_label = '-- Select Source --'
+        # Filter item_group to show only active groups
+        self.fields['item_group'].queryset = ItemGroup.objects.filter(is_active=True).order_by('name')
+        self.fields['item_group'].empty_label = '-- Select Group --'
+        # Show item_code as read-only if editing
+        if self.instance and self.instance.pk:
+            self.fields['item_code'] = forms.CharField(
+                widget=forms.TextInput(attrs={'class': 'form-control', 'readonly': True}),
+                required=False,
+                initial=self.instance.item_code
+            )
 
 class ItemMasterCreateView(CreateView):
     model = ItemMaster
@@ -1490,6 +1594,240 @@ def item_master_delete(request, pk):
     item.delete()
     messages.success(request, f'Item "{item_name}" ({item_code}) deleted successfully.')
     return redirect('item_master_manage')
+
+# Item Group Master CRUD Views
+class ItemGroupManagementView(ListView):
+    model = ItemGroup
+    template_name = 'masters/item_group_manage.html'
+    context_object_name = 'item_group_list'
+    paginate_by = 20
+
+    def get_queryset(self):
+        queryset = ItemGroup.objects.all()
+        
+        # Search filter
+        search = self.request.GET.get('search', '').strip()
+        if search:
+            queryset = queryset.filter(
+                db_models.Q(name__icontains=search)
+            )
+        
+        # Status filter
+        status = self.request.GET.get('status', '').strip().lower()
+        if status == 'active':
+            queryset = queryset.filter(is_active=True)
+        elif status == 'inactive':
+            queryset = queryset.filter(is_active=False)
+        
+        return queryset.order_by('name')
+    
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['master_type'] = 'item_group'
+        context['master_name'] = 'Item Group Master'
+        context['required_fields'] = ['name']
+        context['optional_fields'] = ['is_active']
+        context['search'] = self.request.GET.get('search', '')
+        context['status_filter'] = self.request.GET.get('status', '')
+        return context
+    
+    def post(self, request, *args, **kwargs):
+        """Handle POST requests for creating new item groups"""
+        name = request.POST.get('name')
+        is_active = request.POST.get('is_active') == 'on'
+        
+        # Create new record
+        if name:
+            try:
+                ItemGroup.objects.create(
+                    name=name,
+                    is_active=is_active
+                )
+                messages.success(request, f'Item group "{name}" created successfully.')
+            except Exception as e:
+                messages.error(request, f'Error creating item group: {str(e)}')
+        else:
+            messages.error(request, 'Name is required.')
+        
+        return redirect('item_group_manage')
+
+class ItemGroupCreateView(CreateView):
+    model = ItemGroup
+    fields = ['name', 'is_active']
+    template_name = 'masters/item_group_form.html'
+    success_url = reverse_lazy('item_group_manage')
+    
+    def form_valid(self, form):
+        messages.success(self.request, 'Item group created successfully.')
+        return super().form_valid(form)
+
+class ItemGroupUpdateView(UpdateView):
+    model = ItemGroup
+    fields = ['name', 'is_active']
+    template_name = 'masters/item_group_form.html'
+    success_url = reverse_lazy('item_group_manage')
+    
+    def form_valid(self, form):
+        messages.success(self.request, 'Item group updated successfully.')
+        return super().form_valid(form)
+
+@login_required
+@super_admin_required
+def item_group_delete(request, pk):
+    """Delete an item group - function-based view to handle GET requests properly"""
+    try:
+        item_group = get_object_or_404(ItemGroup, pk=pk)
+        item_group_name = item_group.name
+        
+        # Check if any items are using this group
+        items_using_group = ItemMaster.objects.filter(item_group=item_group).count()
+        if items_using_group > 0:
+            messages.error(request, f'Cannot delete item group "{item_group_name}" because {items_using_group} item(s) are using it. Please update those items first.')
+            return redirect('item_group_manage')
+        
+        item_group.delete()
+        messages.success(request, f'Item group "{item_group_name}" deleted successfully.')
+    except Exception as e:
+        messages.error(request, f'Error deleting item group: {str(e)}')
+    
+    return redirect('item_group_manage')
+
+@login_required
+@super_admin_required
+def item_group_enable(request, pk):
+    """Enable an item group"""
+    item_group = get_object_or_404(ItemGroup, pk=pk)
+    item_group.is_active = True
+    item_group.save()
+    messages.success(request, f'Item group "{item_group.name}" enabled successfully.')
+    return redirect('item_group_manage')
+
+@login_required
+@super_admin_required
+def item_group_disable(request, pk):
+    """Disable an item group"""
+    item_group = get_object_or_404(ItemGroup, pk=pk)
+    item_group.is_active = False
+    item_group.save()
+    messages.success(request, f'Item group "{item_group.name}" disabled successfully.')
+    return redirect('item_group_manage')
+
+# Therapy Group Master CRUD Views
+class TherapyGroupManagementView(ListView):
+    model = TherapyGroup
+    template_name = 'masters/therapy_group_manage.html'
+    context_object_name = 'therapy_group_list'
+    paginate_by = 20
+
+    def get_queryset(self):
+        queryset = TherapyGroup.objects.all()
+        
+        # Search filter
+        search = self.request.GET.get('search', '').strip()
+        if search:
+            queryset = queryset.filter(
+                db_models.Q(name__icontains=search)
+            )
+        
+        # Status filter
+        status = self.request.GET.get('status', '').strip().lower()
+        if status == 'active':
+            queryset = queryset.filter(is_active=True)
+        elif status == 'inactive':
+            queryset = queryset.filter(is_active=False)
+        
+        return queryset.order_by('name')
+    
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['master_type'] = 'therapy_group'
+        context['master_name'] = 'Therapy Group Master'
+        context['required_fields'] = ['name']
+        context['optional_fields'] = ['is_active']
+        context['search'] = self.request.GET.get('search', '')
+        context['status_filter'] = self.request.GET.get('status', '')
+        return context
+    
+    def post(self, request, *args, **kwargs):
+        """Handle POST requests for creating new therapy groups"""
+        name = request.POST.get('name')
+        is_active = request.POST.get('is_active') == 'on'
+        
+        # Create new record
+        if name:
+            try:
+                TherapyGroup.objects.create(
+                    name=name,
+                    is_active=is_active
+                )
+                messages.success(request, f'Therapy group "{name}" created successfully.')
+            except Exception as e:
+                messages.error(request, f'Error creating therapy group: {str(e)}')
+        else:
+            messages.error(request, 'Name is required.')
+        
+        return redirect('therapy_group_manage')
+
+class TherapyGroupCreateView(CreateView):
+    model = TherapyGroup
+    fields = ['name', 'is_active']
+    template_name = 'masters/therapy_group_form.html'
+    success_url = reverse_lazy('therapy_group_manage')
+    
+    def form_valid(self, form):
+        messages.success(self.request, 'Therapy group created successfully.')
+        return super().form_valid(form)
+
+class TherapyGroupUpdateView(UpdateView):
+    model = TherapyGroup
+    fields = ['name', 'is_active']
+    template_name = 'masters/therapy_group_form.html'
+    success_url = reverse_lazy('therapy_group_manage')
+    
+    def form_valid(self, form):
+        messages.success(self.request, 'Therapy group updated successfully.')
+        return super().form_valid(form)
+
+@login_required
+@super_admin_required
+def therapy_group_delete(request, pk):
+    """Delete a therapy group - function-based view to handle GET requests properly"""
+    try:
+        therapy_group = get_object_or_404(TherapyGroup, pk=pk)
+        therapy_group_name = therapy_group.name
+        
+        # Check if any therapies are using this group
+        therapies_using_group = TherapyMaster.objects.filter(therapy_group=therapy_group).count()
+        if therapies_using_group > 0:
+            messages.error(request, f'Cannot delete therapy group "{therapy_group_name}" because {therapies_using_group} therapy/therapies are using it. Please update those therapies first.')
+            return redirect('therapy_group_manage')
+        
+        therapy_group.delete()
+        messages.success(request, f'Therapy group "{therapy_group_name}" deleted successfully.')
+    except Exception as e:
+        messages.error(request, f'Error deleting therapy group: {str(e)}')
+    
+    return redirect('therapy_group_manage')
+
+@login_required
+@super_admin_required
+def therapy_group_enable(request, pk):
+    """Enable a therapy group"""
+    therapy_group = get_object_or_404(TherapyGroup, pk=pk)
+    therapy_group.is_active = True
+    therapy_group.save()
+    messages.success(request, f'Therapy group "{therapy_group.name}" enabled successfully.')
+    return redirect('therapy_group_manage')
+
+@login_required
+@super_admin_required
+def therapy_group_disable(request, pk):
+    """Disable a therapy group"""
+    therapy_group = get_object_or_404(TherapyGroup, pk=pk)
+    therapy_group.is_active = False
+    therapy_group.save()
+    messages.success(request, f'Therapy group "{therapy_group.name}" disabled successfully.')
+    return redirect('therapy_group_manage')
 
 # Slot Master CRUD Views
 class SlotMasterManagementView(ListView):
@@ -2119,10 +2457,10 @@ def download_master_template(request, master_type):
             }
         elif master_type == 'item' or master_type == 'itemmaster':
             template_data = {
-                'columns': ['item_code', 'item_name', 'item_category', 'unit_of_measure', 'procured_from', 'is_active'],
+                'columns': ['item_name', 'item_group', 'umo', 'min_max', 'procured_from', 'is_active'],
                 'example_rows': [
-                    ['ITM001', 'Sesame Oil', 'Oil', 'ml', 'IP Pharmacy', 'true'],
-                    ['ITM002', 'Turmeric Powder', 'Herb', 'gm', 'Kashaya Room', 'true'],
+                    ['Sesame Oil', 'Oil', 'ml', '', 'IP Pharmacy', 'true'],
+                    ['Turmeric Powder', 'Herb', 'gm', '', 'Kashaya Room', 'true'],
                 ]
             }
         elif master_type == 'slot' or master_type == 'slotmaster':
@@ -2337,12 +2675,21 @@ def bulk_upload_master(request):
                         # Parse boolean fields
                         is_active = _parse_boolean(row.get('is_active', True))
                         
+                        # Handle therapy_group as ForeignKey
+                        therapy_group_name = str(row.get('therapy_group', '')).strip()
+                        therapy_group_obj = None
+                        if therapy_group_name:
+                            try:
+                                therapy_group_obj = TherapyGroup.objects.get(name=therapy_group_name)
+                            except TherapyGroup.DoesNotExist:
+                                pass
+                        
                         # Get or create
                         therapy, created = TherapyMaster.objects.get_or_create(
                             therapy_code=therapy_code,
                             defaults={
                                 'therapy_name': therapy_name,
-                                'therapy_group': str(row.get('therapy_group', '')).strip() or None,
+                                'therapy_group': therapy_group_obj,
                                 'therapy_category': str(row.get('therapy_category', '')).strip() or None,
                                 'therapy_duration': str(row.get('therapy_duration', '')).strip() or None,
                                 'bathing_required': str(row.get('bathing_required', '')).strip() or None,
@@ -2360,7 +2707,7 @@ def bulk_upload_master(request):
                         if not created:
                             # Update existing
                             therapy.therapy_name = therapy_name
-                            therapy.therapy_group = str(row.get('therapy_group', '')).strip() or None
+                            therapy.therapy_group = therapy_group_obj
                             therapy.therapy_category = str(row.get('therapy_category', '')).strip() or None
                             therapy.therapy_duration = str(row.get('therapy_duration', '')).strip() or None
                             therapy.bathing_required = str(row.get('bathing_required', '')).strip() or None
@@ -2381,20 +2728,28 @@ def bulk_upload_master(request):
                         errors.append(f'Row {idx+2}: {str(e)}')
             
             elif master_type == 'itemmaster' or master_type == 'item':
-                if 'item_code' not in df.columns or 'item_name' not in df.columns:
-                    return JsonResponse({'success': False, 'error': 'Required columns missing: item_code, item_name'}, status=400)
+                if 'item_name' not in df.columns:
+                    return JsonResponse({'success': False, 'error': 'Required columns missing: item_name'}, status=400)
                 
                 for idx, row in df.iterrows():
                     try:
-                        item_code = str(row.get('item_code', '')).strip()
                         item_name = str(row.get('item_name', '')).strip()
                         
-                        if not item_code or not item_name:
+                        if not item_name:
                             error_count += 1
-                            errors.append(f'Row {idx+2}: Missing required fields (item_code, item_name)')
+                            errors.append(f'Row {idx+2}: Missing required field (item_name)')
                             continue
                         
                         is_active = _parse_boolean(row.get('is_active', True))
+                        
+                        # Handle item_group as ForeignKey
+                        item_group_name = str(row.get('item_group', '')).strip()
+                        item_group_obj = None
+                        if item_group_name:
+                            try:
+                                item_group_obj = ItemGroup.objects.get(name=item_group_name)
+                            except ItemGroup.DoesNotExist:
+                                pass
                         
                         # Handle procured_from as ForeignKey
                         procured_from_name = str(row.get('procured_from', '')).strip()
@@ -2403,31 +2758,19 @@ def bulk_upload_master(request):
                             try:
                                 procured_from_obj = Procured.objects.get(name=procured_from_name)
                             except Procured.DoesNotExist:
-                                # Try to create if it doesn't exist (optional - you may want to skip instead)
-                                # procured_from_obj = Procured.objects.create(name=procured_from_name, is_active=True)
                                 pass
                         
-                        item, created = ItemMaster.objects.get_or_create(
-                            item_code=item_code,
-                            defaults={
-                                'item_name': item_name,
-                                'item_category': str(row.get('item_category', '')).strip() or None,
-                                'unit_of_measure': str(row.get('unit_of_measure', '')).strip() or None,
-                                'procured_from': procured_from_obj,
-                                'is_active': is_active,
-                            }
+                        # For bulk upload, we'll create new items (item_code will be auto-generated)
+                        # If you want to update existing, you'd need to match by item_name or another unique field
+                        item = ItemMaster.objects.create(
+                            item_name=item_name,
+                            item_group=item_group_obj,
+                            umo=str(row.get('umo', '')).strip() or None,
+                            min_max=str(row.get('min_max', '')).strip() or None,
+                            procured_from=procured_from_obj,
+                            is_active=is_active,
                         )
-                        
-                        if not created:
-                            item.item_name = item_name
-                            item.item_category = str(row.get('item_category', '')).strip() or None
-                            item.unit_of_measure = str(row.get('unit_of_measure', '')).strip() or None
-                            item.procured_from = procured_from_obj
-                            item.is_active = is_active
-                            item.save()
-                            updated_count += 1
-                        else:
-                            created_count += 1
+                        created_count += 1
                     except Exception as e:
                         error_count += 1
                         errors.append(f'Row {idx+2}: {str(e)}')

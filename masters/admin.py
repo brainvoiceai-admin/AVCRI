@@ -1,7 +1,7 @@
 from django.contrib import admin
 from .models import (
     Procured, OilClass, UsageType, PrescriptionUsage, PrescriptionTime, 
-    PrescriptionScope, UnitNo, TherapyMaster, ItemMaster, SlotMaster,
+    PrescriptionScope, UnitNo, TherapyMaster, TherapyGroup, ItemMaster, ItemGroup, SlotMaster,
     TherapistMaster, TherapistLeaveMaster, TherapistGrade, StayingRoom,
     NurseTreatmentMaster, NurseMaster
 )
@@ -62,11 +62,19 @@ class UnitNoAdmin(admin.ModelAdmin):
     list_editable = ['is_active']
     ordering = ['unit_name']
 
+@admin.register(TherapyGroup)
+class TherapyGroupAdmin(admin.ModelAdmin):
+    list_display = ['name', 'is_active', 'created_at', 'updated_at']
+    list_filter = ['is_active', 'created_at']
+    search_fields = ['name']
+    list_editable = ['is_active']
+    ordering = ['name']
+
 @admin.register(TherapyMaster)
 class TherapyMasterAdmin(admin.ModelAdmin):
     list_display = ['therapy_code', 'therapy_name', 'therapy_group', 'total_no_of_therapist', 'is_active', 'created_at']
     list_filter = ['is_active', 'therapy_group', 'therapy_category', 'created_at']
-    search_fields = ['therapy_code', 'therapy_name', 'therapy_group']
+    search_fields = ['therapy_code', 'therapy_name', 'therapy_group__name']
     list_editable = ['is_active']
     ordering = ['therapy_name']
     fieldsets = (
@@ -85,19 +93,28 @@ class TherapyMasterAdmin(admin.ModelAdmin):
         }),
     )
 
+@admin.register(ItemGroup)
+class ItemGroupAdmin(admin.ModelAdmin):
+    list_display = ['name', 'is_active', 'created_at', 'updated_at']
+    list_filter = ['is_active', 'created_at']
+    search_fields = ['name']
+    list_editable = ['is_active']
+    ordering = ['name']
+
 @admin.register(ItemMaster)
 class ItemMasterAdmin(admin.ModelAdmin):
-    list_display = ['item_code', 'item_name', 'item_category', 'procured_from', 'is_active', 'created_at']
-    list_filter = ['is_active', 'item_category', 'procured_from', 'created_at']
-    search_fields = ['item_code', 'item_name', 'item_category', 'procured_from__name']
+    list_display = ['item_code', 'item_name', 'item_group', 'umo', 'procured_from', 'is_active', 'created_at']
+    list_filter = ['is_active', 'item_group', 'procured_from', 'created_at']
+    search_fields = ['item_code', 'item_name', 'item_group__name', 'procured_from__name']
     list_editable = ['is_active']
     ordering = ['item_name']
+    readonly_fields = ['item_code']
     fieldsets = (
         ('Basic Information', {
-            'fields': ('item_code', 'item_name', 'item_category')
+            'fields': ('item_code', 'item_name', 'item_group')
         }),
         ('Details', {
-            'fields': ('unit_of_measure', 'procured_from')
+            'fields': ('umo', 'min_max', 'procured_from')
         }),
         ('Status', {
             'fields': ('is_active',)
