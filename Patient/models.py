@@ -113,8 +113,17 @@ class TreatmentRoom(models.Model):
     floor = models.CharField(max_length=20, null=True, blank=True)
     description = models.TextField(null=True, blank=True)
     tr_code = models.CharField(max_length=20, null=True, blank=True)
+    is_active = models.BooleanField(default=True, verbose_name="Active")
+    created_at = models.DateTimeField(auto_now_add=True, null=True, blank=True, verbose_name="Created At")
+    updated_at = models.DateTimeField(auto_now=True, null=True, blank=True, verbose_name="Updated At")
+    
     def __str__(self):
         return f"{self.room_no} ({self.tr_code})"
+    
+    class Meta:
+        verbose_name = "Treatment Room"
+        verbose_name_plural = "Treatment Rooms"
+        ordering = ["room_no"]
 
 from django.db import models, IntegrityError, transaction
 from django.utils import timezone

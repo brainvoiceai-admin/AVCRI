@@ -9,6 +9,7 @@ whitenoise[brotli]==6.7.0
 mssql-django 
 pyodbc
 pandas>=2.0
+openpyxl>=3.0.0
 prophet>=1.1
 cmdstanpy>=1.1
 djangorestframework>=3.14

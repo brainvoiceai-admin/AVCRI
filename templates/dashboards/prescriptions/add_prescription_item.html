@@ -8,181 +8,9 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
     <meta name="csrf-token" content="{{ csrf_token }}">
-    <style>
-      :root {
-        --primary: #3498db;
-        --primary-dark: #2980b9;
-        --secondary: #2c3e50;
-        --light: #ecf0f1;
-        --dark: #34495e;
-        --success: #27ae60;
-        --warning: #f39c12;
-        --danger: #e74c3c;
-        --gray: #95a5a6;
-        --light-gray: #f8f9fa;
-        --border-radius: 8px;
-        --shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-      }
-
-      * {
-        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-      }
-
-      body {
-        background: #f5f7fa;
-        display: flex;
-        min-height: 100vh;
-        margin: 0;
-        padding: 0;
-      }
-
-      /* Main Content Styles */
-      .main-content {
-        flex: 1;
-        padding: 30px;
-        margin-left: 250px; /* Align with existing side nav */
-        overflow-y: auto;
-      }
-
-      .card {
-        max-width: 900px;
-        margin: 0 auto;
-        border: none;
-        border-radius: var(--border-radius);
-        box-shadow: var(--shadow);
-        background: #fff;
-      }
-
-      .card-body {
-        padding: 30px;
-      }
-
-      .page-title {
-        font-size: 1.8rem;
-        font-weight: 600;
-        color: var(--secondary);
-        margin-bottom: 8px;
-      }
-
-      .page-subtitle {
-        color: var(--gray);
-        margin-bottom: 25px;
-        font-size: 1rem;
-      }
-
-      .form-label {
-        font-weight: 500;
-        color: var(--dark);
-        margin-bottom: 8px;
-      }
-
-      .form-control, .form-select {
-        border-radius: 6px;
-        border: 1px solid #dee2e6;
-        padding: 10px 12px;
-        transition: all 0.3s ease;
-      }
-
-      .form-control:focus, .form-select:focus {
-        border-color: var(--primary);
-        box-shadow: 0 0 0 0.2rem rgba(52, 152, 219, 0.25);
-      }
-
-      .form-control[readonly] {
-        background-color: #f8f9fa;
-      }
-
-      .btn {
-        border-radius: 6px;
-        padding: 10px 20px;
-        font-weight: 500;
-        transition: all 0.3s ease;
-      }
-
-      .btn-primary {
-        background: var(--primary);
-        border-color: var(--primary);
-      }
-
-      .btn-primary:hover {
-        background: var(--primary-dark);
-        border-color: var(--primary-dark);
-        transform: translateY(-1px);
-      }
-
-      .btn-secondary {
-        background: #6c757d;
-        border-color: #6c757d;
-      }
-
-      .btn-secondary:hover {
-        background: #5a6268;
-        border-color: #5a6268;
-        transform: translateY(-1px);
-      }
-
-      .section-divider {
-        border-top: 1px solid #e9ecef;
-        margin: 20px 0;
-        padding-top: 20px;
-      }
-
-      .auto-fill-note {
-        font-size: 0.85rem;
-        color: var(--gray);
-        font-style: italic;
-        margin-top: 4px;
-      }
-
-      .alert {
-        border-radius: 6px;
-        border: none;
-        padding: 12px 16px;
-      }
-
-      .alert-success {
-        background: #e6ffed;
-        color: #064;
-      }
-
-      .alert-error, .alert-danger {
-        background: #ffecec;
-        color: #700;
-      }
-
-      .alert-warning {
-        background: #fff4e6;
-        color: #663c00;
-      }
-
-      .alert-info {
-        background: #e6f7ff;
-        color: #004b70;
-      }
-
-      /* Responsive Styles */
-      @media (max-width: 1024px) {
-        .main-content {
-          margin-left: 0;
-          padding: 20px 15px;
-        }
-      }
-
-      @media (max-width: 768px) {
-        .card-body {
-          padding: 20px;
-        }
-        
-        .page-title {
-          font-size: 1.5rem;
-        }
-        
-        .btn {
-          width: 100%;
-          margin-bottom: 10px;
-        }
-      }
-    </style>
+    
+    <link rel="stylesheet" href="{% static 'css/dashboards_prescriptions_add_prescription_item.css' %}">
+    <link rel="stylesheet" href="{% static 'css/dashboards_nav.css' %}">
 </head>
 <body>
   <!-- Include existing navbar -->
@@ -224,7 +52,7 @@
 
           <div class="col-md-4">
             <label class="form-label">Usage</label>
-            <input type="text" name="usage" id="usage" class="form-control" placeholder="e.g. oral" required>
+            <input type="text" name="usage" id="usage" class="form-control" placeholder="e.g. oral">
           </div>
 
           <div class="col-md-4">
@@ -279,60 +107,8 @@
     </div>
   </main>
 
-  <script>
-    $(function(){
-      // When item selection changes, fetch details and autofill procured_from and item_uom (only)
-      $('#item_select').on('change', function(){
-        const code = $(this).val();
-        if (!code) {
-          $('#item_uom').val('');
-          $('#procured_from').val('');
-          return;
-        }
-        fetch(`/get-item-details/?item_code=${encodeURIComponent(code)}`)
-          .then(r => r.json())
-          .then(data => {
-            // Only autofill procured_from and item_uom as requested
-            $('#item_uom').val(data.item_uom || '');
-            $('#procured_from').val(data.procured_from || '');
-            // do NOT auto-fill dates; do NOT auto-fill internal/external
-          })
-          .catch(err => {
-            console.error('failed to fetch item details', err);
-          });
-      });
-
-      // Compute days when from/to changed (keeps days in sync but doesn't auto-fill dates)
-      $('#from_date, #to_date').on('change', function(){
-        const f = $('#from_date').val();
-        const t = $('#to_date').val();
-        if (!f || !t) {
-          $('#days').val(0);
-          return;
-        }
-        const from = new Date(f);
-        const to = new Date(t);
-        if (from <= to) {
-          const diffMs = to - from;
-          const diffDays = Math.floor(diffMs / (1000*60*60*24)) + 1;
-          $('#days').val(diffDays);
-        } else {
-          $('#days').val(0);
-        }
-      });
-
-      // Set today's date as default for from_date
-      const today = new Date().toISOString().split('T')[0];
-      $('#from_date').val(today);
-      
-      // Set to_date to 7 days from today as default
-      const nextWeek = new Date();
-      nextWeek.setDate(nextWeek.getDate() + 7);
-      $('#to_date').val(nextWeek.toISOString().split('T')[0]);
-      
-      // Trigger days calculation on page load
-      $('#from_date, #to_date').trigger('change');
-    });
-  </script>
+  
+    <script src="{% static 'js/dashboards_prescriptions_add_prescription_item.js' %}"></script>
+    <script src="{% static 'js/dashboards_nav.js' %}"></script>
 </body>
 </html>

@@ -17,66 +17,16 @@ from django.http import JsonResponse
 from django.db.models import Q
 from datetime import date
 from MySql_Data_pull.models import Registration, OPMaster, store_Therapy, store_TherapyItem, store_Prescription, store_PrescriptionItem, ItemMaster,Visit
-from masters.models import UnitNo
+from masters.models import UnitNo, get_staying_room_display_number
 import json
 from .models import Repeated_Visitors
 from datetime import date, datetime
 from final_allocation import expand_therapies_for_visit
 
 # Step 1: Patient Lookup
-def patient_lookup_view(request):
-    if request.method == "POST":
-        reg_number = request.POST.get('reg_number')
-        from_date_str = request.POST.get('from_date')
-        to_date_str = request.POST.get('to_date')
-
-        patient_found = False
-        
-        # First, try to find in IP patients (Registration table)
-        try:
-            patient = Registration.objects.using('therapy_db').get(pat_reg_no=reg_number)
-            request.session['patient_reg_no'] = str(patient.pat_reg_no)
-            request.session['is_ip_or_op'] = 'IP'
-            patient_found = True
-        except Registration.DoesNotExist:
-            pass
-        except Exception as e:
-            print(f"Error searching IP patients: {e}")
-        
-        # If not found in IP patients, try OP patients (OPMaster table)
-        if not patient_found:
-            try:
-                op_patient = OPMaster.objects.using('hospital_db').filter(NPat_Reg_No=reg_number).first()
-                
-                if op_patient:
-                    request.session['patient_reg_no'] = str(op_patient.NPat_Reg_No)
-                    request.session['is_ip_or_op'] = 'OP'
-                    patient_found = True
-            except Exception as e:
-                print(f"Error searching OP patients: {e}")
-        
-        if patient_found:
-            # Store date and days data in the session
-            request.session['from_date'] = from_date_str
-            request.session['to_date'] = to_date_str
-            
-            if from_date_str and to_date_str:
-                try:
-                    from_date = datetime.strptime(from_date_str, '%Y-%m-%d').date()
-                    to_date = datetime.strptime(to_date_str, '%Y-%m-%d').date()
-                    admission_days = (to_date - from_date).days + 1
-                    request.session['admission_days'] = admission_days
-                except ValueError:
-                    request.session['admission_days'] = None
-            else:
-                request.session['admission_days'] = None
-
-            return redirect('patient:therapy_entry')
-        else:
-            error_message = "Registration number not found in IP or OP patients."
-            return render(request, 'patient_lookup.html', {'error': error_message})
-    
-    return render(request, 'dashboards/doctorsAndHelpDesk/patient_lookup.html')
+# Removed patient_lookup_view - template deleted (not in navigation)
+# def patient_lookup_view(request):
+#     ...
 
 
 def search_patients_api(request):
@@ -90,7 +40,10 @@ def search_patients_api(request):
         # Search in IP patients (Registration table)
         try:
             ip_patients = Registration.objects.using('therapy_db').filter(
-                Q(pat_reg_no__icontains=query) | Q(pat_name__icontains=query)
+                Q(pat_status='Y') & (
+                    Q(pat_reg_no__icontains=query) | 
+                    Q(pat_name__icontains=query)
+                )
             ).values('pat_reg_no', 'pat_name')[:10]
             
             for patient in ip_patients:
@@ -104,16 +57,31 @@ def search_patients_api(request):
         
         # Search in OP patients (OPMaster table)
         try:
+            from MySql_Data_pull.models import Treatment
             op_patients = OPMaster.objects.using('hospital_db').filter(
                 Q(NPat_Reg_No__icontains=query) | Q(NPat_Name__icontains=query)
             ).values('NPat_Reg_No', 'NPat_Name')[:10]
             print(op_patients)
             for patient in op_patients:
-                patients.append({
-                    'pat_reg_no': str(patient['NPat_Reg_No']),
-                    'pat_name': patient['NPat_Name'] or 'Unknown',
-                    'patient_type': 'OP'
-                })
+                pat_reg_no_str = str(patient['NPat_Reg_No'])
+                # Check if patient has active status in Treatment table (Status = 'ON')
+                try:
+                    # Use exists() to avoid fetching datetime fields that may cause timezone issues
+                    has_active_treatment = Treatment.objects.using('iptherapy_db').filter(
+                        Pat_Reg_No=pat_reg_no_str,
+                        Status='ON'
+                    ).exists()
+                    # Only include OP patients with active status (Status = 'ON')
+                    if has_active_treatment:
+                        patients.append({
+                            'pat_reg_no': pat_reg_no_str,
+                            'pat_name': patient['NPat_Name'] or 'Unknown',
+                            'patient_type': 'OP'
+                        })
+                except Exception as e:
+                    print(f"Error checking Treatment status for OP patient {pat_reg_no_str}: {e}")
+                    import traceback
+                    traceback.print_exc()
         except Exception as e:
             print(f"Error searching OP patients: {e}")
         
@@ -151,6 +119,7 @@ def get_patient_details_api(request):
             vip_status = "No"
             repeated_status = "No"
         
+        display_room_no = get_staying_room_display_number(patient.pat_room_no)
         patient_details = {
             'pat_reg_no': patient.pat_reg_no,
             'pat_name': patient.pat_name or 'Unknown',
@@ -158,7 +127,7 @@ def get_patient_details_api(request):
             'pat_sex': patient.pat_sex or 'Unknown',
             'vip_status': vip_status,
             'pat_op_reg_no': patient.pat_op_reg_no or '',
-            'pat_room_no': patient.pat_room_no or '',
+            'pat_room_no': display_room_no or '',
             'pat_ref_id': patient.pat_ref_id or '',
             'repeated_status': repeated_status,
             'patient_type': 'IP'
@@ -182,14 +151,40 @@ def get_patient_details_api(request):
                     vip_status = "No"
                     repeated_status = "No"
                 
+                # Fetch room number and age from Treatment model for OP patients
+                op_room_no = ''
+                op_age = 'Unknown'
+                try:
+                    from MySql_Data_pull.models import Treatment
+                    # Try to find treatment record - Pat_Reg_No is primary key (CharField)
+                    # Only fetch Pat_Room_No and Pat_Age to avoid errors with other columns
+                    pat_reg_no_str = str(pat_reg_no)
+                    treatment = Treatment.objects.using('iptherapy_db').filter(
+                        Pat_Reg_No=pat_reg_no_str
+                    ).only('Pat_Reg_No', 'Pat_Room_No', 'Pat_Age').first()
+                    
+                    if treatment:
+                        if treatment.Pat_Room_No:
+                            op_room_no = str(treatment.Pat_Room_No).strip()
+                            print(f"[DEBUG] OP patient {pat_reg_no} room number from Treatment: {op_room_no}")
+                        if treatment.Pat_Age:
+                            op_age = str(treatment.Pat_Age).strip()
+                            print(f"[DEBUG] OP patient {pat_reg_no} age from Treatment: {op_age}")
+                    else:
+                        print(f"[DEBUG] No Treatment record found for OP patient {pat_reg_no}")
+                except Exception as e:
+                    print(f"Error fetching OP patient details from Treatment model: {e}")
+                    import traceback
+                    traceback.print_exc()
+                
                 patient_details = {
                     'pat_reg_no': op_patient.NPat_Reg_No,
                     'pat_name': op_patient.NPat_Name or 'Unknown',
-                    'pat_age': 'Unknown',  # OP patients don't have age in this table
+                    'pat_age': op_age,  # Fetch from Treatment model
                     'pat_sex': op_patient.NPat_Sex or 'Unknown',
                     'vip_status': vip_status,
                     'pat_op_reg_no': '',  # OP patients don't have OP reg no
-                    'pat_room_no': '',  # OP patients don't have room number
+                    'pat_room_no': op_room_no,  # Fetch from Treatment model
                     'pat_ref_id': '',  # OP patients don't have ref ID
                     'repeated_status': repeated_status,
                     'patient_type': 'OP'
@@ -215,7 +210,7 @@ from django.http import JsonResponse
 from django.views.decorators.http import require_http_methods
 
 # import your models
-from .models import TimeSlot  # TimeSlot model you showed
+from masters.models import SlotMaster  # Use SlotMaster instead of TimeSlot
 
 
 @require_http_methods(["GET", "POST"])
@@ -265,12 +260,12 @@ def therapy_entry_view(request):
             if slot_value:
                 try:
                     parsed_time = datetime.strptime(slot_value.strip(), "%H:%M").time()
-                    # try to find TimeSlot row with matching start_time
-                    time_slot_found = TimeSlot.objects.filter(start_time=parsed_time).first()
+                    # try to find SlotMaster row with matching slot_time
+                    time_slot_found = SlotMaster.objects.filter(slot_time=parsed_time, is_active=True).first()
                     if time_slot_found:
                         time_slot_id = getattr(time_slot_found, 'slot_number', None) or getattr(time_slot_found, 'pk', None)
                     else:
-                        warnings.append(f"Row {idx+1}: slot '{slot_value}' not found in TimeSlot table.")
+                        warnings.append(f"Row {idx+1}: slot '{slot_value}' not found in SlotMaster table.")
                 except Exception:
                     warnings.append(f"Row {idx+1}: slot '{slot_value}' has invalid format; expected HH:MM.")
 
@@ -304,12 +299,41 @@ def therapy_entry_view(request):
         'patient': patient,
         'all_therapy_items': all_therapy_items,
     }
-    return render(request, 'dashboards/doctorsAndHelpDesk/therapy_entry.html', context)
+    return render(request, 'dashboards/prescriptions/therapy_entry.html', context)
 
 
 from .models import TherapyDetails
+from masters.models import TherapyMaster
+
 def search_therapies_api(request):
     query = request.GET.get('q', '')
+    patient_type = (request.GET.get('patient_type') or '').strip().upper()  # Get patient type (IP or OP)
+    
+    # Use TherapyMaster if available, otherwise fall back to TherapyDetails
+    try:
+        if TherapyMaster is not None:
+            qs = TherapyMaster.objects.filter(is_active=True)
+            
+            # Filter by patient type based on requirements:
+            # - For IP patients: Show only IP treatments
+            # - For OP patients: Show both OP and IP treatments
+            if patient_type == 'IP':
+                # IP patients: Only IP treatments
+                qs = qs.filter(patient_type='IP')
+            elif patient_type == 'OP':
+                # OP patients: Both OP and IP treatments
+                qs = qs.filter(Q(patient_type='OP') | Q(patient_type='IP'))
+            # If patient_type is not provided or empty, show all (backward compatibility)
+            
+            if query:
+                qs = qs.filter(Q(therapy_name__icontains=query) | Q(therapy_code__icontains=query))
+            
+            therapies = qs.values('therapy_code', 'therapy_name')[:10]
+            return JsonResponse(list(therapies), safe=False)
+    except Exception as e:
+        print(f"Error using TherapyMaster: {e}")
+    
+    # Fallback to TherapyDetails if TherapyMaster fails
     if query:
         therapies = TherapyDetails.objects.filter(
             therapy_name__icontains=query
@@ -346,106 +370,9 @@ from django.conf import settings
 
 DB_ALIAS = getattr(settings, 'DB_ALIAS', 'therapy_db')  # if you use a constant, keep that
 
-def review_view(request):
-    patient_reg_no = request.session.get('patient_reg_no')
-    if not patient_reg_no:
-        return redirect('patient:patient_lookup')
-
-    patient = get_object_or_404(Registration.objects.using(DB_ALIAS), pat_reg_no=patient_reg_no)
-
-    try:
-        vip_status = "Yes" if Repeated_Visitors.objects.using(DB_ALIAS).filter(register_number=patient_reg_no, is_vip=1).exists() else "No"
-    except Exception:
-        vip_status = "N/A"
-
-    from_date = request.session.get('from_date')
-    to_date = request.session.get('to_date')
-    admission_days = request.session.get('admission_days')
-    is_ip_or_op = request.session.get('is_ip_or_op')
-    repeated_status = request.session.get('repeated_status')
-    therapy_data = request.session.get('therapy_rows_data', []) or []
-    prescription_data = request.session.get('prescription_rows_data', []) or []
-
-    # Resolve item names for therapies (supports multiple items per therapy)
-    for therapy_row in therapy_data:
-        items = therapy_row.get('items') or []
-        resolved = []
-        for it in items:
-            item_code = it.get('item_code') or it.get('item')
-            if item_code:
-                try:
-                    item_master = ItemMaster.objects.using(DB_ALIAS).get(item_code=item_code)
-                    resolved.append({
-                        'item_code': item_code,
-                        'item_name': item_master.item_name,
-                        'oil_class': it.get('oil_class') or '',
-                        'usage': it.get('usage') or '',
-                        'procured': it.get('procured') or '',
-                    })
-                except ItemMaster.DoesNotExist:
-                    resolved.append({
-                        'item_code': item_code,
-                        'item_name': 'Item not found',
-                        'oil_class': it.get('oil_class') or '',
-                        'usage': it.get('usage') or '',
-                        'procured': it.get('procured') or '',
-                    })
-        therapy_row['resolved_items'] = resolved
-
-        # --- NEW: resolve slot to friendly label ---
-        slot_label = ''
-        # Try time_slot_id first (your sanitized view stores time_slot_id)
-        time_slot_id = therapy_row.get('time_slot_id')
-        if time_slot_id:
-            # TimeSlot primary key is slot_number per your model; attempt both ways
-            ts = TimeSlot.objects.filter(slot_number=time_slot_id).first()
-            if not ts:
-                ts = TimeSlot.objects.filter(pk=time_slot_id).first()
-            if ts:
-                try:
-                    slot_label = ts.start_time.strftime("%I:%M %p").lstrip("0")
-                except Exception:
-                    slot_label = str(ts.start_time)
-        else:
-            # fallback to free-text slot_value (expected "HH:MM")
-            sv = therapy_row.get('slot_value') or therapy_row.get('slot') or ''
-            if sv:
-                try:
-                    dt = datetime.strptime(sv.strip(), "%H:%M")
-                    slot_label = dt.strftime("%I:%M %p").lstrip("0")
-                except Exception:
-                    # if format differs, just show raw value
-                    slot_label = sv
-
-        therapy_row['slot_label'] = slot_label or ''
-
-    # Resolve prescription row item names and ensure from/to/days fields are present
-    for pres_row in prescription_data:
-        item_code = pres_row.get('item') or pres_row.get('item_code')
-        if item_code:
-            try:
-                item_master = ItemMaster.objects.using(DB_ALIAS).get(item_code=item_code)
-                pres_row['item_name'] = item_master.item_name
-            except ItemMaster.DoesNotExist:
-                pres_row['item_name'] = 'Item not found'
-        # ensure date fields exist (they come from frontend)
-        pres_row['from_date'] = pres_row.get('from_date') or ''
-        pres_row['to_date'] = pres_row.get('to_date') or ''
-        pres_row['days'] = pres_row.get('days') or 0
-        pres_row['procured_from'] = pres_row.get('procured_from') or pres_row.get('procured_from') or ''
-
-    context = {
-        'patient': patient,
-        'vip_status': vip_status,
-        'from_date': from_date,
-        'to_date': to_date,
-        'admission_days': admission_days,
-        'is_ip_or_op': is_ip_or_op,
-        'therapy_data': therapy_data,
-        'prescription_data': prescription_data,
-        'repeated_status': repeated_status,
-    }
-    return render(request, 'dashboards/doctorsAndHelpDesk/review_page.html', context)
+# Removed review_view - template deleted (not in navigation)
+# def review_view(request):
+#     ...
 
 
 DEFAULT_DB = 'default'
@@ -505,10 +432,11 @@ def submit_all_data(request):
             ts_id = row.get('time_slot_id') or row.get('preferred_time_slot_id')
             if ts_id:
                 try:
-                    # Try matching slot_number first (your TimeSlot model uses slot_number as PK)
-                    preferred_ts_obj = TimeSlot.objects.using(DEFAULT_DB).filter(slot_number=ts_id).first()
+                    from masters.models import SlotMaster
+                    # Try matching slot_number first (SlotMaster uses slot_number)
+                    preferred_ts_obj = SlotMaster.objects.filter(slot_number=ts_id, is_active=True).first()
                     if not preferred_ts_obj:
-                        preferred_ts_obj = TimeSlot.objects.using(DEFAULT_DB).filter(pk=ts_id).first()
+                        preferred_ts_obj = SlotMaster.objects.filter(pk=ts_id, is_active=True).first()
                 except Exception:
                     preferred_ts_obj = None
 
@@ -519,14 +447,15 @@ def submit_all_data(request):
                     preferred_slot_text = sv
                     try:
                         parsed_time = datetime.strptime(sv, "%H:%M").time()
-                        preferred_ts_obj = TimeSlot.objects.using(DEFAULT_DB).filter(start_time=parsed_time).first()
+                        from masters.models import SlotMaster
+                        preferred_ts_obj = SlotMaster.objects.filter(slot_time=parsed_time, is_active=True).first()
                     except Exception:
                         preferred_ts_obj = None
 
             # 3) If we found an object, ensure we also have text form for debugging
             if not preferred_slot_text and preferred_ts_obj:
                 try:
-                    preferred_slot_text = preferred_ts_obj.start_time.strftime("%H:%M")
+                    preferred_slot_text = preferred_ts_obj.slot_time.strftime("%H:%M")
                 except Exception:
                     preferred_slot_text = ''
 
@@ -761,39 +690,40 @@ from MySql_Data_pull.models import Visit  # adjust path if needed
 from .models import RoomBooking, TherapistBooking
 from MySql_Data_pull.models import store_Therapy, store_TherapyItem, store_PrescriptionItem
 
-class PatientListView(ListView):
-    model = Visit
-    template_name = "dashboards/prescriptions/patient_list.html"   # see templates section below
-    context_object_name = "visits"
-    paginate_by = 25
-
-    def get_queryset(self):
-        # Gather active bookings (status='BOOKED')
-        room_qs = RoomBooking.objects.filter(status='BOOKED')
-        therapist_qs = TherapistBooking.objects.filter(status='BOOKED')
-
-        patient_ids_from_bookings = set(
-            list(room_qs.values_list('patient_id', flat=True)) +
-            list(therapist_qs.values_list('patient_id', flat=True))
-        )
-        patient_ids_from_bookings = {p for p in patient_ids_from_bookings if p is not None and p != ""}
-
-        visit_ids_from_bookings = set(
-            list(room_qs.exclude(visit__isnull=True).values_list('visit__id', flat=True)) +
-            list(therapist_qs.exclude(visit__isnull=True).values_list('visit__id', flat=True))
-        )
-
-        queries = Q()
-        if visit_ids_from_bookings:
-            queries |= Q(id__in=list(visit_ids_from_bookings))
-        if patient_ids_from_bookings and hasattr(Visit, 'patient_id'):
-            queries |= Q(patient_id__in=list(patient_ids_from_bookings))
-
-        if queries:
-            qs = Visit.objects.filter(queries).distinct().order_by('-id')
-        else:
-            qs = Visit.objects.none()
-        return qs
+# Removed PatientListView - Treatment Schedule page not needed
+# class PatientListView(ListView):
+#     model = Visit
+#     template_name = "dashboards/prescriptions/patient_list.html"
+#     context_object_name = "visits"
+#     paginate_by = 25
+# 
+#     def get_queryset(self):
+#         # Gather active bookings (status='BOOKED')
+#         room_qs = RoomBooking.objects.filter(status='BOOKED')
+#         therapist_qs = TherapistBooking.objects.filter(status='BOOKED')
+# 
+#         patient_ids_from_bookings = set(
+#             list(room_qs.values_list('patient_id', flat=True)) +
+#             list(therapist_qs.values_list('patient_id', flat=True))
+#         )
+#         patient_ids_from_bookings = {p for p in patient_ids_from_bookings if p is not None and p != ""}
+# 
+#         visit_ids_from_bookings = set(
+#             list(room_qs.exclude(visit__isnull=True).values_list('visit__id', flat=True)) +
+#             list(therapist_qs.exclude(visit__isnull=True).values_list('visit__id', flat=True))
+#         )
+# 
+#         queries = Q()
+#         if visit_ids_from_bookings:
+#             queries |= Q(id__in=list(visit_ids_from_bookings))
+#         if patient_ids_from_bookings and hasattr(Visit, 'patient_id'):
+#             queries |= Q(patient_id__in=list(patient_ids_from_bookings))
+# 
+#         if queries:
+#             qs = Visit.objects.filter(queries).distinct().order_by('-id')
+#         else:
+#             qs = Visit.objects.none()
+#         return qs
     
 
 from collections import defaultdict
@@ -987,7 +917,7 @@ def cancel_session_bookings(request):
     ids = request.POST.getlist("booking_ids")
     if not ids:
         messages.error(request, "No bookings selected to cancel.")
-        return redirect(request.META.get("HTTP_REFERER", reverse("patient:patient_list")))
+        return redirect(request.META.get("HTTP_REFERER", reverse("patient:home")))
 
     canceled = 0
     errors = []
@@ -1025,7 +955,7 @@ def complete_session_bookings(request):
     ids = request.POST.getlist("booking_ids")
     if not ids:
         messages.error(request, "No bookings selected to complete.")
-        return redirect(request.META.get("HTTP_REFERER", reverse("patient:patient_list")))
+        return redirect(request.META.get("HTTP_REFERER", reverse("patient:home")))
 
     completed = 0
     errors = []
@@ -1122,7 +1052,7 @@ def update_therapy_item(request, item_id):
         store_TherapyItemDay.expand_for_item(item)
 
         messages.success(request, "Therapy item and day schedule updated successfully.")
-        return redirect(request.META.get("HTTP_REFERER", reverse("patient:patient_list")))
+        return redirect(request.META.get("HTTP_REFERER", reverse("patient:home")))
 
     return render(request, "dashboards/prescriptions/update_therapy_item.html", {"item": item})
 
@@ -1171,7 +1101,7 @@ def update_prescription_item(request, item_id):
         item.updated_at = timezone.now()
         item.save(update_fields=["dosage", "usage", "from_date", "to_date", "time", "item_uom", "status", "updated_at"])
         messages.success(request, "Prescription item updated.")
-        return redirect(request.META.get("HTTP_REFERER", reverse("patient:patient_list")))
+        return redirect(request.META.get("HTTP_REFERER", reverse("patient:home")))
 
     return render(request, "dashboards/prescriptions/update_prescription_item.html", {"item": item})
 
@@ -1481,7 +1411,8 @@ def compute_available_slots_for_date(date_obj, therapy_name, patient_type):
         # Room availability check (if therapy needs a room)
         room_ok = True
         if needs_room:
-            timeslot_q = TimeSlot.objects.filter(start_time=start_time).first()
+            from masters.models import SlotMaster
+            timeslot_q = SlotMaster.objects.filter(slot_time=start_time, is_active=True).first()
             if timeslot_q:
                 # RoomBooking.room is FK named 'room' — values_list('room',flat=True) returns PKs
                 booked_room_pks = RoomBooking.objects.filter(date=date_obj, time_slot=timeslot_q, status='BOOKED').values_list('room', flat=True)
@@ -1497,7 +1428,8 @@ def compute_available_slots_for_date(date_obj, therapy_name, patient_type):
             continue
 
         # Therapist capacity check
-        timeslot_q = TimeSlot.objects.filter(start_time=start_time).first()
+        from masters.models import SlotMaster
+        timeslot_q = SlotMaster.objects.filter(slot_time=start_time, is_active=True).first()
 
         # exclude therapists on leave using pk
         available_therapists = all_therapists_qs.exclude(pk__in=on_leave_ids)
@@ -1600,16 +1532,16 @@ def available_slots(request):
 @require_GET
 def time_slots(request):
     """
-    Return all TimeSlot rows in order:
+    Return all SlotMaster rows in order:
       { "slots": [ {"slot_number":1, "start_time":"06:30", "label":"6:30 AM"}, ... ] }
     """
-    from .models import TimeSlot
-    qs = TimeSlot.objects.order_by('slot_number')
+    from masters.models import SlotMaster
+    qs = SlotMaster.objects.filter(is_active=True).order_by('slot_number')
     slots = []
     for t in qs:
-        # ensure start_time exists; format HH:MM and friendly label
-        st = t.start_time.strftime("%H:%M")
-        label = t.start_time.strftime("%I:%M %p").lstrip("0")
+        # use slot_time field; format HH:MM and friendly label in 12-hour format
+        st = t.slot_time.strftime("%H:%M")
+        label = t.slot_time.strftime("%I:%M %p").lstrip("0")
         slots.append({"slot_number": t.slot_number, "start_time": st, "label": label})
     return JsonResponse({"slots": slots})
 

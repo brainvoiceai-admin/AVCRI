@@ -128,6 +128,111 @@ if missing:
     sys.exit(1)
 
 # -------------------------
+# Import helper functions from reshedule.py
+# -------------------------
+try:
+    # Try to import from reshedule.py if available
+    import reshedule
+    is_treatment_requiring_senior_tag = getattr(reshedule, 'is_treatment_requiring_senior_tag', None)
+    get_therapy_details = getattr(reshedule, 'get_therapy_details', None)
+    therapy_needs_room = getattr(reshedule, 'therapy_needs_room', None)
+    therapy_needs_bath = getattr(reshedule, 'therapy_needs_bath', None)
+    get_therapist_grade_name = getattr(reshedule, 'get_therapist_grade_name', None)
+    therapist_requirements = getattr(reshedule, 'therapist_requirements', None)
+except Exception:
+    # Define fallback functions if import fails
+    is_treatment_requiring_senior_tag = None
+    get_therapy_details = None
+    therapy_needs_room = None
+    therapy_needs_bath = None
+    get_therapist_grade_name = None
+    therapist_requirements = None
+
+# Define helper functions if not imported
+if not is_treatment_requiring_senior_tag:
+    def is_treatment_requiring_senior_tag(therapy_name):
+        """
+        Check if a treatment requires special senior tag handling.
+        Returns True ONLY if the therapy name exactly matches one of the specified treatments.
+        """
+        if not therapy_name:
+            return False
+        
+        # List of treatments that require senior tag (only one senior, not bathing)
+        # ONLY these exact treatments should show the senior tag
+        special_treatments = [
+            'dhara & abh(3)',
+            'dhara& pizhichil (4)',
+            'dhara & pizhichil (5)',
+            'dhara & pizhichil (6)',
+            'dhara & pizhichil (7)',
+            'dhara & abyangam ( 3 t)',
+            'dhara & sudhikalpana dhara (5t)',
+            'dhara ( 2 t)',
+            'thakradhara & abhyangam (4)',
+            'thakradhara & pizichil(6)',
+            'thakradhara ( 2 t)',
+            'thakradhara&fbkadee kizhi (5 t)',
+            'thakradhara& thakrapizhichil(7)',
+        ]
+        
+        # Normalize therapy name: lowercase, remove extra spaces, keep structure
+        therapy_normalized = ' '.join(str(therapy_name).lower().strip().split())
+        
+        # Check for exact match (case-insensitive, ignoring extra spaces)
+        for special_treatment in special_treatments:
+            special_normalized = ' '.join(special_treatment.lower().strip().split())
+            if therapy_normalized == special_normalized:
+                return True
+        
+        return False
+
+if not get_therapist_grade_name:
+    def get_therapist_grade_name(therapist):
+        """Get therapist grade name from TherapistGrade FK"""
+        if not therapist:
+            return ''
+        if hasattr(therapist, 'therapist_grade') and therapist.therapist_grade:
+            if hasattr(therapist.therapist_grade, 'name'):
+                return therapist.therapist_grade.name
+        return ''
+
+if not therapist_requirements:
+    therapy_cache = {}
+    def get_therapy_details(therapy_name):
+        """Get therapy details from TherapyMaster"""
+        if not TherapyMaster:
+            return None
+        name = (therapy_name or "").strip().lower()
+        if not name:
+            return None
+        if name in therapy_cache:
+            return therapy_cache[name]
+        try:
+            details = TherapyMaster.objects.filter(therapy_name__iexact=therapy_name).first()
+            therapy_cache[name] = details
+            return details
+        except Exception:
+            therapy_cache[name] = None
+            return None
+    
+    def therapist_requirements(booking_or_therapy):
+        """Get therapist requirements from TherapyMaster"""
+        name = getattr(booking_or_therapy, 'therapy_name', None)
+        details = get_therapy_details(name) if name else None
+        if not details:
+            return {"super_senior":0, "senior":0, "junior":0, "trainee":0, "total":1, "therapy_code": None, "therapy_category": None}
+        return {
+            "super_senior": int(getattr(details, 'no_of_super_senior_therapist', 0) or 0),
+            "senior": int(getattr(details, 'no_of_senior_therapist', 0) or 0),
+            "junior": int(getattr(details, 'no_of_junior_therapist', 0) or 0),
+            "trainee": int(getattr(details, 'no_of_trainee_therapist', 0) or 0),
+            "total": int(getattr(details, 'total_no_of_therapist', 0) or 1),
+            "therapy_code": getattr(details, 'therapy_code', None),
+            "therapy_category": getattr(details, 'therapy_category', None)
+        }
+
+# -------------------------
 # Utility helpers
 # -------------------------
 def parse_target_date(date_str=None):
@@ -168,23 +273,98 @@ def therapist_has_weekly_leave_on(t_obj, target_date):
 def get_required_therapist_count_for_booking(booking):
     """
     Determine the required number of therapists for the treatment for this booking.
-    Attempts to use booking.therapy (FK) or booking.therapy_name -> TherapyMaster.total_no_of_therapist.
-    Falls back to 1 if unknown.
+    Uses therapist_requirements to get total count.
     """
     try:
-        # if booking has therapy FK
-        if hasattr(booking, "therapy") and booking.therapy:
-            tm = booking.therapy
-            return int(getattr(tm, "total_no_of_therapist", getattr(tm, "total", 1) or 1))
-        # fallback: match by name
-        name = getattr(booking, "therapy_name", None)
-        if name and TherapyMaster:
-            tm = TherapyMaster.objects.filter(therapy_name__iexact=name).first()
-            if tm:
-                return int(getattr(tm, "total_no_of_therapist", getattr(tm, "total", 1) or 1))
+        req = therapist_requirements(booking) if therapist_requirements else {}
+        return int(req.get("total", 1) or 1)
     except Exception:
         logger.exception("Error determining required therapist count for booking %s", getattr(booking, "pk", None))
     return 1
+
+def get_patient_gender_from_booking(booking):
+    """
+    Get patient gender from booking. Tries multiple sources.
+    """
+    try:
+        # Try to get from booking's patient relationship
+        if hasattr(booking, 'patient') and booking.patient:
+            if hasattr(booking.patient, 'pat_sex'):
+                return booking.patient.pat_sex
+        # Try to get from visit (TherapyAllocation)
+        if hasattr(booking, 'visit') and booking.visit:
+            if hasattr(booking.visit, 'patient') and booking.visit.patient:
+                if hasattr(booking.visit.patient, 'pat_sex'):
+                    return booking.visit.patient.pat_sex
+        # Try from PatientSnapshot via patient_id
+        try:
+            from Sheduling.models import PatientSnapshot
+            if hasattr(booking, 'patient_id') and booking.patient_id:
+                patient = PatientSnapshot.objects.filter(pat_reg_no=str(booking.patient_id)).first()
+                if patient and hasattr(patient, 'pat_sex'):
+                    return patient.pat_sex
+        except Exception:
+            pass
+    except Exception:
+        pass
+    return None
+
+def normalize_patient_gender(pat_sex):
+    """Normalize patient gender to 'male' or 'female'"""
+    if not pat_sex:
+        return None
+    g = str(pat_sex).strip().lower()
+    if g.startswith('f'):
+        return 'female'
+    elif g.startswith('m'):
+        return 'male'
+    return None
+
+def get_therapist_gender(therapist):
+    """Get therapist gender from TherapistMaster"""
+    try:
+        v = getattr(therapist, 'therapist_gender', None)
+        if v:
+            v_str = str(v).strip()
+            if v_str.lower().startswith('m'):
+                return 'male'
+            if v_str.lower().startswith('f'):
+                return 'female'
+    except Exception:
+        pass
+    return None
+
+def patient_already_has_booking(patient_id, target_date, time_slot, exclude_booking_pk=None, exclude_allocation=None):
+    """
+    Check if patient already has a booking at this date+slot.
+    Excludes the current booking and bookings from same allocation.
+    """
+    try:
+        room_qs = RoomBooking.objects.filter(
+            patient_id=patient_id,
+            date=target_date,
+            time_slot=time_slot,
+            status__in=['BOOKED', 'scheduled']
+        )
+        if exclude_booking_pk:
+            room_qs = room_qs.exclude(pk=exclude_booking_pk)
+        if exclude_allocation and hasattr(RoomBooking, 'therapy'):
+            room_qs = room_qs.exclude(therapy=exclude_allocation)
+        
+        therapist_qs = TherapistBooking.objects.filter(
+            patient_id=patient_id,
+            date=target_date,
+            time_slot=time_slot,
+            status='BOOKED'
+        )
+        if exclude_booking_pk:
+            therapist_qs = therapist_qs.exclude(pk=exclude_booking_pk)
+        if exclude_allocation and hasattr(TherapistBooking, 'visit'):
+            therapist_qs = therapist_qs.exclude(visit=exclude_allocation)
+        
+        return room_qs.exists() or therapist_qs.exists()
+    except Exception:
+        return False
 
 
 def count_assigned_therapists_for_patient_slot(patient_id, target_date, time_slot):
@@ -251,17 +431,43 @@ def cancel_full_treatment_for_patient_slot(patient_id, target_date, time_slot, b
 # -------------------------
 # Candidate selection & assignment helpers
 # -------------------------
-def available_candidates_by_level_and_bathing(target_date, time_slot, level, require_bathing, em_therapist_ids=None, em_emp_codes=None):
+def available_candidates_by_level_and_bathing(target_date, time_slot, level, require_bathing, 
+                                               desired_gender=None, patient_gender=None, 
+                                               em_therapist_ids=None, em_emp_codes=None,
+                                               allow_trainee_substitution=False):
     """
     Return list of TherapistMaster candidates that:
-      - have therapist_grade == level
+      - have therapist_grade == level (or Junior if Trainee needed and allow_trainee_substitution=True)
       - optionally have is_bathing_therapist == True
+      - match desired_gender if provided
       - are NOT on emergency leave (by FK or emp code)
       - do NOT have weekly leave on that weekday
       - NOT already BOOKED at date+slot
     """
     try:
-        qs = TherapistMaster.objects.filter(therapist_grade=level)
+        # Handle trainee substitution: if level is Trainee and desired_gender is male, search for Junior instead
+        search_level = level
+        if allow_trainee_substitution and desired_gender == 'male':
+            # Check if level is Trainee Therapist
+            level_name = get_therapist_grade_name(level) if hasattr(level, '__class__') else str(level)
+            if 'Trainee' in str(level_name):
+                # Find Junior Therapist grade
+                try:
+                    from masters.models import TherapistGrade
+                    junior_grade = TherapistGrade.objects.filter(name__icontains='Junior').first()
+                    if junior_grade:
+                        search_level = junior_grade
+                        logger.debug("Trainee substitution: Using Junior Therapist grade for male patient")
+                except Exception:
+                    pass
+        
+        qs = TherapistMaster.objects.filter(therapist_grade=search_level)
+        
+        # STRICT GENDER FILTER
+        if desired_gender:
+            qs = qs.filter(therapist_gender__istartswith=desired_gender[0])
+        
+        # STRICT: Only return bathing therapists when bathing is required
         if require_bathing:
             qs = qs.filter(is_bathing_therapist=True)
     except Exception:
@@ -287,25 +493,80 @@ def available_candidates_by_level_and_bathing(target_date, time_slot, level, req
 
     # exclude therapists already booked at same slot
     try:
-        busy_ids = list(TherapistBooking.objects.filter(date=target_date, time_slot=time_slot, status='BOOKED').values_list('therapist__pk', flat_true:=False))
-    except Exception:
-        busy_ids = []
-    # The above attempt with flat_true may raise; do robust approach:
-    try:
         busy_ids = list(TherapistBooking.objects.filter(date=target_date, time_slot=time_slot, status='BOOKED').values_list('therapist__pk', flat=True))
         if busy_ids:
             qs = qs.exclude(pk__in=busy_ids)
     except Exception:
         logger.debug("Skipping slot-busy exclusion due to error.")
 
-    return list(qs)
+    # Additional gender check (double-check after query)
+    candidates = list(qs)
+    if desired_gender:
+        candidates = [c for c in candidates if get_therapist_gender(c) == desired_gender]
+
+    return candidates
 
 
-def find_previous_assigned_therapist_for_booking_patient_only(booking, needs_bathing, same_level, target_date, em_therapist_ids, em_emp_codes):
+def find_previous_bathing_therapist_for_patient(booking, target_date, em_therapist_ids, em_emp_codes):
     """
-    Preference: most recent previous therapist for the same patient (ignore therapy).
-    Validate candidate against constraints (level, bathing, not on leave, not weekly leave, not already booked at slot).
+    Find most recent previous bathing therapist for the same patient.
+    Returns TherapistMaster instance or None.
     """
+    try:
+        prev_bath_booking = TherapistBooking.objects.filter(
+            patient_id=booking.patient_id,
+            is_bathing=True,
+            status='BOOKED'
+        ).exclude(
+            pk=booking.pk
+        ).exclude(
+            date=target_date,
+            time_slot=booking.time_slot
+        ).select_related('therapist').order_by('-date', '-created_at').first()
+        
+        if prev_bath_booking and prev_bath_booking.therapist:
+            cand = prev_bath_booking.therapist
+            # Validate availability
+            if getattr(cand, 'pk', None) in em_therapist_ids or getattr(cand, 'employee_code', None) in em_emp_codes:
+                return None
+            if therapist_has_weekly_leave_on(cand, target_date):
+                return None
+            if TherapistBooking.objects.filter(therapist=cand, date=target_date, time_slot=booking.time_slot, status='BOOKED').exists():
+                return None
+            if not getattr(cand, 'is_bathing_therapist', False):
+                return None
+            return cand
+    except Exception:
+        pass
+    return None
+
+def find_previous_assigned_therapist_for_booking_patient_only(booking, needs_bathing, same_level, target_date, 
+                                                                em_therapist_ids, em_emp_codes, desired_gender=None):
+    """
+    Preference: 
+    1. Most recent previous BATHING therapist if needs_bathing=True
+    2. Most recent previous therapist for the same patient (ignore therapy).
+    Validate candidate against constraints (level, bathing, gender, not on leave, not weekly leave, not already booked at slot).
+    """
+    # First try to find previous bathing therapist if needed
+    if needs_bathing:
+        prev_bath = find_previous_bathing_therapist_for_patient(booking, target_date, em_therapist_ids, em_emp_codes)
+        if prev_bath:
+            # Validate same level if required
+            if same_level:
+                old_grade = get_therapist_grade_name(booking.therapist) if booking.therapist else ''
+                new_grade = get_therapist_grade_name(prev_bath)
+                if old_grade != new_grade:
+                    prev_bath = None  # Grade mismatch, continue to regular search
+            # Validate gender if required
+            if prev_bath and desired_gender:
+                t_gender = get_therapist_gender(prev_bath)
+                if t_gender != desired_gender:
+                    prev_bath = None  # Gender mismatch, continue to regular search
+            if prev_bath:
+                return prev_bath
+    
+    # Fallback to regular previous therapist search
     try:
         prev = (TherapistBooking.objects
                 .filter(patient_id=booking.patient_id)
@@ -321,8 +582,18 @@ def find_previous_assigned_therapist_for_booking_patient_only(booking, needs_bat
     cand = prev.therapist
 
     # validate same level
-    if same_level and getattr(cand, 'therapist_grade', None) != getattr(booking.therapist, 'therapist_grade', None):
-        return None
+    if same_level:
+        old_grade = get_therapist_grade_name(booking.therapist) if booking.therapist else ''
+        new_grade = get_therapist_grade_name(cand)
+        if old_grade != new_grade:
+            return None
+    
+    # validate gender match
+    if desired_gender:
+        t_gender = get_therapist_gender(cand)
+        if t_gender != desired_gender:
+            return None
+    
     # validate bathing if needed
     if needs_bathing and not getattr(cand, 'is_bathing_therapist', False):
         return None
@@ -345,9 +616,10 @@ def find_previous_assigned_therapist_for_booking_patient_only(booking, needs_bat
     return cand
 
 
-def pick_least_loaded_candidate(candidates, target_date, max_daily_normal, max_daily_overtime_extra):
+def pick_least_loaded_candidate(candidates, target_date, max_daily_normal, max_daily_overtime_extra, therapy_category=None):
     """
-    From candidate TherapistMaster list, pick one based on daily load and overtime rules.
+    From candidate TherapistMaster list, pick one based on daily load and overtime rules,
+    with additional balancing for the current therapy difficulty category (Easy/Medium/Hard).
     """
     if not candidates:
         return None
@@ -363,14 +635,38 @@ def pick_least_loaded_candidate(candidates, target_date, max_daily_normal, max_d
     for pk in cand_pks:
         counts.setdefault(pk, 0)
 
+    # Category-specific counts using TherapyMaster FK when available
+    category_counts = {}
+    if therapy_category:
+        try:
+            cat_qs = (TherapistBooking.objects
+                      .filter(
+                          therapist_id__in=cand_pks,
+                          date=target_date,
+                          status='BOOKED',
+                          therapy__therapy_category__iexact=str(therapy_category),
+                      )
+                      .values('therapist_id')
+                      .annotate(cn=Count('pk')))
+            category_counts = {row['therapist_id']: row['cn'] for row in cat_qs}
+        except Exception:
+            category_counts = {}
+    for pk in cand_pks:
+        category_counts.setdefault(pk, 0)
+
+    def sort_key(p):
+        # Prefer therapists with fewer sessions in this difficulty category,
+        # then fewer total sessions, then stable by pk.
+        return (category_counts.get(p, 0), counts.get(p, 0), p)
+
     under_normal = [pk for pk, cnt in counts.items() if cnt < max_daily_normal]
     if under_normal:
-        pick_pk = sorted(under_normal, key=lambda p: (counts[p], p))[0]
+        pick_pk = sorted(under_normal, key=sort_key)[0]
         return next((c for c in candidates if c.pk == pick_pk), None)
 
     under_overtime = [pk for pk, cnt in counts.items() if cnt < (max_daily_normal + max_daily_overtime_extra)]
     if under_overtime:
-        pick_pk = sorted(under_overtime, key=lambda p: (counts[p], p))[0]
+        pick_pk = sorted(under_overtime, key=sort_key)[0]
         return next((c for c in candidates if c.pk == pick_pk), None)
 
     return None
@@ -412,14 +708,63 @@ def process_reassignments(target_date=None, dry_run=True, max_daily_normal=5, ma
     for booking in affected:
         summary['checked'] += 1
         old = booking.therapist
-        level = getattr(old, 'therapist_grade', None)
+        if not old:
+            continue
+        
+        # Get therapist grade properly
+        old_grade_name = get_therapist_grade_name(old)
+        try:
+            from masters.models import TherapistGrade
+            if old_grade_name:
+                level = TherapistGrade.objects.filter(name=old_grade_name).first()
+            else:
+                level = getattr(old, 'therapist_grade', None)
+        except Exception:
+            level = getattr(old, 'therapist_grade', None)
+        
         slot = booking.time_slot
-        needs_bathing = bool(getattr(booking, 'is_bathing', False))
+        therapy_name = getattr(booking, 'therapy_name', None)
+
+        # Determine therapy requirements (to get difficulty category for fair distribution)
+        therapy_req = therapist_requirements(booking) if therapist_requirements else {}
+        therapy_category = therapy_req.get("therapy_category")
+        
+        # Determine if therapy needs bathing (from TherapyMaster, not just booking flag)
+        needs_bathing = False
+        if therapy_needs_bath:
+            needs_bathing = therapy_needs_bath(booking)
+        else:
+            needs_bathing = bool(getattr(booking, 'is_bathing', False))
+        
+        # Check if special treatment (Dhara & Pizichil)
+        requires_senior_tag = False
+        if is_treatment_requiring_senior_tag and therapy_name:
+            requires_senior_tag = is_treatment_requiring_senior_tag(therapy_name)
+        
+        # Get patient gender
+        patient_gender = get_patient_gender_from_booking(booking)
+        desired_gender = normalize_patient_gender(patient_gender)
+        
+        # Check if patient already has booking at this slot (excluding this booking and same allocation)
+        exclude_allocation = None
+        if hasattr(booking, 'visit'):
+            exclude_allocation = booking.visit
+        if patient_already_has_booking(booking.patient_id, target_date, slot, 
+                                       exclude_booking_pk=booking.pk, 
+                                       exclude_allocation=exclude_allocation):
+            logger.warning("Patient %s already has booking at %s %s - skipping reassignment", 
+                          booking.patient_id, target_date, slot)
+            summary['failed'].append((booking.pk, "patient_already_has_booking_at_slot"))
+            continue
 
         # 1) prefer previous therapist for same patient (not patient+therapy)
-        prev = find_previous_assigned_therapist_for_booking_patient_only(booking, needs_bathing=needs_bathing,
-                                                                         same_level=True, target_date=target_date,
-                                                                         em_therapist_ids=em_therapist_ids, em_emp_codes=em_emp_codes)
+        # Prioritize previous bathing therapist if needed
+        prev = find_previous_assigned_therapist_for_booking_patient_only(
+            booking, needs_bathing=needs_bathing,
+            same_level=True, target_date=target_date,
+            em_therapist_ids=em_therapist_ids, em_emp_codes=em_emp_codes,
+            desired_gender=desired_gender
+        )
         if prev:
             today_cnt = TherapistBooking.objects.filter(therapist=prev, date=target_date, status='BOOKED').count()
             if today_cnt < max_daily_normal or today_cnt < (max_daily_normal + max_daily_overtime_extra):
@@ -441,12 +786,27 @@ def process_reassignments(target_date=None, dry_run=True, max_daily_normal=5, ma
                         summary['failed'].append((booking.pk, str(e)))
                 continue
 
-        # 2) build candidate pool by level & bathing requirement
-        candidates = available_candidates_by_level_and_bathing(target_date, slot, level, require_bathing=needs_bathing, em_therapist_ids=em_therapist_ids, em_emp_codes=em_emp_codes)
+        # 2) build candidate pool by level & bathing requirement with gender matching
+        # Check if trainee substitution is needed (male trainee -> junior)
+        allow_trainee_sub = False
+        if old_grade_name and 'Trainee' in old_grade_name and desired_gender == 'male':
+            allow_trainee_sub = True
+        
+        candidates = available_candidates_by_level_and_bathing(
+            target_date, slot, level, require_bathing=needs_bathing, 
+            desired_gender=desired_gender, patient_gender=patient_gender,
+            em_therapist_ids=em_therapist_ids, em_emp_codes=em_emp_codes,
+            allow_trainee_substitution=allow_trainee_sub
+        )
 
         # If booking doesn't require bathing and no bathing-only candidates, allow any same-level therapist
         if not candidates and not needs_bathing:
-            candidates = available_candidates_by_level_and_bathing(target_date, slot, level, require_bathing=False, em_therapist_ids=em_therapist_ids, em_emp_codes=em_emp_codes)
+            candidates = available_candidates_by_level_and_bathing(
+                target_date, slot, level, require_bathing=False,
+                desired_gender=desired_gender, patient_gender=patient_gender,
+                em_therapist_ids=em_therapist_ids, em_emp_codes=em_emp_codes,
+                allow_trainee_substitution=allow_trainee_sub
+            )
 
         # 3) if no candidates -> cancel (single or full treatment)
         if not candidates:
@@ -478,8 +838,40 @@ def process_reassignments(target_date=None, dry_run=True, max_daily_normal=5, ma
                         summary['failed'].append((booking.pk, str(e)))
             continue
 
-        # 4) pick candidate with daily-load & overtime rules
-        pick = pick_least_loaded_candidate(candidates, target_date, max_daily_normal, max_daily_overtime_extra)
+        # 4) pick candidate with daily-load & overtime rules + difficulty balancing
+        pick = pick_least_loaded_candidate(
+            candidates,
+            target_date,
+            max_daily_normal,
+            max_daily_excess,
+            therapy_category=therapy_category,
+        )
+
+        # Enforce senior-tag limit (max 2 special senior-tag tasks per therapist per day)
+        if pick and requires_senior_tag:
+            try:
+                pick_grade = get_therapist_grade_name(pick)
+                if pick_grade and 'Senior' in pick_grade and 'get_senior_tag_count_for_therapist' in dir(reshedule):
+                    senior_count = reshedule.get_senior_tag_count_for_therapist(pick, target_date)
+                    if senior_count >= 2:
+                        logger.info(
+                            "Senior tag limit reached for therapist %s on %s (count=%s). Looking for alternative.",
+                            getattr(pick, 'therapist_code', pick.pk), target_date, senior_count
+                        )
+                        # Remove this candidate and try to pick another one
+                        remaining = [c for c in candidates if c != pick]
+                        if remaining:
+                            pick = pick_least_loaded_candidate(
+                                remaining,
+                                target_date,
+                                max_daily_normal,
+                                max_daily_overtime_extra,
+                                therapy_category=therapy_category,
+                            )
+                        else:
+                            pick = None
+            except Exception as e:
+                logger.debug("Error while enforcing senior-tag limit: %s", e)
         if not pick:
             # no pick due to load limits -> treat like no candidates
             if should_cancel_full_treatment(booking, target_date):
@@ -508,8 +900,81 @@ def process_reassignments(target_date=None, dry_run=True, max_daily_normal=5, ma
                         summary['failed'].append((booking.pk, str(e)))
             continue
 
-        # 5) perform reassignment
-        if args.dry_run:
+        # 5) perform reassignment with special treatment handling
+        # For special treatments (Dhara & Pizichil): Senior therapist should NOT be bathing therapist
+        # Check if picked therapist is senior and needs to be bathing - find alternative if needed
+        if requires_senior_tag and needs_bathing and pick:
+            pick_grade = get_therapist_grade_name(pick)
+            if pick_grade and 'Senior' in pick_grade:
+                # Senior therapist cannot be bathing therapist - need to find alternative
+                # Try to find non-senior bathing therapist first
+                non_senior_bathing = [c for c in candidates if c != pick and getattr(c, 'is_bathing_therapist', False) and 'Senior' not in get_therapist_grade_name(c)]
+                
+                if non_senior_bathing:
+                    # Use non-senior bathing therapist instead (respect difficulty balancing)
+                    alt_pick = pick_least_loaded_candidate(
+                        non_senior_bathing,
+                        target_date,
+                        max_daily_normal,
+                        max_daily_overtime_extra,
+                        therapy_category=therapy_category,
+                    )
+                    if alt_pick:
+                        pick = alt_pick
+                        logger.info("Special treatment: Using non-senior bathing therapist %s instead of senior", getattr(pick, 'therapist_code', pick.pk))
+                    else:
+                        logger.warning("Special treatment: Senior therapist %s cannot be bathing therapist, no non-senior alternative found", 
+                                      getattr(pick, 'therapist_code', 'unknown'))
+                        summary['failed'].append((booking.pk, "special_treatment_senior_cannot_be_bathing_no_alternative"))
+                        continue
+                else:
+                    # No non-senior bathing therapist available - this is a problem
+                    logger.warning("Special treatment: Senior therapist %s is only bathing option, but cannot be bathing therapist", 
+                                  getattr(pick, 'therapist_code', 'unknown'))
+                    summary['failed'].append((booking.pk, "special_treatment_senior_only_bathing_option"))
+                    continue
+        
+        # Check room availability if therapy needs room
+        if therapy_needs_room and therapy_needs_room(booking):
+            try:
+                from Patient.models import TreatmentRoom
+                # Get room from booking or check if room is still available
+                booking_room = getattr(booking, 'room', None)
+                if not booking_room and hasattr(booking, 'visit') and booking.visit:
+                    # Try to get room from related RoomBooking
+                    try:
+                        from Patient.models import RoomBooking
+                        room_booking = RoomBooking.objects.filter(
+                            patient_id=booking.patient_id,
+                            date=target_date,
+                            time_slot=slot,
+                            status='BOOKED'
+                        ).first()
+                        if room_booking:
+                            booking_room = room_booking.room
+                    except Exception:
+                        pass
+                
+                # If room exists, verify it's still available
+                if booking_room:
+                    room_conflict = RoomBooking.objects.filter(
+                        room=booking_room,
+                        date=target_date,
+                        time_slot=slot,
+                        status='BOOKED'
+                    ).exclude(
+                        patient_id=booking.patient_id
+                    ).exists()
+                    if room_conflict:
+                        logger.warning("Room %s not available for reassignment", getattr(booking_room, 'room_no', 'unknown'))
+                        summary['failed'].append((booking.pk, "room_not_available"))
+                        continue
+            except Exception as e:
+                logger.debug("Error checking room availability: %s", e)
+        
+        # Perform reassignment
+        dry_run_flag = getattr(args, 'dry_run', False) if hasattr(args, 'dry_run') else dry_run
+        if dry_run_flag:
             summary['reassigned'].append((booking.pk, getattr(old, 'therapist_code', old.pk), getattr(pick, 'therapist_code', pick.pk)))
             logger.info("[DRY RUN] Would reassign booking %s -> therapist %s", booking.pk, getattr(pick, 'therapist_code', pick.pk))
         else:
@@ -517,7 +982,16 @@ def process_reassignments(target_date=None, dry_run=True, max_daily_normal=5, ma
                 with transaction.atomic():
                     booking.therapist = pick
                     if hasattr(booking, 'is_bathing') and needs_bathing:
-                        booking.is_bathing = True
+                        # For special treatments: ensure senior is NOT marked as bathing
+                        if requires_senior_tag:
+                            pick_grade = get_therapist_grade_name(pick)
+                            if pick_grade and 'Senior' in pick_grade:
+                                booking.is_bathing = False
+                                logger.info("Special treatment: Senior therapist %s NOT marked as bathing", getattr(pick, 'therapist_code', pick.pk))
+                            else:
+                                booking.is_bathing = True
+                        else:
+                            booking.is_bathing = True
                     booking.save(update_fields=['therapist', 'updated_at'] + (['is_bathing'] if hasattr(booking, 'is_bathing') else []))
                 summary['reassigned'].append((booking.pk, getattr(old, 'therapist_code', old.pk), getattr(pick, 'therapist_code', pick.pk)))
                 logger.info("Reassigned booking %s -> therapist %s", booking.pk, getattr(pick, 'therapist_code', pick.pk))
