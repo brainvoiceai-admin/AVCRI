@@ -56,11 +56,7 @@
                                 {% if form.item_code %}
                                 <div class="col-md-6 mb-3">
                                     <label for="{{ form.item_code.id_for_label }}" class="form-label">
-<<<<<<< HEAD
-                                        Item Code {% if form.item_code %}<span class="text-danger">*</span>{% endif %}
-=======
                                         Item Code
->>>>>>> a8b58aa4eadd2845dab0b2b078ae8a5a53bf8ed5
                                     </label>
                                     {% if form.item_code %}
                                     {{ form.item_code }}
@@ -77,12 +73,8 @@
                                     <small class="text-muted">Will be generated on save</small>
                                     {% endif %}
                                 </div>
-<<<<<<< HEAD
-
-=======
                                 {% endif %}
-                                
->>>>>>> a8b58aa4eadd2845dab0b2b078ae8a5a53bf8ed5
+
                                 <div class="col-md-6 mb-3">
                                     <label for="{{ form.item_name.id_for_label }}" class="form-label">
                                         Item Name <span class="text-danger">*</span>
@@ -103,48 +95,30 @@
                                     <label for="{{ form.item_group.id_for_label }}" class="form-label">
                                         Group
                                     </label>
-<<<<<<< HEAD
-                                    {{ form.item_category }}
-                                    {% if form.item_category.errors %}
+                                    {{ form.item_group }}
+                                    {% if form.item_group.errors %}
                                     <div class="text-danger small">
-                                        {% for error in form.item_category.errors %}
+                                        {% for error in form.item_group.errors %}
                                         {{ error }}
                                         {% endfor %}
                                     </div>
-=======
-                                    {{ form.item_group }}
-                                    {% if form.item_group.errors %}
-                                        <div class="text-danger small">
-                                            {% for error in form.item_group.errors %}
-                                                {{ error }}
-                                            {% endfor %}
-                                        </div>
->>>>>>> a8b58aa4eadd2845dab0b2b078ae8a5a53bf8ed5
                                     {% endif %}
+
                                 </div>
 
                                 <div class="col-md-6 mb-3">
                                     <label for="{{ form.umo.id_for_label }}" class="form-label">
                                         UOM
                                     </label>
-<<<<<<< HEAD
-                                    {{ form.unit_of_measure }}
-                                    {% if form.unit_of_measure.errors %}
+                                    {{ form.umo }}
+                                    {% if form.umo.errors %}
                                     <div class="text-danger small">
-                                        {% for error in form.unit_of_measure.errors %}
+                                        {% for error in form.umo.errors %}
                                         {{ error }}
                                         {% endfor %}
                                     </div>
-=======
-                                    {{ form.umo }}
-                                    {% if form.umo.errors %}
-                                        <div class="text-danger small">
-                                            {% for error in form.umo.errors %}
-                                                {{ error }}
-                                            {% endfor %}
-                                        </div>
->>>>>>> a8b58aa4eadd2845dab0b2b078ae8a5a53bf8ed5
                                     {% endif %}
+
                                 </div>
                             </div>
 
@@ -155,14 +129,14 @@
                                     </label>
                                     {{ form.min_max }}
                                     {% if form.min_max.errors %}
-                                        <div class="text-danger small">
-                                            {% for error in form.min_max.errors %}
-                                                {{ error }}
-                                            {% endfor %}
-                                        </div>
+                                    <div class="text-danger small">
+                                        {% for error in form.min_max.errors %}
+                                        {{ error }}
+                                        {% endfor %}
+                                    </div>
                                     {% endif %}
                                 </div>
-                                
+
                                 <div class="col-md-6 mb-3">
                                     <label for="{{ form.procured_from.id_for_label }}" class="form-label">
                                         Procured From
@@ -222,14 +196,9 @@
                         <ul class="list-unstyled small">
                             <li><i class="fas fa-check text-success me-2"></i>Item code is auto-generated (4-digit)</li>
                             <li><i class="fas fa-check text-success me-2"></i>Item names should be descriptive</li>
-<<<<<<< HEAD
-                            <li><i class="fas fa-check text-success me-2"></i>Categories help with organization</li>
-                            <li><i class="fas fa-check text-success me-2"></i>Units of measure are important for
-                                inventory</li>
-=======
                             <li><i class="fas fa-check text-success me-2"></i>Select a group from the dropdown</li>
-                            <li><i class="fas fa-check text-success me-2"></i>UOM (Unit of Measure) is important for inventory</li>
->>>>>>> a8b58aa4eadd2845dab0b2b078ae8a5a53bf8ed5
+                            <li><i class="fas fa-check text-success me-2"></i>UOM (Unit of Measure) is important for
+                                inventory</li>
                         </ul>
 
                         <hr>
@@ -237,14 +206,9 @@
                         <h6>Quick Tips</h6>
                         <ul class="list-unstyled small text-muted">
                             <li><i class="fas fa-lightbulb text-warning me-2"></i>Use consistent naming conventions</li>
-<<<<<<< HEAD
-                            <li><i class="fas fa-lightbulb text-warning me-2"></i>Group similar items by category</li>
-                            <li><i class="fas fa-lightbulb text-warning me-2"></i>Keep item codes short and memorable
-                            </li>
-=======
                             <li><i class="fas fa-lightbulb text-warning me-2"></i>Group similar items together</li>
-                            <li><i class="fas fa-lightbulb text-warning me-2"></i>Item code is automatically assigned</li>
->>>>>>> a8b58aa4eadd2845dab0b2b078ae8a5a53bf8ed5
+                            <li><i class="fas fa-lightbulb text-warning me-2"></i>Item code is automatically assigned
+                            </li>
                         </ul>
                     </div>
                 </div>

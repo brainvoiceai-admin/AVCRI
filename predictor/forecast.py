@@ -9,7 +9,14 @@ import numpy as _np
 if not hasattr(_np, "float_"):
     _np.float_ = _np.float64
 # Prophet import - ensure 'prophet' is installed in your env
-from prophet import Prophet
+try:
+    from prophet import Prophet
+    PROPHET_AVAILABLE = True
+except ImportError:
+    Prophet = None
+    PROPHET_AVAILABLE = False
+    import warnings
+    warnings.warn("Prophet library not installed. Forecasting features will be disabled.")
 
 # Prefer Scheduling from external MySql_Data_pull. Fallback to PatientHistory if not available.
 try:
@@ -259,6 +266,9 @@ def history_diagnostics(aggregate_by: str = "day", up_to_date: Optional[Union[st
 # ----------------- Prophet fitting and storage -----------------
 
 def _fit_prophet_safe(df: pd.DataFrame, daily_seasonality: bool = True) -> Optional[Prophet]:
+    if not PROPHET_AVAILABLE or Prophet is None:
+        logger.warning("Prophet not available, cannot fit model")
+        return None
     try:
         model = Prophet(daily_seasonality=daily_seasonality, weekly_seasonality=True, yearly_seasonality=True)
         model.fit(df)

@@ -1632,10 +1632,6 @@ class ItemMasterForm(forms.ModelForm):
         model = ItemMaster
         fields = ['item_name', 'item_group', 'umo', 'min_max', 'procured_from', 'is_active']
         widgets = {
-<<<<<<< HEAD
-            'item_code': forms.TextInput(attrs={'class': 'form-control', 'readonly': 'readonly'}),
-=======
->>>>>>> a8b58aa4eadd2845dab0b2b078ae8a5a53bf8ed5
             'item_name': forms.TextInput(attrs={'class': 'form-control'}),
             'item_group': forms.Select(attrs={'class': 'form-control'}),
             'umo': forms.Select(attrs={'class': 'form-control'}),
@@ -1649,19 +1645,6 @@ class ItemMasterForm(forms.ModelForm):
         # Filter procured_from to show only active sources
         self.fields['procured_from'].queryset = Procured.objects.filter(is_active=True).order_by('name')
         self.fields['procured_from'].empty_label = '-- Select Source --'
-<<<<<<< HEAD
-        
-        instance = getattr(self, 'instance', None)
-        if instance and instance.pk:
-            # Update mode: make item_code readonly and disabled (cannot be changed)
-            self.fields['item_code'].widget.attrs['readonly'] = True
-            self.fields['item_code'].disabled = True
-        else:
-            # Create mode: remove item_code from form (will be auto-generated)
-            if 'item_code' in self.fields:
-                del self.fields['item_code']
-
-=======
         # Filter item_group to show only active groups
         self.fields['item_group'].queryset = ItemGroup.objects.filter(is_active=True).order_by('name')
         self.fields['item_group'].empty_label = '-- Select Group --'
@@ -1682,7 +1665,6 @@ class ItemMasterForm(forms.ModelForm):
                 required=False,
                 initial=self.instance.item_code
             )
->>>>>>> a8b58aa4eadd2845dab0b2b078ae8a5a53bf8ed5
 
 class ItemMasterCreateView(CreateView):
     model = ItemMaster
@@ -2881,11 +2863,7 @@ def bulk_upload_master(request):
             
             elif master_type == 'itemmaster' or master_type == 'item':
                 if 'item_name' not in df.columns:
-<<<<<<< HEAD
                     return JsonResponse({'success': False, 'error': 'Required column missing: item_name'}, status=400)
-=======
-                    return JsonResponse({'success': False, 'error': 'Required columns missing: item_name'}, status=400)
->>>>>>> a8b58aa4eadd2845dab0b2b078ae8a5a53bf8ed5
                 
                 for idx, row in df.iterrows():
                     try:
@@ -2925,7 +2903,6 @@ def bulk_upload_master(request):
                             except Procured.DoesNotExist:
                                 pass
                         
-<<<<<<< HEAD
                         # Logic: Check if item_code provided exists
                         input_code = str(row.get('item_code', '')).strip()
                         item = None
@@ -2938,8 +2915,9 @@ def bulk_upload_master(request):
                         if item:
                             # Update existing
                             item.item_name = item_name
-                            item.item_category = str(row.get('item_category', '')).strip() or None
-                            item.unit_of_measure = str(row.get('unit_of_measure', '')).strip() or None
+                            item.item_group = item_group_obj
+                            item.umo = umo_obj
+                            item.min_max = str(row.get('min_max', '')).strip() or None
                             item.procured_from = procured_from_obj
                             item.is_active = is_active
                             item.save()
@@ -2950,26 +2928,14 @@ def bulk_upload_master(request):
                             ItemMaster.objects.create(
                                 item_code=new_code,
                                 item_name=item_name,
-                                item_category=str(row.get('item_category', '')).strip() or None,
-                                unit_of_measure=str(row.get('unit_of_measure', '')).strip() or None,
+                                item_group=item_group_obj,
+                                umo=umo_obj,
+                                min_max=str(row.get('min_max', '')).strip() or None,
                                 procured_from=procured_from_obj,
                                 is_active=is_active
                             )
                             created_count += 1
 
-=======
-                        # For bulk upload, we'll create new items (item_code will be auto-generated)
-                        # If you want to update existing, you'd need to match by item_name or another unique field
-                        item = ItemMaster.objects.create(
-                            item_name=item_name,
-                            item_group=item_group_obj,
-                            umo=umo_obj,
-                            min_max=str(row.get('min_max', '')).strip() or None,
-                            procured_from=procured_from_obj,
-                            is_active=is_active,
-                        )
-                        created_count += 1
->>>>>>> a8b58aa4eadd2845dab0b2b078ae8a5a53bf8ed5
                     except Exception as e:
                         error_count += 1
                         errors.append(f'Row {idx+2}: {str(e)}')

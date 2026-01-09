@@ -66,25 +66,12 @@
                             </select>
                         </div>
                         <div class="col-md-3">
-<<<<<<< HEAD
-                            <label for="categoryFilter" class="form-label small text-muted mb-1">Category</label>
-                            <select class="form-select" name="category" id="categoryFilter">
-                                <option value="">All Categories</option>
-                                <option value="medicine" {% if category_filter == 'medicine' %}selected{% endif %}>
-                                    Medicine</option>
-                                <option value="consumable" {% if category_filter == 'consumable' %}selected{% endif %}>
-                                    Consumable</option>
-                                <option value="equipment" {% if category_filter == 'equipment' %}selected{% endif %}>
-                                    Equipment</option>
-                                <option value="other" {% if category_filter == 'other' %}selected{% endif %}>Other
-                                </option>
-=======
+                            <label for="groupFilter" class="form-label small text-muted mb-1">Group</label>
                             <select class="form-select" name="group" id="groupFilter">
                                 <option value="">All Groups</option>
                                 {% for group in item_groups %}
                                 <option value="{{ group.id }}" {% if group_filter == group.id|stringformat:"s" %}selected{% endif %}>{{ group.name }}</option>
                                 {% endfor %}
->>>>>>> a8b58aa4eadd2845dab0b2b078ae8a5a53bf8ed5
                             </select>
                         </div>
                         <div class="col-md-3">
@@ -92,7 +79,8 @@
                                 <button type="submit" class="btn btn-primary flex-grow-1" id="filterButton">
                                     <i class="fas fa-search me-1"></i>Filter
                                 </button>
-                                <a href="{% url 'item_master_manage' %}" class="btn btn-outline-secondary" id="clearFilters" title="Clear Filters">
+                                <a href="{% url 'item_master_manage' %}" class="btn btn-outline-secondary"
+                                    id="clearFilters" title="Clear Filters">
                                     <i class="fas fa-times"></i>
                                 </a>
                             </div>
@@ -168,7 +156,8 @@
                                 <td colspan="9" class="text-center py-4">
                                     <div class="text-muted">
                                         <i class="fas fa-box fa-3x mb-3"></i>
-                                        <p>No items found. <a href="{% url 'item_master_add' %}">Add the first item</a></p>
+                                        <p>No items found. <a href="{% url 'item_master_add' %}">Add the first item</a>
+                                        </p>
                                     </div>
                                 </td>
                             </tr>
@@ -184,24 +173,15 @@
         <nav aria-label="Item pagination" class="mt-4">
             <ul class="pagination justify-content-center">
                 {% if page_obj.has_previous %}
-<<<<<<< HEAD
                 <li class="page-item">
                     <a class="page-link"
-                        href="?page=1{% if search %}&search={{ search }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if category_filter %}&category={{ category_filter }}{% endif %}">&laquo;
+                        href="?page=1{% if search %}&search={{ search }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if group_filter %}&group={{ group_filter }}{% endif %}">&laquo;
                         First</a>
                 </li>
                 <li class="page-item">
                     <a class="page-link"
-                        href="?page={{ page_obj.previous_page_number }}{% if search %}&search={{ search }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if category_filter %}&category={{ category_filter }}{% endif %}">Previous</a>
+                        href="?page={{ page_obj.previous_page_number }}{% if search %}&search={{ search }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if group_filter %}&group={{ group_filter }}{% endif %}">Previous</a>
                 </li>
-=======
-                    <li class="page-item">
-                        <a class="page-link" href="?page=1{% if search %}&search={{ search }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if group_filter %}&group={{ group_filter }}{% endif %}">&laquo; First</a>
-                    </li>
-                    <li class="page-item">
-                        <a class="page-link" href="?page={{ page_obj.previous_page_number }}{% if search %}&search={{ search }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if group_filter %}&group={{ group_filter }}{% endif %}">Previous</a>
-                    </li>
->>>>>>> a8b58aa4eadd2845dab0b2b078ae8a5a53bf8ed5
                 {% endif %}
 
                 <li class="page-item active">
@@ -211,24 +191,15 @@
                 </li>
 
                 {% if page_obj.has_next %}
-<<<<<<< HEAD
                 <li class="page-item">
                     <a class="page-link"
-                        href="?page={{ page_obj.next_page_number }}{% if search %}&search={{ search }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if category_filter %}&category={{ category_filter }}{% endif %}">Next</a>
+                        href="?page={{ page_obj.next_page_number }}{% if search %}&search={{ search }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if group_filter %}&group={{ group_filter }}{% endif %}">Next</a>
                 </li>
                 <li class="page-item">
                     <a class="page-link"
-                        href="?page={{ page_obj.paginator.num_pages }}{% if search %}&search={{ search }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if category_filter %}&category={{ category_filter }}{% endif %}">Last
+                        href="?page={{ page_obj.paginator.num_pages }}{% if search %}&search={{ search }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if group_filter %}&group={{ group_filter }}{% endif %}">Last
                         &raquo;</a>
                 </li>
-=======
-                    <li class="page-item">
-                        <a class="page-link" href="?page={{ page_obj.next_page_number }}{% if search %}&search={{ search }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if group_filter %}&group={{ group_filter }}{% endif %}">Next</a>
-                    </li>
-                    <li class="page-item">
-                        <a class="page-link" href="?page={{ page_obj.paginator.num_pages }}{% if search %}&search={{ search }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if group_filter %}&group={{ group_filter }}{% endif %}">Last &raquo;</a>
-                    </li>
->>>>>>> a8b58aa4eadd2845dab0b2b078ae8a5a53bf8ed5
                 {% endif %}
             </ul>
         </nav>
