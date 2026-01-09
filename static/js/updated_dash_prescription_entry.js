@@ -157,6 +157,36 @@ $(function(){
   let cancelingPrescriptionIndex = null;
   let resumingPrescriptionIndex = null;
   let selectedPatient = null;
+  let prescriptionActionById = {};
+
+  // Track the last action performed so rows can be color-coded
+  function rememberPrescriptionAction(id, action){
+    if (!id) return;
+    // Store with string key to ensure matching
+    const key = String(id);
+    prescriptionActionById[key] = action;
+  }
+  function decoratePrescriptionList(list){
+    return (list || []).map(p => {
+      // Try multiple key formats to match what we stored
+      const key1 = p.allocation_id ? String(p.allocation_id) : null;
+      const key2 = p.id ? String(p.id) : null;
+      const remembered = (key1 && prescriptionActionById[key1]) || 
+                         (key2 && prescriptionActionById[key2]) || '';
+      // Only use derived from server if it's 'cancelled' (server knows cancellation state)
+      // Otherwise, ignore server's last_action and use remembered or default to 'added'
+      const derived = (p.status === 'cancelled' ? 'cancelled' : '') || 
+                      (p.last_action === 'cancelled' ? 'cancelled' : '');
+      // Priority: remembered > derived (only cancelled) > default to 'added' for new prescriptions
+      // If no remembered action and not cancelled, ALWAYS default to 'added' (blue)
+      let finalAction = remembered || derived;
+      if (!finalAction && key1 && p.status !== 'cancelled') {
+        finalAction = 'added';  // Default to blue for new/active prescriptions
+      }
+      // Ensure we never return empty string - default to 'added' if somehow we got empty
+      return { ...p, last_action: finalAction || 'added' };
+    });
+  }
 
   // Patient search with auto-fill functionality
   let searchTimeout;
@@ -394,6 +424,8 @@ $(function(){
     editPrescriptionIndex = null;
     cancelingPrescriptionIndex = null;
     resumingPrescriptionIndex = null;
+    // Clear remembered actions when switching patients to avoid stale data
+    prescriptionActionById = {};
     
     // Reset form state
     resetFormState();
@@ -406,7 +438,7 @@ $(function(){
     // Load patient prescriptions
     const patientRegNo = patient.pat_op_reg_no || patient.pat_reg_no;
     ajax({action:'patient_prescriptions', patient_reg_no: patientRegNo}).then(list => {
-      addedPrescriptions = list || [];
+      addedPrescriptions = decoratePrescriptionList(list || []);
       renderAll();
     }).catch(()=>{ 
       addedPrescriptions = [];
@@ -899,6 +931,12 @@ $(function(){
       return response.json();
     }).then(j => {
       if (j.allocation_id || j.status === 'ok') {
+        // Remember this as 'added' action before reloading
+        const newAllocationId = j.allocation_id;
+        if (newAllocationId) {
+          rememberPrescriptionAction(newAllocationId, 'added');
+        }
+        
         // Reset form first
         itemGroups = []; 
         renderItemGroups();
@@ -919,7 +957,7 @@ $(function(){
           setTimeout(() => {
             ajax({action:'patient_prescriptions', patient_reg_no: patientRegNo}).then(list => {
               if (list && Array.isArray(list)) {
-                addedPrescriptions = list;
+                addedPrescriptions = decoratePrescriptionList(list);
                 renderAll();
                 alert('Prescription saved to server as Draft.');
               } else {
@@ -952,6 +990,69 @@ $(function(){
       $allocateBtn.prop('disabled', false).html('<i class="fas fa-save"></i> Save Prescription');
     });
   });
+
+  // Decide row color for today's prescription status (Added/Updated/Resumed/Cancelled for today only)
+  function getTodayPrescriptionColorClass(p){
+    if (!p) return '';
+    const today = new Date().toISOString().slice(0,10);
+
+    const inMainRange =
+      p.from_date && p.to_date &&
+      today >= String(p.from_date) && today <= String(p.to_date);
+
+    const inCancelledRange =
+      p.cancelled_date_from && p.cancelled_date_to &&
+      p.cancelled_date_from !== 'null' && p.cancelled_date_to !== 'null' &&
+      today >= String(p.cancelled_date_from) && today <= String(p.cancelled_date_to);
+
+    if (inMainRange && inCancelledRange) {
+      // Cancelled for today
+      return 'action-cancelled';
+    }
+
+    if (!inMainRange) {
+      // Not active today
+      return '';
+    }
+
+    if (p.status === 'cancelled') {
+      // Overall cancelled but today is outside the cancelled range -> no special color today
+      return '';
+    }
+
+    // At this point, prescription is active for today (not cancelled for today)
+    // Use last_action to determine color based on sequence: Add → Update → Cancel → Resume
+    
+    // Ensure last_action is a string for comparison
+    const lastAction = String(p.last_action || '').toLowerCase();
+    
+    // Priority order: Resumed > Updated > Added
+    if (lastAction === 'resumed' || p.resumed_at) {
+      return 'action-resumed';  // Green
+    }
+    
+    if (lastAction === 'updated') {
+      return 'action-updated';  // Yellow
+    }
+    
+    // Default to blue for 'added' or empty/undefined (newly added)
+    // This ensures new prescriptions show blue, not yellow
+    return 'action-added';  // Blue
+    // Default: newly added and active today (blue)
+    // This handles empty, undefined, or any other value
+    return 'action-added';
+  }
+
+  function buildActionBadge(actionClass){
+    const labelMap = {
+      'action-added': 'Added (today)',
+      'action-updated': 'Updated (today)',
+      'action-resumed': 'Resumed (today)',
+      'action-cancelled': 'Cancelled (today)'
+    };
+    if (!actionClass || !labelMap[actionClass]) return '';
+    return `<span class="action-pill ${actionClass}">${labelMap[actionClass]}</span>`;
+  }
 
   // render prescriptions table
   function renderPrescriptions(){
@@ -1092,7 +1193,9 @@ $(function(){
       const procuredFromValues = [...new Set((p.items_groups || []).map(g => g.procured_from).filter(pf => pf))];
       const procuredFromDisplay = procuredFromValues.length > 0 ? procuredFromValues.join(', ') : '—';
       
-      const row = `<tr class="${statusClass}">
+      const actionClass = getTodayPrescriptionColorClass(p);
+
+      const row = `<tr class="${statusClass} ${actionClass}">
         <td>${i+1}</td>
         <td>${esc(p.prescription_name || 'Prescription')}</td>
         <td>${esc(procuredFromDisplay)}</td>
@@ -1262,22 +1365,70 @@ $(function(){
         return response.json();
       }).then(j => {
         if (j.status === 'ok') {
-          alert('Prescription updated successfully on server.');
-          resetFormState(); 
+          // Mark as updated for color coding BEFORE reloading
+          p.last_action = 'updated';
+          rememberPrescriptionAction(p.allocation_id || p.id, 'updated');
+          // Render immediately to show yellow color
           renderAll();
+          alert('Prescription updated successfully on server.');
+          resetFormState();
+          
+          // Reload from server to get updated data, but preserve last_action
+          if (selectedPatient && p.allocation_id) {
+            const patientRegNo = selectedPatient.pat_op_reg_no || selectedPatient.pat_reg_no;
+            if (patientRegNo) {
+              ajax({action:'patient_prescriptions', patient_reg_no: patientRegNo}).then(list => {
+                if (list && Array.isArray(list)) {
+                  // Use decoratePrescriptionList to preserve remembered actions
+                  const decoratedList = decoratePrescriptionList(list);
+                  // Find and update the specific prescription to preserve the reference
+                  const updatedPrescription = decoratedList.find(pr => pr.allocation_id === p.allocation_id);
+                  if (updatedPrescription) {
+                    // Update all fields from server, but preserve last_action
+                    Object.assign(p, updatedPrescription);
+                    // Ensure last_action is preserved (decoratePrescriptionList should have set it)
+                    const rememberedAction = prescriptionActionById[String(p.allocation_id || p.id || '')];
+                    if (rememberedAction) {
+                      p.last_action = rememberedAction;
+                    }
+                  } else {
+                    // If not found, replace entire array
+                    addedPrescriptions = decoratedList;
+                  }
+                  renderAll();
+                } else {
+                  renderAll();
+                }
+              }).catch(() => {
+                // If reload fails, use local values (already rendered above)
+                renderAll();
+              });
+            } else {
+              renderAll();
+            }
+          } else {
+            renderAll();
+          }
         } else {
           alert('Failed to update prescription: ' + (j.error || JSON.stringify(j)));
+          renderAll();
         }
       }).catch(e => {
         alert('Network error: ' + (e.message || 'Prescription updated locally only.'));
+        // Mark as updated locally
+        p.last_action = 'updated';
+        rememberPrescriptionAction(p.allocation_id || p.id, 'updated');
         resetFormState(); 
         renderAll();
       });
     } else {
       // Update local data only (for unsaved prescriptions)
-      alert('Prescription updated locally.');
-      resetFormState(); 
+      p.last_action = 'updated';
+      rememberPrescriptionAction(p.allocation_id || p.id, 'updated');
+      resetFormState();
+      // Render immediately to show yellow color
       renderAll();
+      alert('Prescription updated locally.');
     }
   });
 
@@ -1435,6 +1586,18 @@ $(function(){
     p.status = 'cancelled';
     p.cancellation_reason = reason;
     
+    // Only set last_action to 'cancelled' if today is in the cancelled range
+    // Otherwise, preserve the previous last_action (e.g., 'updated')
+    const today = new Date().toISOString().slice(0,10);
+    const todayCancelled = today >= cfrom && today <= cto;
+    if (todayCancelled) {
+      p.last_action = 'cancelled';
+      rememberPrescriptionAction(p.allocation_id || p.id, 'cancelled');
+    } else {
+      // Today is not cancelled - preserve previous action (e.g., 'updated')
+      // Don't change last_action or rememberPrescriptionAction
+    }
+    
     // IMMEDIATELY update UI - don't wait for server - EXACTLY like therapy entry
     $cancelModal.hide();
     renderAll();
@@ -1461,8 +1624,14 @@ $(function(){
                   if (list && Array.isArray(list)) {
                     const updated = list.find(pr => pr.allocation_id === p.allocation_id);
                     if (updated) {
+                      // Preserve last_action before updating
+                      const rememberedAction = prescriptionActionById[p.allocation_id || p.id];
                       // Update all fields from server response
                       Object.assign(p, updated);
+                      // Restore last_action if it was remembered
+                      if (rememberedAction) {
+                        p.last_action = rememberedAction;
+                      }
                       // Explicitly set cancelled dates (handle null/undefined/string 'null')
                       p.cancelled_date_from = (updated.cancelled_date_from && updated.cancelled_date_from !== 'null') ? updated.cancelled_date_from : null;
                       p.cancelled_date_to = (updated.cancelled_date_to && updated.cancelled_date_to !== 'null') ? updated.cancelled_date_to : null;
@@ -1644,6 +1813,10 @@ $(function(){
       prescription.status_summary = {};
     }
     
+    // Mark as resumed for color coding FIRST, before rendering
+    prescription.last_action = 'resumed';
+    rememberPrescriptionAction(prescription.allocation_id || prescription.id, 'resumed');
+    
     // Decrease cancelled count and increase draft count optimistically
     if (prescription.status_summary.cancelled && prescription.status_summary.cancelled > 0) {
       prescription.status_summary.cancelled = (prescription.status_summary.cancelled || 0) - 1;
@@ -1714,10 +1887,36 @@ $(function(){
               setTimeout(() => {
                 ajax({action:'patient_prescriptions', patient_reg_no: patientRegNo}).then(list => {
                   if (list && Array.isArray(list)) {
-                    const updated = list.find(pr => pr.allocation_id === prescription.allocation_id);
+                    // Use decoratePrescriptionList to properly preserve remembered actions
+                    const decoratedList = decoratePrescriptionList(list);
+                    const updated = decoratedList.find(pr => pr.allocation_id === prescription.allocation_id);
                     if (updated) {
+                      // Preserve last_action before updating - use string keys to match storage
+                      const key1 = prescription.allocation_id ? String(prescription.allocation_id) : null;
+                      const key2 = prescription.id ? String(prescription.id) : null;
+                      const rememberedAction = (key1 && prescriptionActionById[key1]) || 
+                                             (key2 && prescriptionActionById[key2]) || '';
                       // Update all fields from server response
                       Object.assign(prescription, updated);
+                      // Restore last_action if it was remembered (always restore to preserve resumed/updated state)
+                      // This is critical - we must restore the remembered action to preserve color coding
+                      // The rememberedAction should already be 'resumed' since we set it before server call
+                      if (rememberedAction) {
+                        prescription.last_action = rememberedAction;
+                        // Also update the stored action to ensure it persists
+                        if (key1) {
+                          rememberPrescriptionAction(key1, rememberedAction);
+                        }
+                      } else {
+                        // If no remembered action but we just resumed, ensure it's set
+                        // This handles edge cases where the action wasn't remembered properly
+                        prescription.last_action = 'resumed';
+                        if (key1) {
+                          rememberPrescriptionAction(key1, 'resumed');
+                        }
+                      }
+                      // Re-render to show updated color immediately
+                      renderAll();
                       // Explicitly set cancelled dates (handle null/undefined/string 'null')
                       prescription.cancelled_date_from = (updated.cancelled_date_from && updated.cancelled_date_from !== 'null') ? updated.cancelled_date_from : null;
                       prescription.cancelled_date_to = (updated.cancelled_date_to && updated.cancelled_date_to !== 'null') ? updated.cancelled_date_to : null;
