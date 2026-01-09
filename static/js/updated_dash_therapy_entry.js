@@ -927,37 +927,42 @@ $(function () {
     const inMainRange =
       t.from_date && t.to_date &&
       today >= String(t.from_date) && today <= String(t.to_date);
+
+    if (!inMainRange) {
+      return '';
+    }
+
+    // Get the last action - this is the CURRENT state set by user actions
+    const lastAction = String(t.last_action || '').toLowerCase().trim();
+
+    // PRIORITY 1: If last_action is explicitly set, it ALWAYS wins
+    // This ensures Cancel → Resume → Cancel works correctly
+    if (lastAction === 'cancelled') return 'action-cancelled';
+    if (lastAction === 'resumed') return 'action-resumed';
+    if (lastAction === 'updated') return 'action-updated';
+    if (lastAction === 'added') return 'action-added';
+
+    // PRIORITY 2: Fall back to checking if today is in cancelled range
     const inCancelledRange =
       t.cancelled_date_from && t.cancelled_date_to &&
       t.cancelled_date_from !== 'null' && t.cancelled_date_to !== 'null' &&
       today >= String(t.cancelled_date_from) && today <= String(t.cancelled_date_to);
 
-    // Check timestamps from server/local for "today" actions
+    if (inCancelledRange) {
+      return 'action-cancelled';
+    }
+
+    // PRIORITY 3: Check timestamps from server for "today" actions (only if no last_action)
     const isTodayResumed = t.resumed_at && t.resumed_at.slice(0, 10) === today;
     const isTodayCancelled = t.cancelled_at && t.cancelled_at.slice(0, 10) === today;
     const isTodayUpdated = t.updated_at && t.updated_at.slice(0, 10) === today &&
       t.updated_at !== t.created_at;
     const isTodayAdded = t.created_at && t.created_at.slice(0, 10) === today;
 
-    if (!inMainRange) {
-      return '';
-    }
-
-    const lastAction = String(t.last_action || '').toLowerCase().trim();
-
-    // Priority 1: Resumed Today (Green)
-    if (lastAction === 'resumed' || isTodayResumed) return 'action-resumed';
-
-    // Priority 2: Cancelled Today or currently in cancelled range (Red)
-    if (inCancelledRange || lastAction === 'cancelled' || isTodayCancelled) {
-      return 'action-cancelled';
-    }
-
-    // Priority 3: Updated Today (Yellow)
-    if (lastAction === 'updated' || isTodayUpdated) return 'action-updated';
-
-    // Priority 4: Added Today (Blue)
-    if (lastAction === 'added' || isTodayAdded) return 'action-added';
+    if (isTodayResumed) return 'action-resumed';
+    if (isTodayCancelled) return 'action-cancelled';
+    if (isTodayUpdated) return 'action-updated';
+    if (isTodayAdded) return 'action-added';
 
     return '';
   }
@@ -1386,17 +1391,18 @@ $(function () {
     t.status = 'cancelled';
     t.cancellation_reason = reason;
 
-    // Only set last_action to 'cancelled' if today is in the cancelled range
-    // Otherwise, preserve the previous last_action (e.g., 'updated')
+    // Only set last_action to 'cancelled' if TODAY is in the cancelled range
+    // This ensures cancelling future dates doesn't turn the row red
     const today = new Date().toISOString().slice(0, 10);
-    const todayCancelled = today >= cfrom && today <= cto;
-    if (todayCancelled) {
+    const todayIsCancelled = today >= cfrom && today <= cto;
+
+    if (todayIsCancelled) {
+      // Today is cancelled - turn row RED
       t.last_action = 'cancelled';
       rememberTherapyAction(t.allocation_id || t.therapy_code || t.id, 'cancelled');
-    } else {
-      // Today is not cancelled - preserve previous action (e.g., 'updated')
-      // Don't change last_action or rememberTherapyAction
     }
+    // If today is NOT cancelled, don't change last_action
+    // This preserves the previous color (green/yellow/blue)
 
     // IMMEDIATELY update UI - don't wait for server - EXACTLY like prescription entry
     $cancelModal.hide();
@@ -1421,19 +1427,39 @@ $(function () {
                 if (therapies && Array.isArray(therapies)) {
                   const updated = therapies.find(th => th.allocation_id === t.allocation_id);
                   if (updated) {
+                    // Get the remembered action before updating
+                    const rememberedAction = therapyActionById[t.allocation_id || t.therapy_code || t.id];
+
                     // Update all fields from server response
                     Object.assign(t, updated);
-                    const rememberedAction = therapyActionById[t.allocation_id || t.therapy_code || t.id];
-                    t.last_action = rememberedAction || t.last_action || 'cancelled';
+
                     // Explicitly set cancelled dates (handle null/undefined/string 'null')
                     t.cancelled_date_from = (updated.cancelled_date_from && updated.cancelled_date_from !== 'null') ? updated.cancelled_date_from : null;
                     t.cancelled_date_to = (updated.cancelled_date_to && updated.cancelled_date_to !== 'null') ? updated.cancelled_date_to : null;
                     t.cancellation_reason = updated.cancellation_reason || '';
                     t.status = updated.status || t.status;
+
                     // Update status_summary if available
                     if (updated.status_summary) {
                       t.status_summary = updated.status_summary;
                     }
+
+                    // Check if today is in the cancelled range
+                    const today = new Date().toISOString().slice(0, 10);
+                    const todayIsCancelled = t.cancelled_date_from && t.cancelled_date_to &&
+                      t.cancelled_date_from !== 'null' && t.cancelled_date_to !== 'null' &&
+                      today >= t.cancelled_date_from && today <= t.cancelled_date_to;
+
+                    // If today is cancelled, override any previous action with 'cancelled'
+                    if (todayIsCancelled) {
+                      t.last_action = 'cancelled';
+                      rememberTherapyAction(t.allocation_id || t.therapy_code || t.id, 'cancelled');
+                    } else if (rememberedAction && rememberedAction !== 'cancelled') {
+                      // If today is NOT cancelled, restore the remembered action (updated/resumed/added)
+                      // but only if it's not 'cancelled' (we just cancelled, so don't restore old cancelled state)
+                      t.last_action = rememberedAction;
+                    }
+
                     // Update UI again with server data
                     renderAll();
                   }

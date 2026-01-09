@@ -995,37 +995,41 @@ $(function () {
       p.from_date && p.to_date &&
       today >= String(p.from_date) && today <= String(p.to_date);
 
+    if (!inMainRange) {
+      return '';
+    }
+
+    // Get the last action - this is the CURRENT state set by user actions
+    const lastAction = String(p.last_action || '').toLowerCase().trim();
+
+    // PRIORITY 1: If last_action is explicitly set, it ALWAYS wins
+    // This ensures Cancel → Resume → Cancel works correctly
+    if (lastAction === 'cancelled') return 'action-cancelled';
+    if (lastAction === 'resumed') return 'action-resumed';
+    if (lastAction === 'updated') return 'action-updated';
+    if (lastAction === 'added') return 'action-added';
+
+    // PRIORITY 2: Fall back to checking if today is in cancelled range
     const inCancelledRange =
       p.cancelled_date_from && p.cancelled_date_to &&
       p.cancelled_date_from !== 'null' && p.cancelled_date_to !== 'null' &&
       today >= String(p.cancelled_date_from) && today <= String(p.cancelled_date_to);
 
-    if (!inMainRange) {
-      return '';
+    if (inCancelledRange) {
+      return 'action-cancelled';
     }
 
-    // Check timestamps from server/local for "today" actions
+    // PRIORITY 3: Check timestamps from server for "today" actions (only if no last_action)
     const isTodayResumed = p.resumed_at && p.resumed_at.slice(0, 10) === today;
     const isTodayCancelled = p.cancelled_at && p.cancelled_at.slice(0, 10) === today;
     const isTodayUpdated = p.updated_at && p.updated_at.slice(0, 10) === today &&
       p.updated_at !== p.created_at;
     const isTodayAdded = p.created_at && p.created_at.slice(0, 10) === today;
 
-    const lastAction = String(p.last_action || '').toLowerCase().trim();
-
-    // Priority 1: Resumed Today (Green)
-    if (lastAction === 'resumed' || isTodayResumed) return 'action-resumed';
-
-    // Priority 2: Cancelled Today or currently in cancelled range (Red)
-    if (inCancelledRange || lastAction === 'cancelled' || isTodayCancelled) {
-      return 'action-cancelled';
-    }
-
-    // Priority 3: Updated Today (Yellow)
-    if (lastAction === 'updated' || isTodayUpdated) return 'action-updated';
-
-    // Priority 4: Added Today (Blue)
-    if (lastAction === 'added' || isTodayAdded) return 'action-added';
+    if (isTodayResumed) return 'action-resumed';
+    if (isTodayCancelled) return 'action-cancelled';
+    if (isTodayUpdated) return 'action-updated';
+    if (isTodayAdded) return 'action-added';
 
     return '';
   }
@@ -1352,10 +1356,29 @@ $(function () {
         return response.json();
       }).then(j => {
         if (j.status === 'ok') {
-          // Mark as updated for color coding BEFORE reloading
-          p.last_action = 'updated';
-          rememberPrescriptionAction(p.allocation_id || p.id, 'updated');
-          // Render immediately to show yellow color
+          // Check if today is cancelled or resumed BEFORE marking as updated
+          const today = new Date().toISOString().slice(0, 10);
+          const todayIsCancelled = p.cancelled_date_from && p.cancelled_date_to &&
+            p.cancelled_date_from !== 'null' && p.cancelled_date_to !== 'null' &&
+            today >= p.cancelled_date_from && today <= p.cancelled_date_to;
+          const todayIsResumed = p.resumed_at && p.resumed_at.slice(0, 10) === today;
+
+          // Priority: Cancelled > Resumed > Updated
+          if (todayIsCancelled) {
+            // Today is cancelled - keep RED color
+            p.last_action = 'cancelled';
+            rememberPrescriptionAction(p.allocation_id || p.id, 'cancelled');
+          } else if (todayIsResumed) {
+            // Today is resumed - keep GREEN color
+            p.last_action = 'resumed';
+            rememberPrescriptionAction(p.allocation_id || p.id, 'resumed');
+          } else {
+            // Today is not cancelled/resumed - mark as updated (YELLOW)
+            p.last_action = 'updated';
+            rememberPrescriptionAction(p.allocation_id || p.id, 'updated');
+          }
+
+          // Render immediately to show correct color
           renderAll();
           alert('Prescription updated successfully on server.');
           resetFormState();
@@ -1402,18 +1425,47 @@ $(function () {
         }
       }).catch(e => {
         alert('Network error: ' + (e.message || 'Prescription updated locally only.'));
-        // Mark as updated locally
-        p.last_action = 'updated';
-        rememberPrescriptionAction(p.allocation_id || p.id, 'updated');
+        // Check if today is cancelled or resumed before marking as updated
+        const today = new Date().toISOString().slice(0, 10);
+        const todayIsCancelled = p.cancelled_date_from && p.cancelled_date_to &&
+          p.cancelled_date_from !== 'null' && p.cancelled_date_to !== 'null' &&
+          today >= p.cancelled_date_from && today <= p.cancelled_date_to;
+        const todayIsResumed = p.resumed_at && p.resumed_at.slice(0, 10) === today;
+
+        if (todayIsCancelled) {
+          p.last_action = 'cancelled';
+          rememberPrescriptionAction(p.allocation_id || p.id, 'cancelled');
+        } else if (todayIsResumed) {
+          p.last_action = 'resumed';
+          rememberPrescriptionAction(p.allocation_id || p.id, 'resumed');
+        } else {
+          p.last_action = 'updated';
+          rememberPrescriptionAction(p.allocation_id || p.id, 'updated');
+        }
         resetFormState();
         renderAll();
       });
     } else {
       // Update local data only (for unsaved prescriptions)
-      p.last_action = 'updated';
-      rememberPrescriptionAction(p.allocation_id || p.id, 'updated');
+      // Check if today is cancelled or resumed before marking as updated
+      const today = new Date().toISOString().slice(0, 10);
+      const todayIsCancelled = p.cancelled_date_from && p.cancelled_date_to &&
+        p.cancelled_date_from !== 'null' && p.cancelled_date_to !== 'null' &&
+        today >= p.cancelled_date_from && today <= p.cancelled_date_to;
+      const todayIsResumed = p.resumed_at && p.resumed_at.slice(0, 10) === today;
+
+      if (todayIsCancelled) {
+        p.last_action = 'cancelled';
+        rememberPrescriptionAction(p.allocation_id || p.id, 'cancelled');
+      } else if (todayIsResumed) {
+        p.last_action = 'resumed';
+        rememberPrescriptionAction(p.allocation_id || p.id, 'resumed');
+      } else {
+        p.last_action = 'updated';
+        rememberPrescriptionAction(p.allocation_id || p.id, 'updated');
+      }
       resetFormState();
-      // Render immediately to show yellow color
+      // Render immediately to show correct color
       renderAll();
       alert('Prescription updated locally.');
     }
@@ -1573,17 +1625,18 @@ $(function () {
     p.status = 'cancelled';
     p.cancellation_reason = reason;
 
-    // Only set last_action to 'cancelled' if today is in the cancelled range
-    // Otherwise, preserve the previous last_action (e.g., 'updated')
+    // Only set last_action to 'cancelled' if TODAY is in the cancelled range
+    // This ensures cancelling future dates doesn't turn the row red
     const today = new Date().toISOString().slice(0, 10);
-    const todayCancelled = today >= cfrom && today <= cto;
-    if (todayCancelled) {
+    const todayIsCancelled = today >= cfrom && today <= cto;
+
+    if (todayIsCancelled) {
+      // Today is cancelled - turn row RED
       p.last_action = 'cancelled';
       rememberPrescriptionAction(p.allocation_id || p.id, 'cancelled');
-    } else {
-      // Today is not cancelled - preserve previous action (e.g., 'updated')
-      // Don't change last_action or rememberPrescriptionAction
     }
+    // If today is NOT cancelled, don't change last_action
+    // This preserves the previous color (green/yellow/blue)
 
     // IMMEDIATELY update UI - don't wait for server - EXACTLY like therapy entry
     $cancelModal.hide();
@@ -1611,23 +1664,39 @@ $(function () {
                   if (list && Array.isArray(list)) {
                     const updated = list.find(pr => pr.allocation_id === p.allocation_id);
                     if (updated) {
-                      // Preserve last_action before updating
+                      // Get the remembered action before updating
                       const rememberedAction = prescriptionActionById[p.allocation_id || p.id];
+
                       // Update all fields from server response
                       Object.assign(p, updated);
-                      // Restore last_action if it was remembered
-                      if (rememberedAction) {
-                        p.last_action = rememberedAction;
-                      }
+
                       // Explicitly set cancelled dates (handle null/undefined/string 'null')
                       p.cancelled_date_from = (updated.cancelled_date_from && updated.cancelled_date_from !== 'null') ? updated.cancelled_date_from : null;
                       p.cancelled_date_to = (updated.cancelled_date_to && updated.cancelled_date_to !== 'null') ? updated.cancelled_date_to : null;
                       p.cancellation_reason = updated.cancellation_reason || '';
                       p.status = updated.status || p.status;
+
                       // Update status_summary if available
                       if (updated.status_summary) {
                         p.status_summary = updated.status_summary;
                       }
+
+                      // Check if today is in the cancelled range
+                      const today = new Date().toISOString().slice(0, 10);
+                      const todayIsCancelled = p.cancelled_date_from && p.cancelled_date_to &&
+                        p.cancelled_date_from !== 'null' && p.cancelled_date_to !== 'null' &&
+                        today >= p.cancelled_date_from && today <= p.cancelled_date_to;
+
+                      // If today is cancelled, override any previous action with 'cancelled'
+                      if (todayIsCancelled) {
+                        p.last_action = 'cancelled';
+                        rememberPrescriptionAction(p.allocation_id || p.id, 'cancelled');
+                      } else if (rememberedAction && rememberedAction !== 'cancelled') {
+                        // If today is NOT cancelled, restore the remembered action (updated/resumed/added)
+                        // but only if it's not 'cancelled' (we just cancelled, so don't restore old cancelled state)
+                        p.last_action = rememberedAction;
+                      }
+
                       // Update UI again with server data
                       renderAll();
                     }
