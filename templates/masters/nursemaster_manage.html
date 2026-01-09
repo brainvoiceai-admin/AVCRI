@@ -55,9 +55,8 @@
                 {% csrf_token %}
 
                 <div class="col-md-3">
-                    <label for="id_nurse_code" class="form-label">Nurse Code <span class="text-danger">*</span></label>
-                    <input type="text" name="nurse_code" id="id_nurse_code" class="form-control"
-                        placeholder="e.g., N001" required maxlength="50">
+                    <label for="id_nurse_code" class="form-label">Nurse Code</label>
+                    <input type="text" id="id_nurse_code" class="form-control" placeholder="Auto-generated" readonly>
                 </div>
 
                 <div class="col-md-4">
