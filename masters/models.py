@@ -153,12 +153,30 @@ class UnitNo(models.Model):
         ordering = ['unit_name']
 
     def __str__(self):
-        return self.unit_name# Therapy Master
+        return self.unit_name
+
+# Therapy Group Master
+class TherapyGroup(models.Model):
+    """Master list of therapy groups/categories."""
+    name = models.CharField(max_length=100, unique=True, verbose_name="Group Name")
+    is_active = models.BooleanField(default=True, verbose_name="Active")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Created At")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="Updated At")
+
+    def __str__(self):
+        return self.name
+
+    class Meta:
+        verbose_name = "Therapy Group"
+        verbose_name_plural = "Therapy Groups"
+        ordering = ["name"]
+
+# Therapy Master
 class TherapyMaster(models.Model):
     """Master list of therapy names and details."""
     therapy_code = models.CharField(max_length=20, unique=True, verbose_name="Therapy Code")
     therapy_name = models.CharField(max_length=255, verbose_name="Therapy Name")
-    therapy_group = models.CharField(max_length=100, null=True, blank=True, verbose_name="Therapy Group")
+    therapy_group = models.ForeignKey('TherapyGroup', on_delete=models.SET_NULL, null=True, blank=True, verbose_name="Therapy Group")
     therapy_category = models.CharField(max_length=100, null=True, blank=True, verbose_name="Therapy Category")
     therapy_duration = models.CharField(max_length=50, null=True, blank=True, verbose_name="Duration")
     bathing_required = models.CharField(max_length=10, null=True, blank=True, verbose_name="Bathing Required")
@@ -193,17 +211,69 @@ class TherapyMaster(models.Model):
         verbose_name_plural = "Therapy Masters"
         ordering = ["therapy_name"]
 
+# Item Group Master
+class ItemGroup(models.Model):
+    """Master list of item groups/categories."""
+    name = models.CharField(max_length=100, unique=True, verbose_name="Group Name")
+    is_active = models.BooleanField(default=True, verbose_name="Active")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Created At")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="Updated At")
+
+    def __str__(self):
+        return self.name
+
+    class Meta:
+        verbose_name = "Item Group"
+        verbose_name_plural = "Item Groups"
+        ordering = ["name"]
+
 # Item Master
 class ItemMaster(models.Model):
     """Master list of items used in therapies and prescriptions."""
-    item_code = models.CharField(max_length=20, unique=True, verbose_name="Item Code")
+    item_code = models.CharField(max_length=4, unique=True, verbose_name="Item Code", editable=False)
     item_name = models.CharField(max_length=255, verbose_name="Item Name")
-    item_category = models.CharField(max_length=100, null=True, blank=True, verbose_name="Category")
-    unit_of_measure = models.CharField(max_length=50, null=True, blank=True, verbose_name="Unit")
+    item_group = models.ForeignKey('ItemGroup', on_delete=models.SET_NULL, null=True, blank=True, verbose_name="Group")
+    umo = models.ForeignKey('UnitNo', on_delete=models.SET_NULL, null=True, blank=True, verbose_name="UOM")
+    min_max = models.CharField(max_length=100, null=True, blank=True, verbose_name="Min/Max")
     procured_from = models.ForeignKey('Procured', on_delete=models.SET_NULL, null=True, blank=True, verbose_name="Procured From")
     is_active = models.BooleanField(default=True, verbose_name="Active")
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="Created At")
     updated_at = models.DateTimeField(auto_now=True, verbose_name="Updated At")
+
+    def save(self, *args, **kwargs):
+        if not self.item_code:
+            # Auto-generate 4-digit unique code
+            self.item_code = self.generate_unique_code()
+        super().save(*args, **kwargs)
+
+    def generate_unique_code(self):
+        """Generate a unique 4-digit code starting from 0001"""
+        from django.db.models import Max
+        # Get the maximum existing code
+        max_code = ItemMaster.objects.aggregate(Max('item_code'))['item_code__max']
+        
+        if max_code:
+            try:
+                # Try to parse as integer and increment
+                next_num = int(max_code) + 1
+                if next_num > 9999:
+                    # If we exceed 9999, find the next available number
+                    for i in range(1, 10000):
+                        code_str = f"{i:04d}"
+                        if not ItemMaster.objects.filter(item_code=code_str).exists():
+                            return code_str
+            except ValueError:
+                # If max_code is not numeric, start from 0001
+                pass
+        
+        # Start from 0001 or find first available
+        for i in range(1, 10000):
+            code_str = f"{i:04d}"
+            if not ItemMaster.objects.filter(item_code=code_str).exists():
+                return code_str
+        
+        # Fallback (should never reach here)
+        return "0001"
 
     def __str__(self):
         return f"{self.item_code} - {self.item_name}"

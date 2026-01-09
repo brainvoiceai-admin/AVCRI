@@ -56,11 +56,25 @@ urlpatterns = [
     path('therapy/add/', views.TherapyMasterCreateView.as_view(), name='therapy_master_add'),
     path('therapy/<int:pk>/update/', views.TherapyMasterUpdateView.as_view(), name='therapy_master_update'),
     path('therapy/<int:pk>/delete/', views.therapy_master_delete, name='therapy_master_delete'),
+    # Therapy Group Master CRUD
+    path('therapy-groups/', views.TherapyGroupManagementView.as_view(), name='therapy_group_manage'),
+    path('therapy-groups/add/', views.TherapyGroupCreateView.as_view(), name='therapy_group_add'),
+    path('therapy-groups/<int:pk>/update/', views.TherapyGroupUpdateView.as_view(), name='therapy_group_update'),
+    path('therapy-groups/<int:pk>/delete/', views.therapy_group_delete, name='therapy_group_delete'),
+    path('therapy-groups/<int:pk>/enable/', views.therapy_group_enable, name='therapy_group_enable'),
+    path('therapy-groups/<int:pk>/disable/', views.therapy_group_disable, name='therapy_group_disable'),
     # Item Master CRUD
     path('items/', views.ItemMasterManagementView.as_view(), name='item_master_manage'),
     path('items/add/', views.ItemMasterCreateView.as_view(), name='item_master_add'),
     path('items/<int:pk>/update/', views.ItemMasterUpdateView.as_view(), name='item_master_update'),
     path('items/<int:pk>/delete/', views.item_master_delete, name='item_master_delete'),
+    # Item Group Master CRUD
+    path('item-groups/', views.ItemGroupManagementView.as_view(), name='item_group_manage'),
+    path('item-groups/add/', views.ItemGroupCreateView.as_view(), name='item_group_add'),
+    path('item-groups/<int:pk>/update/', views.ItemGroupUpdateView.as_view(), name='item_group_update'),
+    path('item-groups/<int:pk>/delete/', views.item_group_delete, name='item_group_delete'),
+    path('item-groups/<int:pk>/enable/', views.item_group_enable, name='item_group_enable'),
+    path('item-groups/<int:pk>/disable/', views.item_group_disable, name='item_group_disable'),
     # Slot Master CRUD
     path('slots/', views.SlotMasterManagementView.as_view(), name='slot_master_manage'),
     path('slots/add/', views.SlotMasterCreateView.as_view(), name='slot_master_add'),

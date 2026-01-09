@@ -281,8 +281,6 @@ def user_role_assignment(request):
 @super_admin_required
 def module_management(request):
     """View for Super Admin to manage modules"""
-    modules = Module.objects.all().order_by('order', 'name')
-    
     if request.method == 'POST':
         action = request.POST.get('action')
         
@@ -291,26 +289,31 @@ def module_management(request):
             display_name = request.POST.get('display_name')
             url_name = request.POST.get('url_name')
             icon = request.POST.get('icon', '📋')
-            order = request.POST.get('order', 0)
+            try:
+                order = int(request.POST.get('order', 0))
+            except (ValueError, TypeError):
+                order = 0
             description = request.POST.get('description', '')
             
             if not name or not display_name or not url_name:
                 messages.error(request, 'Name, Display Name, and URL Name are required.')
             else:
-                module, created = Module.objects.get_or_create(
-                    name=name,
-                    defaults={
-                        'display_name': display_name,
-                        'url_name': url_name,
-                        'icon': icon,
-                        'order': order,
-                        'description': description,
-                    }
-                )
-                if created:
+                try:
+                    module = Module.objects.create(
+                        name=name,
+                        display_name=display_name,
+                        url_name=url_name,
+                        icon=icon,
+                        order=order,
+                        description=description,
+                        is_active=True  # Explicitly set to active by default
+                    )
                     messages.success(request, f'Module "{module.display_name}" created successfully.')
-                else:
-                    messages.error(request, f'A module with name "{name}" already exists.')
+                except Exception as e:
+                    if 'unique' in str(e).lower() or 'duplicate' in str(e).lower():
+                        messages.error(request, f'A module with name "{name}" already exists.')
+                    else:
+                        messages.error(request, f'Error creating module: {str(e)}')
         
         elif action == 'update':
             module_id = request.POST.get('module_id')
@@ -319,7 +322,10 @@ def module_management(request):
             module.display_name = request.POST.get('display_name')
             module.url_name = request.POST.get('url_name')
             module.icon = request.POST.get('icon', '📋')
-            module.order = request.POST.get('order', 0)
+            try:
+                module.order = int(request.POST.get('order', 0))
+            except (ValueError, TypeError):
+                module.order = 0
             module.description = request.POST.get('description', '')
             module.is_active = request.POST.get('is_active') == 'on'
             module.save()
@@ -333,12 +339,25 @@ def module_management(request):
             # Check if module is used by any roles
             roles_using_module = Role.objects.filter(modules=module)
             if roles_using_module.exists():
-                messages.error(request, f'Cannot delete module "{module.display_name}" because it is used by {roles_using_module.count()} role(s).')
-        else:
+                # Force-remove this module from all roles, then delete the module
+                # so it no longer appears anywhere in the system.
+                count = roles_using_module.count()
+                for role in roles_using_module:
+                    role.modules.remove(module)
+                module.delete()
+                messages.warning(
+                    request,
+                    f'Module "{module.display_name}" was linked to {count} role(s). '
+                    f'It has been removed from those roles and deleted.'
+                )
+            else:
                 module.delete()
                 messages.success(request, f'Module "{module.display_name}" deleted successfully.')
         
         return redirect('authentication:module_management')
+    
+    # Get all modules after POST processing (to show updated list)
+    modules = Module.objects.all().order_by('order', 'name')
     
     context = {
         'modules': modules,
