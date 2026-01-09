@@ -1,24 +1,27 @@
 {%load static%}
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% if object %}Edit{% else %}Add{% endif %} Slot Master</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet"
+        integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
-    
-    
+
+
     <link rel="stylesheet" href="{% static 'css/masters_slot_master_form.css' %}">
     <link rel="stylesheet" href="{% static 'css/dashboards_nav.css' %}">
 </head>
+
 <body>
     {% include 'dashboards/nav.html' %}
 
     <div class="main-content container mt-4">
         <div class="d-flex justify-content-between align-items-center mb-4">
             <h2>
-                <i class="fas fa-clock text-primary"></i> 
+                <i class="fas fa-clock text-primary"></i>
                 {% if object %}Edit Time Slot{% else %}Add New Time Slot{% endif %}
             </h2>
             <div>
@@ -29,12 +32,12 @@
         </div>
 
         {% if messages %}
-            {% for message in messages %}
-                <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
-                    {{ message }}
-                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-                </div>
-            {% endfor %}
+        {% for message in messages %}
+        <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
+            {{ message }}
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+        {% endfor %}
         {% endif %}
 
         <div class="row">
@@ -48,63 +51,65 @@
                     <div class="card-body">
                         <form method="post" class="needs-validation" novalidate>
                             {% csrf_token %}
-                            
+
                             <div class="row">
                                 <div class="col-md-6 mb-3">
-                                    <label for="{{ form.slot_number.id_for_label }}" class="form-label required-field">
+                                    <label class="form-label {% if form.slot_number %}required-field{% endif %}">
                                         Slot Number
                                     </label>
+                                    {% if form.slot_number %}
                                     {{ form.slot_number }}
                                     {% if form.slot_number.errors %}
-                                        <div class="invalid-feedback d-block">
-                                            {% for error in form.slot_number.errors %}
-                                                {{ error }}
-                                            {% endfor %}
-                                        </div>
+                                    <div class="invalid-feedback d-block">
+                                        {% for error in form.slot_number.errors %}
+                                        {{ error }}
+                                        {% endfor %}
+                                    </div>
                                     {% endif %}
-                                    <small class="form-text text-muted">Unique number for this slot</small>
+                                    {% else %}
+                                    <input type="text" class="form-control" value="Auto-generated" readonly>
+                                    <small class="form-text text-muted">Will be generated on save</small>
+                                    {% endif %}
                                 </div>
-                                
+
                                 <div class="col-md-6 mb-3">
                                     <label for="{{ form.slot_name.id_for_label }}" class="form-label">
                                         Slot Name
                                     </label>
                                     {{ form.slot_name }}
                                     {% if form.slot_name.errors %}
-                                        <div class="invalid-feedback d-block">
-                                            {% for error in form.slot_name.errors %}
-                                                {{ error }}
-                                            {% endfor %}
-                                        </div>
+                                    <div class="invalid-feedback d-block">
+                                        {% for error in form.slot_name.errors %}
+                                        {{ error }}
+                                        {% endfor %}
+                                    </div>
                                     {% endif %}
                                     <small class="form-text text-muted">Optional descriptive name</small>
                                 </div>
                             </div>
-                            
+
                             <div class="row">
                                 <div class="col-md-6 mb-3">
                                     <label for="id_slot_time" class="form-label required-field">
                                         Slot Time
                                     </label>
-                                    <input type="time" 
-                                           class="form-control" 
-                                           id="id_slot_time" 
-                                           name="slot_time" 
-                                           value="{% if form.slot_time.value %}{{ form.slot_time.value|time:'H:i' }}{% elif object %}{{ object.slot_time|time:'H:i' }}{% endif %}"
-                                           required>
+                                    <input type="time" class="form-control" id="id_slot_time" name="slot_time"
+                                        value="{% if form.slot_time.value %}{{ form.slot_time.value|time:'H:i' }}{% elif object %}{{ object.slot_time|time:'H:i' }}{% endif %}"
+                                        required>
                                     {% if form.slot_time.errors %}
-                                        <div class="invalid-feedback d-block">
-                                            {% for error in form.slot_time.errors %}
-                                                {{ error }}
-                                            {% endfor %}
-                                        </div>
+                                    <div class="invalid-feedback d-block">
+                                        {% for error in form.slot_time.errors %}
+                                        {{ error }}
+                                        {% endfor %}
+                                    </div>
                                     {% endif %}
-                                    <small class="form-text text-muted">Time for this slot (12-hour format will be displayed)</small>
+                                    <small class="form-text text-muted">Time for this slot (12-hour format will be
+                                        displayed)</small>
                                     <div class="mt-2">
                                         <strong>Preview:</strong> <span id="timePreview" class="badge bg-info">-</span>
                                     </div>
                                 </div>
-                                
+
                                 <div class="col-md-6 mb-3">
                                     <div class="form-check form-switch mt-4">
                                         {{ form.is_active }}
@@ -113,16 +118,17 @@
                                         </label>
                                     </div>
                                     {% if form.is_active.errors %}
-                                        <div class="invalid-feedback d-block">
-                                            {% for error in form.is_active.errors %}
-                                                {{ error }}
-                                            {% endfor %}
-                                        </div>
+                                    <div class="invalid-feedback d-block">
+                                        {% for error in form.is_active.errors %}
+                                        {{ error }}
+                                        {% endfor %}
+                                    </div>
                                     {% endif %}
-                                    <small class="form-text text-muted">Only active slots will appear in scheduling</small>
+                                    <small class="form-text text-muted">Only active slots will appear in
+                                        scheduling</small>
                                 </div>
                             </div>
-                            
+
                             <div class="d-flex justify-content-between mt-4">
                                 <a href="{% url 'slot_master_manage' %}" class="btn btn-outline-secondary">
                                     <i class="fas fa-times me-2"></i>Cancel
@@ -136,7 +142,7 @@
                     </div>
                 </div>
             </div>
-            
+
             <div class="col-lg-4">
                 <div class="card">
                     <div class="card-header">
@@ -148,17 +154,20 @@
                         <h6>Time Slot Guidelines</h6>
                         <ul class="list-unstyled small">
                             <li><i class="fas fa-check text-success me-2"></i>Slot numbers must be unique</li>
-                            <li><i class="fas fa-check text-success me-2"></i>Time will be displayed in 12-hour format</li>
+                            <li><i class="fas fa-check text-success me-2"></i>Time will be displayed in 12-hour format
+                            </li>
                             <li><i class="fas fa-check text-success me-2"></i>Use descriptive slot names</li>
-                            <li><i class="fas fa-check text-success me-2"></i>Only active slots appear in scheduling</li>
+                            <li><i class="fas fa-check text-success me-2"></i>Only active slots appear in scheduling
+                            </li>
                         </ul>
-                        
+
                         <hr>
-                        
+
                         <h6>Quick Tips</h6>
                         <ul class="list-unstyled small text-muted">
                             <li><i class="fas fa-lightbulb text-warning me-2"></i>Use descriptive slot names</li>
-                            <li><i class="fas fa-lightbulb text-warning me-2"></i>Consider therapy duration when setting slots</li>
+                            <li><i class="fas fa-lightbulb text-warning me-2"></i>Consider therapy duration when setting
+                                slots</li>
                             <li><i class="fas fa-lightbulb text-warning me-2"></i>Plan for breaks between sessions</li>
                         </ul>
                     </div>
@@ -168,8 +177,9 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
-    
+
     <script src="{% static 'js/masters_slot_master_form.js' %}"></script>
     <script src="{% static 'js/dashboards_nav.js' %}"></script>
 </body>
+
 </html>

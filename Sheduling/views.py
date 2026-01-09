@@ -2006,7 +2006,11 @@ def therapy_entry(request):
                     'status_summary': status_summary,
                     'cancelled_date_from': a.cancelled_date_from.isoformat() if a.cancelled_date_from else None,
                     'cancelled_date_to': a.cancelled_date_to.isoformat() if a.cancelled_date_to else None,
-                    'cancellation_reason': getattr(a, 'cancellation_reason', '') or ''
+                    'cancellation_reason': getattr(a, 'cancellation_reason', '') or '',
+                    'created_at': a.created_at.isoformat() if a.created_at else None,
+                    'updated_at': a.updated_at.isoformat() if a.updated_at else None,
+                    'resumed_at': a.resumed_at.isoformat() if a.resumed_at else None,
+                    'cancelled_at': a.cancelled_at.isoformat() if a.cancelled_at else None
                 })
             return JsonResponse(out, safe=False)
 
@@ -3154,7 +3158,9 @@ def prescription_entry_page(request):
                     'cancelled_date_to': p.cancelled_date_to.isoformat() if p.cancelled_date_to else None,
                     'cancellation_reason': p.cancellation_reason,
                     'resumed_by': p.resumed_by.username if p.resumed_by else None,
-                    'resumed_at': p.resumed_at.isoformat() if p.resumed_at else None
+                    'resumed_at': p.resumed_at.isoformat() if p.resumed_at else None,
+                    'created_at': p.created_at.isoformat() if p.created_at else None,
+                    'updated_at': p.updated_at.isoformat() if p.updated_at else None
                 })
             
             return JsonResponse(results, safe=False)

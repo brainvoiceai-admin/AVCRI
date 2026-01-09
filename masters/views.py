@@ -21,7 +21,59 @@ import json
 import pandas as pd
 from datetime import datetime
 from io import BytesIO
-from django.db import transaction
+from django.db import transaction, connection
+from django.db.models import Max
+
+def generate_unique_code(prefix, model_class, field_name):
+    """
+    Generates a unique code in the format PREFIX + 3 digits (e.g., ITM001).
+    Ensures no collision and monotonically increasing numbers.
+    """
+    with transaction.atomic():
+        # Get all existing codes
+        existing_codes = model_class.objects.filter(
+            **{f"{field_name}__startswith": prefix}
+        ).values_list(field_name, flat=True)
+        
+        max_number = 0
+        for code in existing_codes:
+            try:
+                # Extract numeric part
+                # Assuming code format is exactly PREFIX + Number
+                number_part = code[len(prefix):]
+                if number_part.isdigit():
+                    num = int(number_part)
+                    if num > max_number:
+                        max_number = num
+            except Exception:
+                continue
+        
+        next_number = max_number + 1
+        return f"{prefix}{next_number:03d}"
+
+def generate_numeric_code(model_class, field_name, start_from=1000):
+    """
+    Generates a unique numeric code (4 to 5 digits, e.g., '1001').
+    """
+    with transaction.atomic():
+        existing_codes = model_class.objects.values_list(field_name, flat=True)
+        max_number = 0
+        for code in existing_codes:
+            try:
+                # Try to parse as int
+                num = int(str(code))
+                if num > max_number:
+                    max_number = num
+            except ValueError:
+                continue
+        
+        if max_number < start_from:
+            next_number = start_from
+        else:
+            next_number = max_number + 1
+            
+        return str(next_number)
+
 
 @login_required
 @require_http_methods(["GET"])
@@ -864,22 +916,25 @@ class NurseMasterManagementView(ListView):
         context = super().get_context_data(**kwargs)
         context['master_type'] = 'nursemaster'
         context['master_name'] = 'Nurse Master'
-        context['required_fields'] = ['nurse_code', 'nurse_name']
+        context['required_fields'] = ['nurse_name']
         context['optional_fields'] = ['designation', 'is_active']
+
         context['search'] = self.request.GET.get('search', '')
         context['status_filter'] = self.request.GET.get('status', '')
         return context
     
     def post(self, request, *args, **kwargs):
         """Handle POST requests for creating new nurses"""
-        nurse_code = request.POST.get('nurse_code')
         nurse_name = request.POST.get('nurse_name')
         designation = request.POST.get('designation', '')
         is_active = request.POST.get('is_active') == 'on'
         
         # Create new record
-        if nurse_code and nurse_name:
+        if nurse_name:
             try:
+                # Auto-generate nurse_code (numeric 3-5 digits)
+                nurse_code = generate_numeric_code(NurseMaster, 'nurse_code', start_from=100)
+                
                 NurseMaster.objects.create(
                     nurse_code=nurse_code,
                     nurse_name=nurse_name,
@@ -890,9 +945,10 @@ class NurseMasterManagementView(ListView):
             except Exception as e:
                 messages.error(request, f'Error creating nurse: {str(e)}')
         else:
-            messages.error(request, 'Nurse code and name are required.')
+            messages.error(request, 'Nurse name is required.')
         
         return redirect('nursemaster_manage')
+
 
 @method_decorator(super_admin_required, name='dispatch')
 class NurseMasterUpdateView(UpdateView):
@@ -901,9 +957,17 @@ class NurseMasterUpdateView(UpdateView):
     template_name = 'masters/nursemaster_form.html'
     success_url = reverse_lazy('nursemaster_manage')
     
+    def get_form(self, form_class=None):
+        form = super().get_form(form_class)
+        if 'nurse_code' in form.fields:
+            form.fields['nurse_code'].disabled = True
+            form.fields['nurse_code'].widget.attrs['class'] = 'form-control'
+        return form
+    
     def form_valid(self, form):
         messages.success(self.request, 'Nurse updated successfully.')
         return super().form_valid(form)
+
 
 @login_required
 @super_admin_required
@@ -1561,6 +1625,7 @@ class ItemMasterManagementView(ListView):
         context['item_groups'] = ItemGroup.objects.filter(is_active=True).order_by('name')
         return context
 
+
 class ItemMasterForm(forms.ModelForm):
     """Custom form for ItemMaster with filtered procured_from dropdown"""
     class Meta:
@@ -1608,8 +1673,13 @@ class ItemMasterCreateView(CreateView):
     success_url = reverse_lazy('item_master_manage')
     
     def form_valid(self, form):
-        messages.success(self.request, 'Item created successfully.')
-        return super().form_valid(form)
+        # Auto-generate item_code (numeric 4-5 digits)
+        instance = form.save(commit=False)
+        instance.item_code = generate_numeric_code(ItemMaster, 'item_code')
+        instance.save()
+        messages.success(self.request, f'Item "{instance.item_name}" ({instance.item_code}) created successfully.')
+        return redirect(self.success_url)
+
 
 class ItemMasterUpdateView(UpdateView):
     model = ItemMaster
@@ -1905,13 +1975,22 @@ class SlotMasterManagementView(ListView):
 
 class SlotMasterCreateView(CreateView):
     model = SlotMaster
-    fields = ['slot_number', 'slot_name', 'slot_time', 'is_active']
+    fields = ['slot_name', 'slot_time', 'is_active']
     template_name = 'masters/slot_master_form.html'
     success_url = reverse_lazy('slot_master_manage')
     
     def form_valid(self, form):
-        messages.success(self.request, 'Slot created successfully.')
-        return super().form_valid(form)
+        # Auto-generate slot_number
+        with transaction.atomic():
+            max_val = SlotMaster.objects.aggregate(Max('slot_number'))['slot_number__max']
+            next_val = (max_val or 0) + 1
+            instance = form.save(commit=False)
+            instance.slot_number = next_val
+            instance.save()
+            
+        messages.success(self.request, f'Slot {instance.slot_number} created successfully.')
+        return redirect(self.success_url)
+
 
 class SlotMasterUpdateView(UpdateView):
     model = SlotMaster
@@ -1919,9 +1998,16 @@ class SlotMasterUpdateView(UpdateView):
     template_name = 'masters/slot_master_form.html'
     success_url = reverse_lazy('slot_master_manage')
     
+    def get_form(self, form_class=None):
+        form = super().get_form(form_class)
+        if 'slot_number' in form.fields:
+            form.fields['slot_number'].disabled = True
+        return form
+    
     def form_valid(self, form):
         messages.success(self.request, 'Slot updated successfully.')
         return super().form_valid(form)
+
 
 @login_required
 @super_admin_required
@@ -2107,21 +2193,25 @@ class TreatmentRoomManagementView(ListView):
         context['status_filter'] = self.request.GET.get('status', '')
         context['master_type'] = 'treatmentroom'
         context['master_name'] = 'Treatment Room Master'
-        context['required_fields'] = ['room_no']
-        context['optional_fields'] = ['floor', 'description', 'tr_code', 'is_active']
+        context['required_fields'] = ['floor']
+        context['optional_fields'] = ['description', 'tr_code', 'is_active']
         return context
 
 @method_decorator(login_required, name='dispatch')
 @method_decorator(super_admin_required, name='dispatch')
 class TreatmentRoomCreateView(CreateView):
     model = TreatmentRoom
-    fields = ['room_no', 'floor', 'description', 'tr_code', 'is_active']
+    fields = ['floor', 'description', 'tr_code', 'is_active']
     template_name = 'masters/treatment_room_master_form.html'
     success_url = reverse_lazy('treatment_room_master_manage')
     
     def form_valid(self, form):
-        messages.success(self.request, 'Treatment room created successfully.')
-        return super().form_valid(form)
+        # Auto-generate room_no (TR + number)
+        instance = form.save(commit=False)
+        instance.room_no = generate_unique_code('TR', TreatmentRoom, 'room_no')
+        instance.save()
+        messages.success(self.request, f'Treatment room {instance.room_no} created successfully.')
+        return redirect(self.success_url)
 
 @method_decorator(login_required, name='dispatch')
 @method_decorator(super_admin_required, name='dispatch')
@@ -2130,6 +2220,12 @@ class TreatmentRoomUpdateView(UpdateView):
     fields = ['room_no', 'floor', 'description', 'tr_code', 'is_active']
     template_name = 'masters/treatment_room_master_form.html'
     success_url = reverse_lazy('treatment_room_master_manage')
+    
+    def get_form(self, form_class=None):
+        form = super().get_form(form_class)
+        if 'room_no' in form.fields:
+            form.fields['room_no'].disabled = True
+        return form
     
     def form_valid(self, form):
         messages.success(self.request, 'Treatment room updated successfully.')
@@ -2164,6 +2260,7 @@ def treatment_room_master_disable(request, pk):
     room.save()
     messages.success(request, f'Treatment room {room.room_no} disabled successfully.')
     return redirect('treatment_room_master_manage')
+
 
 # Therapist Master CRUD Views
 class TherapistMasterManagementView(ListView):
@@ -2766,7 +2863,7 @@ def bulk_upload_master(request):
             
             elif master_type == 'itemmaster' or master_type == 'item':
                 if 'item_name' not in df.columns:
-                    return JsonResponse({'success': False, 'error': 'Required columns missing: item_name'}, status=400)
+                    return JsonResponse({'success': False, 'error': 'Required column missing: item_name'}, status=400)
                 
                 for idx, row in df.iterrows():
                     try:
@@ -2806,33 +2903,56 @@ def bulk_upload_master(request):
                             except Procured.DoesNotExist:
                                 pass
                         
-                        # For bulk upload, we'll create new items (item_code will be auto-generated)
-                        # If you want to update existing, you'd need to match by item_name or another unique field
-                        item = ItemMaster.objects.create(
-                            item_name=item_name,
-                            item_group=item_group_obj,
-                            umo=umo_obj,
-                            min_max=str(row.get('min_max', '')).strip() or None,
-                            procured_from=procured_from_obj,
-                            is_active=is_active,
-                        )
-                        created_count += 1
+                        # Logic: Check if item_code provided exists
+                        input_code = str(row.get('item_code', '')).strip()
+                        item = None
+                        if input_code:
+                            try:
+                                item = ItemMaster.objects.get(item_code=input_code)
+                            except ItemMaster.DoesNotExist:
+                                item = None
+                                
+                        if item:
+                            # Update existing
+                            item.item_name = item_name
+                            item.item_group = item_group_obj
+                            item.umo = umo_obj
+                            item.min_max = str(row.get('min_max', '')).strip() or None
+                            item.procured_from = procured_from_obj
+                            item.is_active = is_active
+                            item.save()
+                            updated_count += 1
+                        else:
+                            # Create new with AUTO GEN code (NUMERIC)
+                            new_code = generate_numeric_code(ItemMaster, 'item_code')
+                            ItemMaster.objects.create(
+                                item_code=new_code,
+                                item_name=item_name,
+                                item_group=item_group_obj,
+                                umo=umo_obj,
+                                min_max=str(row.get('min_max', '')).strip() or None,
+                                procured_from=procured_from_obj,
+                                is_active=is_active
+                            )
+                            created_count += 1
+
                     except Exception as e:
                         error_count += 1
                         errors.append(f'Row {idx+2}: {str(e)}')
+
             
             elif master_type == 'slotmaster' or master_type == 'slot':
-                if 'slot_number' not in df.columns or 'slot_time' not in df.columns:
-                    return JsonResponse({'success': False, 'error': 'Required columns missing: slot_number, slot_time'}, status=400)
+                if 'slot_time' not in df.columns:
+                    return JsonResponse({'success': False, 'error': 'Required column missing: slot_time'}, status=400)
                 
                 for idx, row in df.iterrows():
                     try:
-                        slot_number = _parse_int(row.get('slot_number'))
+                        input_slot_number = _parse_int(row.get('slot_number'))
                         slot_time_str = str(row.get('slot_time', '')).strip()
                         
-                        if slot_number is None or not slot_time_str:
+                        if not slot_time_str:
                             error_count += 1
-                            errors.append(f'Row {idx+2}: Missing required fields (slot_number, slot_time)')
+                            errors.append(f'Row {idx+2}: Missing required field (slot_time)')
                             continue
                         
                         # Parse time
@@ -2851,27 +2971,38 @@ def bulk_upload_master(request):
                                 continue
                         
                         is_active = _parse_boolean(row.get('is_active', True))
+                        slot_name = str(row.get('slot_name', '')).strip() or None
                         
-                        slot, created = SlotMaster.objects.get_or_create(
-                            slot_number=slot_number,
-                            defaults={
-                                'slot_time': slot_time,
-                                'slot_name': str(row.get('slot_name', '')).strip() or None,
-                                'is_active': is_active,
-                            }
-                        )
+                        slot = None
+                        if input_slot_number is not None and input_slot_number != 0:
+                             try:
+                                 slot = SlotMaster.objects.get(slot_number=input_slot_number)
+                             except SlotMaster.DoesNotExist:
+                                 slot = None
                         
-                        if not created:
+                        if slot:
+                            # Update existing
                             slot.slot_time = slot_time
-                            slot.slot_name = str(row.get('slot_name', '')).strip() or None
+                            slot.slot_name = slot_name
                             slot.is_active = is_active
                             slot.save()
                             updated_count += 1
                         else:
+                            # Create new with MAX + 1
+                            max_val = SlotMaster.objects.aggregate(Max('slot_number'))['slot_number__max']
+                            next_val = (max_val or 0) + 1
+                            SlotMaster.objects.create(
+                                slot_number=next_val,
+                                slot_time=slot_time,
+                                slot_name=slot_name,
+                                is_active=is_active
+                            )
                             created_count += 1
+
                     except Exception as e:
                         error_count += 1
                         errors.append(f'Row {idx+2}: {str(e)}')
+
             
             elif master_type == 'ingredientmaster' or master_type == 'ingredient':
                 for idx, row in df.iterrows():
@@ -2932,42 +3063,49 @@ def bulk_upload_master(request):
                         errors.append(f'Row {idx+2}: {str(e)}')
             
             elif master_type == 'treatmentroom' or master_type == 'treatment_room':
-                if 'room_no' not in df.columns:
-                    return JsonResponse({'success': False, 'error': 'Required column missing: room_no'}, status=400)
+                # room_no is PK, but we might check floor/desc if needed
+                # Actually user wants auto-gen for NEW.
+                # So we don't require room_no in Excel, but if it's there we use it for update.
                 
                 for idx, row in df.iterrows():
                     try:
-                        room_no = str(row.get('room_no', '')).strip()
+                        # Required if creating new? No, we auto-gen.
+                        # But we need some data to create a room. Floor/Desc?
+                        floor = str(row.get('floor', '')).strip() or None
                         
-                        if not room_no:
-                            error_count += 1
-                            errors.append(f'Row {idx+2}: Missing required field (room_no)')
-                            continue
+                        # Logic: Look for room_no
+                        input_room_no = str(row.get('room_no', '')).strip()
+                        room = None
+                        if input_room_no:
+                            try:
+                                room = TreatmentRoom.objects.get(room_no=input_room_no)
+                            except TreatmentRoom.DoesNotExist:
+                                room = None
                         
-                        is_active = _parse_boolean(row.get('is_active', True))
-                        
-                        room, created = TreatmentRoom.objects.get_or_create(
-                            room_no=room_no,
-                            defaults={
-                                'floor': str(row.get('floor', '')).strip() or None,
-                                'description': str(row.get('description', '')).strip() or None,
-                                'tr_code': str(row.get('tr_code', '')).strip() or None,
-                                'is_active': is_active,
-                            }
-                        )
-                        
-                        if not created:
-                            room.floor = str(row.get('floor', '')).strip() or None
-                            room.description = str(row.get('description', '')).strip() or None
-                            room.tr_code = str(row.get('tr_code', '')).strip() or None
-                            room.is_active = is_active
-                            room.save()
-                            updated_count += 1
+                        if room:
+                             # Update
+                             room.floor = floor
+                             room.description = str(row.get('description', '')).strip() or None
+                             room.tr_code = str(row.get('tr_code', '')).strip() or None
+                             room.is_active = _parse_boolean(row.get('is_active', True))
+                             room.save()
+                             updated_count += 1
                         else:
-                            created_count += 1
+                             # Create new with TR code
+                             new_no = generate_unique_code('TR', TreatmentRoom, 'room_no')
+                             TreatmentRoom.objects.create(
+                                 room_no=new_no,
+                                 floor=floor,
+                                 description=str(row.get('description', '')).strip() or None,
+                                 tr_code=str(row.get('tr_code', '')).strip() or None,
+                                 is_active=_parse_boolean(row.get('is_active', True))
+                             )
+                             created_count += 1
+                             
                     except Exception as e:
                         error_count += 1
                         errors.append(f'Row {idx+2}: {str(e)}')
+
             
             elif master_type == 'procured':
                 if 'name' not in df.columns:
@@ -3188,41 +3326,50 @@ def bulk_upload_master(request):
                         errors.append(f'Row {idx+2}: {str(e)}')
             
             elif master_type == 'nursemaster' or master_type == 'nurse_master':
-                if 'nurse_code' not in df.columns or 'nurse_name' not in df.columns:
-                    return JsonResponse({'success': False, 'error': 'Required columns missing: nurse_code, nurse_name'}, status=400)
+                if 'nurse_name' not in df.columns:
+                     return JsonResponse({'success': False, 'error': 'Required column missing: nurse_name'}, status=400)
                 
                 for idx, row in df.iterrows():
                     try:
-                        nurse_code = str(row.get('nurse_code', '')).strip()
                         nurse_name = str(row.get('nurse_name', '')).strip()
-                        
-                        if not nurse_code or not nurse_name:
+                        if not nurse_name:
                             error_count += 1
-                            errors.append(f'Row {idx+2}: Missing required fields (nurse_code, nurse_name)')
+                            errors.append(f'Row {idx+2}: Missing required field (nurse_name)')
                             continue
+
+                        input_code = str(row.get('nurse_code', '')).strip()
+                        nurse = None
+                        if input_code:
+                            try:
+                                nurse = NurseMaster.objects.get(nurse_code=input_code)
+                            except NurseMaster.DoesNotExist:
+                                nurse = None
                         
                         is_active = _parse_boolean(row.get('is_active', True))
+                        designation = str(row.get('designation', '')).strip() or None
                         
-                        nurse, created = NurseMaster.objects.get_or_create(
-                            nurse_code=nurse_code,
-                            defaults={
-                                'nurse_name': nurse_name,
-                                'designation': str(row.get('designation', '')).strip() or None,
-                                'is_active': is_active,
-                            }
-                        )
-                        
-                        if not created:
+                        if nurse:
+                            # Update
                             nurse.nurse_name = nurse_name
-                            nurse.designation = str(row.get('designation', '')).strip() or None
+                            nurse.designation = designation
                             nurse.is_active = is_active
                             nurse.save()
                             updated_count += 1
                         else:
+                            # Create new
+                            new_code = generate_numeric_code(NurseMaster, 'nurse_code', start_from=100)
+                            NurseMaster.objects.create(
+                                nurse_code=new_code,
+                                nurse_name=nurse_name,
+                                designation=designation,
+                                is_active=is_active
+                            )
                             created_count += 1
+
                     except Exception as e:
                         error_count += 1
                         errors.append(f'Row {idx+2}: {str(e)}')
+
             
             elif master_type == 'prescriptionusage' or master_type == 'prescription_usage':
                 if 'name' not in df.columns:
