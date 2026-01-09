@@ -469,9 +469,9 @@
     }
 
     .action-resumed {
-      background: #e7f9ed;
-      color: #1b5e20;
-      border-color: #cdeed8;
+      background: #e8f5e9;
+      color: #2e7d32;
+      border-color: #a5d6a7;
     }
 
     .action-cancelled {
@@ -489,7 +489,7 @@
     }
 
     tr.action-resumed {
-      background: #f6fff9;
+      background: #e8f5e9 !important;
     }
 
     tr.action-cancelled {
