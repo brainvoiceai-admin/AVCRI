@@ -233,7 +233,7 @@ class ItemMaster(models.Model):
     item_code = models.CharField(max_length=4, unique=True, verbose_name="Item Code", editable=False)
     item_name = models.CharField(max_length=255, verbose_name="Item Name")
     item_group = models.ForeignKey('ItemGroup', on_delete=models.SET_NULL, null=True, blank=True, verbose_name="Group")
-    umo = models.CharField(max_length=50, null=True, blank=True, verbose_name="UMO")
+    umo = models.ForeignKey('UnitNo', on_delete=models.SET_NULL, null=True, blank=True, verbose_name="UMO")
     min_max = models.CharField(max_length=100, null=True, blank=True, verbose_name="Min/Max")
     procured_from = models.ForeignKey('Procured', on_delete=models.SET_NULL, null=True, blank=True, verbose_name="Procured From")
     is_active = models.BooleanField(default=True, verbose_name="Active")

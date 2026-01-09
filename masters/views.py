@@ -124,10 +124,21 @@ def create_master_item(request):
                 except ItemGroup.DoesNotExist:
                     pass
             
+            # Get umo if provided
+            umo = None
+            if data.get('umo'):
+                try:
+                    if isinstance(data.get('umo'), int):
+                        umo = UnitNo.objects.get(id=data.get('umo'))
+                    else:
+                        umo = UnitNo.objects.get(unit_name=data.get('umo'))
+                except UnitNo.DoesNotExist:
+                    pass
+            
             item = ItemMaster.objects.create(
                 item_name=data['item_name'],
                 item_group=item_group,
-                umo=data.get('umo', ''),
+                umo=umo,
                 min_max=data.get('min_max', '')
             )
         elif master_type == 'slot':
@@ -213,7 +224,23 @@ def update_master_item(request, item_id):
                     item.item_group = None
             else:
                 item.item_group = None
-            item.umo = data.get('umo', item.umo)
+            # Handle umo as ForeignKey - can be ID or unit_name
+            umo_data = data.get('umo')
+            if umo_data:
+                if isinstance(umo_data, int):
+                    try:
+                        item.umo = UnitNo.objects.get(id=umo_data)
+                    except UnitNo.DoesNotExist:
+                        item.umo = None
+                elif isinstance(umo_data, str):
+                    try:
+                        item.umo = UnitNo.objects.get(unit_name=umo_data)
+                    except UnitNo.DoesNotExist:
+                        item.umo = None
+                else:
+                    item.umo = None
+            else:
+                item.umo = None
             item.min_max = data.get('min_max', item.min_max)
             # Handle procured_from as ForeignKey - can be ID or name
             procured_from_data = data.get('procured_from')
@@ -1542,7 +1569,7 @@ class ItemMasterForm(forms.ModelForm):
         widgets = {
             'item_name': forms.TextInput(attrs={'class': 'form-control'}),
             'item_group': forms.Select(attrs={'class': 'form-control'}),
-            'umo': forms.TextInput(attrs={'class': 'form-control'}),
+            'umo': forms.Select(attrs={'class': 'form-control'}),
             'min_max': forms.TextInput(attrs={'class': 'form-control'}),
             'procured_from': forms.Select(attrs={'class': 'form-control'}),
             'is_active': forms.CheckboxInput(attrs={'class': 'form-check-input'}),
@@ -1556,6 +1583,16 @@ class ItemMasterForm(forms.ModelForm):
         # Filter item_group to show only active groups
         self.fields['item_group'].queryset = ItemGroup.objects.filter(is_active=True).order_by('name')
         self.fields['item_group'].empty_label = '-- Select Group --'
+        # Filter umo to show only active units
+        current_umo = self.instance.umo if self.instance and self.instance.pk else None
+        if current_umo:
+            # Include current unit even if inactive
+            self.fields['umo'].queryset = UnitNo.objects.filter(
+                db_models.Q(is_active=True) | db_models.Q(pk=current_umo.pk)
+            ).order_by('unit_name')
+        else:
+            self.fields['umo'].queryset = UnitNo.objects.filter(is_active=True).order_by('unit_name')
+        self.fields['umo'].empty_label = '-- Select UMO --'
         # Show item_code as read-only if editing
         if self.instance and self.instance.pk:
             self.fields['item_code'] = forms.CharField(
@@ -2751,6 +2788,15 @@ def bulk_upload_master(request):
                             except ItemGroup.DoesNotExist:
                                 pass
                         
+                        # Handle umo as ForeignKey
+                        umo_name = str(row.get('umo', '')).strip()
+                        umo_obj = None
+                        if umo_name:
+                            try:
+                                umo_obj = UnitNo.objects.get(unit_name=umo_name)
+                            except UnitNo.DoesNotExist:
+                                pass
+                        
                         # Handle procured_from as ForeignKey
                         procured_from_name = str(row.get('procured_from', '')).strip()
                         procured_from_obj = None
@@ -2765,7 +2811,7 @@ def bulk_upload_master(request):
                         item = ItemMaster.objects.create(
                             item_name=item_name,
                             item_group=item_group_obj,
-                            umo=str(row.get('umo', '')).strip() or None,
+                            umo=umo_obj,
                             min_max=str(row.get('min_max', '')).strip() or None,
                             procured_from=procured_from_obj,
                             is_active=is_active,
