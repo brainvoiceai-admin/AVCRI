@@ -3086,7 +3086,7 @@ def prescription_entry_page(request):
         
         try:
             patient = PatientSnapshot.objects.get(pat_reg_no=patient_reg_no)
-            prescriptions = PrescriptionAllocation.objects.filter(patient=patient).order_by('-created_at')
+            prescriptions = PrescriptionAllocation.objects.filter(patient=patient).order_by('created_at')
             
             # Import PrescriptionScheduling to calculate status counts
             from .models import PrescriptionScheduling
