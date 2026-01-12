@@ -1,0 +1,374 @@
+:root {
+      --primary-color: #1a73e8;
+      --primary-light: #e8f0fe;
+      --secondary-color: #5f6368;
+      --accent-color: #34a853;
+      --warning-color: #f9ab00;
+      --light-bg: #f8fafc;
+      --card-bg: #ffffff;
+      --border-color: #e0e0e0;
+      --text-primary: #202124;
+      --text-secondary: #5f6368;
+      --bathing-color: #dc2626;
+      --bathing-bg: #fee2e2;
+    }
+    
+        body {
+      background: var(--light-bg);
+      font-family: 'Inter', system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+      color: var(--text-primary);
+      line-height: 1.5;
+    }
+    
+    .main-content {
+      margin-left: 300px;
+      padding: 24px;
+      max-width: 1400px;
+    }
+    
+    @media (max-width: 768px) {
+      .main-content {
+        margin-left: 0;
+        padding: 16px;
+      }
+    }
+    
+    .card {
+      border: none;
+      border-radius: 12px;
+      background: var(--card-bg);
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+      transition: transform 0.2s, box-shadow 0.2s;
+      height: 100%;
+    }
+    
+    .card:hover {
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+    }
+    
+    .card-header {
+      border-bottom: 1px solid var(--border-color);
+      background: var(--card-bg);
+      border-radius: 12px 12px 0 0 !important;
+      padding: 16px 20px;
+    }
+    
+    .status-badge {
+      font-size: 0.75rem;
+      padding: 0.35rem 0.7rem;
+      border-radius: 50px;
+    }
+    
+    .chip {
+      display: inline-flex;
+            align-items: center;
+      gap: 8px;
+      padding: 6px 12px;
+      border-radius: 50px;
+      background: var(--primary-light);
+      font-size: 0.85rem;
+      margin-right: 8px;
+      margin-bottom: 8px;
+      color: var(--primary-color);
+      font-weight: 500;
+    }
+    
+    .avatar {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #dfefff, #eef8ff);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 600;
+      color: var(--primary-color);
+      font-size: 0.9rem;
+    }
+    
+    /* Bathing flag styling */
+    .bathing-flag {
+      color: var(--bathing-color);
+      font-weight: 700;
+      background: var(--bathing-bg);
+      padding: 2px 6px;
+      border-radius: 4px;
+      margin-left: 4px;
+      font-size: 0.85em;
+    }
+    
+    .therapist-header {
+      background: linear-gradient(135deg, var(--primary-color), #0d47a1);
+      color: white;
+      border-radius: 12px;
+      padding: 24px;
+      margin-bottom: 24px;
+    }
+    
+    .profile-img {
+      width: 100px;
+      height: 100px;
+      border-radius: 50%;
+      border: 4px solid rgba(255, 255, 255, 0.3);
+      object-fit: cover;
+    }
+    
+    /* Stats cards */
+    .stat-card {
+            text-align: center;
+      padding: 20px 15px;
+    }
+    
+    .stat-number {
+      font-size: 2rem;
+            font-weight: 700;
+      color: var(--primary-color);
+      line-height: 1;
+    }
+    
+    .stat-label {
+      font-size: 0.9rem;
+      color: var(--text-secondary);
+      margin-top: 8px;
+    }
+    
+    /* Calendar styling */
+    .calendar {
+            display: grid;
+      grid-template-columns: repeat(7, 1fr);
+      gap: 8px;
+    }
+    
+    .calendar-day-name {
+      font-weight: 600;
+      text-align: center;
+      color: var(--text-secondary);
+      font-size: 0.85rem;
+      padding: 10px 0;
+    }
+    
+    .calendar-day {
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+            text-align: center;
+      padding: 8px 4px;
+      height: 80px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      cursor: pointer;
+      font-size: 0.9rem;
+      transition: all 0.2s;
+      position: relative;
+    }
+    
+    .calendar-day:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(13, 110, 253, 0.1);
+      border-color: var(--primary-color);
+    }
+    
+    .calendar-day.event {
+      background: var(--primary-light);
+      color: var(--primary-color);
+      font-weight: 600;
+    }
+    
+    .calendar-day.today {
+      border: 2px solid var(--primary-color);
+      color: var(--primary-color);
+            font-weight: 700;
+        }
+    
+    .calendar-day.other-month {
+      opacity: 0.4;
+      background: #f9fafb;
+    }
+    
+    .event-indicator {
+      position: absolute;
+      bottom: 6px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--primary-color);
+    }
+    
+    .calendar-day.event .event-indicator {
+      background: var(--accent-color);
+    }
+    
+    .event-count {
+      position: absolute;
+      top: 4px;
+      right: 4px;
+      background: var(--accent-color);
+      color: white;
+      border-radius: 50%;
+      width: 18px;
+      height: 18px;
+      font-size: 0.7rem;
+            display: flex;
+            align-items: center;
+      justify-content: center;
+    }
+    
+    /* Table styling */
+    .table th {
+      font-weight: 600;
+      color: var(--text-secondary);
+      border-top: none;
+      font-size: 0.9rem;
+      padding: 12px 16px;
+    }
+    
+    .table td {
+      padding: 12px 16px;
+      vertical-align: middle;
+    }
+    
+    .table-hover tbody tr:hover {
+      background-color: rgba(26, 115, 232, 0.04);
+    }
+    
+    /* Button styling */
+    .btn-outline-primary {
+      border-color: var(--primary-color);
+      color: var(--primary-color);
+    }
+    
+    .btn-outline-primary:hover {
+      background-color: var(--primary-color);
+      border-color: var(--primary-color);
+    }
+    
+    /* Responsive adjustments */
+    @media (max-width: 768px) {
+      .calendar-day {
+        height: 60px;
+      }
+      
+      .main-content {
+        padding: 16px;
+      }
+    }
+    
+    @media (max-width: 576px) {
+      .calendar-day {
+        height: 50px;
+        font-size: 0.8rem;
+      }
+      
+      .card-body {
+        padding: 16px;
+      }
+    }
+    
+    .session-card {
+      border-left: 4px solid var(--primary-color);
+      padding-left: 16px;
+    }
+    
+    .session-card.completed {
+      border-left-color: var(--accent-color);
+    }
+    
+    .session-card.in-progress {
+      border-left-color: var(--warning-color);
+    }
+    
+    /* Timeline for today's schedule */
+    .timeline-slot {
+      display: flex;
+      margin-bottom: 16px;
+      position: relative;
+    }
+    
+    .timeline-time {
+      width: 80px;
+      font-weight: 600;
+      color: var(--text-secondary);
+            font-size: 0.9rem;
+        }
+    
+    .timeline-content {
+      flex: 1;
+      padding-left: 16px;
+                position: relative;
+            }
+    
+    .timeline-content:before {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: 8px;
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--primary-color);
+    }
+    
+    .timeline-slot:not(:last-child) .timeline-content:after {
+      content: '';
+      position: absolute;
+      left: 4px;
+      top: 18px;
+      bottom: -16px;
+      width: 2px;
+      background: var(--border-color);
+    }
+    
+    .slot-session {
+      background: white;
+      border-radius: 8px;
+      padding: 12px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+      margin-bottom: 8px;
+    }
+    
+    .slot-session.empty {
+      background: #f8f9fa;
+      color: var(--text-secondary);
+      text-align: center;
+      font-style: italic;
+    }
+    
+    /* Treatment slot colors */
+    .slot-6-30am { border-left: 4px solid #4caf50; }
+    .slot-8-30am { border-left: 4px solid #2196f3; }
+    .slot-10-00am { border-left: 4px solid #ff9800; }
+    .slot-11-30am { border-left: 4px solid #9c27b0; }
+    .slot-2-30pm { border-left: 4px solid #f44336; }
+    .slot-4-00pm { border-left: 4px solid #607d8b; }
+    .slot-5-30pm { border-left: 4px solid #795548; }
+    
+    /* Filter controls */
+    .filter-controls {
+      background: white;
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 20px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+    
+    .filter-group {
+      display: flex;
+      gap: 16px;
+      align-items: center;
+    }
+    
+    .filter-group label {
+      font-weight: 500;
+      color: var(--text-secondary);
+      margin-bottom: 0;
+    }
+    
+    .filter-group select,
+    .filter-group input {
+      border: 1px solid var(--border-color);
+      border-radius: 6px;
+      padding: 8px 12px;
+      font-size: 0.9rem;
+        }

@@ -1,17 +1,12 @@
 <!doctype html>
+{%load static%}
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>IP Registration</title>
-  <style>
-    body { font-family: Arial, sans-serif; background: #f5f6fa; padding: 20px; }
-    form { display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px; background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
-    label { font-weight: bold; }
-    input, select { width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; }
-    .full { grid-column: 1 / -1; }
-    button { padding: 10px 15px; background: #007bff; border: none; border-radius: 5px; color: #fff; cursor: pointer; }
-  </style>
+  
+    <link rel="stylesheet" href="{% static 'css/IP_Registration.css' %}">
 </head>
 <body>
   <h2>IP Registration Form</h2>

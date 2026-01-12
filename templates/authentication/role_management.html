@@ -6,58 +6,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Role Management - AVCRI</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            background-color: #f8f9fa;
-        }
-        .sidebar {
-            background-color: #343a40;
-            color: white;
-            min-height: 100vh;
-            position: fixed;
-            width: 18%;
-        }
-        .sidebar a {
-            color: #adb5bd;
-            padding: 10px 15px;
-            display: block;
-            text-decoration: none;
-        }
-        .sidebar a:hover {
-            color: white;
-            background-color: #495057;
-        }
-        .main {
-            padding: 20px;
-            margin-left: 18%;
-            width: calc(100% - 18%);
-            max-width: calc(100vw - 18%);
-            overflow-x: auto;
-        }
-        .card {
-            box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
-        }
-        .table th {
-            white-space: nowrap;
-        }
-        .table td {
-            vertical-align: middle;
-        }
-        .btn-sm {
-            margin: 2px;
-        }
-        @media (max-width: 768px) {
-            .sidebar {
-                position: static;
-                width: 100%;
-            }
-            .main {
-                margin-left: 0;
-                padding: 10px;
-            }
-        }
-    </style>
+    
+    <link rel="stylesheet" href="{% static 'css/authentication_role_management.css' %}">
+    <link rel="stylesheet" href="{% static 'css/dashboards_nav.css' %}">
 </head>
 <body>
     <div class="container-fluid">
@@ -87,11 +38,58 @@
                         </div>
                     {% endfor %}
                 {% endif %}
+                
+                <!-- Toast Container for Success Messages -->
+                <div class="toast-container position-fixed top-0 end-0 p-3" style="z-index: 9999;">
+                    <div id="successToast" class="toast" role="alert" aria-live="assertive" aria-atomic="true">
+                        <div class="toast-header bg-success text-white">
+                            <strong class="me-auto">Success</strong>
+                            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="toast" aria-label="Close"></button>
+                        </div>
+                        <div class="toast-body" id="toastMessage">
+                            Role created successfully
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Search and Filter Section -->
+                <div class="card mb-4">
+                    <div class="card-body">
+                        <form method="get" action="{% url 'authentication:role_management' %}" id="filterForm">
+                            <div class="row g-3">
+                                <div class="col-md-6">
+                                    <label for="search" class="form-label">Search</label>
+                                    <input type="text" class="form-control" id="search" name="search" 
+                                           placeholder="Search by name, display name, or description..." 
+                                           value="{{ request.GET.search|default:'' }}">
+                                </div>
+                                <div class="col-md-3">
+                                    <label for="status" class="form-label">Status</label>
+                                    <select class="form-select" id="status" name="status">
+                                        <option value="">All Status</option>
+                                        <option value="active" {% if request.GET.status == 'active' %}selected{% endif %}>Active</option>
+                                        <option value="inactive" {% if request.GET.status == 'inactive' %}selected{% endif %}>Inactive</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-3 d-flex align-items-end">
+                                    <button type="submit" class="btn btn-primary w-100 me-2">
+                                        <i class="fas fa-search"></i> Filter
+                                    </button>
+                                    <a href="{% url 'authentication:role_management' %}" class="btn btn-secondary w-100">
+                                        <i class="fas fa-times"></i> Clear
+                                    </a>
+                                </div>
+                            </div>
+                        </form>
+                    </div>
+                </div>
 
                 <!-- Roles Table -->
                 <div class="card">
-                    <div class="card-header">
-                        <h5 class="mb-0">Existing Roles</h5>
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">Existing Roles 
+                            <span class="badge bg-primary ms-2">{{ roles|length }}</span>
+                        </h5>
                     </div>
                     <div class="card-body p-0">
                         <div class="table-responsive">
@@ -109,7 +107,7 @@
                                 </thead>
                                 <tbody>
                                     {% for role in roles %}
-                                    <tr>
+                                    <tr {% if not role.is_active %}class="table-secondary" style="opacity: 0.7;"{% endif %}>
                                         <td>{{ role.name }}</td>
                                         <td>{{ role.display_name }}</td>
                                         <td>{{ role.description|truncatechars:50 }}</td>
@@ -149,6 +147,9 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    
+    <script src="{% static 'js/authentication_role_management.js' %}"></script>
+    <script src="{% static 'js/dashboards_nav.js' %}"></script>
 </body>
 </html>
 

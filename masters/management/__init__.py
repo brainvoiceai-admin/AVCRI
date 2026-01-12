@@ -1,2 +1,1 @@
-# Management package
-
+# Management commands for masters app

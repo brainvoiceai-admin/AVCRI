@@ -6,12 +6,17 @@ from django.http import HttpResponseForbidden
 def module_access_required(module_name):
     """
     Decorator to check if user has access to a specific module
+    Super admin always has access to all modules
     """
     def decorator(view_func):
         @wraps(view_func)
         def wrapper(request, *args, **kwargs):
             if not request.user.is_authenticated:
                 return redirect('authentication:login')
+            
+            # Super admin always has access
+            if request.user.role == 'super_admin':
+                return view_func(request, *args, **kwargs)
             
             if not request.user.has_module_access(module_name):
                 messages.error(request, f'You do not have permission to access {module_name}.')
