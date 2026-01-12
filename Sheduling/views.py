@@ -3774,6 +3774,8 @@ def scheduling_dashboard(request):
             bookings__date=filter_date,
             bookings__status='scheduled'
         ).distinct()
+        # Note: zero-therapist therapies (non-nurse) will be filtered out later at the
+        # booking level so we keep this as a queryset for efficient select_related/prefetch
     else:
         # If no date filter, show allocations based on Booking status (not allocation status)
         # This ensures we check actual booking objects, not the allocation header status
@@ -3792,6 +3794,8 @@ def scheduling_dashboard(request):
         scheduled_allocations = TherapyAllocation.objects.filter(
             bookings__status='scheduled'
         ).distinct()
+        # Note: zero-therapist therapies (non-nurse) will be filtered out later at the
+        # booking level so we keep this as a queryset for efficient select_related/prefetch
     
     # Prepare context data with proper prefetching for RoomBooking
     scheduled_allocations_with_bookings = scheduled_allocations.select_related('patient', 'room', 'timeslot').prefetch_related(
@@ -3820,11 +3824,20 @@ def scheduling_dashboard(request):
         )
         
         # Separate therapist and nurse bookings
+        # Filter out zero-therapist therapies (not nurse treatments) from scheduled bookings
+        # These are treated as prescriptions and only appear in prescription scheduling PDF
         from .nurse_allocation import is_nurse_treatment
+        from reshedule import therapist_requirements
         therapist_bookings = []
         nurse_bookings = []
         for booking in scheduled_bookings:
             is_nurse = is_nurse_treatment(booking.allocation.therapy_code, booking.allocation.therapy_name)
+            therapy_req = therapist_requirements(booking.allocation)
+            
+            # Skip zero-therapist therapies (not nurse treatments) - they appear only in prescription PDF
+            if not is_nurse and therapy_req.get("total", 1) == 0:
+                continue  # Skip from scheduled list
+            
             if is_nurse:
                 nurse_bookings.append(booking)
             else:
@@ -3835,8 +3848,15 @@ def scheduling_dashboard(request):
     nurse_bookings_list = []
     if filter_date:
         from .nurse_allocation import is_nurse_treatment
+        from reshedule import therapist_requirements
         for booking in scheduled_bookings:
             is_nurse = is_nurse_treatment(booking.allocation.therapy_code, booking.allocation.therapy_name)
+            therapy_req = therapist_requirements(booking.allocation)
+            
+            # Skip zero-therapist therapies (not nurse treatments) - they appear only in prescription PDF
+            if not is_nurse and therapy_req.get("total", 1) == 0:
+                continue  # Skip from scheduled list
+            
             if is_nurse:
                 nurse_bookings_list.append(booking)
             else:
@@ -3844,8 +3864,15 @@ def scheduling_dashboard(request):
     else:
         # When no date filter, separate from scheduled_allocations
         from .nurse_allocation import is_nurse_treatment
+        from reshedule import therapist_requirements
         for allocation in scheduled_allocations_with_bookings:
             is_nurse = is_nurse_treatment(allocation.therapy_code, allocation.therapy_name)
+            therapy_req = therapist_requirements(allocation)
+            
+            # Skip zero-therapist therapies (not nurse treatments) - they appear only in prescription PDF
+            if not is_nurse and therapy_req.get("total", 1) == 0:
+                continue  # Skip from scheduled list
+            
             for booking in allocation.bookings.filter(status='scheduled'):
                 if is_nurse:
                     nurse_bookings_list.append(booking)
@@ -4161,6 +4188,7 @@ def get_therapy_data_api(request):
         date_filter = request.GET.get('date')
         status_filter = request.GET.get('status', 'all')
         patient_name_filter = (request.GET.get('patient_name') or request.GET.get('patient') or '').strip()
+        include_zero_therapist = request.GET.get('include_zero_therapist', 'false').lower() == 'true'  # For prescription PDF
         
         data = []
         
@@ -4182,26 +4210,46 @@ def get_therapy_data_api(request):
                 if patient_name_filter:
                     booking_query['allocation__patient__pat_name__icontains'] = patient_name_filter
                 
-                bookings = Booking.objects.filter(**booking_query).select_related(
+                # Base queryset for this status/date
+                base_bookings_qs = Booking.objects.filter(**booking_query).select_related(
                     'allocation__patient', 'allocation', 'timeslot', 'room'
                 ).prefetch_related(
                     'assignments__therapist'
                 )
+                
+                # For 'allocated' status (used by prescription scheduling PDF), we also want to
+                # include zero‑therapist (non‑nurse) therapies. They are auto-scheduled as 'scheduled'
+                # after Final Schedule, but we need to include them in the prescription PDF.
+                # Note: base_bookings_qs already includes scheduled bookings, but we need to ensure
+                # zero-therapist therapies are NOT filtered out later in the loop.
+                if status_filter == 'allocated':
+                    # base_bookings_qs already has scheduled bookings, which includes zero-therapist therapies
+                    # We just need to make sure they're not filtered out in the conversion loop below
+                    bookings = list(base_bookings_qs)
+                else:
+                    bookings = list(base_bookings_qs)
                 
                 from .nurse_allocation import is_nurse_treatment
                 from reshedule import therapist_requirements
                 
                 # Convert bookings to JSON format
                 for booking in bookings:
-                    # Skip therapies with zero therapist requirements ONLY for failed status
-                    # Nurse treatments have zero therapist requirements but should be shown in draft/scheduled
-                    if status_filter == 'failed':
-                        # Check if it's a nurse treatment - nurse treatments should not be in failed anyway
-                        is_nurse = is_nurse_treatment(booking.allocation.therapy_code, booking.allocation.therapy_name)
-                        # Only filter out non-nurse treatments with zero therapist requirements from failed status
-                        if not is_nurse and therapist_requirements(booking.allocation).get("total", 1) == 0:
-                            continue
-                    # For draft and scheduled status, show all therapies including nurse treatments (which have zero therapist requirements)
+                    # Determine if this is a nurse treatment and get therapist requirements
+                    # We only want to hide zero-therapist non‑nurse therapies from the
+                    # therapy scheduling *lists* (scheduled/failed), but we still need
+                    # them for the prescription PDF which uses status=allocated.
+                    is_nurse = is_nurse_treatment(booking.allocation.therapy_code, booking.allocation.therapy_name)
+                    therapy_req = therapist_requirements(booking.allocation)
+                    
+                    # Exclude zero-therapist therapies (not nurse treatments) from scheduled/failed views
+                    # Keep them for 'allocated' status (used by prescription PDF) and 'draft'/'all'
+                    # Note: 'allocated' status is used by prescription PDF which needs zero-therapist therapies
+                    # The therapy scheduling dashboard uses 'scheduled' status, not 'allocated'
+                    if status_filter in ('scheduled', 'failed'):
+                        if not is_nurse and therapy_req.get("total", 1) == 0:
+                            continue  # Skip zero-therapist therapies from scheduled/failed lists
+                    
+                    # For draft/all, include zero-therapist therapies
                     # Get assigned therapists for this booking
                     therapists = []
                     # Pre-fetch all TherapistBooking records for this booking to avoid N+1 queries

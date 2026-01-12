@@ -295,6 +295,7 @@
                 }
                 
                 // Separate therapist and nurse treatments
+                // Filter out zero-therapist therapies (not nurse treatments) from scheduled display
                 const therapistData = [];
                 const nurseData = [];
                 
@@ -305,6 +306,12 @@
                         ? (item.is_nurse_treatment === true || item.is_nurse_treatment === 'true')
                         : false;
                     const isNurseTreatment = nurseFlag || (hasNurses && !hasTherapists);
+                    
+                    // Skip zero-therapist therapies (not nurse treatments) - they appear only in prescription PDF
+                    if (!isNurseTreatment && (!hasTherapists || item.therapists.length === 0)) {
+                        // This is a zero-therapist therapy (not a nurse treatment), skip it from scheduled display
+                        return; // Skip this item
+                    }
                     
                     if (isNurseTreatment) {
                         nurseData.push(item);

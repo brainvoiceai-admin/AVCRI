@@ -3666,6 +3666,14 @@ def bulk_allocate_for_date(target_date_str):
                 booking_continuity_map[booking.pk] = None  # Mark as no continuity needed
                 continue
             
+            # Skip therapies with zero therapist requirements in PASS 1 (they don't need therapists)
+            # Note: This does NOT include nurse treatments - they are handled above
+            therapy_req = therapist_requirements(allocation)
+            if therapy_req.get('total', 1) == 0:
+                booking_continuity_map[booking.pk] = None  # Mark as no continuity needed
+                print(f"[CONTINUITY PASS1] Skipping booking {booking.pk} - zero therapists required (total=0)")
+                continue
+            
             # Assign continuity therapists for this booking (partial assignment is OK)
             # This will lock therapists but NOT complete the booking
             print(f"[CONTINUITY PASS1] >>> Processing booking {booking.pk} (allocation_id={allocation.id}, patient_id={getattr(allocation.patient, 'id', None)})")
@@ -3730,6 +3738,36 @@ def bulk_allocate_for_date(target_date_str):
         pass2_booking_count += allocation_bookings.count()
         
         print(f"[CONTINUITY PASS2] Processing allocation {allocation.id} ({allocation_bookings.count()} bookings)")
+        
+        # Check if this therapy requires zero therapists (total_no_of_therapist = 0)
+        # Note: This does NOT include nurse treatments - they go through normal flow to allocate nurses
+        from Sheduling.nurse_allocation import is_nurse_treatment
+        is_nurse = is_nurse_treatment(allocation.therapy_code, allocation.therapy_name)
+        
+        # Only auto-schedule if it's NOT a nurse treatment AND has zero therapist requirements
+        if not is_nurse:
+            therapy_req = therapist_requirements(allocation)
+            if therapy_req.get('total', 1) == 0:
+                # Mark all bookings for this allocation as scheduled (they don't need algorithm)
+                allocation_bookings.update(status='scheduled')
+                from Sheduling.models import BookingItem
+                BookingItem.objects.filter(booking__allocation=allocation, booking__date=target_date).update(status='scheduled')
+                
+                successful_count += 1
+                results.append({
+                    'allocation_id': allocation.id,
+                    'patient_name': str(allocation.patient),
+                    'therapy_name': allocation.therapy_name,
+                    'status': 'success',
+                    'booked_tasks': allocation_bookings.count(),
+                    'failed_tasks': 0,
+                    'auto_scheduled': True  # Flag to indicate auto-scheduled without algorithm
+                })
+                print(f"[CONTINUITY PASS2] Auto-scheduled {allocation_bookings.count()} bookings for allocation {allocation.id} (zero therapists required, total=0, NOT nurse treatment)")
+                continue  # Skip algorithm for this allocation
+        
+        # Nurse treatments go through normal flow (expand_therapies_for_visit) which will allocate nurses
+        
         try:
             # PASS 2: Run the allocation algorithm for this allocation and target date.
             # expand_therapies_for_visit processes ALL bookings for this allocation.
