@@ -133,8 +133,10 @@
                         </a>
                     {% endif %} {% endcomment %}
                     {% for module in user_modules %}
-                        {% if 'therapy' in module.name|lower or 'prescription' in module.name|lower or 'therapy' in module.display_name|lower or 'prescription' in module.display_name|lower %}
-                            {% if module.url_name != 'prescription_dash' and module.name != 'prescriptions_dashboard' and module.url_name != 'superadmindash' and module.url_name != 'doctordash' and module.url_name != 'gmdash' and module.url_name != 'ip_pharmacy' and module.url_name != 'medicin_prescription' and module.url_name != 'medicin_prescription_table' and module.url_name != 'Patient_feedback_review' and module.url_name != 'view_patient_details' and module.url_name != 'therapist_feedback_form' and module.url_name != 'patient_lookup' and module.url_name != 'review_page' and module.url_name != 'treatment_schedule' and module.url_name != 'patient_list' and 'master' not in module.name|lower and 'master' not in module.display_name|lower and 'master' not in module.url_name|lower and module.url_name != 'therapistdash' and 'schedule' not in module.name|lower and 'schedule' not in module.display_name|lower and 'availability' not in module.name|lower and 'dash' not in module.name|lower and 'dashboard' not in module.name|lower and 'dash' not in module.display_name|lower and 'dashboard' not in module.display_name|lower %}
+                        {# Show modules with therapy/prescription in name, display_name, or url_name #}
+                        {% if 'therapy' in module.name|lower or 'prescription' in module.name|lower or 'therapy' in module.display_name|lower or 'prescription' in module.display_name|lower or 'therapy' in module.url_name|lower or module.url_name == 'patient_therapy' or module.url_name == 'prescription_entry_page' %}
+                            {# Exclude report/audit modules to prevent duplicates - they belong in Reports section #}
+                            {% if module.url_name != 'prescription_dash' and module.name != 'prescriptions_dashboard' and module.url_name != 'superadmindash' and module.url_name != 'doctordash' and module.url_name != 'gmdash' and module.url_name != 'ip_pharmacy' and module.url_name != 'medicin_prescription' and module.url_name != 'medicin_prescription_table' and module.url_name != 'Patient_feedback_review' and module.url_name != 'view_patient_details' and module.url_name != 'therapist_feedback_form' and module.url_name != 'patient_lookup' and module.url_name != 'review_page' and module.url_name != 'treatment_schedule' and module.url_name != 'patient_list' and 'master' not in module.name|lower and 'master' not in module.display_name|lower and 'master' not in module.url_name|lower and module.url_name != 'therapistdash' and 'schedule' not in module.name|lower and 'schedule' not in module.display_name|lower and 'availability' not in module.name|lower and 'dash' not in module.name|lower and 'dashboard' not in module.name|lower and 'dash' not in module.display_name|lower and 'dashboard' not in module.display_name|lower and 'report' not in module.name|lower and 'report' not in module.display_name|lower and 'Report' not in module.url_name and 'Audit' not in module.url_name and 'audit' not in module.name|lower and 'audit' not in module.display_name|lower %}
                                 {% if ':' in module.url_name %}
                                     {% if module.url_name != 'sheduling:patient_therapy' %}
                                         <a href="{% url module.url_name %}" class="menu-item" data-url="{% url module.url_name %}">
@@ -187,7 +189,8 @@
                     {% endif %}
                     {% for module in user_modules %}
                         {% if 'schedule' in module.name|lower or 'schedule' in module.display_name|lower or 'availability' in module.name|lower %}
-                            {% if 'master' not in module.name|lower and 'master' not in module.display_name|lower and 'master' not in module.url_name|lower and module.url_name != 'prescription_dash' and module.url_name != 'superadmindash' and module.url_name != 'doctordash' and module.url_name != 'gmdash' and module.url_name != 'ip_pharmacy' and module.url_name != 'medicin_prescription' and module.url_name != 'medicin_prescription_table' and module.url_name != 'Patient_feedback_review' and module.url_name != 'view_patient_details' and module.url_name != 'therapist_feedback_form' and module.url_name != 'patient_lookup' and module.url_name != 'review_page' and module.url_name != 'treatment_schedule' and module.url_name != 'patient_list' and module.url_name != 'therapistdash' and 'therapy' not in module.name|lower and 'therapy' not in module.display_name|lower and 'dash' not in module.name|lower and 'dashboard' not in module.name|lower and 'dash' not in module.display_name|lower and 'dashboard' not in module.display_name|lower %}
+                            {# Exclude report/audit modules to prevent duplicates - they belong in Reports section #}
+                            {% if 'master' not in module.name|lower and 'master' not in module.display_name|lower and 'master' not in module.url_name|lower and module.url_name != 'prescription_dash' and module.url_name != 'superadmindash' and module.url_name != 'doctordash' and module.url_name != 'gmdash' and module.url_name != 'ip_pharmacy' and module.url_name != 'medicin_prescription' and module.url_name != 'medicin_prescription_table' and module.url_name != 'Patient_feedback_review' and module.url_name != 'view_patient_details' and module.url_name != 'therapist_feedback_form' and module.url_name != 'patient_lookup' and module.url_name != 'review_page' and module.url_name != 'treatment_schedule' and module.url_name != 'patient_list' and module.url_name != 'therapistdash' and 'therapy' not in module.name|lower and 'therapy' not in module.display_name|lower and 'dash' not in module.name|lower and 'dashboard' not in module.name|lower and 'dash' not in module.display_name|lower and 'dashboard' not in module.display_name|lower and 'report' not in module.name|lower and 'report' not in module.display_name|lower and 'Report' not in module.url_name and 'Audit' not in module.url_name and 'audit' not in module.name|lower and 'audit' not in module.display_name|lower %}
                             {% if ':' in module.url_name %}
                                 {% if module.url_name != 'sheduling:patient_therapy' %}
                                     <a href="{% url module.url_name %}" class="menu-item" data-url="{% url module.url_name %}">
@@ -285,6 +288,7 @@
                     <span class="section-arrow" id="reports-section-arrow">▼</span>
                 </div>
                 <div class="menu-subsection" id="reports-section">
+                    {# Show hardcoded reports for backward compatibility #}
                     {% if request.user.role == "doctor_admin" or request.user.role == "doctor" or request.user.role == "super_admin" %}
                         <a href="{% url 'authentication:Therapy_Report' %}" class="menu-item" data-url="{% url 'authentication:Therapy_Report' %}">
                             <span>📊</span> Reports & Analytics
@@ -303,6 +307,26 @@
                             <span>📈</span> Demand Prediction
                         </a>
                     {% endif %}
+                    {# Show dynamic modules with 'report' in name/display_name or url_name containing 'Report' or 'Audit' #}
+                    {# Allow modules with different names even if they share the same URL as hardcoded links #}
+                    {% for module in user_modules %}
+                        {% if 'report' in module.name|lower or 'report' in module.display_name|lower or 'Report' in module.url_name or 'Audit' in module.url_name %}
+                            {# Exclude only if module name matches hardcoded module names, not just URL #}
+                            {# This allows modules with different names but same URL to display #}
+                            {% if module.name|lower != 'reports' and module.name|lower != 'audit_log' and module.name|lower != 'demand_prediction' and module.url_name != 'prediction_dashboard' %}
+                                {# Show all report/audit modules, including custom ones like "jaise module" #}
+                                {% if ':' in module.url_name %}
+                                    <a href="{% url module.url_name %}" class="menu-item" data-url="{% url module.url_name %}">
+                                        <span>{{ module.icon }}</span> {{ module.display_name }}
+                                    </a>
+                                {% else %}
+                                    <a href="{% url 'authentication:'|add:module.url_name %}" class="menu-item" data-url="{% url 'authentication:'|add:module.url_name %}">
+                                        <span>{{ module.icon }}</span> {{ module.display_name }}
+                                    </a>
+                                {% endif %}
+                            {% endif %}
+                        {% endif %}
+                    {% endfor %}
                 </div>
             </div>
 
@@ -343,7 +367,8 @@
                 </div>
                 <div class="menu-subsection" id="other-modules-section">
                     {% for module in user_modules %}
-                        {% if 'patient' not in module.name|lower and 'patient' not in module.display_name|lower and 'therapy' not in module.name|lower and 'therapy' not in module.display_name|lower and 'prescription' not in module.name|lower and 'prescription' not in module.display_name|lower and 'schedule' not in module.name|lower and 'schedule' not in module.display_name|lower and 'availability' not in module.name|lower and 'availability' not in module.display_name|lower and 'dash' not in module.name|lower and 'dashboard' not in module.name|lower and 'dash' not in module.display_name|lower and 'dashboard' not in module.display_name|lower and 'report' not in module.name|lower and 'report' not in module.display_name|lower and 'audit' not in module.name|lower and 'audit' not in module.display_name|lower and 'user' not in module.name|lower and 'user' not in module.display_name|lower and 'role' not in module.name|lower and 'role' not in module.display_name|lower and 'module' not in module.name|lower and 'module' not in module.display_name|lower and 'master' not in module.name|lower and 'master' not in module.display_name|lower and 'master' not in module.url_name|lower and module.url_name != 'sheduling:patient_therapy' and module.url_name != 'prescription_dash' and module.name != 'patient_lookup' and module.name != 'prescriptions_dashboard' and module.url_name != 'user_profile' and module.url_name != 'logout' and module.url_name != 'login' and module.url_name != 'patient_list' and module.url_name != 'treatment_schedule' and module.url_name != 'patient_dashboard' %}
+                        {% comment %} Show modules that haven't been displayed in other sections. Exclude modules already shown in Reports, Patient, Therapy, Scheduling, Dashboards sections. {% endcomment %}
+                        {% if 'patient' not in module.name|lower and 'patient' not in module.display_name|lower and 'therapy' not in module.name|lower and 'therapy' not in module.display_name|lower and 'prescription' not in module.name|lower and 'prescription' not in module.display_name|lower and 'schedule' not in module.name|lower and 'schedule' not in module.display_name|lower and 'availability' not in module.name|lower and 'availability' not in module.display_name|lower and 'dash' not in module.name|lower and 'dashboard' not in module.name|lower and 'dash' not in module.display_name|lower and 'dashboard' not in module.display_name|lower and 'report' not in module.name|lower and 'report' not in module.display_name|lower and 'Report' not in module.url_name and 'Audit' not in module.url_name and 'audit' not in module.name|lower and 'audit' not in module.display_name|lower and 'user' not in module.name|lower and 'user' not in module.display_name|lower and 'role' not in module.name|lower and 'role' not in module.display_name|lower and 'master' not in module.name|lower and 'master' not in module.display_name|lower and 'master' not in module.url_name|lower and module.url_name != 'sheduling:patient_therapy' and module.url_name != 'prescription_dash' and module.name != 'patient_lookup' and module.name != 'prescriptions_dashboard' and module.url_name != 'user_profile' and module.url_name != 'logout' and module.url_name != 'login' and module.url_name != 'patient_list' and module.url_name != 'treatment_schedule' and module.url_name != 'patient_dashboard' and module.url_name != 'Therapy_Report' and module.url_name != 'Therapy_Audit_Log' and module.url_name != 'Audit_Log' and module.url_name != 'prediction_dashboard' %}
                             {% if ':' in module.url_name %}
                                 <a href="{% url module.url_name %}" class="menu-item" data-url="{% url module.url_name %}">
                                     <span>{{ module.icon }}</span> {{ module.display_name }}
@@ -369,6 +394,7 @@
                                     <span>{{ module.icon }}</span> {{ module.display_name }}
                                 </a>
                             {% elif module.url_name == 'therapistdash' or module.url_name == 'therapistadmindash' or module.url_name == 'patientdash' or module.url_name == 'housekeepingdash' or module.url_name == 'nurse_dash' or module.url_name == 'Manage_user' or module.url_name == 'Therapy_Report' or module.url_name == 'Therapy_Audit_Log' or module.url_name == 'Audit_Log' or module.url_name == 'patient_profile' or module.url_name == 'role_management' or module.url_name == 'create_role' or module.url_name == 'edit_role' or module.url_name == 'delete_role' or module.url_name == 'user_role_assignment' or module.url_name == 'module_management' or module.url_name == 'therapist_schedule' or module.url_name == 'add_therapy_with_autofill' or module.url_name == 'search_patients' or module.url_name == 'get_patient_details' or module.url_name == 'confirm_role_change' or module.url_name == 'execute_role_change' %}
+                                {# Display modules that use authentication: namespace #}
                                 <a href="{% url 'authentication:'|add:module.url_name %}" class="menu-item" data-url="{% url 'authentication:'|add:module.url_name %}">
                                     <span>{{ module.icon }}</span> {{ module.display_name }}
                                 </a>
