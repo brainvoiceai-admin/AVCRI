@@ -653,19 +653,12 @@ $(function () {
             }
           });
 
-          // Get already selected item codes
-          const selectedCodes = getAllSelectedItemCodes();
-
-          // Format for Select2 and mark already-selected items as disabled
-          const formattedResults = data.map(i => {
-            const isSelected = selectedCodes.has(i.item_code);
-            return {
-              id: i.item_code,
-              text: i.item_name || i.item_code,
-              disabled: isSelected,
-              title: isSelected ? 'This item is already added to the prescription' : ''
-            };
-          });
+          // Format for Select2 - NO global duplicate checking
+          // Items can be added to multiple groups
+          const formattedResults = data.map(i => ({
+            id: i.item_code,
+            text: i.item_name || i.item_code
+          }));
           console.log('Formatted results:', formattedResults);
           return { results: formattedResults };
         }
@@ -673,14 +666,9 @@ $(function () {
       },
       cache: true
     },
-    templateResult: function (item) {
-      if (!item.id) return item.text;
-
-      // Custom template to show disabled items with visual indication
-      if (item.disabled) {
-        return $(`<span style="color: #999; font-style: italic;">${item.text} (already added)</span>`);
-      }
-      return $(`<span>${item.text}</span>`);
+    // Prevent Select2 from sorting - maintain selection order
+    sorter: function (data) {
+      return data; // Return data as-is, don't sort
     }
   });
 
@@ -741,19 +729,6 @@ $(function () {
     setTimeout(updateProcuredFromField, 100);
   });
 
-  // Prevent selecting items that are already in other groups
-  $itemBuilder.on('select2:selecting', function (e) {
-    const itemCode = e.params.args.data.id;
-    const itemText = e.params.args.data.text;
-
-    // Check if this item is already in any group (excluding the one being edited)
-    if (isItemAlreadySelected(itemCode, editingGroupId)) {
-      e.preventDefault();
-      alert(`"${itemText}" is already added to this prescription.\n\nEach item can only be added once per prescription.`);
-      return false;
-    }
-  });
-
   // Add Group
   let isAddingGroup = false; // Prevent double-click
 
@@ -786,20 +761,21 @@ $(function () {
       return;
     }
 
-    // Check for duplicate items across all groups
-    // Note: When editing a group, it's already removed from itemGroups,
-    // so we don't need to exclude it. The check is against remaining groups only.
-    const selectedCodes = getAllSelectedItemCodes();
-    const duplicateItems = [];
+    // Check for duplicate items WITHIN the current selection only
+    // NOT across all groups - same medicine can exist in different groups
+    const selectedItemCodes = new Set();
+    const duplicatesInSelection = [];
 
     selected.forEach(item => {
-      if (selectedCodes.has(item.id)) {
-        duplicateItems.push(item.text || item.id);
+      if (selectedItemCodes.has(item.id)) {
+        duplicatesInSelection.push(item.text || item.id);
+      } else {
+        selectedItemCodes.add(item.id);
       }
     });
 
-    if (duplicateItems.length > 0) {
-      alert(`The following item(s) are already added to this prescription:\n\n${duplicateItems.join('\n')}\n\nEach item can only be added once per prescription. Please remove the duplicate(s) and try again.`);
+    if (duplicatesInSelection.length > 0) {
+      alert(`The following item(s) are selected multiple times in this group:\n\n${duplicatesInSelection.join('\n')}\n\nEach item can only be added once per group. Please remove the duplicate(s) from your selection.`);
       isAddingGroup = false; // Reset flag
       return;
     }
@@ -1415,26 +1391,26 @@ $(function () {
       $commonUsageSelect.val(null).trigger('change');
     }
 
-    // Load item groups and deduplicate items across all groups
-    // This handles cases where duplicates may have been saved previously
-    const seenItemCodes = new Set();
-    const deduplicatedGroups = [];
+    // Load item groups and deduplicate items WITHIN each group only
+    // Same medicine can exist in different groups
+    const loadedGroups = [];
 
     (p.items_groups || []).forEach(g => {
-      // Filter out items that have already been seen in previous groups
+      // Deduplicate items within THIS group only
+      const seenInGroup = new Set();
       const uniqueItems = (g.items || []).filter(item => {
         if (!item.item_code) return true; // Keep items without codes (shouldn't happen)
-        if (seenItemCodes.has(item.item_code)) {
-          console.warn(`Duplicate item detected and removed: ${item.item_name} (${item.item_code})`);
-          return false; // Skip this duplicate item
+        if (seenInGroup.has(item.item_code)) {
+          console.warn(`Duplicate item within group detected and removed: ${item.item_name} (${item.item_code})`);
+          return false; // Skip this duplicate item within the group
         }
-        seenItemCodes.add(item.item_code);
-        return true; // Keep this unique item
+        seenInGroup.add(item.item_code);
+        return true; // Keep this unique item within the group
       });
 
       // Only add the group if it has items after deduplication
       if (uniqueItems.length > 0) {
-        deduplicatedGroups.push({
+        loadedGroups.push({
           id: Math.random().toString(36).slice(2, 9),
           items: uniqueItems,
           dosage: g.dosage || '',
@@ -1448,7 +1424,7 @@ $(function () {
       }
     });
 
-    itemGroups = deduplicatedGroups;
+    itemGroups = loadedGroups;
     renderItemGroups();
     $allocateBtn.hide(); $updateBtn.show(); window.scrollTo({ top: 0, behavior: 'smooth' });
   }
