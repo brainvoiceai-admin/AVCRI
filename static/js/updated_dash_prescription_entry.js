@@ -419,6 +419,7 @@ $(function () {
     editPrescriptionIndex = null;
     cancelingPrescriptionIndex = null;
     resumingPrescriptionIndex = null;
+    editingGroupId = null; // Clear editing group ID
     // Clear remembered actions when switching patients to avoid stale data
     prescriptionActionById = {};
 
@@ -594,6 +595,36 @@ $(function () {
   // Store item data for procured_from checking
   const itemDataCache = {};
 
+  // Track which group is being edited (if any)
+  let editingGroupId = null;
+
+  // Function to get all currently selected item codes across all groups
+  // Optionally exclude a specific group (for edit mode)
+  function getAllSelectedItemCodes(excludeGroupId = null) {
+    const allItemCodes = new Set();
+    itemGroups.forEach(group => {
+      // Skip the group being edited
+      if (excludeGroupId && group.id === excludeGroupId) {
+        return;
+      }
+      if (group.items && Array.isArray(group.items)) {
+        group.items.forEach(item => {
+          if (item.item_code) {
+            allItemCodes.add(item.item_code);
+          }
+        });
+      }
+    });
+    return allItemCodes;
+  }
+
+  // Function to check if an item is already selected in any group
+  // Optionally exclude a specific group (for edit mode)
+  function isItemAlreadySelected(itemCode, excludeGroupId = null) {
+    const selectedCodes = getAllSelectedItemCodes(excludeGroupId);
+    return selectedCodes.has(itemCode);
+  }
+
   // init select2s
   $itemBuilder.select2({
     placeholder: 'Search or type items (multi)',
@@ -621,17 +652,35 @@ $(function () {
               itemDataCache[item.item_code] = item;
             }
           });
-          // Format for Select2
-          const formattedResults = data.map(i => ({
-            id: i.item_code,
-            text: i.item_name || i.item_code
-          }));
+
+          // Get already selected item codes
+          const selectedCodes = getAllSelectedItemCodes();
+
+          // Format for Select2 and mark already-selected items as disabled
+          const formattedResults = data.map(i => {
+            const isSelected = selectedCodes.has(i.item_code);
+            return {
+              id: i.item_code,
+              text: i.item_name || i.item_code,
+              disabled: isSelected,
+              title: isSelected ? 'This item is already added to the prescription' : ''
+            };
+          });
           console.log('Formatted results:', formattedResults);
           return { results: formattedResults };
         }
         return { results: [] };
       },
       cache: true
+    },
+    templateResult: function (item) {
+      if (!item.id) return item.text;
+
+      // Custom template to show disabled items with visual indication
+      if (item.disabled) {
+        return $(`<span style="color: #999; font-style: italic;">${item.text} (already added)</span>`);
+      }
+      return $(`<span>${item.text}</span>`);
     }
   });
 
@@ -692,8 +741,30 @@ $(function () {
     setTimeout(updateProcuredFromField, 100);
   });
 
+  // Prevent selecting items that are already in other groups
+  $itemBuilder.on('select2:selecting', function (e) {
+    const itemCode = e.params.args.data.id;
+    const itemText = e.params.args.data.text;
+
+    // Check if this item is already in any group (excluding the one being edited)
+    if (isItemAlreadySelected(itemCode, editingGroupId)) {
+      e.preventDefault();
+      alert(`"${itemText}" is already added to this prescription.\n\nEach item can only be added once per prescription.`);
+      return false;
+    }
+  });
+
   // Add Group
+  let isAddingGroup = false; // Prevent double-click
+
   $('#add-item-group-btn').on('click', function () {
+    // Prevent double-click
+    if (isAddingGroup) {
+      console.warn('Add Group already in progress, ignoring duplicate click');
+      return;
+    }
+    isAddingGroup = true;
+
     const selected = $itemBuilder.select2('data') || [];
     const dosage = $('#item-builder-dosage').val().trim();
     const time = $('#item-builder-time').val().trim();
@@ -711,12 +782,47 @@ $(function () {
     if (!selected || selected.length === 0) {
       alert('Please select at least one medication');
       $itemBuilder.focus();
+      isAddingGroup = false; // Reset flag
+      return;
+    }
+
+    // Check for duplicate items across all groups
+    // Note: When editing a group, it's already removed from itemGroups,
+    // so we don't need to exclude it. The check is against remaining groups only.
+    const selectedCodes = getAllSelectedItemCodes();
+    const duplicateItems = [];
+
+    selected.forEach(item => {
+      if (selectedCodes.has(item.id)) {
+        duplicateItems.push(item.text || item.id);
+      }
+    });
+
+    if (duplicateItems.length > 0) {
+      alert(`The following item(s) are already added to this prescription:\n\n${duplicateItems.join('\n')}\n\nEach item can only be added once per prescription. Please remove the duplicate(s) and try again.`);
+      isAddingGroup = false; // Reset flag
       return;
     }
 
     const items = selected.length > 0 ? selected.map(s => ({ item_code: s.id, item_name: s.text || s.id })) : [];
+
+    // Debug logging
+    console.log('=== Add Group Debug ===');
+    console.log('Items to add:', items.map(i => `${i.item_name} (${i.item_code})`));
+    console.log('Current itemGroups count:', itemGroups.length);
+    console.log('All existing item codes:', Array.from(getAllSelectedItemCodes()));
+    console.log('editingGroupId:', editingGroupId);
+
     const grp = { id: Math.random().toString(36).slice(2, 9), items, dosage, time, uno, oil_class: oilClass, procured_from: procuredFrom, ingredients, ingredient_ids: ingredientIds };
     itemGroups.push(grp);
+
+    console.log('After adding - itemGroups count:', itemGroups.length);
+    console.log('New group ID:', grp.id);
+    console.log('=======================');
+
+    // Clear editing group ID after adding
+    editingGroupId = null;
+
     $itemBuilder.val(null).trigger('change');
     $('#item-builder-dosage').val('');
     $('#item-builder-time').val('');
@@ -725,6 +831,11 @@ $(function () {
     $itemBuilderProcuredFrom.val('');
     ingredientInput.val(''); // Clear text input
     renderItemGroups();
+
+    // Reset flag after a short delay to allow for UI updates
+    setTimeout(() => {
+      isAddingGroup = false;
+    }, 300);
   });
 
   function renderItemGroups() {
@@ -807,6 +918,10 @@ $(function () {
   $itemGroupsList.on('click', '.remove-group', function () {
     const id = $(this).data('id');
     itemGroups = itemGroups.filter(g => g.id !== id);
+    // Clear editing group ID if the removed group was being edited
+    if (editingGroupId === id) {
+      editingGroupId = null;
+    }
     renderItemGroups();
   });
 
@@ -814,7 +929,15 @@ $(function () {
     const id = $(this).data('id');
     const g = itemGroups.find(x => x.id === id);
     if (!g) return;
-    $itemBuilder.val(null).trigger('change');
+
+    // Set the editing group ID so duplicate checking excludes this group
+    editingGroupId = id;
+
+    // Completely clear Select2 - remove all options and values
+    $itemBuilder.empty(); // Remove all option elements
+    $itemBuilder.val(null).trigger('change'); // Clear selection
+
+    // Add the group's items as new options
     g.items.forEach(it => {
       const opt = new Option(it.item_name, it.item_code, true, true);
       $itemBuilder.append(opt);
@@ -837,7 +960,20 @@ $(function () {
     } else {
       ingredientInput.val('');
     }
+
+    // Debug logging
+    console.log('=== Edit Group Debug ===');
+    console.log('Editing group ID:', id);
+    console.log('Group items:', g.items.map(i => `${i.item_name} (${i.item_code})`));
+    console.log('itemGroups count before removal:', itemGroups.length);
+
+    // Remove the group from the list (it will be re-added when user clicks "Add Group")
     itemGroups = itemGroups.filter(x => x.id !== id);
+
+    console.log('itemGroups count after removal:', itemGroups.length);
+    console.log('Remaining item codes:', Array.from(getAllSelectedItemCodes()));
+    console.log('========================');
+
     renderItemGroups();
   });
 
@@ -1279,17 +1415,40 @@ $(function () {
       $commonUsageSelect.val(null).trigger('change');
     }
 
-    itemGroups = (p.items_groups || []).map(g => ({
-      id: Math.random().toString(36).slice(2, 9),
-      items: g.items || [],
-      dosage: g.dosage || '',
-      time: g.time || '',
-      uno: g.uno || '',
-      oil_class: g.oil_class || '',
-      procured_from: g.procured_from || '',
-      ingredient_ids: g.ingredient_ids || [],
-      ingredients: g.ingredients || []
-    }));
+    // Load item groups and deduplicate items across all groups
+    // This handles cases where duplicates may have been saved previously
+    const seenItemCodes = new Set();
+    const deduplicatedGroups = [];
+
+    (p.items_groups || []).forEach(g => {
+      // Filter out items that have already been seen in previous groups
+      const uniqueItems = (g.items || []).filter(item => {
+        if (!item.item_code) return true; // Keep items without codes (shouldn't happen)
+        if (seenItemCodes.has(item.item_code)) {
+          console.warn(`Duplicate item detected and removed: ${item.item_name} (${item.item_code})`);
+          return false; // Skip this duplicate item
+        }
+        seenItemCodes.add(item.item_code);
+        return true; // Keep this unique item
+      });
+
+      // Only add the group if it has items after deduplication
+      if (uniqueItems.length > 0) {
+        deduplicatedGroups.push({
+          id: Math.random().toString(36).slice(2, 9),
+          items: uniqueItems,
+          dosage: g.dosage || '',
+          time: g.time || '',
+          uno: g.uno || '',
+          oil_class: g.oil_class || '',
+          procured_from: g.procured_from || '',
+          ingredient_ids: g.ingredient_ids || [],
+          ingredients: g.ingredients || []
+        });
+      }
+    });
+
+    itemGroups = deduplicatedGroups;
     renderItemGroups();
     $allocateBtn.hide(); $updateBtn.show(); window.scrollTo({ top: 0, behavior: 'smooth' });
   }
@@ -1479,7 +1638,9 @@ $(function () {
     $scopeSelect.val('');
     $commonUsageSelect.val(null).trigger('change');
     usageSelectionOrder = []; // Reset selection order
-    itemGroups = []; renderItemGroups();
+    itemGroups = [];
+    editingGroupId = null; // Clear editing group ID
+    renderItemGroups();
     $allocateBtn.show(); $updateBtn.hide();
   }
 

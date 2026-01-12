@@ -2612,6 +2612,30 @@ def prescription_entry_page(request):
                     ps.pat_ref_id = payload.get('patient_ref_id'); changed = True
                 if changed: ps.save()
                 
+                # Deduplicate items across all groups before saving
+                seen_item_codes = set()
+                deduplicated_groups = []
+                
+                for group in items_groups:
+                    unique_items = []
+                    for item in group.get('items', []):
+                        item_code = item.get('item_code')
+                        if item_code and item_code in seen_item_codes:
+                            # Skip duplicate item
+                            print(f"Backend: Duplicate item removed during allocation: {item.get('item_name')} ({item_code})")
+                            continue
+                        if item_code:
+                            seen_item_codes.add(item_code)
+                        unique_items.append(item)
+                    
+                    # Only add group if it has items after deduplication
+                    if unique_items:
+                        deduplicated_group = {**group, 'items': unique_items}
+                        deduplicated_groups.append(deduplicated_group)
+                
+                # Use deduplicated groups
+                items_groups = deduplicated_groups
+                
                 # Create prescription allocation
                 from_date_parsed = parse_date(from_date)
                 to_date_parsed = parse_date(to_date)
@@ -2883,6 +2907,30 @@ def prescription_entry_page(request):
                 if prescription_name:
                     allocation.prescription_name = prescription_name
                 if items_groups is not None and items_groups != []:
+                    # Deduplicate items across all groups before saving
+                    seen_item_codes = set()
+                    deduplicated_groups = []
+                    
+                    for group in items_groups:
+                        unique_items = []
+                        for item in group.get('items', []):
+                            item_code = item.get('item_code')
+                            if item_code and item_code in seen_item_codes:
+                                # Skip duplicate item
+                                print(f"Backend: Duplicate item removed: {item.get('item_name')} ({item_code})")
+                                continue
+                            if item_code:
+                                seen_item_codes.add(item_code)
+                            unique_items.append(item)
+                        
+                        # Only add group if it has items after deduplication
+                        if unique_items:
+                            deduplicated_group = {**group, 'items': unique_items}
+                            deduplicated_groups.append(deduplicated_group)
+                    
+                    # Use deduplicated groups
+                    items_groups = deduplicated_groups
+                    
                     # Compare old and new groups (normalize for comparison)
                     try:
                         old_norm = _json.dumps(old_items_groups, sort_keys=True) if old_items_groups else ''
