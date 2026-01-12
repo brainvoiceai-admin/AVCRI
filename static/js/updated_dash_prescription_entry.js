@@ -420,6 +420,7 @@ $(function () {
     cancelingPrescriptionIndex = null;
     resumingPrescriptionIndex = null;
     editingGroupId = null; // Clear editing group ID
+    editingGroupIndex = null; // Clear editing group index
     // Clear remembered actions when switching patients to avoid stale data
     prescriptionActionById = {};
 
@@ -597,6 +598,7 @@ $(function () {
 
   // Track which group is being edited (if any)
   let editingGroupId = null;
+  let editingGroupIndex = null; // Track the position of the group being edited
 
   // Function to get all currently selected item codes across all groups
   // Optionally exclude a specific group (for edit mode)
@@ -788,16 +790,26 @@ $(function () {
     console.log('Current itemGroups count:', itemGroups.length);
     console.log('All existing item codes:', Array.from(getAllSelectedItemCodes()));
     console.log('editingGroupId:', editingGroupId);
+    console.log('editingGroupIndex:', editingGroupIndex);
 
     const grp = { id: Math.random().toString(36).slice(2, 9), items, dosage, time, uno, oil_class: oilClass, procured_from: procuredFrom, ingredients, ingredient_ids: ingredientIds };
-    itemGroups.push(grp);
+
+    // If editing a group, insert at the original position; otherwise, add to the end
+    if (editingGroupIndex !== null && editingGroupIndex >= 0) {
+      itemGroups.splice(editingGroupIndex, 0, grp); // Insert at original position
+      console.log(`Inserted group at position ${editingGroupIndex}`);
+    } else {
+      itemGroups.push(grp); // Add to end
+      console.log('Added group to end');
+    }
 
     console.log('After adding - itemGroups count:', itemGroups.length);
     console.log('New group ID:', grp.id);
     console.log('=======================');
 
-    // Clear editing group ID after adding
+    // Clear editing group ID and index after adding
     editingGroupId = null;
+    editingGroupIndex = null;
 
     $itemBuilder.val(null).trigger('change');
     $('#item-builder-dosage').val('');
@@ -897,6 +909,7 @@ $(function () {
     // Clear editing group ID if the removed group was being edited
     if (editingGroupId === id) {
       editingGroupId = null;
+      editingGroupIndex = null;
     }
     renderItemGroups();
   });
@@ -943,10 +956,15 @@ $(function () {
     console.log('Group items:', g.items.map(i => `${i.item_name} (${i.item_code})`));
     console.log('itemGroups count before removal:', itemGroups.length);
 
-    // Remove the group from the list (it will be re-added when user clicks "Add Group")
+    // Store the original index of this group so we can restore it to the same position
+    const originalIndex = itemGroups.findIndex(x => x.id === id);
+    editingGroupIndex = originalIndex; // Track the position
+
+    // Remove the group from the list (it will be re-added at the same position when user clicks "Add Group")
     itemGroups = itemGroups.filter(x => x.id !== id);
 
     console.log('itemGroups count after removal:', itemGroups.length);
+    console.log('Original group index:', originalIndex);
     console.log('Remaining item codes:', Array.from(getAllSelectedItemCodes()));
     console.log('========================');
 
@@ -1616,6 +1634,7 @@ $(function () {
     usageSelectionOrder = []; // Reset selection order
     itemGroups = [];
     editingGroupId = null; // Clear editing group ID
+    editingGroupIndex = null; // Clear editing group index
     renderItemGroups();
     $allocateBtn.show(); $updateBtn.hide();
   }
