@@ -627,10 +627,20 @@
         
         // Print Prescription Schedule to PDF
         function printPrescriptionScheduleToPDF() {
+            console.log('[PDF] Button clicked, starting PDF generation...');
             const selectedDate = document.getElementById('scheduled-date').value;
             
             if (!selectedDate) {
                 alert('Please select a date first using the date filter');
+                return;
+            }
+            
+            console.log('[PDF] Selected date:', selectedDate);
+            
+            // Check if jsPDF is available
+            if (typeof window.jspdf === 'undefined') {
+                alert('PDF library not loaded. Please refresh the page and try again.');
+                console.error('[PDF] jsPDF library not found');
                 return;
             }
             
@@ -640,98 +650,94 @@
             printBtn.disabled = true;
             printBtn.innerHTML = '<span>⏳</span> Generating PDF...';
             
+            console.log('[PDF] Fetching prescription data...');
             // Fetch prescription data
             fetch(`/sheduling/prescription/api/prescription-data/?status=scheduled&date=${selectedDate}`)
                 .then(response => response.json())
                 .then(data => {
-                    // Also fetch therapy data to get patients with zero-therapist therapies
+                    console.log('[PDF] Prescription data received:', data.success, 'patients:', data.data?.length || 0);
+                    // Also fetch therapy data to get ALL scheduled therapies (with therapists, nurse treatments, and zero-therapist)
+                    // Fetch both 'allocated' and 'scheduled' status to get all scheduled therapies
                     // Use include_zero_therapist=true to get zero-therapist therapies for prescription PDF
-                    fetch(`/sheduling/scheduling/api/therapy-data/?status=allocated&date=${selectedDate}&include_zero_therapist=true`)
-                        .then(res => res.json())
-                        .then(therapyData => {
-                            // Get all patients from prescriptions
-                            const prescriptionPatients = new Set();
-                            if (data.success && data.data.length > 0) {
-                                data.data.forEach(item => {
-                                    prescriptionPatients.add(item.registration_no);
-                                });
-                            }
-                            
-                            // Get patients with zero-therapist therapies who don't have prescriptions
-                            // With include_zero_therapist=true, zero-therapist therapies are included in therapyData
-                            const zeroTherapistPatients = new Set();
-                            if (therapyData.success && therapyData.data) {
-                                therapyData.data.forEach(therapy => {
-                                    const therapistsCount = therapy.therapists ? therapy.therapists.length : 0;
-                                    const isNurse = therapy.is_nurse_treatment === true;
-                                    const isZeroTherapist = !isNurse && therapistsCount === 0;
-                                    
-                                    if (isZeroTherapist && !prescriptionPatients.has(therapy.patient_reg_no)) {
-                                        zeroTherapistPatients.add(therapy.patient_reg_no);
-                                    }
-                                });
-                            }
-                            
-                            // Add placeholder entries for patients with only zero-therapist therapies
-                            // We'll fetch their details to get age, sex, and doctor info
-                            const additionalPatientsPromises = Array.from(zeroTherapistPatients).map(regNo => {
-                                // Find the therapy data for this patient to get patient info
-                                // Look in therapyData which now includes zero-therapist therapies
-                                const therapyForPatient = therapyData.data.find(t => t.patient_reg_no === regNo);
-                                const patientId = therapyForPatient ? therapyForPatient.id : null;
+                    console.log('[PDF] Fetching therapy data...');
+                    Promise.all([
+                        fetch(`/sheduling/scheduling/api/therapy-data/?status=allocated&date=${selectedDate}&include_zero_therapist=true`).then(r => r.json()),
+                        fetch(`/sheduling/scheduling/api/therapy-data/?status=scheduled&date=${selectedDate}&include_zero_therapist=true`).then(r => r.json())
+                    ]).then(([allocatedData, scheduledData]) => {
+                        // Combine both responses
+                        const therapyData = {
+                            success: allocatedData.success || scheduledData.success,
+                            data: [...(allocatedData.data || []), ...(scheduledData.data || [])]
+                        };
+                        
+                        // Deduplicate by booking_id or id
+                        const seen = new Set();
+                        therapyData.data = therapyData.data.filter(t => {
+                            const key = t.booking_id || t.id;
+                            if (seen.has(key)) return false;
+                            seen.add(key);
+                            return true;
+                        });
+                        
+                        console.log('[PDF Debug] Combined therapy data - allocated:', allocatedData.data?.length || 0, 'scheduled:', scheduledData.data?.length || 0, 'total unique:', therapyData.data.length);
+                        
+                        return therapyData;
+                    }).then(therapyData => {
+                        // Get all patients from prescriptions
+                        const prescriptionPatients = new Set();
+                        if (data.success && data.data.length > 0) {
+                            data.data.forEach(item => {
+                                prescriptionPatients.add(item.registration_no);
+                            });
+                        }
+                        
+                        // Get patients with zero-therapist therapies who don't have prescriptions
+                        // With include_zero_therapist=true, zero-therapist therapies are included in therapyData
+                        const zeroTherapistPatients = new Set();
+                        if (therapyData.success && therapyData.data) {
+                            therapyData.data.forEach(therapy => {
+                                const therapistsCount = therapy.therapists ? therapy.therapists.length : 0;
+                                const isNurse = therapy.is_nurse_treatment === true;
+                                const isZeroTherapist = !isNurse && therapistsCount === 0;
                                 
-                                // Try to fetch patient details to get age, sex, and doctor
-                                if (patientId) {
-                                    return fetch(`/sheduling/prescription/api/prescription-details/?patient_id=${patientId}&date=${selectedDate}`)
-                                        .then(res => res.json())
-                                        .then(detailData => {
-                                            if (detailData.success && detailData.patient_info) {
-                                                return {
-                                                    patient_id: patientId,
-                                                    scheduling_id: null,
-                                                    patient_name: detailData.patient_info.name || therapyForPatient.patient_name || 'Unknown',
-                                                    registration_no: regNo,
-                                                    room_no: detailData.patient_info.room_no || therapyForPatient.patient_room_no || null,
-                                                    doctor_name: detailData.patient_info.doctor_name || 'N/A',
-                                                    prescription_count: 0,
-                                                    status: 'scheduled',
-                                                    details: {
-                                                        success: true,
-                                                        patient_info: detailData.patient_info,
-                                                        prescription_groups: [],
-                                                        therapy_items: []
-                                                    }
-                                                };
-                                            } else {
-                                                // Fallback if details not available
-                                                return {
-                                                    patient_id: patientId,
-                                                    scheduling_id: null,
-                                                    patient_name: therapyForPatient ? therapyForPatient.patient_name : 'Unknown',
-                                                    registration_no: regNo,
-                                                    room_no: therapyForPatient ? therapyForPatient.patient_room_no : null,
-                                                    doctor_name: 'N/A',
-                                                    prescription_count: 0,
-                                                    status: 'scheduled',
-                                                    details: {
-                                                        success: true,
-                                                        patient_info: {
-                                                            name: therapyForPatient ? therapyForPatient.patient_name : 'Unknown',
-                                                            registration_no: regNo,
-                                                            room_no: therapyForPatient ? therapyForPatient.patient_room_no : null,
-                                                            age: '',
-                                                            sex: '',
-                                                            doctor_name: 'N/A'
-                                                        },
-                                                        prescription_groups: [],
-                                                        therapy_items: []
-                                                    }
-                                                };
-                                            }
-                                        })
-                                        .catch(error => {
-                                            console.error(`Error fetching details for patient ${regNo}:`, error);
-                                            // Fallback on error
+                                if (isZeroTherapist && !prescriptionPatients.has(therapy.patient_reg_no)) {
+                                    zeroTherapistPatients.add(therapy.patient_reg_no);
+                                }
+                            });
+                        }
+                        
+                        // Add placeholder entries for patients with only zero-therapist therapies
+                        // We'll fetch their details to get age, sex, and doctor info
+                        const additionalPatientsPromises = Array.from(zeroTherapistPatients).map(regNo => {
+                            // Find the therapy data for this patient to get patient info
+                            // Look in therapyData which now includes zero-therapist therapies
+                            const therapyForPatient = therapyData.data.find(t => t.patient_reg_no === regNo);
+                            const patientId = therapyForPatient ? therapyForPatient.id : null;
+                            
+                            // Try to fetch patient details to get age, sex, and doctor
+                            if (patientId) {
+                                return fetch(`/sheduling/prescription/api/prescription-details/?patient_id=${patientId}&date=${selectedDate}`)
+                                    .then(res => res.json())
+                                    .then(detailData => {
+                                        if (detailData.success && detailData.patient_info) {
+                                            return {
+                                                patient_id: patientId,
+                                                scheduling_id: null,
+                                                patient_name: detailData.patient_info.name || therapyForPatient.patient_name || 'Unknown',
+                                                registration_no: regNo,
+                                                room_no: detailData.patient_info.room_no || therapyForPatient.patient_room_no || null,
+                                                doctor_name: detailData.patient_info.doctor_name || 'N/A',
+                                                prescription_count: 0,
+                                                status: 'scheduled',
+                                                details: {
+                                                    success: true,
+                                                    patient_info: detailData.patient_info,
+                                                    prescription_groups: [],
+                                                    therapy_items: []
+                                                }
+                                            };
+                                        } else {
+                                            // Fallback if details not available
                                             return {
                                                 patient_id: patientId,
                                                 scheduling_id: null,
@@ -755,133 +761,278 @@
                                                     therapy_items: []
                                                 }
                                             };
-                                        });
-                                } else {
-                                    // No patient ID, return basic info
-                                    return Promise.resolve({
-                                        patient_id: null,
-                                        scheduling_id: null,
-                                        patient_name: therapyForPatient ? therapyForPatient.patient_name : 'Unknown',
-                                        registration_no: regNo,
-                                        room_no: therapyForPatient ? therapyForPatient.patient_room_no : null,
-                                        doctor_name: 'N/A',
-                                        prescription_count: 0,
-                                        status: 'scheduled',
-                                        details: {
-                                            success: true,
-                                            patient_info: {
-                                                name: therapyForPatient ? therapyForPatient.patient_name : 'Unknown',
-                                                registration_no: regNo,
-                                                room_no: therapyForPatient ? therapyForPatient.patient_room_no : null,
-                                                age: '',
-                                                sex: '',
-                                                doctor_name: 'N/A'
-                                            },
-                                            prescription_groups: [],
-                                            therapy_items: []
                                         }
+                                    })
+                                    .catch(error => {
+                                        console.error(`Error fetching details for patient ${regNo}:`, error);
+                                        // Fallback on error
+                                        return {
+                                            patient_id: patientId,
+                                            scheduling_id: null,
+                                            patient_name: therapyForPatient ? therapyForPatient.patient_name : 'Unknown',
+                                            registration_no: regNo,
+                                            room_no: therapyForPatient ? therapyForPatient.patient_room_no : null,
+                                            doctor_name: 'N/A',
+                                            prescription_count: 0,
+                                            status: 'scheduled',
+                                            details: {
+                                                success: true,
+                                                patient_info: {
+                                                    name: therapyForPatient ? therapyForPatient.patient_name : 'Unknown',
+                                                    registration_no: regNo,
+                                                    room_no: therapyForPatient ? therapyForPatient.patient_room_no : null,
+                                                    age: '',
+                                                    sex: '',
+                                                    doctor_name: 'N/A'
+                                                },
+                                                prescription_groups: [],
+                                                therapy_items: []
+                                            }
+                                        };
                                     });
+                            } else {
+                                // No patient ID, return basic info
+                                return Promise.resolve({
+                                    patient_id: null,
+                                    scheduling_id: null,
+                                    patient_name: therapyForPatient ? therapyForPatient.patient_name : 'Unknown',
+                                    registration_no: regNo,
+                                    room_no: therapyForPatient ? therapyForPatient.patient_room_no : null,
+                                    doctor_name: 'N/A',
+                                    prescription_count: 0,
+                                    status: 'scheduled',
+                                    details: {
+                                        success: true,
+                                        patient_info: {
+                                            name: therapyForPatient ? therapyForPatient.patient_name : 'Unknown',
+                                            registration_no: regNo,
+                                            room_no: therapyForPatient ? therapyForPatient.patient_room_no : null,
+                                            age: '',
+                                            sex: '',
+                                            doctor_name: 'N/A'
+                                        },
+                                        prescription_groups: [],
+                                        therapy_items: []
+                                    }
+                                });
+                            }
+                        });
+                        
+                        // Wait for all patient details to be fetched, then continue
+                        Promise.all(additionalPatientsPromises).then(additionalPatients => {
+                            // Combine prescription patients with zero-therapist-only patients
+                            const allPatients = (data.success && data.data.length > 0 ? data.data : []).concat(additionalPatients);
+                            
+                            if (allPatients.length > 0) {
+                            // Fetch details for each patient (only for prescription patients)
+                            const patientPromises = allPatients.map(item => {
+                                if (item.details) {
+                                    // Already has details (zero-therapist-only patient)
+                                    return Promise.resolve(item);
+                                } else {
+                                    // Fetch prescription details
+                                    return fetch(`/sheduling/prescription/api/prescription-details/?patient_id=${item.patient_id}&date=${selectedDate}`)
+                                        .then(res => res.json())
+                                        .then(detailData => ({
+                                            ...item,
+                                            details: detailData.success ? detailData : null
+                                        }));
                                 }
                             });
                             
-                            // Wait for all patient details to be fetched, then continue
-                            Promise.all(additionalPatientsPromises).then(additionalPatients => {
-                                // Combine prescription patients with zero-therapist-only patients
-                                const allPatients = (data.success && data.data.length > 0 ? data.data : []).concat(additionalPatients);
-                                
-                                if (allPatients.length > 0) {
-                                // Fetch details for each patient (only for prescription patients)
-                                const patientPromises = allPatients.map(item => {
-                                    if (item.details) {
-                                        // Already has details (zero-therapist-only patient)
-                                        return Promise.resolve(item);
-                                    } else {
-                                        // Fetch prescription details
-                                        return fetch(`/sheduling/prescription/api/prescription-details/?patient_id=${item.patient_id}&date=${selectedDate}`)
-                                            .then(res => res.json())
-                                            .then(detailData => ({
-                                                ...item,
-                                                details: detailData.success ? detailData : null
-                                            }));
-                                    }
-                                });
-                                
-                                Promise.all(patientPromises)
-                                    .then(patientsWithDetails => {
-                                        // Map therapies by patient registration number
-                                        // Separate regular therapies and zero-therapist therapies
-                                        const therapiesByPatient = {};
-                                        const zeroTherapistTherapiesByPatient = {};
-                                        if (therapyData.success && therapyData.data) {
-                                            console.log('[PDF Debug] Total therapies from API:', therapyData.data.length);
-                                            therapyData.data.forEach(therapy => {
-                                                const regNo = therapy.patient_reg_no;
-                                                // Check if this is a zero-therapist therapy (not nurse treatment)
-                                                // Zero-therapist therapies have empty therapists array
-                                                // is_nurse_treatment will be false (boolean) for non-nurse treatments, true for nurse treatments
-                                                const therapistsCount = therapy.therapists ? therapy.therapists.length : 0;
-                                                const isNurse = therapy.is_nurse_treatment === true;
-                                                const isZeroTherapist = !isNurse && therapistsCount === 0;
-                                                
-                                                if (isZeroTherapist) {
-                                                    console.log('[PDF Debug] Found zero-therapist therapy:', therapy.therapy_name, 'for patient:', regNo);
-                                                    // Store zero-therapist therapies separately
-                                                    if (!zeroTherapistTherapiesByPatient[regNo]) {
-                                                        zeroTherapistTherapiesByPatient[regNo] = [];
-                                                    }
-                                                    zeroTherapistTherapiesByPatient[regNo].push(therapy);
-                                                } else {
-                                                    // Regular therapies with therapists
-                                                    if (!therapiesByPatient[regNo]) {
-                                                        therapiesByPatient[regNo] = [];
-                                                    }
-                                                    therapiesByPatient[regNo].push(therapy);
+                            Promise.all(patientPromises)
+                                .then(patientsWithDetails => {
+                                    // Map therapies by patient registration number
+                                    // Separate regular therapies and zero-therapist therapies
+                                    const therapiesByPatient = {};
+                                    const zeroTherapistTherapiesByPatient = {};
+                                    if (therapyData.success && therapyData.data) {
+                                        console.log('[PDF Debug] Total therapies from API:', therapyData.data.length);
+                                        therapyData.data.forEach(therapy => {
+                                            const regNo = therapy.patient_reg_no;
+                                            // Check if this is a zero-therapist therapy (not nurse treatment)
+                                            // Zero-therapist therapies have empty therapists array
+                                            // is_nurse_treatment will be false (boolean) for non-nurse treatments, true for nurse treatments
+                                            const therapistsCount = therapy.therapists ? therapy.therapists.length : 0;
+                                            const isNurse = therapy.is_nurse_treatment === true;
+                                            const isZeroTherapist = !isNurse && therapistsCount === 0;
+                                            
+                                            if (isZeroTherapist) {
+                                                console.log('[PDF Debug] Found zero-therapist therapy:', therapy.therapy_name, 'for patient:', regNo);
+                                                // Store zero-therapist therapies separately
+                                                if (!zeroTherapistTherapiesByPatient[regNo]) {
+                                                    zeroTherapistTherapiesByPatient[regNo] = [];
                                                 }
-                                            });
-                                            console.log('[PDF Debug] Zero-therapist therapies by patient:', Object.keys(zeroTherapistTherapiesByPatient));
+                                                zeroTherapistTherapiesByPatient[regNo].push(therapy);
+                                            } else {
+                                                // Regular therapies with therapists
+                                                if (!therapiesByPatient[regNo]) {
+                                                    therapiesByPatient[regNo] = [];
+                                                }
+                                                therapiesByPatient[regNo].push(therapy);
+                                            }
+                                        });
+                                        console.log('[PDF Debug] Zero-therapist therapies by patient:', Object.keys(zeroTherapistTherapiesByPatient));
+                                    }
+                                    
+                                    // Create a map of therapy times by therapy name and patient for lookup
+                                    const therapyTimeMap = {};
+                                    if (therapyData.success && therapyData.data) {
+                                        therapyData.data.forEach(therapy => {
+                                            const regNo = therapy.patient_reg_no;
+                                            const therapyName = therapy.therapy_name;
+                                            const timeslot = therapy.timeslot || '';
+                                            if (regNo && therapyName && timeslot) {
+                                                const key = `${regNo}_${therapyName}`;
+                                                therapyTimeMap[key] = timeslot;
+                                            }
+                                        });
+                                    }
+                                    
+                                    // Convert therapies from therapy API to therapy items format
+                                    const convertTherapyToTherapyItem = (therapy) => {
+                                            const therapyName = therapy.therapy_name || 'Unknown Therapy';
+                                            const timeslot = therapy.timeslot || '';
+                                            
+                                            // Extract items from therapy if available
+                                            // Therapies from API might have items_groups or items structure
+                                            let itemsArray = [];
+                                            if (therapy.items_groups && Array.isArray(therapy.items_groups)) {
+                                                // If items_groups exists, use it
+                                                itemsArray = therapy.items_groups.map(group => ({
+                                                    items: group.items || [],
+                                                    dosage: group.dosage || '',
+                                                    uno: group.uno || '',
+                                                    usage: group.usage || '',
+                                                    usage_array: group.usage_array || [],
+                                                    oil_class: group.oil_class || '',
+                                                    ingredients: group.ingredients || []
+                                                }));
+                                            } else if (therapy.items && Array.isArray(therapy.items)) {
+                                                // If items array exists, wrap it
+                                                itemsArray = [{
+                                                    items: therapy.items,
+                                                    dosage: therapy.dosage || '',
+                                                    uno: therapy.uno || '',
+                                                    usage: therapy.usage || '',
+                                                    usage_array: therapy.usage_array || [],
+                                                    oil_class: therapy.oil_class || '',
+                                                    ingredients: therapy.ingredients || []
+                                                }];
+                                            } else {
+                                                // If no items structure, create a minimal entry with just therapy name
+                                                // This handles therapies that don't have items in the API response
+                                                itemsArray = [{
+                                                    items: [{
+                                                        item_name: therapyName,
+                                                        item_code: therapy.therapy_code || '',
+                                                        type: 'therapy'
+                                                    }],
+                                                    dosage: therapy.dosage || '',
+                                                    uno: therapy.uno || '',
+                                                    usage: therapy.usage || '',
+                                                    usage_array: therapy.usage_array || [],
+                                                    oil_class: therapy.oil_class || '',
+                                                    ingredients: therapy.ingredients || []
+                                                }];
+                                            }
+                                            
+                                            // Create a therapy item structure similar to prescription details API
+                                            return {
+                                                group_id: `therapy_api_${therapy.booking_id || therapy.id}`,
+                                                therapy_name: therapyName,
+                                                therapy_id: therapy.id || therapy.booking_id,
+                                                dosage: therapy.dosage || '',
+                                                usage: therapy.usage || '',
+                                                usage_array: therapy.usage_array || [],
+                                                internal_external: therapy.internal_external || '',
+                                                uno: therapy.uno || '',
+                                                booking_id: therapy.booking_id,
+                                                booking_status: therapy.status || therapy.booking_status || 'scheduled',
+                                                booking_is_cancelled: false,
+                                                timeslot: timeslot,
+                                                time: timeslot,
+                                                items: itemsArray,
+                                                is_group: true
+                                            };
+                                        };
+                                        
+                                    // Add therapy items and zero-therapist therapies to each patient
+                                    const patientsWithAllData = patientsWithDetails.map(item => {
+                                        const regNo = item.registration_no;
+                                        const zeroTherapies = zeroTherapistTherapiesByPatient[regNo] || [];
+                                        const therapiesFromAPI = therapiesByPatient[regNo] || [];
+                                        
+                                        if (zeroTherapies.length > 0) {
+                                            console.log('[PDF Debug] Patient', regNo, 'has', zeroTherapies.length, 'zero-therapist therapies:', zeroTherapies.map(t => t.therapy_name));
+                                        }
+                                        if (therapiesFromAPI.length > 0) {
+                                            console.log('[PDF Debug] Patient', regNo, 'has', therapiesFromAPI.length, 'therapies from API:', therapiesFromAPI.map(t => t.therapy_name));
                                         }
                                         
-                                        // Add therapy items and zero-therapist therapies to each patient
-                                        const patientsWithAllData = patientsWithDetails.map(item => {
-                                            const regNo = item.registration_no;
-                                            const zeroTherapies = zeroTherapistTherapiesByPatient[regNo] || [];
-                                            if (zeroTherapies.length > 0) {
-                                                console.log('[PDF Debug] Patient', regNo, 'has', zeroTherapies.length, 'zero-therapist therapies:', zeroTherapies.map(t => t.therapy_name));
+                                        // Get therapy items from prescription details API
+                                        const therapyItemsFromDetails = item.details?.therapy_items || [];
+                                        
+                                        // Convert therapies from therapy API to therapy items format
+                                        const therapyItemsFromAPI = therapiesFromAPI.map(convertTherapyToTherapyItem);
+                                        
+                                        // Combine both sources and enhance with timeslot information
+                                        const allTherapyItems = [...therapyItemsFromDetails, ...therapyItemsFromAPI];
+                                        
+                                        // Remove duplicates based on therapy_name and booking_id
+                                        const uniqueTherapyItems = [];
+                                        const seenTherapies = new Set();
+                                        allTherapyItems.forEach(therapyItem => {
+                                            const therapyName = therapyItem.therapy_name || '';
+                                            const bookingId = therapyItem.booking_id || '';
+                                            const key = `${therapyName}_${bookingId}`;
+                                            
+                                            if (!seenTherapies.has(key)) {
+                                                seenTherapies.add(key);
+                                                // Enhance with timeslot information
+                                                const lookupKey = `${regNo}_${therapyName}`;
+                                                const timeslot = therapyTimeMap[lookupKey] || therapyItem.timeslot || therapyItem.time || '';
+                                                uniqueTherapyItems.push({
+                                                    ...therapyItem,
+                                                    timeslot: timeslot
+                                                });
                                             }
-                                            return {
-                                                ...item,
-                                                therapy_items: therapiesByPatient[regNo] || [],
-                                                zero_therapist_therapies: zeroTherapies
-                                            };
                                         });
                                         
-                                        printBtn.disabled = false;
-                                        printBtn.innerHTML = originalText;
-                                        generatePrescriptionPDF(patientsWithAllData, selectedDate);
-                                    })
-                                    .catch(error => {
-                                        printBtn.disabled = false;
-                                        printBtn.innerHTML = originalText;
-                                        // Still generate PDF without therapy items
-                                        generatePrescriptionPDF(patientsWithDetails, selectedDate);
+                                        return {
+                                            ...item,
+                                            therapy_items: uniqueTherapyItems,
+                                            zero_therapist_therapies: zeroTherapies
+                                        };
                                     });
-                                } else {
+                                    
                                     printBtn.disabled = false;
                                     printBtn.innerHTML = originalText;
-                                    alert('No scheduled prescriptions or therapies found for the selected date.');
-                                }
-                            })
-                            .catch(error => {
+                                    generatePrescriptionPDF(patientsWithAllData, selectedDate);
+                                })
+                                .catch(error => {
+                                    printBtn.disabled = false;
+                                    printBtn.innerHTML = originalText;
+                                    // Still generate PDF without therapy items
+                                    generatePrescriptionPDF(patientsWithDetails, selectedDate);
+                                });
+                            } else {
                                 printBtn.disabled = false;
                                 printBtn.innerHTML = originalText;
-                                alert('Error fetching patient details: ' + error.message);
-                            });
+                                alert('No scheduled prescriptions or therapies found for the selected date.');
+                            }
                         })
                         .catch(error => {
                             printBtn.disabled = false;
                             printBtn.innerHTML = originalText;
-                            alert('Error fetching therapy data: ' + error.message);
+                            alert('Error fetching patient details: ' + error.message);
                         });
+                    })
+                    .catch(error => {
+                        printBtn.disabled = false;
+                        printBtn.innerHTML = originalText;
+                        alert('Error fetching therapy data: ' + error.message);
+                    });
                 })
                 .catch(error => {
                     printBtn.disabled = false;
@@ -891,45 +1042,84 @@
         }
         
         function generatePrescriptionPDF(prescriptionData, date) {
-            const { jsPDF } = window.jspdf;
-            const doc = new jsPDF('p', 'mm', 'a4');
+            console.log('[PDF] generatePrescriptionPDF called with', prescriptionData?.length || 0, 'patients');
             
-            const pageWidth = doc.internal.pageSize.getWidth();
-            const pageHeight = doc.internal.pageSize.getHeight();
-            const margin = 15;
-            let yPos = margin;
-            let currentPage = 1;
-            let totalPages = 1;
+            if (!prescriptionData || prescriptionData.length === 0) {
+                alert('No prescription data available to generate PDF.');
+                console.error('[PDF] No prescription data provided');
+                return;
+            }
             
-            // Remove duplicates and merge patients by registration number
-            // This ensures patients with both prescriptions and zero-therapist therapies appear only once
-            const uniqueDataMap = new Map();
-            prescriptionData.forEach(item => {
-                const regNo = item.registration_no || item.details?.patient_info?.registration_no || '';
-                if (regNo) {
+            try {
+                const { jsPDF } = window.jspdf;
+                const doc = new jsPDF('p', 'mm', 'a4');
+                console.log('[PDF] jsPDF instance created');
+                
+                const pageWidth = doc.internal.pageSize.getWidth();
+                const pageHeight = doc.internal.pageSize.getHeight();
+                const margin = 15;
+                let yPos = margin;
+                let currentPage = 1;
+                let totalPages = 1;
+                
+                // Remove duplicates and merge patients by registration number
+                // This ensures patients with both prescriptions and zero-therapist therapies appear only once
+                const uniqueDataMap = new Map();
+                console.log('[PDF] Total patients before deduplication:', prescriptionData.length);
+                prescriptionData.forEach((item, index) => {
+                    // Normalize registration number (trim whitespace, convert to string)
+                    const regNoRaw = item.registration_no || item.details?.patient_info?.registration_no || '';
+                    const regNo = String(regNoRaw).trim();
+                    const patientName = item.patient_name || item.details?.patient_info?.name || 'Unknown';
+                    console.log(`[PDF] Processing patient ${index + 1}: regNo="${regNo}", name="${patientName}"`);
+                    
+                    if (regNo) {
                     if (uniqueDataMap.has(regNo)) {
                         // Merge with existing patient entry
+                        console.log(`[PDF] Merging duplicate patient: ${regNo}`);
                         const existing = uniqueDataMap.get(regNo);
                         // Merge prescription groups
                         const existingGroups = existing.details?.prescription_groups || [];
                         const newGroups = item.details?.prescription_groups || [];
-                        // Merge therapy items
+                        // Merge therapy items from details
                         const existingTherapyItems = existing.details?.therapy_items || [];
                         const newTherapyItems = item.details?.therapy_items || [];
+                        // Merge therapy items from API (item.therapy_items)
+                        const existingTherapyItemsAPI = existing.therapy_items || [];
+                        const newTherapyItemsAPI = item.therapy_items || [];
                         // Merge zero-therapist therapies
                         const existingZero = existing.zero_therapist_therapies || [];
                         const newZero = item.zero_therapist_therapies || [];
                         
+                        // Merge patient info - prefer non-empty values from new item
+                        const existingPatientInfo = existing.details?.patient_info || {};
+                        const newPatientInfo = item.details?.patient_info || {};
+                        const mergedPatientInfo = {
+                            name: newPatientInfo.name || existingPatientInfo.name || existing.patient_name || item.patient_name || 'Unknown',
+                            registration_no: newPatientInfo.registration_no || existingPatientInfo.registration_no || regNo,
+                            room_no: newPatientInfo.room_no || existingPatientInfo.room_no || existing.room_no || item.room_no || 'N/A',
+                            age: newPatientInfo.age || existingPatientInfo.age || '',
+                            sex: newPatientInfo.sex || existingPatientInfo.sex || '',
+                            doctor_name: newPatientInfo.doctor_name || existingPatientInfo.doctor_name || existing.doctor_name || item.doctor_name || 'N/A'
+                        };
+                        
                         uniqueDataMap.set(regNo, {
                             ...existing,
+                            patient_name: mergedPatientInfo.name,
+                            registration_no: mergedPatientInfo.registration_no,
+                            room_no: mergedPatientInfo.room_no,
+                            doctor_name: mergedPatientInfo.doctor_name,
                             details: {
                                 ...existing.details,
+                                patient_info: mergedPatientInfo,
                                 prescription_groups: [...existingGroups, ...newGroups],
                                 therapy_items: [...existingTherapyItems, ...newTherapyItems]
                             },
+                            therapy_items: [...existingTherapyItemsAPI, ...newTherapyItemsAPI],
                             zero_therapist_therapies: [...existingZero, ...newZero]
                         });
                     } else {
+                        console.log(`[PDF] Adding new patient: ${regNo}`);
                         uniqueDataMap.set(regNo, item);
                     }
                 } else {
@@ -938,22 +1128,28 @@
                     if (patientId && !uniqueDataMap.has(`id_${patientId}`)) {
                         uniqueDataMap.set(`id_${patientId}`, item);
                     }
-                }
-            });
-            
-            // Convert map to array
-            const uniqueData = Array.from(uniqueDataMap.values());
-            
-            // Sort by patient name
-            uniqueData.sort((a, b) => {
-                const nameA = a.patient_name || a.details?.patient_info?.name || '';
-                const nameB = b.patient_name || b.details?.patient_info?.name || '';
-                return nameA.localeCompare(nameB);
-            });
-            
-            // Header function - add heading only on first page
-            function addHeader(isFirstPage) {
-                if (isFirstPage) {
+                    }
+                });
+                
+                // Convert map to array
+                const uniqueData = Array.from(uniqueDataMap.values());
+                console.log('[PDF] Total patients after deduplication:', uniqueData.length);
+                uniqueData.forEach((patient, idx) => {
+                    const regNo = patient.registration_no || patient.details?.patient_info?.registration_no || '';
+                    const name = patient.patient_name || patient.details?.patient_info?.name || 'Unknown';
+                    console.log(`[PDF] Final patient ${idx + 1}: regNo="${regNo}", name="${name}", prescriptions=${patient.details?.prescription_groups?.length || 0}, therapies=${patient.therapy_items?.length || 0}, zeroTherapist=${patient.zero_therapist_therapies?.length || 0}`);
+                });
+                
+                // Sort by patient name
+                uniqueData.sort((a, b) => {
+                    const nameA = a.patient_name || a.details?.patient_info?.name || '';
+                    const nameB = b.patient_name || b.details?.patient_info?.name || '';
+                    return nameA.localeCompare(nameB);
+                });
+                
+                // Header function - add heading only on first page
+                function addHeader(isFirstPage) {
+                    if (isFirstPage) {
                     // Add heading "Prescription Scheduling of [date]" at top of first page
                     const formattedDate = formatDate(date);
                     doc.setFontSize(14);
@@ -967,74 +1163,94 @@
                     doc.setLineWidth(0.5);
                     doc.line(margin, margin + 12, pageWidth - margin, margin + 12);
                     
-                    yPos = margin + 18; // Start content below heading
-                } else {
-                    // Just reset a small top margin for subsequent pages
-                    yPos = margin;
+                        yPos = margin + 18; // Start content below heading
+                    } else {
+                        // Just reset a small top margin for subsequent pages
+                        yPos = margin;
+                    }
                 }
-            }
-            
-            // Footer function
-            function addFooter(pageNum) {
-                const footerY = pageHeight - 10;
                 
-                // Subtle footer line
-                doc.setDrawColor(230, 230, 230);
-                doc.setLineWidth(0.3);
-                doc.line(margin, footerY - 5, pageWidth - margin, footerY - 5);
-                
-                doc.setFontSize(8);
-                doc.setFont(undefined, 'normal');
-                doc.setTextColor(108, 117, 125);
-                doc.text(`Page ${pageNum}`, pageWidth / 2, footerY, { align: 'center' });
-            }
-            
-            // Check if we need a new page
-            function checkNewPage(requiredHeight) {
-                if (yPos + requiredHeight > pageHeight - 20) {
-                    addFooter(currentPage);
-                    doc.addPage();
-                    currentPage++;
-                    addHeader(false); // Not first page
+                // Footer function
+                function addFooter(pageNum) {
+                    const footerY = pageHeight - 10;
+                    
+                    // Subtle footer line
+                    doc.setDrawColor(230, 230, 230);
+                    doc.setLineWidth(0.3);
+                    doc.line(margin, footerY - 5, pageWidth - margin, footerY - 5);
+                    
+                    doc.setFontSize(8);
+                    doc.setFont(undefined, 'normal');
+                    doc.setTextColor(108, 117, 125);
+                    doc.text(`Page ${pageNum}`, pageWidth / 2, footerY, { align: 'center' });
                 }
-            }
-            
-            // Add initial header with heading on first page only
-            addHeader(true);
-            
-            // Process each patient
-            uniqueData.forEach((item, index) => {
-                // Get patient info from details, with fallbacks to item data
-                const patientInfo = {
-                    name: item.details?.patient_info?.name || item.patient_name || 'Unknown',
-                    registration_no: item.details?.patient_info?.registration_no || item.registration_no || 'N/A',
-                    room_no: item.details?.patient_info?.room_no || item.room_no || 'N/A',
-                    age: item.details?.patient_info?.age || '',
-                    sex: item.details?.patient_info?.sex || '',
-                    doctor_name: item.details?.patient_info?.doctor_name || item.doctor_name || 'N/A'
-                };
                 
-                const prescriptionGroups = item.details?.prescription_groups || [];
-                const therapyItems = item.details?.therapy_items || [];
-                const zeroTherapistTherapies = item.zero_therapist_therapies || [];
+                // Check if we need a new page
+                function checkNewPage(requiredHeight) {
+                    if (yPos + requiredHeight > pageHeight - 20) {
+                        addFooter(currentPage);
+                        doc.addPage();
+                        currentPage++;
+                        addHeader(false); // Not first page
+                    }
+                }
                 
-                // Determine if this patient has any content to display
-                const hasPrescriptions = prescriptionGroups.length > 0 || therapyItems.length > 0;
-                const hasZeroTherapist = zeroTherapistTherapies.length > 0;
-                const hasAnyContent = hasPrescriptions || hasZeroTherapist;
+                // Add initial header with heading on first page only
+                addHeader(true);
                 
-                // Calculate estimated height based on groups (compact so multiple patients fit per page)
-                let estimatedHeight = 18;
-                prescriptionGroups.forEach(group => {
-                    estimatedHeight += 6 + (group.items?.length || 0) * 3;
-                });
-                therapyItems.forEach(item => {
-                    estimatedHeight += 6 + (item.items?.length || 0) * 3;
-                });
-                zeroTherapistTherapies.forEach(() => {
-                    estimatedHeight += 5; // Height per zero-therapist therapy row
-                });
-                checkNewPage(estimatedHeight);
+                // Track which patients we've already shown to prevent duplicates
+                const shownPatients = new Set();
+                
+                // Process each patient
+                uniqueData.forEach((item, index) => {
+                    // Get patient info from details, with fallbacks to item data
+                    const regNo = item.registration_no || item.details?.patient_info?.registration_no || '';
+                    const patientInfo = {
+                        name: item.details?.patient_info?.name || item.patient_name || 'Unknown',
+                        registration_no: regNo || 'N/A',
+                        room_no: item.details?.patient_info?.room_no || item.room_no || 'N/A',
+                        age: item.details?.patient_info?.age || '',
+                        sex: item.details?.patient_info?.sex || '',
+                        doctor_name: item.details?.patient_info?.doctor_name || item.doctor_name || 'N/A'
+                    };
+                    
+                    // Skip if we've already shown this patient (by registration number)
+                    if (regNo && shownPatients.has(regNo)) {
+                        console.log(`[PDF] Skipping duplicate patient: ${regNo}`);
+                        return; // Skip this iteration
+                    }
+                    if (regNo) {
+                        shownPatients.add(regNo);
+                    }
+                    
+                    const prescriptionGroups = item.details?.prescription_groups || [];
+                    // Get therapy items from both details API and converted from therapy API
+                    const therapyItemsFromDetails = item.details?.therapy_items || [];
+                    const therapyItemsFromAPI = item.therapy_items || [];
+                    // Combine both sources (therapies from API are already converted to therapy items format)
+                    const therapyItems = [...therapyItemsFromDetails, ...therapyItemsFromAPI];
+                    const zeroTherapistTherapies = item.zero_therapist_therapies || [];
+                    
+                    console.log('[PDF Debug] Patient:', item.patient_name, 'therapyItemsFromDetails:', therapyItemsFromDetails.length, 'therapyItemsFromAPI:', therapyItemsFromAPI.length, 'total therapyItems:', therapyItems.length, 'zeroTherapist:', zeroTherapistTherapies.length);
+                    
+                    // Determine if this patient has any content to display
+                    const hasPrescriptions = prescriptionGroups.length > 0;
+                    const hasTherapyItems = therapyItems.length > 0;
+                    const hasZeroTherapist = zeroTherapistTherapies.length > 0;
+                    const hasAnyContent = hasPrescriptions || hasTherapyItems || hasZeroTherapist;
+                    
+                    // Calculate estimated height based on groups (compact so multiple patients fit per page)
+                    let estimatedHeight = 18;
+                    prescriptionGroups.forEach(group => {
+                        estimatedHeight += 6 + (group.items?.length || 0) * 3;
+                    });
+                    therapyItems.forEach(item => {
+                        estimatedHeight += 6 + (item.items?.length || 0) * 3;
+                    });
+                    zeroTherapistTherapies.forEach(() => {
+                        estimatedHeight += 5; // Height per zero-therapist therapy row
+                    });
+                    checkNewPage(estimatedHeight);
                 
                 // Patient Information Section - show once at the top if patient has any content
                 // This ensures patient details appear only once, regardless of whether they have prescriptions, zero-therapist therapies, or both
@@ -1056,8 +1272,8 @@
                     yPos += 6;
                 }
                 
-                // Prescription Items and Zero-Therapist Therapies - combined in same table structure
-                if (prescriptionGroups.length > 0 || zeroTherapistTherapies.length > 0) {
+                // Prescription Items, Therapy Treatments, and Zero-Therapist Therapies - combined in same table structure
+                if (prescriptionGroups.length > 0 || therapyItems.length > 0 || zeroTherapistTherapies.length > 0) {
                     checkNewPage(6);
                     
                     // Group prescription groups by allocation_id (extract from group_id)
@@ -1082,7 +1298,109 @@
                         groupsByAllocation[allocationId].push(group);
                     });
                     
-                    // Calculate approximate box height needed (include zero-therapist therapies)
+                    // Process therapy items - group by therapy name and extract time/date
+                    const therapyRows = [];
+                    if (therapyItems && therapyItems.length > 0) {
+                        therapyItems.forEach(item => {
+                            // Therapy items can be in different formats
+                            // Format 1: is_group with items array
+                            // Format 2: Direct therapy item with items array
+                            const therapyName = item.therapy_name || 'Unknown Therapy';
+                            const therapyTime = item.timeslot || item.time || '';
+                            
+                            // Check if item has items array (grouped format)
+                            if (item.items && Array.isArray(item.items) && item.items.length > 0) {
+                                // Process each group within the therapy
+                                item.items.forEach(group => {
+                                    const items = group.items || [];
+                                    // Handle both cases: items with content and empty items (use therapy name)
+                                    if (items.length > 0) {
+                                        const itemNames = items.map(it => it.item_name || 'N/A').join(', ');
+                                        
+                                        // Get dosage, usage, etc. from group or item
+                                        const dosage = group.dosage || item.dosage || group.dose || '';
+                                        const uno = group.uno || item.uno || group.notes || '';
+                                        const dosageDisplay = (dosage && uno) ? `${dosage} (${uno})` : (dosage || uno || '');
+                                        
+                                        // Usage can be from group, item, or usage_array
+                                        let usage = group.usage || item.usage || '';
+                                        if (!usage && group.usage_array && Array.isArray(group.usage_array) && group.usage_array.length > 0) {
+                                            usage = group.usage_array.join(', ');
+                                        } else if (!usage && item.usage_array && Array.isArray(item.usage_array) && item.usage_array.length > 0) {
+                                            usage = item.usage_array.join(', ');
+                                        }
+                                        
+                                        const oilClass = group.oil_class || item.oil_class || '';
+                                        const ingredients = (group.ingredients && group.ingredients.length > 0)
+                                            ? group.ingredients.map(ing => ing.ingredient_name || ing.text || 'N/A').join(', ')
+                                            : ((item.ingredients && item.ingredients.length > 0)
+                                                ? item.ingredients.map(ing => ing.ingredient_name || ing.text || 'N/A').join(', ')
+                                                : '');
+                                        
+                                        // Use time from item or group, fallback to therapy time
+                                        const rowTime = group.time || group.timeslot || therapyTime || '';
+                                        
+                                        // For therapies: Usage column = therapy name, Items column = usage, Dosage column = items + dosage, Ingredients column = time
+                                        therapyRows.push({
+                                            therapyName: therapyName,
+                                            therapyTime: rowTime,
+                                            itemNames: itemNames,
+                                            usage: therapyName, // Usage column shows therapy name
+                                            usageForItems: usage, // Items column shows usage
+                                            dosage: itemNames + (dosageDisplay ? ` - ${dosageDisplay}` : ''), // Dosage column shows items + dosage
+                                            oilClass: oilClass,
+                                            ingredients: rowTime || '' // Ingredients column shows time slot
+                                        });
+                                    } else {
+                                        // If group has no items, still create a row with just therapy name and time
+                                        const rowTime = group.time || group.timeslot || therapyTime || '';
+                                        const usage = group.usage || item.usage || '';
+                                        const dosageDisplay = group.dosage || item.dosage || '';
+                                        
+                                        therapyRows.push({
+                                            therapyName: therapyName,
+                                            therapyTime: rowTime,
+                                            itemNames: therapyName,
+                                            usage: therapyName, // Usage column shows therapy name
+                                            usageForItems: usage, // Items column shows usage
+                                            dosage: therapyName + (dosageDisplay ? ` - ${dosageDisplay}` : ''), // Dosage column shows therapy name + dosage
+                                            oilClass: group.oil_class || item.oil_class || '',
+                                            ingredients: rowTime || '' // Ingredients column shows time slot
+                                        });
+                                    }
+                                });
+                            } else {
+                                // If no items array, treat the whole item as a single therapy entry
+                                // This handles therapies that don't have items structure (like from therapy API)
+                                // For therapies from API without items, show just therapy name and time
+                                const itemName = item.item_name || therapyName;
+                                const dosage = item.dosage || item.dose || '';
+                                const uno = item.uno || item.notes || '';
+                                const dosageDisplay = (dosage && uno) ? `${dosage} (${uno})` : (dosage || uno || '');
+                                
+                                let usage = item.usage || '';
+                                if (!usage && item.usage_array && Array.isArray(item.usage_array) && item.usage_array.length > 0) {
+                                    usage = item.usage_array.join(', ');
+                                }
+                                
+                                const oilClass = item.oil_class || '';
+                                
+                                // For therapies: Usage column = therapy name, Items column = usage, Dosage column = items + dosage, Ingredients column = time
+                                therapyRows.push({
+                                    therapyName: therapyName,
+                                    therapyTime: therapyTime,
+                                    itemNames: itemName,
+                                    usage: therapyName, // Usage column shows therapy name
+                                    usageForItems: usage, // Items column shows usage
+                                    dosage: itemName + (dosageDisplay ? ` - ${dosageDisplay}` : ''), // Dosage column shows items + dosage
+                                    oilClass: oilClass,
+                                    ingredients: therapyTime || '' // Ingredients column shows time slot
+                                });
+                            }
+                        });
+                    }
+                    
+                    // Calculate approximate box height needed (include all items)
                     let estimatedHeight = 10; // Base height for header and column headers
                     Object.values(groupsByAllocation).forEach(allocationGroups => {
                         allocationGroups.forEach(group => {
@@ -1090,6 +1408,9 @@
                                 estimatedHeight += 5; // Height per row
                             }
                         });
+                    });
+                    therapyRows.forEach(() => {
+                        estimatedHeight += 5; // Height per therapy row
                     });
                     zeroTherapistTherapies.forEach(() => {
                         estimatedHeight += 5; // Height per zero-therapist therapy row
@@ -1101,7 +1422,7 @@
                     const boxStartY = yPos;
                     
                     // Column headers (no background box, just text) - only show once if there are any items
-                    if (prescriptionGroups.length > 0 || zeroTherapistTherapies.length > 0) {
+                    if (prescriptionGroups.length > 0 || therapyRows.length > 0 || zeroTherapistTherapies.length > 0) {
                         doc.setFontSize(7);
                         doc.setFont(undefined, 'bold');
                         doc.setTextColor(0, 0, 0);
@@ -1209,6 +1530,51 @@
                         });
                     });
                     
+                    // Render therapy treatments as rows in the same table structure
+                    therapyRows.forEach((therapyRow, index) => {
+                        checkNewPage(5);
+                        
+                        // Render row data
+                        doc.setFontSize(7);
+                        
+                        // Usage column: Therapy name
+                        doc.setFont(undefined, 'normal');
+                        doc.setTextColor(0, 0, 0);
+                        const usageText = therapyRow.usage || therapyRow.therapyName || '—';
+                        const usageLines = doc.splitTextToSize(usageText, 25);
+                        doc.text(usageLines, boxX + 2, yPos + 2);
+                        
+                        // Items column: Usage of therapy (in blue, bold)
+                        doc.setFont(undefined, 'bold');
+                        doc.setTextColor(0, 86, 179);
+                        const itemsText = therapyRow.usageForItems || '—';
+                        const itemsLines = doc.splitTextToSize(itemsText, 35);
+                        doc.text(itemsLines, boxX + 30, yPos + 2);
+                        
+                        // Dosage column: Therapy items + dosage
+                        doc.setFont(undefined, 'normal');
+                        doc.setTextColor(0, 0, 0);
+                        const doseLines = doc.splitTextToSize(therapyRow.dosage || '—', 30);
+                        doc.text(doseLines, boxX + 68, yPos + 2);
+                        
+                        // Oil Class column
+                        doc.text(therapyRow.oilClass || '—', boxX + 100, yPos + 2);
+                        
+                        // Ingredients column: Time slot
+                        const ingredientsLines = doc.splitTextToSize(therapyRow.ingredients || '—', 30);
+                        doc.text(ingredientsLines, boxX + 135, yPos + 2);
+                        
+                        // Calculate row height
+                        const rowHeight = Math.max(
+                            itemsLines.length * 2.5,
+                            usageLines.length * 2.5,
+                            doseLines.length * 2.5,
+                            ingredientsLines.length * 2.5,
+                            3.5
+                        );
+                        yPos += rowHeight;
+                    });
+                    
                     // Render zero-therapist therapies as rows in the same table structure
                     zeroTherapistTherapies.forEach((therapy, index) => {
                         checkNewPage(5);
@@ -1216,155 +1582,101 @@
                         const therapyName = therapy.therapy_name || 'Unknown Therapy';
                         const therapyTime = therapy.timeslot || 'N/A';
                         
+                        // Extract items and usage from zero-therapist therapy
+                        let itemNames = '';
+                        let dosageDisplay = '';
+                        let usage = '';
+                        
+                        // Check if therapy has items_groups or items structure
+                        if (therapy.items_groups && Array.isArray(therapy.items_groups) && therapy.items_groups.length > 0) {
+                            // Extract items from items_groups
+                            const allItems = [];
+                            therapy.items_groups.forEach(group => {
+                                if (group.items && Array.isArray(group.items)) {
+                                    group.items.forEach(item => {
+                                        allItems.push(item.item_name || 'N/A');
+                                    });
+                                }
+                            });
+                            itemNames = allItems.join(', ');
+                            
+                            // Get dosage and usage from first group
+                            const firstGroup = therapy.items_groups[0];
+                            const dosage = firstGroup.dosage || therapy.dosage || '';
+                            const uno = firstGroup.uno || therapy.uno || '';
+                            dosageDisplay = (dosage && uno) ? `${dosage} (${uno})` : (dosage || uno || '');
+                            
+                            // Extract usage
+                            usage = firstGroup.usage || therapy.usage || '';
+                            if (!usage && firstGroup.usage_array && Array.isArray(firstGroup.usage_array) && firstGroup.usage_array.length > 0) {
+                                usage = firstGroup.usage_array.join(', ');
+                            } else if (!usage && therapy.usage_array && Array.isArray(therapy.usage_array) && therapy.usage_array.length > 0) {
+                                usage = therapy.usage_array.join(', ');
+                            }
+                        } else if (therapy.items && Array.isArray(therapy.items) && therapy.items.length > 0) {
+                            // Extract items from items array
+                            itemNames = therapy.items.map(item => item.item_name || 'N/A').join(', ');
+                            const dosage = therapy.dosage || '';
+                            const uno = therapy.uno || '';
+                            dosageDisplay = (dosage && uno) ? `${dosage} (${uno})` : (dosage || uno || '');
+                            
+                            // Extract usage
+                            usage = therapy.usage || '';
+                            if (!usage && therapy.usage_array && Array.isArray(therapy.usage_array) && therapy.usage_array.length > 0) {
+                                usage = therapy.usage_array.join(', ');
+                            }
+                        } else {
+                            // If no items structure, try to get usage directly from therapy
+                            usage = therapy.usage || '';
+                            if (!usage && therapy.usage_array && Array.isArray(therapy.usage_array) && therapy.usage_array.length > 0) {
+                                usage = therapy.usage_array.join(', ');
+                            }
+                        }
+                        
+                        // If no items found, use '—'
+                        const dosageText = itemNames ? (itemNames + (dosageDisplay ? ` - ${dosageDisplay}` : '')) : '—';
+                        
+                        // Usage for Items column (show '—' if no usage found)
+                        const usageForItems = usage || '—';
+                        
                         // Render row data
                         doc.setFontSize(7);
                         
-                        // Usage column: Time
+                        // Usage column: Therapy name
                         doc.setFont(undefined, 'normal');
                         doc.setTextColor(0, 0, 0);
-                        doc.text(therapyTime, boxX + 2, yPos + 2);
+                        const usageLines = doc.splitTextToSize(therapyName, 25);
+                        doc.text(usageLines, boxX + 2, yPos + 2);
                         
-                        // Items column: Therapy name (in blue, bold)
+                        // Items column: Usage of therapy (in blue, bold)
                         doc.setFont(undefined, 'bold');
                         doc.setTextColor(0, 86, 179);
-                        const itemsLines = doc.splitTextToSize(therapyName, 35);
+                        const itemsLines = doc.splitTextToSize(usageForItems, 35);
                         doc.text(itemsLines, boxX + 30, yPos + 2);
                         
-                        // Dosage column: empty
+                        // Dosage column: Therapy items + dosage
                         doc.setFont(undefined, 'normal');
                         doc.setTextColor(0, 0, 0);
-                        doc.text('—', boxX + 68, yPos + 2);
+                        const doseLines = doc.splitTextToSize(dosageText, 30);
+                        doc.text(doseLines, boxX + 68, yPos + 2);
                         
                         // Oil Class column: empty
                         doc.text('—', boxX + 100, yPos + 2);
                         
-                        // Ingredients column: empty
-                        doc.text('—', boxX + 135, yPos + 2);
+                        // Ingredients column: Time slot
+                        doc.text(therapyTime, boxX + 135, yPos + 2);
                         
                         // Calculate row height
-                        const rowHeight = Math.max(itemsLines.length * 2.5, 3.5);
+                        const rowHeight = Math.max(
+                            itemsLines.length * 2.5,
+                            usageLines.length * 2.5,
+                            doseLines.length * 2.5,
+                            3.5
+                        );
                         yPos += rowHeight;
                     });
                     
-                    yPos += 3; // Space after prescription/zero-therapist section
-                }
-                // Removed "No prescription items found" message - just skip if no items
-                
-                // Therapy Items - Grouped Format with colored header bar
-                if (therapyItems.length > 0) {
-                    checkNewPage(15);
-                    doc.setFillColor(16, 185, 129); // Green like therapy scheduling
-                    doc.rect(margin, yPos - 3, pageWidth - margin * 2, 8, 'F');
-                    
-                    doc.setFontSize(12);
-                    doc.setFont(undefined, 'bold');
-                    doc.setTextColor(255, 255, 255);
-                    doc.text('Therapy Items', margin + 5, yPos + 2);
-                    yPos += 10;
-                    doc.setTextColor(0, 0, 0);
-                    
-                    // Group therapy items by therapy_name
-                    const therapyGroups = {};
-                    therapyItems.forEach(item => {
-                        if (item.is_group && item.items) {
-                            const therapyKey = item.therapy_name || 'Unknown Therapy';
-                            if (!therapyGroups[therapyKey]) {
-                                therapyGroups[therapyKey] = [];
-                            }
-                            therapyGroups[therapyKey].push(item);
-                        }
-                    });
-                    
-                    // Render each therapy group
-                    Object.keys(therapyGroups).forEach(therapyName => {
-                        const therapyGroupsList = therapyGroups[therapyName];
-                        
-                        checkNewPage(15);
-                        
-                        // Therapy name - Colored bar like therapy scheduling
-                        doc.setFillColor(52, 211, 153); // Lighter green
-                        doc.rect(margin, yPos - 2, pageWidth - margin * 2, 6, 'F');
-                        
-                        doc.setFontSize(10);
-                        doc.setFont(undefined, 'bold');
-                        doc.setTextColor(255, 255, 255);
-                        doc.text(therapyName, margin + 5, yPos + 2);
-                        
-                        yPos += 8;
-                        doc.setTextColor(0, 0, 0);
-                        
-                        // Render each dosage group within this therapy
-                        therapyGroupsList.forEach(group => {
-                            const items = group.items || [];
-                            if (items.length === 0) return;
-                            
-                            checkNewPage(20);
-                            
-                            // Dosage if available - combine with UNO if both exist
-                            if (group.dosage || group.uno) {
-                                doc.setFontSize(9);
-                                doc.setFont(undefined, 'bold');
-                                doc.setTextColor(0, 0, 0);
-                                const dosageText = group.dosage || '';
-                                const unoText = group.uno || '';
-                                const dosageDisplay = (dosageText && unoText) 
-                                    ? `${dosageText} (${unoText})`
-                                    : (dosageText || (unoText ? `(${unoText})` : ''));
-                                if (dosageDisplay) {
-                                    doc.text(`Dosage: ${dosageDisplay}`, margin + 5, yPos);
-                                    yPos += 5;
-                                }
-                            }
-                            
-                            // Display multiple items as comma-separated list
-                            doc.setFontSize(9);
-                            doc.setFont(undefined, 'bold');
-                            doc.setTextColor(0, 0, 0);
-                            const itemNames = items.map(it => {
-                                const name = it.item_name || 'N/A';
-                                const isRemoved = it.is_removed || it.status === 'removed';
-                                return isRemoved ? `${name} [REMOVED]` : name;
-                            }).join(', ');
-                            const itemNamesLines = doc.splitTextToSize(itemNames, pageWidth - margin * 2 - 10);
-                            doc.text(itemNamesLines, margin + 5, yPos);
-                            yPos += itemNamesLines.length * 4 + 4;
-                            
-                            // Display shared details: usage, UNO, Ext/Int
-                            doc.setFontSize(8);
-                            doc.setFont(undefined, 'normal');
-                            doc.setTextColor(73, 80, 87);
-                            
-                            const details = [];
-                            // Handle usage
-                            let usage = 'N/A';
-                            if (group.usage) {
-                                usage = group.usage;
-                            } else if (group.usage_array && Array.isArray(group.usage_array) && group.usage_array.length > 0) {
-                                usage = group.usage_array.join(', ');
-                            }
-                            if (usage !== 'N/A') {
-                                details.push(`Usage: ${usage}`);
-                            }
-                            // UNO is now combined with dosage above, so we don't need a separate UNO entry
-                            if (group.internal_external && group.internal_external !== 'N/A') {
-                                details.push(`Ext/Int: ${group.internal_external}`);
-                            }
-                            
-                            if (details.length > 0) {
-                                const detailsText = details.join('  •  ');
-                                const detailsLines = doc.splitTextToSize(detailsText, pageWidth - margin * 2 - 10);
-                                doc.text(detailsLines, margin + 5, yPos);
-                                yPos += detailsLines.length * 4 + 3;
-                            }
-                            
-                            yPos += 4; // Space between groups
-                            doc.setTextColor(0, 0, 0);
-                        });
-                        
-                        yPos += 3; // Space between therapies
-                    });
-                    
-                    yPos += 5; // Space after therapy section
+                    yPos += 3; // Space after prescription/therapy/zero-therapist section
                 }
                 
                 // Zero-therapist therapies are now integrated into the prescription table above
@@ -1378,10 +1690,16 @@
                 yPos += 12;
             });
             
-            // Add final footer
-            addFooter(currentPage);
-            
-            // Save PDF
-            const fileName = `Prescription_Schedule_${date.replace(/-/g, '_')}.pdf`;
-            doc.save(fileName);
+                // Add final footer
+                addFooter(currentPage);
+                
+                // Save PDF
+                const fileName = `Prescription_Schedule_${date.replace(/-/g, '_')}.pdf`;
+                console.log('[PDF] Saving PDF with filename:', fileName);
+                doc.save(fileName);
+                console.log('[PDF] PDF saved successfully');
+            } catch (error) {
+                console.error('[PDF] Error generating PDF:', error);
+                alert('Error generating PDF: ' + error.message);
+            }
         }

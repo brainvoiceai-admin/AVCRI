@@ -4431,7 +4431,14 @@ def get_therapy_data_api(request):
                         'nurses': nurses,
                         'is_nurse_treatment': is_nurse_treatment_flag,
                         'created_at': booking.allocation.created_at.isoformat(),
-                        'allocated_by': booking.allocation.allocated_by.username if booking.allocation.allocated_by else None
+                        'allocated_by': booking.allocation.allocated_by.username if booking.allocation.allocated_by else None,
+                        'usage': booking.allocation.usage or '',
+                        'usage_array': booking.allocation.usage_array if hasattr(booking.allocation, 'usage_array') and booking.allocation.usage_array else [],
+                        'items_groups': booking.allocation.items_groups if booking.allocation.items_groups else [],
+                        'items': booking.allocation.items if hasattr(booking.allocation, 'items') and booking.allocation.items else [],
+                        'dosage': booking.allocation.dosage if hasattr(booking.allocation, 'dosage') else '',
+                        'uno': booking.allocation.uno if hasattr(booking.allocation, 'uno') else '',
+                        'oil_class': booking.allocation.oil_class or ''
                     })
         else:
             # No date filter - return allocations based on Booking status (not allocation status)
@@ -4613,7 +4620,14 @@ def get_therapy_data_api(request):
                         'nurses': nurses,
                         'is_nurse_treatment': is_nurse_treatment_flag,
                         'created_at': allocation.created_at.isoformat(),
-                        'allocated_by': allocation.allocated_by.username if allocation.allocated_by else None
+                        'allocated_by': allocation.allocated_by.username if allocation.allocated_by else None,
+                        'usage': allocation.usage or '',
+                        'usage_array': allocation.usage_array if hasattr(allocation, 'usage_array') and allocation.usage_array else [],
+                        'items_groups': allocation.items_groups if allocation.items_groups else [],
+                        'items': allocation.items if hasattr(allocation, 'items') and allocation.items else [],
+                        'dosage': allocation.dosage if hasattr(allocation, 'dosage') else '',
+                        'uno': allocation.uno if hasattr(allocation, 'uno') else '',
+                        'oil_class': allocation.oil_class or ''
                     })
         
         return JsonResponse({
