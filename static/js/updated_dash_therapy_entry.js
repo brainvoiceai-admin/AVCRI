@@ -355,7 +355,9 @@ $(function () {
     $therapySelect.val(null).trigger('change').prop('disabled', false);
     $slotSelect.val('').prop('disabled', false);
     $('#ext-int-select').val('').prop('value', '');
-    $fromDate.val('').prop('value', '').prop('disabled', false);
+    // Set from date to current date
+    const today = new Date().toISOString().split('T')[0];
+    $fromDate.val(today).prop('value', today).prop('disabled', false);
     $toDate.val('').prop('value', '').prop('disabled', false);
     $daysInput.val('').prop('value', '');
     $therapyUsageInput.val('').prop('value', '');
@@ -877,7 +879,8 @@ $(function () {
 
           // Reset form
           itemGroups = []; renderItemGroups();
-          $therapySelect.val(null).trigger('change'); $('#ext-int-select').val(''); $slotSelect.val(''); $fromDate.val(''); $toDate.val(''); $daysInput.val(''); $therapyUsageInput.val(''); $procuredSelect.val('');
+          const today = new Date().toISOString().split('T')[0];
+          $therapySelect.val(null).trigger('change'); $('#ext-int-select').val(''); $slotSelect.val(''); $fromDate.val(today); $toDate.val(''); $daysInput.val(''); $therapyUsageInput.val(''); $procuredSelect.val('');
 
           renderAll();
 
@@ -1730,8 +1733,9 @@ $(function () {
     $slotSelect.val('').prop('disabled', false);
     $('#ext-int-select').val('');
 
-    // Clear date fields explicitly
-    $fromDate.val('').prop('value', '').prop('disabled', false);
+    // Clear date fields explicitly - set from date to current date
+    const today = new Date().toISOString().split('T')[0];
+    $fromDate.val(today).prop('value', today).prop('disabled', false);
     $toDate.val('').prop('value', '').prop('disabled', false);
     $daysInput.val('').prop('value', '');
 
@@ -2142,6 +2146,10 @@ $(function () {
 
   // Initialize UnitNo dropdown
   loadUnitNumbers();
+  
+  // Set from date to current date on page load
+  const today = new Date().toISOString().split('T')[0];
+  $fromDate.val(today);
 
   // Clear form button
   $('#clear-form').on('click', function () {
