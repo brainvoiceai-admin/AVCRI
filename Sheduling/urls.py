@@ -1,5 +1,5 @@
 from django.urls import path
-from . import views, prescription_views, procurement_views, patient_views, therapist_views, availability_views
+from . import views, prescription_views, procurement_views, patient_views, therapist_views, availability_views, matrix_views
 
 urlpatterns = [
    
@@ -13,6 +13,9 @@ urlpatterns = [
     path('scheduling/api/final-schedule/status/', views.final_schedule_status_api, name='final_schedule_status_api'),
     path('scheduling/api/reschedule-therapy/', views.reschedule_therapy_api, name='reschedule_therapy_api'),
     path('scheduling/api/reschedule-all-failed/', views.reschedule_all_failed_api, name='reschedule_all_failed_api'),
+
+    # Continuity Matrix API
+    path('scheduling/api/continuity-matrix/', matrix_views.continuity_matrix_api, name='continuity_matrix_api'),
     
     # Prescription Scheduling URLs
     path('prescription-scheduling/', prescription_views.prescription_scheduling_dashboard, name='prescription_scheduling_dashboard'),
