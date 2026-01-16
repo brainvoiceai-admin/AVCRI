@@ -1,0 +1,45 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>400 - Bad Request | AVCRI</title>
+    <link rel="stylesheet" href="{% static 'css/errortemplates_error.css' %}">
+</head>
+<body>
+    <div class="error-container error-400">
+        <div class="error-icon">
+            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2" fill="none" opacity="0.2"/>
+                <path d="M12 8v4M12 16h.01" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z" stroke="currentColor" stroke-width="2" fill="none"/>
+            </svg>
+        </div>
+        <div class="error-code">400</div>
+        <h1 class="error-title">Bad Request</h1>
+        <p class="error-message">The request you sent was invalid or malformed.</p>
+        <p class="error-description">
+            We couldn't process your request because it contains invalid data or is missing required information.
+        </p>
+        
+        <div class="error-details">
+            <h3>What might have gone wrong?</h3>
+            <ul>
+                <li>The request format is incorrect</li>
+                <li>Required parameters are missing</li>
+                <li>Invalid data was submitted</li>
+                <li>The request size exceeds limits</li>
+            </ul>
+        </div>
+
+        <div class="error-actions">
+            <a href="javascript:history.back()" class="btn btn-secondary">Go Back</a>
+            <a href="/" class="btn btn-primary">Go to Home</a>
+        </div>
+    </div>
+
+    <script src="{% static 'js/errortemplates_error.js' %}"></script>
+</body>
+</html>
+

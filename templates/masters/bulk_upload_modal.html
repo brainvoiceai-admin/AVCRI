@@ -1,0 +1,56 @@
+<!-- Bulk Upload Modal - Reusable Component -->
+<div class="modal fade" id="bulkUploadModal" tabindex="-1" aria-labelledby="bulkUploadModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="bulkUploadModalLabel">
+                    <i class="fas fa-file-excel me-2"></i>Bulk Upload {{ master_name }}
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div class="alert alert-info" id="instructionsAlert" data-no-auto-dismiss="true" style="display: block !important;">
+                    <div class="d-flex justify-content-between align-items-start mb-2">
+                        <strong>Instructions:</strong>
+                        <a href="{% url 'download_master_template' master_type %}" class="btn btn-sm btn-success" download>
+                            <i class="fas fa-download me-1"></i>Download Example Template
+                        </a>
+                    </div>
+                    <ul class="mb-0">
+                        <li>Upload an Excel file (.xlsx or .xls) with the following columns:</li>
+                        <li><strong>Required:</strong> {{ required_fields|join:", " }}</li>
+                        {% if optional_fields %}
+                        <li><strong>Optional:</strong> {{ optional_fields|join:", " }}</li>
+                        {% endif %}
+                        <li>If a record with the same unique identifier exists, it will be updated. Otherwise, a new record will be created.</li>
+                        <li>For is_active column, use: true/1/yes/active/y for active, false/0/no/inactive/n for inactive</li>
+                        <li>Column names are case-insensitive and spaces/underscores are handled automatically</li>
+                        <li><strong>Tip:</strong> Download the example template above, fill in your data, and upload it.</li>
+                    </ul>
+                </div>
+                <form id="bulkUploadForm" enctype="multipart/form-data" data-upload-url="{% url 'bulk_upload_master' %}">
+                    {% csrf_token %}
+                    <input type="hidden" name="master_type" value="{{ master_type }}">
+                    <div class="mb-3">
+                        <label for="excel_file" class="form-label">Select Excel File</label>
+                        <input type="file" class="form-control" id="excel_file" name="excel_file" accept=".xlsx,.xls" required>
+                        <div class="form-text">Only .xlsx and .xls files are supported</div>
+                    </div>
+                    <div id="uploadProgress" class="progress mb-3" style="display: none;">
+                        <div class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 100%">Uploading...</div>
+                    </div>
+                    <div id="uploadResult"></div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal" id="closeModalBtn">Close</button>
+                <button type="button" class="btn btn-primary" onclick="submitBulkUpload()" id="uploadBtn">
+                    <i class="fas fa-upload me-2"></i>Upload
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+
+

@@ -52,6 +52,58 @@ class UsageType(models.Model):
         verbose_name_plural = "Usage Types"
         ordering = ["name"]
 
+#Prescription Usage Master
+class PrescriptionUsage(models.Model):
+    """Master list of usage types specifically for prescriptions."""
+    name = models.CharField(max_length=100, unique=True, verbose_name="Prescription Usage Name")
+    is_active = models.BooleanField(default=True, verbose_name="Active")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Created At")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="Updated At")
+
+    def __str__(self):
+        return self.name
+
+    class Meta:
+        verbose_name = "Prescription Usage"
+        verbose_name_plural = "Prescription Usages"
+        ordering = ["name"]
+
+
+class NurseTreatmentMaster(models.Model):
+    """Master list of nurse treatments with required nurse count."""
+    treatment_code = models.CharField(max_length=50, unique=True, verbose_name="Treatment Code")
+    name = models.CharField(max_length=200, verbose_name="Treatment Name")
+    number_of_nurse_required = models.PositiveIntegerField(default=1, verbose_name="Number of Nurses Required")
+    is_active = models.BooleanField(default=True, verbose_name="Active")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Created At")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="Updated At")
+
+    def __str__(self):
+        return f"{self.treatment_code} - {self.name}"
+
+    class Meta:
+        verbose_name = "Nurse Treatment"
+        verbose_name_plural = "Nurse Treatments"
+        ordering = ["treatment_code"]
+
+
+class NurseMaster(models.Model):
+    """Master list of nurses with their codes, names, and designations."""
+    nurse_code = models.CharField(max_length=50, unique=True, verbose_name="Nurse Code")
+    nurse_name = models.CharField(max_length=200, verbose_name="Nurse Name")
+    designation = models.CharField(max_length=100, verbose_name="Designation")
+    is_active = models.BooleanField(default=True, verbose_name="Active")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Created At")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="Updated At")
+
+    def __str__(self):
+        return f"{self.nurse_code} - {self.nurse_name}"
+
+    class Meta:
+        verbose_name = "Nurse"
+        verbose_name_plural = "Nurses"
+        ordering = ["nurse_code"]
+
 
 #Prescription time master
 class PrescriptionTime(models.Model):
@@ -101,17 +153,44 @@ class UnitNo(models.Model):
         ordering = ['unit_name']
 
     def __str__(self):
-        return self.unit_name# Therapy Master
+        return self.unit_name
+
+# Therapy Group Master
+class TherapyGroup(models.Model):
+    """Master list of therapy groups/categories."""
+    name = models.CharField(max_length=100, unique=True, verbose_name="Group Name")
+    is_active = models.BooleanField(default=True, verbose_name="Active")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Created At")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="Updated At")
+
+    def __str__(self):
+        return self.name
+
+    class Meta:
+        verbose_name = "Therapy Group"
+        verbose_name_plural = "Therapy Groups"
+        ordering = ["name"]
+
+# Therapy Master
 class TherapyMaster(models.Model):
     """Master list of therapy names and details."""
     therapy_code = models.CharField(max_length=20, unique=True, verbose_name="Therapy Code")
     therapy_name = models.CharField(max_length=255, verbose_name="Therapy Name")
-    therapy_group = models.CharField(max_length=100, null=True, blank=True, verbose_name="Therapy Group")
+    therapy_group = models.ForeignKey('TherapyGroup', on_delete=models.SET_NULL, null=True, blank=True, verbose_name="Therapy Group")
     therapy_category = models.CharField(max_length=100, null=True, blank=True, verbose_name="Therapy Category")
     therapy_duration = models.CharField(max_length=50, null=True, blank=True, verbose_name="Duration")
     bathing_required = models.CharField(max_length=10, null=True, blank=True, verbose_name="Bathing Required")
     treatment_room_required = models.CharField(max_length=10, null=True, blank=True, verbose_name="Room Required")
     cost_of_therapy = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, verbose_name="Cost")
+    
+    # Patient type field (IP or OP)
+    patient_type = models.CharField(
+        max_length=2,
+        choices=[('IP', 'IP (Inpatient)'), ('OP', 'OP (Outpatient)')],
+        default='IP',
+        verbose_name="Patient Type",
+        help_text="Select whether this therapy is for Inpatient (IP) or Outpatient (OP) patients"
+    )
     
     # Therapist count fields (from original TherapyDetails model)
     no_of_super_senior_therapist = models.IntegerField(default=0, verbose_name="Super Senior Therapists")
@@ -132,16 +211,69 @@ class TherapyMaster(models.Model):
         verbose_name_plural = "Therapy Masters"
         ordering = ["therapy_name"]
 
-# Item Master
-class ItemMaster(models.Model):
-    """Master list of items used in therapies and prescriptions."""
-    item_code = models.CharField(max_length=20, unique=True, verbose_name="Item Code")
-    item_name = models.CharField(max_length=255, verbose_name="Item Name")
-    item_category = models.CharField(max_length=100, null=True, blank=True, verbose_name="Category")
-    unit_of_measure = models.CharField(max_length=50, null=True, blank=True, verbose_name="Unit")
+# Item Group Master
+class ItemGroup(models.Model):
+    """Master list of item groups/categories."""
+    name = models.CharField(max_length=100, unique=True, verbose_name="Group Name")
     is_active = models.BooleanField(default=True, verbose_name="Active")
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="Created At")
     updated_at = models.DateTimeField(auto_now=True, verbose_name="Updated At")
+
+    def __str__(self):
+        return self.name
+
+    class Meta:
+        verbose_name = "Item Group"
+        verbose_name_plural = "Item Groups"
+        ordering = ["name"]
+
+# Item Master
+class ItemMaster(models.Model):
+    """Master list of items used in therapies and prescriptions."""
+    item_code = models.CharField(max_length=4, unique=True, verbose_name="Item Code", editable=False)
+    item_name = models.CharField(max_length=255, verbose_name="Item Name")
+    item_group = models.ForeignKey('ItemGroup', on_delete=models.SET_NULL, null=True, blank=True, verbose_name="Group")
+    umo = models.ForeignKey('UnitNo', on_delete=models.SET_NULL, null=True, blank=True, verbose_name="UOM")
+    min_max = models.CharField(max_length=100, null=True, blank=True, verbose_name="Min/Max")
+    procured_from = models.ForeignKey('Procured', on_delete=models.SET_NULL, null=True, blank=True, verbose_name="Procured From")
+    is_active = models.BooleanField(default=True, verbose_name="Active")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Created At")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="Updated At")
+
+    def save(self, *args, **kwargs):
+        if not self.item_code:
+            # Auto-generate 4-digit unique code
+            self.item_code = self.generate_unique_code()
+        super().save(*args, **kwargs)
+
+    def generate_unique_code(self):
+        """Generate a unique 4-digit code starting from 0001"""
+        from django.db.models import Max
+        # Get the maximum existing code
+        max_code = ItemMaster.objects.aggregate(Max('item_code'))['item_code__max']
+        
+        if max_code:
+            try:
+                # Try to parse as integer and increment
+                next_num = int(max_code) + 1
+                if next_num > 9999:
+                    # If we exceed 9999, find the next available number
+                    for i in range(1, 10000):
+                        code_str = f"{i:04d}"
+                        if not ItemMaster.objects.filter(item_code=code_str).exists():
+                            return code_str
+            except ValueError:
+                # If max_code is not numeric, start from 0001
+                pass
+        
+        # Start from 0001 or find first available
+        for i in range(1, 10000):
+            code_str = f"{i:04d}"
+            if not ItemMaster.objects.filter(item_code=code_str).exists():
+                return code_str
+        
+        # Fallback (should never reach here)
+        return "0001"
 
     def __str__(self):
         return f"{self.item_code} - {self.item_name}"
@@ -170,6 +302,24 @@ class SlotMaster(models.Model):
         verbose_name = "Slot Master"
         verbose_name_plural = "Slot Masters"
         ordering = ["slot_number"]
+
+# Ingredient Master
+class IngredientMaster(models.Model):
+    """Master list of ingredients used in prescriptions."""
+    ingredient_code = models.CharField(max_length=20, unique=True, verbose_name="Ingredient Code")
+    ingredient_name = models.CharField(max_length=255, verbose_name="Ingredient Name")
+    description = models.TextField(null=True, blank=True, verbose_name="Description")
+    is_active = models.BooleanField(default=True, verbose_name="Active")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Created At")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="Updated At")
+
+    def __str__(self):
+        return f"{self.ingredient_code} - {self.ingredient_name}"
+
+    class Meta:
+        verbose_name = "Ingredient Master"
+        verbose_name_plural = "Ingredient Masters"
+        ordering = ["ingredient_name"]
 
 # Therapist Grade Master
 class TherapistGrade(models.Model):
@@ -247,6 +397,43 @@ class TherapistLeaveMaster(models.Model):
         ordering = ["therapist__therapist_name", "leave_day"]
         unique_together = ['therapist', 'leave_day']
 
+
+
+class StayingRoom(models.Model):
+    """Master list for staying rooms."""
+    number = models.CharField(max_length=20, unique=True, verbose_name="No")
+    room_desc = models.CharField(max_length=255, verbose_name="Room Description")
+    room_no = models.CharField(max_length=50, verbose_name="Room Number")
+    is_active = models.BooleanField(default=True, verbose_name="Active")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Created At")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="Updated At")
+
+    class Meta:
+        verbose_name = "Staying Room"
+        verbose_name_plural = "Staying Rooms"
+        ordering = ["number"]
+
+    def __str__(self):
+        return f"{self.number} - {self.room_no}"
+
+
+def get_staying_room_display_number(room_number):
+    """
+    Given a room identifier (No), return the corresponding StayingRoom.room_no.
+    Falls back to the original value if no match is found.
+    """
+    if room_number in (None, ''):
+        return room_number
+    lookup = str(room_number).strip()
+    if not lookup:
+        return room_number
+    try:
+        staying_room = StayingRoom.objects.filter(number__iexact=lookup).first()
+        if staying_room and staying_room.room_no:
+            return staying_room.room_no
+    except Exception:
+        pass
+    return room_number
 
 
 class EmergencyLeave(models.Model):

@@ -1,22 +1,20 @@
+{%load static%}
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Prescription Scope Management</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet"
+        integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
-    
-    <style>
-        .main-content {
-            padding-left: 275px; 
-        }
-        .table-responsive {
-            max-height: 600px;
-            overflow-y: auto;
-        }
-    </style>
+
+
+    <link rel="stylesheet" href="{% static 'css/masters_prescope_manage.css' %}">
+    <link rel="stylesheet" href="{% static 'css/dashboards_nav.css' %}">
 </head>
+
 <body>
 
     {% include 'dashboards/nav.html' %}
@@ -24,16 +22,27 @@
     <div class="main-content container mt-4">
         <div class="d-flex justify-content-between align-items-center mb-4">
             <h2><i class="fas fa-stethoscope text-primary"></i> Prescription External/Internal Scope Management</h2>
+            <div>
+                {% if master_type %}
+                <button type="button" class="btn btn-info" data-bs-toggle="modal" data-bs-target="#bulkUploadModal">
+                    <i class="fas fa-file-excel me-2"></i>Bulk Upload Excel
+                </button>
+                {% endif %}
+                <a href="{% url 'master_management_dashboard' %}" class="btn btn-secondary">
+                    <i class="fas fa-arrow-left me-2"></i>Back to Dashboard
+                </a>
+            </div>
         </div>
-        
+
         {# Display messages - only show messages for this page #}
         {% if messages %}
-            {% for message in messages %}
-                <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert" id="message-{{ forloop.counter }}">
-                    {{ message }}
-                    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-                </div>
-            {% endfor %}
+        {% for message in messages %}
+        <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert"
+            id="message-{{ forloop.counter }}">
+            {{ message }}
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        </div>
+        {% endfor %}
         {% endif %}
 
         {# ------------------------------------------------------------------ #}
@@ -41,39 +50,28 @@
         {# ------------------------------------------------------------------ #}
         <div class="card p-4 mb-4 border-primary">
             <h4 class="card-title"><i class="fas fa-plus-circle me-2"></i>Add New Prescription Scope</h4>
-            
+
             <form method="post" action="{% url 'prescope_manage' %}" class="row g-3 align-items-center">
                 {% csrf_token %}
-                
+
                 <div class="col-md-6">
                     <label for="id_name" class="form-label visually-hidden">Scope Name (Ext/Int)</label>
-                    <input 
-                        type="text" 
-                        name="name" 
-                        id="id_name" 
+                    <input type="text" name="name" id="id_name"
                         class="form-control {% if errors.name %}is-invalid{% endif %}"
-                        placeholder="e.g., External (OP), Internal (IP)"
-                        required
-                        value="{{ form.name.value|default_if_none:'' }}"
-                    >
+                        placeholder="e.g., External (OP), Internal (IP)" required
+                        value="{{ form.name.value|default_if_none:'' }}">
                     {% if errors.name %}
-                        <div class="invalid-feedback">{{ errors.name }}</div>
+                    <div class="invalid-feedback">{{ errors.name }}</div>
                     {% endif %}
                 </div>
-                
+
                 <div class="col-md-4">
                     <div class="form-check">
-                        <input 
-                            type="checkbox" 
-                            name="is_active" 
-                            id="id_is_active_new" 
-                            class="form-check-input"
-                            checked
-                        >
+                        <input type="checkbox" name="is_active" id="id_is_active_new" class="form-check-input" checked>
                         <label for="id_is_active_new" class="form-check-label">Active by Default</label>
                     </div>
                 </div>
-                
+
                 <div class="col-md-2">
                     <button type="submit" class="btn btn-primary w-100">
                         <i class="fas fa-plus me-1"></i>Add Scope
@@ -81,7 +79,7 @@
                 </div>
             </form>
         </div>
-        
+
         <hr>
 
         {# ------------------------------------------------------------------ #}
@@ -89,23 +87,34 @@
         {# ------------------------------------------------------------------ #}
         <div class="card mb-4">
             <div class="card-body">
-                <div class="row">
-                    <div class="col-md-6">
-                        <input type="text" class="form-control" id="searchInput" placeholder="Search scopes by name...">
+                <form method="get" action="{% url 'prescope_manage' %}" id="filterForm">
+                    <div class="row">
+                        <div class="col-md-5">
+                            <input type="text" class="form-control" name="search" id="searchInput"
+                                placeholder="Search scopes by name..." value="{{ search|default:'' }}">
+                        </div>
+                        <div class="col-md-3">
+                            <select class="form-select" name="status" id="statusFilter">
+                                <option value="">All Status</option>
+                                <option value="active" {% if status_filter == 'active' %}selected{% endif %}>Active
+                                </option>
+                                <option value="inactive" {% if status_filter == 'inactive' %}selected{% endif %}>Inactive
+                                </option>
+                            </select>
+                        </div>
+                        <div class="col-md-2">
+                            <button type="submit" class="btn btn-primary w-100" id="filterButton">
+                                <i class="fas fa-search me-1"></i>Filter
+                            </button>
+                        </div>
+                        <div class="col-md-2">
+                            <a href="{% url 'prescope_manage' %}" class="btn btn-outline-secondary w-100"
+                                id="clearFilters">
+                                <i class="fas fa-times me-1"></i>Clear
+                            </a>
+                        </div>
                     </div>
-                    <div class="col-md-3">
-                        <select class="form-select" id="statusFilter">
-                            <option value="">All Status</option>
-                            <option value="active">Active</option>
-                            <option value="inactive">Inactive</option>
-                        </select>
-                    </div>
-                    <div class="col-md-3">
-                        <button class="btn btn-outline-primary w-100" onclick="clearFilters()">
-                            <i class="fas fa-times me-1"></i>Clear Filters
-                        </button>
-                    </div>
-                </div>
+                </form>
             </div>
         </div>
 
@@ -121,69 +130,66 @@
             </div>
             <div class="card-body p-0">
                 {% if prescope_list %}
-                    <div class="table-responsive">
-                        <table class="table table-hover mb-0" id="scopeTable">
-                            <thead class="table-dark">
-                                <tr>
-                                    <th scope="col">Scope Name</th>
-                                    <th scope="col">Status</th>
-                                    <th scope="col">Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% for source in prescope_list %}
-                                    <tr>
-                                        <td><strong>{{ source.name }}</strong></td>
-                                        <td>
-                                            {% if source.is_active %}
-                                                <span class="badge bg-success">Active</span>
-                                            {% else %}
-                                                <span class="badge bg-secondary">Inactive</span>
-                                            {% endif %}
-                                        </td>
-                                        <td>
-                                            <div class="btn-group" role="group">
-                                                {# Edit Action #}
-                                                <a href="{% url 'prescope_update' pk=source.pk %}" 
-                                                   class="btn btn-sm btn-outline-primary" 
-                                                   title="Edit">
-                                                    <i class="fas fa-edit"></i>
-                                                </a>
-                                                
-                                                {# Enable/Disable Action #}
-                                                {% if source.is_active %}
-                                                    <a href="{% url 'prescope_disable' pk=source.pk %}" 
-                                                       class="btn btn-sm btn-outline-warning" 
-                                                       title="Disable"
-                                                       onclick="return confirm('Are you sure you want to disable {{ source.name }}?');">
-                                                        <i class="fas fa-ban"></i>
-                                                    </a>
-                                                {% else %}
-                                                    <a href="{% url 'prescope_enable' pk=source.pk %}" 
-                                                       class="btn btn-sm btn-outline-success" 
-                                                       title="Enable">
-                                                        <i class="fas fa-check"></i>
-                                                    </a>
-                                                {% endif %}
-                                                
-                                                {# Delete Action #}
-                                                <a href="{% url 'prescope_delete' pk=source.pk %}" 
-                                                   class="btn btn-sm btn-outline-danger" 
-                                                   title="Delete"
-                                                   onclick="return confirm('Are you sure you want to DELETE {{ source.name }}? This action cannot be undone.');">
-                                                    <i class="fas fa-trash"></i>
-                                                </a>
-                                            </div>
-                                        </td>
-                                    </tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
-                    </div>
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0" id="scopeTable">
+                        <thead class="table-dark">
+                            <tr>
+                                <th scope="col">Scope Name</th>
+                                <th scope="col">Status</th>
+                                <th scope="col">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for source in prescope_list %}
+                            <tr>
+                                <td><strong>{{ source.name }}</strong></td>
+                                <td>
+                                    {% if source.is_active %}
+                                    <span class="badge bg-success">Active</span>
+                                    {% else %}
+                                    <span class="badge bg-secondary">Inactive</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    <div class="btn-group" role="group">
+                                        {# Edit Action #}
+                                        <a href="{% url 'prescope_update' pk=source.pk %}"
+                                            class="btn btn-sm btn-outline-primary" title="Edit">
+                                            <i class="fas fa-edit"></i>
+                                        </a>
+
+                                        {# Enable/Disable Action #}
+                                        {% if source.is_active %}
+                                        <a href="{% url 'prescope_disable' pk=source.pk %}"
+                                            class="btn btn-sm btn-outline-warning" title="Disable"
+                                            onclick="return confirm('Are you sure you want to disable {{ source.name }}?');">
+                                            <i class="fas fa-ban"></i>
+                                        </a>
+                                        {% else %}
+                                        <a href="{% url 'prescope_enable' pk=source.pk %}"
+                                            class="btn btn-sm btn-outline-success" title="Enable">
+                                            <i class="fas fa-check"></i>
+                                        </a>
+                                        {% endif %}
+
+                                        {# Delete Action #}
+                                        <a href="{% url 'prescope_delete' pk=source.pk %}"
+                                            class="btn btn-sm btn-outline-danger" title="Delete"
+                                            onclick="return confirm('Are you sure you want to DELETE {{ source.name }}? This action cannot be undone.');">
+                                            <i class="fas fa-trash"></i>
+                                        </a>
+                                    </div>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
                 {% else %}
-                    <div class="alert alert-info m-3">
-                        <i class="fas fa-info-circle me-2"></i>No prescription scopes have been added yet. Use the form above to start!
-                    </div>
+                <div class="alert alert-info m-3">
+                    <i class="fas fa-info-circle me-2"></i>No prescription scopes have been added yet. Use the form
+                    above to start!
+                </div>
                 {% endif %}
             </div>
         </div>
@@ -193,12 +199,12 @@
         <nav aria-label="Prescription Scope pagination" class="mt-4">
             <ul class="pagination justify-content-center">
                 {% if page_obj.has_previous %}
-                    <li class="page-item">
-                        <a class="page-link" href="?page=1">&laquo; First</a>
-                    </li>
-                    <li class="page-item">
-                        <a class="page-link" href="?page={{ page_obj.previous_page_number }}">Previous</a>
-                    </li>
+                <li class="page-item">
+                    <a class="page-link" href="?page=1">&laquo; First</a>
+                </li>
+                <li class="page-item">
+                    <a class="page-link" href="?page={{ page_obj.previous_page_number }}">Previous</a>
+                </li>
                 {% endif %}
 
                 <li class="page-item active">
@@ -208,97 +214,29 @@
                 </li>
 
                 {% if page_obj.has_next %}
-                    <li class="page-item">
-                        <a class="page-link" href="?page={{ page_obj.next_page_number }}">Next</a>
-                    </li>
-                    <li class="page-item">
-                        <a class="page-link" href="?page={{ page_obj.paginator.num_pages }}">Last &raquo;</a>
-                    </li>
+                <li class="page-item">
+                    <a class="page-link" href="?page={{ page_obj.next_page_number }}">Next</a>
+                </li>
+                <li class="page-item">
+                    <a class="page-link" href="?page={{ page_obj.paginator.num_pages }}">Last &raquo;</a>
+                </li>
                 {% endif %}
             </ul>
         </nav>
         {% endif %}
     </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous"></script>
-    <script>
-        // Auto-dismiss messages after 5 seconds
-        document.addEventListener('DOMContentLoaded', function() {
-            const alerts = document.querySelectorAll('.alert');
-            alerts.forEach(function(alert) {
-                setTimeout(function() {
-                    const bsAlert = new bootstrap.Alert(alert);
-                    bsAlert.close();
-                }, 5000);
-            });
-        });
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"
+        integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz"
+        crossorigin="anonymous"></script>
 
-        // Search functionality
-        document.getElementById('searchInput').addEventListener('input', function() {
-            filterTable();
-        });
-
-        // Filter functionality
-        document.getElementById('statusFilter').addEventListener('change', function() {
-            filterTable();
-        });
-
-        function filterTable() {
-            const searchTerm = document.getElementById('searchInput').value.toLowerCase();
-            const statusFilter = document.getElementById('statusFilter').value;
-            const table = document.getElementById('scopeTable');
-            
-            if (!table) return;
-            
-            const rows = table.getElementsByTagName('tbody')[0].getElementsByTagName('tr');
-            
-            let visibleCount = 0;
-            
-            for (let i = 0; i < rows.length; i++) {
-                const row = rows[i];
-                const cells = row.getElementsByTagName('td');
-                
-                if (cells.length === 0) continue; // Skip empty rows
-                
-                const scopeName = cells[0].textContent.toLowerCase();
-                const status = cells[1].textContent.toLowerCase();
-                
-                let showRow = true;
-                
-                // Search filter
-                if (searchTerm && !scopeName.includes(searchTerm)) {
-                    showRow = false;
-                }
-                
-                // Status filter
-                if (statusFilter) {
-                    if (statusFilter === 'active' && !status.includes('active')) {
-                        showRow = false;
-                    } else if (statusFilter === 'inactive' && !status.includes('inactive')) {
-                        showRow = false;
-                    }
-                }
-                
-                if (showRow) {
-                    row.style.display = '';
-                    visibleCount++;
-                } else {
-                    row.style.display = 'none';
-                }
-            }
-            
-            // Update count badge
-            const countBadge = document.getElementById('totalCount');
-            if (countBadge) {
-                countBadge.textContent = visibleCount;
-            }
-        }
-
-        function clearFilters() {
-            document.getElementById('searchInput').value = '';
-            document.getElementById('statusFilter').value = '';
-            filterTable();
-        }
-    </script>
+    {% if master_type %}
+    {% include 'masters/bulk_upload_modal.html' %}
+    <script src="{% static 'js/masters_bulk_upload_modal.js' %}"></script>
+    {% endif %}
+    <script src="{% static 'js/master_filter_handler.js' %}"></script>
+    <script src="{% static 'js/masters_prescope_manage.js' %}"></script>
+    <script src="{% static 'js/dashboards_nav.js' %}"></script>
 </body>
+
 </html>

@@ -3,7 +3,7 @@ from django.utils.html import format_html
 from django.urls import reverse
 from django.utils.safestring import mark_safe
 from .models import (
-    TherapyAllocation, Booking, BookingItem, BookingAssignment, 
+    TherapyAllocation, Booking, BookingItem, BookingAssignment, BookingNurseAssignment,
     PrescriptionAllocation, PatientSnapshot, CancellationRequest,
     NotificationQueue, TherapyNotification, AuditLog, AllocationChange,
     PrescriptionNotification, PrescriptionChange,
@@ -91,7 +91,7 @@ class TherapyAllocationAdmin(admin.ModelAdmin):
     room_info.short_description = 'Room'
     
     def timeslot_info(self, obj):
-        return obj.timeslot.start_time.strftime('%H:%M') if obj.timeslot else '—'
+        return obj.timeslot.slot_time.strftime('%H:%M') if obj.timeslot else '—'
     timeslot_info.short_description = 'Time Slot'
 
 @admin.register(Booking)
@@ -113,7 +113,7 @@ class BookingAdmin(admin.ModelAdmin):
     allocation_info.short_description = 'Therapy & Patient'
     
     def timeslot_info(self, obj):
-        return obj.timeslot.start_time.strftime('%H:%M') if obj.timeslot else '—'
+        return obj.timeslot.slot_time.strftime('%H:%M') if obj.timeslot else '—'
     timeslot_info.short_description = 'Time Slot'
     
     def room_info(self, obj):
@@ -148,21 +148,51 @@ class BookingAssignmentAdmin(admin.ModelAdmin):
     raw_id_fields = ['booking', 'booking_item', 'therapist', 'booking_timeslot', 'released_by']
     
     def booking_info(self, obj):
-        return format_html(
-            '<strong>{}</strong><br><small>{} - {}</small>',
-            obj.booking.allocation.therapy_name,
-            obj.booking.allocation.patient.pat_name,
-            obj.booking.date
-        )
+        if obj.booking:
+            return format_html(
+                '<strong>{}</strong><br><small>{} - {}</small>',
+                obj.booking.allocation.therapy_name if obj.booking.allocation else 'N/A',
+                obj.booking.allocation.patient.pat_name if obj.booking.allocation else 'N/A',
+                obj.booking.date
+            )
+        return 'N/A'
     booking_info.short_description = 'Booking'
     
     def therapist_info(self, obj):
-        return format_html(
-            '<strong>{}</strong><br><small>{}</small>',
-            obj.therapist.therapist_name,
-            obj.therapist.therapist_code
-        )
+        if obj.therapist:
+            return format_html(
+                '<strong>{}</strong><br><small>{}</small>',
+                obj.therapist.therapist_name or 'N/A',
+                obj.therapist.therapist_code or 'N/A'
+            )
+        return 'N/A'
     therapist_info.short_description = 'Therapist'
+
+@admin.register(BookingNurseAssignment)
+class BookingNurseAssignmentAdmin(admin.ModelAdmin):
+    list_display = ['id', 'booking_info', 'nurse_info', 'status', 'assigned_at']
+    list_filter = ['status', 'assigned_at']
+    search_fields = ['nurse__nurse_name', 'nurse__nurse_code', 'booking__allocation__patient__pat_name']
+    readonly_fields = ['assigned_at', 'released_at']
+    ordering = ['-assigned_at']
+    
+    def booking_info(self, obj):
+        if obj.booking:
+            return format_html(
+                '<a href="{}">Booking #{}</a> - {}',
+                reverse('admin:Sheduling_booking_change', args=[obj.booking.pk]),
+                obj.booking.pk,
+                obj.booking.allocation.therapy_name if obj.booking.allocation else 'N/A'
+            )
+        return 'N/A'
+    booking_info.short_description = 'Booking'
+    
+    def nurse_info(self, obj):
+        if obj.nurse:
+            return f"{obj.nurse.nurse_name} ({obj.nurse.nurse_code})"
+        return 'N/A'
+    nurse_info.short_description = 'Nurse'
+    raw_id_fields = ['booking', 'nurse', 'booking_timeslot', 'released_by']
 
 @admin.register(PrescriptionAllocation)
 class PrescriptionAllocationAdmin(admin.ModelAdmin):

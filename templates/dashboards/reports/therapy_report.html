@@ -1,0 +1,325 @@
+{%load static%}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Reports & Analytics - Therapy & Prescription</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    
+    <link rel="stylesheet" href="{% static 'css/dashboards_reports_therapy_report.css' %}">
+    <link rel="stylesheet" href="{% static 'css/dashboards_nav.css' %}">
+</head>
+<body>
+    {% include 'dashboards/nav.html' %}
+
+    <main class="main-content">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h1 class="h2 mb-0">Reports & Analytics</h1>
+            <form method="get" class="d-flex gap-2">
+                <input type="date" name="start_date" value="{{ start_date|date:'Y-m-d' }}" class="form-control">
+                <input type="date" name="end_date" value="{{ end_date|date:'Y-m-d' }}" class="form-control">
+                <button type="submit" class="btn btn-primary">Apply</button>
+            </form>
+        </div>
+
+        <!-- Therapy Statistics -->
+        <div class="row mb-4">
+            <div class="col-md-4">
+                <div class="stat-card">
+                    <div class="stat-number">{{ total_therapies }}</div>
+                    <div class="stat-label">Total Therapies</div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="stat-card">
+                    <div class="stat-number">{{ active_therapies }}</div>
+                    <div class="stat-label">Active Therapies</div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="stat-card">
+                    <div class="stat-number">{{ cancelled_therapies }}</div>
+                    <div class="stat-label">Cancelled Therapies</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Prescription Statistics -->
+        <div class="row mb-4">
+            <div class="col-md-4">
+                <div class="stat-card">
+                    <div class="stat-number">{{ total_prescriptions }}</div>
+                    <div class="stat-label">Total Prescriptions</div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="stat-card">
+                    <div class="stat-number">{{ active_prescriptions }}</div>
+                    <div class="stat-label">Active Prescriptions</div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="stat-card">
+                    <div class="stat-number">{{ cancelled_prescriptions }}</div>
+                    <div class="stat-label">Cancelled Prescriptions</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Booking Statistics -->
+        <div class="row mb-4">
+            <div class="col-md-4">
+                <div class="stat-card">
+                    <div class="stat-number">{{ total_bookings }}</div>
+                    <div class="stat-label">Total Bookings</div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="stat-card">
+                    <div class="stat-number">{{ completed_bookings }}</div>
+                    <div class="stat-label">Completed Bookings</div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="stat-card">
+                    <div class="stat-number">{{ cancelled_bookings }}</div>
+                    <div class="stat-label">Cancelled Bookings</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Average Durations -->
+        <div class="row mb-4">
+            <div class="col-md-6">
+                <div class="stat-card">
+                    <div class="stat-number">{{ avg_therapy_duration }}</div>
+                    <div class="stat-label">Avg Therapy Duration (Days)</div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="stat-card">
+                    <div class="stat-number">{{ avg_prescription_duration }}</div>
+                    <div class="stat-label">Avg Prescription Duration (Days)</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Charts Row 1 -->
+        <div class="row mb-4">
+            <div class="col-md-6">
+                <div class="stat-card">
+                    <h5 class="mb-3">Therapy Status Distribution</h5>
+                    <div class="chart-container">
+                        <canvas id="therapyStatusChart"></canvas>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="stat-card">
+                    <h5 class="mb-3">Prescription Status Distribution</h5>
+                    <div class="chart-container">
+                        <canvas id="prescriptionStatusChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Charts Row 2 -->
+        <div class="row mb-4">
+            <div class="col-md-6">
+                <div class="stat-card">
+                    <h5 class="mb-3">Top Therapies</h5>
+                    <div class="chart-container">
+                        <canvas id="topTherapiesChart"></canvas>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="stat-card">
+                    <h5 class="mb-3">Daily Bookings Trend</h5>
+                    <div class="chart-container">
+                        <canvas id="dailyBookingsChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Charts Row 3 -->
+        <div class="row mb-4">
+            <div class="col-md-6">
+                <div class="stat-card">
+                    <h5 class="mb-3">Therapist Utilization</h5>
+                    <div class="chart-container">
+                        <canvas id="therapistUtilChart"></canvas>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="stat-card">
+                    <h5 class="mb-3">Room Utilization</h5>
+                    <div class="chart-container">
+                        <canvas id="roomUtilChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    
+    <script>
+        // Wait for DOM and Chart.js to be ready
+        document.addEventListener('DOMContentLoaded', function() {
+            // Check if Chart.js is loaded
+            if (typeof Chart === 'undefined') {
+                console.error('Chart.js is not loaded');
+                return;
+            }
+
+            // Therapy Status Chart
+            const therapyStatusData = {{ therapy_status_data|safe }};
+            const therapyStatusChartEl = document.getElementById('therapyStatusChart');
+            if (therapyStatusChartEl && therapyStatusData && Object.keys(therapyStatusData).length > 0) {
+                new Chart(therapyStatusChartEl, {
+                    type: 'doughnut',
+                    data: {
+                        labels: Object.keys(therapyStatusData),
+                        datasets: [{
+                            data: Object.values(therapyStatusData),
+                            backgroundColor: ['#2ed573', '#e74c3c', '#f39c12', '#3498db']
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false
+                    }
+                });
+            }
+
+            // Prescription Status Chart
+            const prescriptionStatusData = {{ prescription_status_data|safe }};
+            const prescriptionStatusChartEl = document.getElementById('prescriptionStatusChart');
+            if (prescriptionStatusChartEl && prescriptionStatusData && Object.keys(prescriptionStatusData).length > 0) {
+                new Chart(prescriptionStatusChartEl, {
+                    type: 'doughnut',
+                    data: {
+                        labels: Object.keys(prescriptionStatusData),
+                        datasets: [{
+                            data: Object.values(prescriptionStatusData),
+                            backgroundColor: ['#2ed573', '#e74c3c', '#f39c12', '#3498db']
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false
+                    }
+                });
+            }
+
+            // Top Therapies Chart
+            const topTherapiesData = {{ top_therapies|safe }};
+            const topTherapiesChartEl = document.getElementById('topTherapiesChart');
+            if (topTherapiesChartEl && topTherapiesData && topTherapiesData.length > 0) {
+                new Chart(topTherapiesChartEl, {
+                    type: 'bar',
+                    data: {
+                        labels: topTherapiesData.map(t => t.therapy_name || 'Unknown'),
+                        datasets: [{
+                            label: 'Count',
+                            data: topTherapiesData.map(t => t.count || 0),
+                            backgroundColor: '#2ed573'
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        scales: {
+                            y: { beginAtZero: true }
+                        }
+                    }
+                });
+            }
+
+            // Daily Bookings Chart
+            const dailyBookingsData = {{ daily_bookings_data|safe }};
+            const dailyBookingsChartEl = document.getElementById('dailyBookingsChart');
+            if (dailyBookingsChartEl && dailyBookingsData && dailyBookingsData.dates && dailyBookingsData.dates.length > 0) {
+                new Chart(dailyBookingsChartEl, {
+                    type: 'line',
+                    data: {
+                        labels: dailyBookingsData.dates,
+                        datasets: [{
+                            label: 'Bookings',
+                            data: dailyBookingsData.counts,
+                            borderColor: '#2ed573',
+                            backgroundColor: 'rgba(46, 213, 115, 0.1)',
+                            fill: true
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        scales: {
+                            y: { beginAtZero: true }
+                        }
+                    }
+                });
+            }
+
+            // Therapist Utilization Chart
+            const therapistUtilData = {{ therapist_utilization|safe }};
+            const therapistUtilChartEl = document.getElementById('therapistUtilChart');
+            if (therapistUtilChartEl && therapistUtilData && therapistUtilData.length > 0) {
+                new Chart(therapistUtilChartEl, {
+                    type: 'bar',
+                    data: {
+                        labels: therapistUtilData.map(t => t.therapist__therapist_name || 'Unknown'),
+                        datasets: [{
+                            label: 'Bookings',
+                            data: therapistUtilData.map(t => t.count || 0),
+                            backgroundColor: '#3498db'
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        scales: {
+                            y: { beginAtZero: true }
+                        }
+                    }
+                });
+            }
+
+            // Room Utilization Chart
+            const roomUtilData = {{ room_utilization|safe }};
+            const roomUtilChartEl = document.getElementById('roomUtilChart');
+            if (roomUtilChartEl && roomUtilData && roomUtilData.length > 0) {
+                new Chart(roomUtilChartEl, {
+                    type: 'bar',
+                    data: {
+                        labels: roomUtilData.map(r => r.room__room_no || 'Unknown'),
+                        datasets: [{
+                            label: 'Bookings',
+                            data: roomUtilData.map(r => r.count || 0),
+                            backgroundColor: '#f39c12'
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        scales: {
+                            y: { beginAtZero: true }
+                        }
+                    }
+                });
+            }
+        });
+    </script>
+    
+    <script src="{% static 'js/dashboards_nav.js' %}"></script>
+</body>
+</html>
+
