@@ -16,3 +16,4 @@ djangorestframework>=3.14
 requests>=2.31.0
 celery>=5.3
 redis>=5.0
+reportlab>=4.0.0

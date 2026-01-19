@@ -608,57 +608,72 @@
                     date: selectedDate
                 })
             })
-            .then(response => response.json())
-            .then(data => {
+            .then(response => {
                 hideLoading('draft');
-                if (data.success) {
-                    // Extract success and failure counts
-                    let successful = 0;
-                    let failed = 0;
-                    
-                    if (data.allocation_update && data.allocation_update.success && data.allocation_update.result) {
-                        successful = data.allocation_update.result.successful || 0;
-                        failed = data.allocation_update.result.failed || 0;
-                    }
-                    
-                    // Show confirmation popup
-                    alert(`Schedule is done.\n${successful} treatments successful, ${failed} treatments failed`);
-                    
-                    // Also show detailed alert for additional info
-                    let message = `Final Schedule completed for ${selectedDate}\n\n`;
-                    
-                    if (data.leave_update && data.leave_update.success) {
-                        message += `Emergency Leave Update: ${data.leave_update.count} employees on leave\n`;
-                    } else if (data.leave_update && !data.leave_update.success) {
-                        message += `Emergency Leave Update: Failed - ${data.leave_update.error}\n`;
-                    }
-                    
-                    if (data.allocation_update && data.allocation_update.success) {
-                        const result = data.allocation_update.result;
-                        message += `Allocation Results: ${result.successful} successful, ${result.failed} failed out of ${result.total_processed} total`;
-                    } else if (data.allocation_update && !data.allocation_update.success) {
-                        message += `Allocation Update: Failed - ${data.allocation_update.error}`;
-                    }
-                    
-                    showAlert('success', message);
-                    
-                    // Reload all data
-                    loadTherapyData('draft', selectedDate);
-                    loadTherapyData('failed', selectedDate);
-                    loadTherapyData('allocated', selectedDate, getPatientSearchValue());
+                const contentType = response.headers.get('content-type');
+                
+                // Check if response is PDF
+                if (contentType && contentType.includes('application/pdf')) {
+                    // Handle PDF download
+                    return response.blob().then(blob => {
+                        const url = window.URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = `Final_Schedule_Debug_${selectedDate}_${new Date().toISOString().slice(0, 10)}.pdf`;
+                        document.body.appendChild(a);
+                        a.click();
+                        window.URL.revokeObjectURL(url);
+                        document.body.removeChild(a);
+                        
+                        // Show success message
+                        showAlert('success', `Final Schedule completed for ${selectedDate}. Debug PDF has been downloaded.`);
+                        
+                        // Reload all data
+                        loadTherapyData('draft', selectedDate);
+                        loadTherapyData('failed', selectedDate);
+                        loadTherapyData('allocated', selectedDate, getPatientSearchValue());
+                    });
+                } else if (contentType && contentType.includes('text/plain')) {
+                    // Handle text file download (fallback)
+                    return response.blob().then(blob => {
+                        const url = window.URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = `Final_Schedule_Debug_${selectedDate}_${new Date().toISOString().slice(0, 10)}.txt`;
+                        document.body.appendChild(a);
+                        a.click();
+                        window.URL.revokeObjectURL(url);
+                        document.body.removeChild(a);
+                        
+                        showAlert('success', `Final Schedule completed for ${selectedDate}. Debug output has been downloaded.`);
+                        
+                        loadTherapyData('draft', selectedDate);
+                        loadTherapyData('failed', selectedDate);
+                        loadTherapyData('allocated', selectedDate, getPatientSearchValue());
+                    });
                 } else {
-                    // Check if it's the "already run" error
-                    if (data.already_run) {
-                        showAlert('warning', data.error);
-                        // Disable the Final Schedule button for this date
-                        const finalScheduleBtn = document.getElementById('final-schedule-btn');
-                        finalScheduleBtn.disabled = true;
-                        finalScheduleBtn.textContent = 'Final Schedule (Already Run)';
-                        finalScheduleBtn.classList.remove('btn-primary');
-                        finalScheduleBtn.classList.add('btn-secondary');
-                    } else {
-                        showAlert('error', data.error || 'Final Schedule failed');
-                    }
+                    // Handle JSON response (for errors like "already run")
+                    return response.json().then(data => {
+                        if (data.success) {
+                            showAlert('success', `Final Schedule completed for ${selectedDate}. Debug PDF has been downloaded.`);
+                            loadTherapyData('draft', selectedDate);
+                            loadTherapyData('failed', selectedDate);
+                            loadTherapyData('allocated', selectedDate, getPatientSearchValue());
+                        } else {
+                            // Check if it's the "already run" error
+                            if (data.already_run) {
+                                showAlert('warning', data.error);
+                                // Disable the Final Schedule button for this date
+                                const finalScheduleBtn = document.getElementById('final-schedule-btn');
+                                finalScheduleBtn.disabled = true;
+                                finalScheduleBtn.textContent = 'Final Schedule (Already Run)';
+                                finalScheduleBtn.classList.remove('btn-primary');
+                                finalScheduleBtn.classList.add('btn-secondary');
+                            } else {
+                                showAlert('error', data.error || 'Final Schedule failed');
+                            }
+                        }
+                    });
                 }
             })
             .catch(error => {
@@ -770,36 +785,62 @@
                 },
                 body: JSON.stringify(requestData)
             })
-            .then(response => response.json())
-            .then(data => {
+            .then(response => {
                 hideLoading('failed');
-                if (data.success) {
-                    // Extract success and failure counts
-                    let successful = 0;
-                    let failed = 0;
-                    
-                    if (data.stats) {
-                        successful = data.stats.successful || 0;
-                        failed = data.stats.failed || 0;
-                    }
-                    
-                    // Show confirmation popup
-                    alert(`Schedule is done.\n${successful} treatments successful, ${failed} treatments failed`);
-                    
-                    // Also show detailed alert for additional info
-                    let message = data.message || 'Rescheduling completed';
-                    if (data.stats) {
-                        message += ` - ${data.stats.successful} successful, ${data.stats.failed} failed out of ${data.stats.total} total`;
-                    }
-                    showAlert('success', message);
-                    // Reload all data to show updated status
-                    loadTherapyData('failed', targetDate);
-                    loadTherapyData('draft', targetDate);
-                    loadTherapyData('allocated', targetDate, getPatientSearchValue());
+                const contentType = response.headers.get('content-type');
+                
+                // Check if response is PDF
+                if (contentType && contentType.includes('application/pdf')) {
+                    // Handle PDF download
+                    return response.blob().then(blob => {
+                        const url = window.URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = `Reschedule_All_Failed_Debug_${targetDate}_${new Date().toISOString().slice(0, 10)}.pdf`;
+                        document.body.appendChild(a);
+                        a.click();
+                        window.URL.revokeObjectURL(url);
+                        document.body.removeChild(a);
+                        
+                        // Show success message
+                        showAlert('success', `Reschedule All Failed completed for ${targetDate}. Debug PDF has been downloaded.`);
+                        
+                        // Reload all data to show updated status
+                        loadTherapyData('failed', targetDate);
+                        loadTherapyData('draft', targetDate);
+                        loadTherapyData('allocated', targetDate, getPatientSearchValue());
+                    });
+                } else if (contentType && contentType.includes('text/plain')) {
+                    // Handle text file download (fallback)
+                    return response.blob().then(blob => {
+                        const url = window.URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = `Reschedule_All_Failed_Debug_${targetDate}_${new Date().toISOString().slice(0, 10)}.txt`;
+                        document.body.appendChild(a);
+                        a.click();
+                        window.URL.revokeObjectURL(url);
+                        document.body.removeChild(a);
+                        
+                        showAlert('success', `Reschedule All Failed completed for ${targetDate}. Debug output has been downloaded.`);
+                        
+                        loadTherapyData('failed', targetDate);
+                        loadTherapyData('draft', targetDate);
+                        loadTherapyData('allocated', targetDate, getPatientSearchValue());
+                    });
                 } else {
-                    showAlert('error', data.error || 'Rescheduling failed');
-                    // Reload failed data
-                    loadTherapyData('failed', targetDate);
+                    // Handle JSON response (for errors)
+                    return response.json().then(data => {
+                        if (data.success) {
+                            showAlert('success', `Reschedule All Failed completed for ${targetDate}. Debug PDF has been downloaded.`);
+                            loadTherapyData('failed', targetDate);
+                            loadTherapyData('draft', targetDate);
+                            loadTherapyData('allocated', targetDate, getPatientSearchValue());
+                        } else {
+                            showAlert('error', data.error || 'Rescheduling failed');
+                            loadTherapyData('failed', targetDate);
+                        }
+                    });
                 }
             })
             .catch(error => {

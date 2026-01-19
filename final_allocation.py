@@ -1140,14 +1140,46 @@ def assign_continuity_therapists_pass1(booking, allocation, target_date, locked_
             continuity_therapists = [row.therapist for row in continuity_qs if row.therapist]
             
             if needs_bath_flag:
+                # CRITICAL FIX: First try to find the actual previous bathing therapist by checking is_bathing=True flag
+                # Look for the therapist who actually had is_bathing=True on the previous day
                 bath_row = next((row for row in continuity_qs if row.is_bathing and getattr(row.therapist, 'is_bathing_therapist', False)), None)
                 if bath_row:
                     previous_bathing_therapist = bath_row.therapist
+                    print(f"[CONTINUITY PASS1] Found previous bathing therapist from plan: {previous_bathing_therapist.therapist_code} (is_bathing=True in plan)")
                 else:
-                    for t in continuity_therapists:
-                        if getattr(t, 'is_bathing_therapist', False):
-                            previous_bathing_therapist = t
-                            break
+                    # Fallback: Check actual TherapistBooking records to find who had is_bathing=True
+                    # This is more reliable than just picking the first bathing therapist from the list
+                    try:
+                        from Patient.models import TherapistBooking
+                        # Find the most recent booking with is_bathing=True for this patient
+                        prev_bath_booking = TherapistBooking.objects.filter(
+                            patient_id=patient_id,
+                            date__lt=target_date,
+                            is_bathing=True,
+                            status='BOOKED'
+                        ).select_related('therapist').order_by('-date', '-created_at').first()
+                        
+                        if prev_bath_booking and prev_bath_booking.therapist:
+                            # Check if this therapist is in continuity_therapists
+                            if prev_bath_booking.therapist in continuity_therapists:
+                                previous_bathing_therapist = prev_bath_booking.therapist
+                                print(f"[CONTINUITY PASS1] ✓ Found previous bathing therapist from TherapistBooking: {previous_bathing_therapist.therapist_code} (is_bathing=True on {prev_bath_booking.date})")
+                            else:
+                                print(f"[CONTINUITY PASS1] ⚠ Previous bathing therapist {prev_bath_booking.therapist.therapist_code} not in continuity list")
+                        else:
+                            # Last resort: pick first bathing therapist from continuity list
+                            for t in continuity_therapists:
+                                if getattr(t, 'is_bathing_therapist', False):
+                                    previous_bathing_therapist = t
+                                    print(f"[CONTINUITY PASS1] ⚠ Using fallback: First bathing therapist from continuity list: {t.therapist_code}")
+                                    break
+                    except Exception as e:
+                        print(f"[CONTINUITY PASS1] Error finding previous bathing therapist: {e}")
+                        # Last resort: pick first bathing therapist from continuity list
+                        for t in continuity_therapists:
+                            if getattr(t, 'is_bathing_therapist', False):
+                                previous_bathing_therapist = t
+                                break
             
             print(f"[CONTINUITY PASS1] Booking {booking.pk}: Found {len(continuity_therapists)} continuity therapists from TherapistContinuityPlan")
             if continuity_therapists:
@@ -1322,13 +1354,16 @@ def assign_continuity_therapists_pass1(booking, allocation, target_date, locked_
     if needs_bath_flag and assigned_continuity:
         if previous_bathing_therapist and previous_bathing_therapist in assigned_continuity:
             result['bath_assigned'] = previous_bathing_therapist
-            print(f"[CONTINUITY PASS1] Using previous bathing therapist: {previous_bathing_therapist.therapist_code} (maintaining continuity)")
+            print(f"[CONTINUITY PASS1] ✓ Using previous bathing therapist: {previous_bathing_therapist.therapist_code} (maintaining continuity)")
         else:
             # Find first bathing therapist from assigned list
+            # But log a warning if previous_bathing_therapist was identified but not in assigned_continuity
+            if previous_bathing_therapist:
+                print(f"[CONTINUITY PASS1] ⚠ Previous bathing therapist {previous_bathing_therapist.therapist_code} identified but not in assigned_continuity (may have been filtered out)")
             for t in assigned_continuity:
                 if getattr(t, 'is_bathing_therapist', False):
                     result['bath_assigned'] = t
-                    print(f"[CONTINUITY PASS1] Assigned bathing therapist: {t.therapist_code}")
+                    print(f"[CONTINUITY PASS1] Assigned bathing therapist: {t.therapist_code} (previous {previous_bathing_therapist.therapist_code if previous_bathing_therapist else 'None'} not available)")
                     break
     
     # Check for senior tag assignment (special treatments)
@@ -2262,15 +2297,21 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
             # For special treatments: Senior therapist should NOT be the bathing therapist
             # Priority: Maintain bathing therapist continuity (previous bathing therapist should stay as bathing)
             if requires_senior_tag and senior_therapist:
-                if previous_bathing_therapist and previous_bathing_therapist in assigned_therapists:
-                    if previous_bathing_therapist != senior_therapist:
-                        # Previous bathing therapist is available and different from senior - use them (maintain continuity)
-                        bath_assigned = previous_bathing_therapist
-                        print(f"[DEBUG] Dhara & Pizichil: Using previous bathing therapist {previous_bathing_therapist.therapist_code} (maintaining continuity, senior {senior_therapist.therapist_code} is different)")
+                # CRITICAL FIX: Prioritize bath_assigned_from_pass1 (from PASS 1) over previous_bathing_therapist
+                # This ensures continuity is maintained even if previous_bathing_therapist is not in assigned_therapists
+                preferred_bathing_therapist = bath_assigned_from_pass1 if bath_assigned_from_pass1 and bath_assigned_from_pass1 in assigned_therapists else None
+                if not preferred_bathing_therapist and previous_bathing_therapist and previous_bathing_therapist in assigned_therapists:
+                    preferred_bathing_therapist = previous_bathing_therapist
+                
+                if preferred_bathing_therapist:
+                    if preferred_bathing_therapist != senior_therapist:
+                        # Preferred bathing therapist is available and different from senior - use them (maintain continuity)
+                        bath_assigned = preferred_bathing_therapist
+                        print(f"[DEBUG] Dhara & Pizichil: Using preferred bathing therapist {preferred_bathing_therapist.therapist_code} (maintaining continuity, senior {senior_therapist.therapist_code} is different)")
                     else:
-                        # Previous bathing therapist IS the senior - reassign senior tag to different senior
-                        print(f"[DEBUG] Dhara & Pizichil: Previous bathing therapist {previous_bathing_therapist.therapist_code} IS the senior - reassigning senior tag to different senior")
-                        bath_assigned = previous_bathing_therapist
+                        # Preferred bathing therapist IS the senior - reassign senior tag to different senior
+                        print(f"[DEBUG] Dhara & Pizichil: Preferred bathing therapist {preferred_bathing_therapist.therapist_code} IS the senior - reassigning senior tag to different senior")
+                        bath_assigned = preferred_bathing_therapist
                         senior_candidates = [t for t in assigned_therapists if t != bath_assigned and 'Senior' in getattr(getattr(t, 'therapist_grade', None), 'name', '')]
                         if senior_candidates:
                             from math import inf
@@ -2287,11 +2328,16 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                         else:
                             print(f"[DEBUG] Dhara & Pizichil: No alternative senior available - keeping senior tag on {senior_therapist.therapist_code} (same as bathing)")
                 else:
-                    # No previous bathing therapist - exclude senior from bathing assignment
+                    # No preferred bathing therapist available - exclude senior from bathing assignment
+                    # But first check if previous_bathing_therapist exists but wasn't in assigned_therapists
+                    if (bath_assigned_from_pass1 or previous_bathing_therapist) and (bath_assigned_from_pass1 not in assigned_therapists if bath_assigned_from_pass1 else True) and (previous_bathing_therapist not in assigned_therapists if previous_bathing_therapist else True):
+                        missing_therapist = bath_assigned_from_pass1 if bath_assigned_from_pass1 else previous_bathing_therapist
+                        print(f"[DEBUG] Dhara & Pizichil: ⚠ Preferred bathing therapist {missing_therapist.therapist_code if missing_therapist else 'None'} not in assigned_therapists - may have been filtered out")
+                    
                     bathing_candidates = [t for t in assigned_therapists if t != senior_therapist and getattr(t, 'is_bathing_therapist', False)]
                     if bathing_candidates:
                         bath_assigned = bathing_candidates[0]
-                        print(f"[DEBUG] Dhara & Pizichil: Assigned bathing therapist {bath_assigned.therapist_code} (senior {senior_therapist.therapist_code} excluded)")
+                        print(f"[DEBUG] Dhara & Pizichil: Assigned bathing therapist {bath_assigned.therapist_code} (senior {senior_therapist.therapist_code} excluded, preferred {bath_assigned_from_pass1.therapist_code if bath_assigned_from_pass1 else previous_bathing_therapist.therapist_code if previous_bathing_therapist else 'None'} not available)")
                     else:
                         # No bathing therapist available except senior - need to find another senior or fail
                         print(f"[DEBUG] Dhara & Pizichil: Senior {senior_therapist.therapist_code} is the only bathing therapist. Looking for alternative senior...")
@@ -2367,7 +2413,7 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
             else:
                 # Not Dhara & Pizichil or no senior therapist - use normal logic
                 # CRITICAL: Always prioritize previous bathing therapist for continuity
-                # Even if PASS 1 assigned a different bathing therapist, we should use the previous one if available
+                # Priority order: 1) previous_bathing_therapist, 2) bath_assigned_from_pass1, 3) first from list
                 if previous_bathing_therapist and previous_bathing_therapist in assigned_therapists:
                     # Previous bathing therapist is in assigned list - ALWAYS use them for continuity
                     if bath_assigned != previous_bathing_therapist:
@@ -2376,11 +2422,16 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                     print(f"[DEBUG] ✓ Using previous bathing therapist {previous_bathing_therapist.therapist_code} for patient {patient_id} (maintaining continuity)")
                 elif bath_assigned_from_pass1 and bath_assigned_from_pass1 in assigned_therapists:
                     # PASS 1 assigned a bathing therapist and they're still in the list - keep them
+                    # This maintains continuity from PASS 1 even if previous_bathing_therapist is not available
                     bath_assigned = bath_assigned_from_pass1
-                    print(f"[DEBUG] ✓ Using PASS 1 bathing therapist {bath_assigned.therapist_code} for patient {patient_id} (no previous therapist found)")
-                else:
-                    # No previous therapist and no PASS 1 assignment - pick first from assigned list
-                    bath_assigned = assigned_therapists[0] if assigned_therapists else None
+                    print(f"[DEBUG] ✓ Using PASS 1 bathing therapist {bath_assigned.therapist_code} for patient {patient_id} (previous {previous_bathing_therapist.therapist_code if previous_bathing_therapist else 'None'} not in assigned_therapists)")
+                elif not bath_assigned:
+                    # No previous therapist and no PASS 1 assignment - pick first bathing therapist from assigned list
+                    for t in assigned_therapists:
+                        if getattr(t, 'is_bathing_therapist', False):
+                            bath_assigned = t
+                            print(f"[DEBUG] Assigned bathing therapist {bath_assigned.therapist_code} (no previous or PASS 1 therapist available)")
+                            break
                     if bath_assigned:
                         print(f"[DEBUG] Using first assigned therapist {bath_assigned.therapist_code} for patient {patient_id} (no continuity available)")
                 
@@ -3382,15 +3433,22 @@ def bulk_allocate_for_date(target_date_str):
                     if not tb.therapist:
                         print(f"[CONTINUITY PLAN]   Skipping TherapistBooking {tb.pk} - no therapist")
                         continue
+                    # CRITICAL FIX: Only mark as bathing if the TherapistBooking record actually has is_bathing=True
+                    # Do NOT use therapist.is_bathing_therapist attribute - that just means they CAN be a bathing therapist,
+                    # not that they WERE the bathing therapist on this specific day
+                    # Only ONE therapist per visit/date/slot should have is_bathing=True
+                    tb_is_bathing = bool(getattr(tb, 'is_bathing', False))
+                    therapist_can_bathe = bool(getattr(tb.therapist, 'is_bathing_therapist', False))
                     continuity_rows.append({
                         "therapist": tb.therapist,
-                        "is_bathing": bool(
-                            getattr(tb, 'is_bathing', False)
-                            or getattr(tb.therapist, 'is_bathing_therapist', False)
-                        ),
+                        "is_bathing": tb_is_bathing,  # ONLY use actual is_bathing flag from TherapistBooking
                         "priority": base_priority,
                         "source_date": source_date,
                     })
+                    if tb_is_bathing:
+                        print(f"[CONTINUITY PLAN]   ✓ Therapist {tb.therapist.therapist_code} marked as bathing (is_bathing=True in TherapistBooking)")
+                    elif therapist_can_bathe:
+                        print(f"[CONTINUITY PLAN]   ℹ Therapist {tb.therapist.therapist_code} CAN be bathing therapist but was NOT on {source_date} (is_bathing=False)")
                     rows_added += 1
                 print(f"[CONTINUITY PLAN]   Added {rows_added} therapists from date {source_date} (priority {base_priority})")
 
@@ -3438,12 +3496,12 @@ def bulk_allocate_for_date(target_date_str):
                         if not tb.therapist:
                             print(f"[CONTINUITY PLAN]   DEBUG: Skipping TherapistBooking {tb.pk} - no therapist")
                             continue
+                        # CRITICAL FIX: Only mark as bathing if the TherapistBooking record actually has is_bathing=True
+                        # Do NOT use therapist.is_bathing_therapist attribute - that just means they CAN be a bathing therapist,
+                        # not that they WERE the bathing therapist on this specific day
                         continuity_rows.append({
                             "therapist": tb.therapist,
-                            "is_bathing": bool(
-                                getattr(tb, 'is_bathing', False)
-                                or getattr(tb.therapist, 'is_bathing_therapist', False)
-                            ),
+                            "is_bathing": bool(getattr(tb, 'is_bathing', False)),  # ONLY use actual is_bathing flag from TherapistBooking
                             "priority": 2,
                             "source_date": any_date,
                         })
