@@ -29,7 +29,8 @@ def change_user_role(user, new_role, profile_data=None):
     
     try:
         # Delete all existing profile data and dependent records
-        delete_all_user_profiles(user)
+        # Pass old_role to only delete TherapistMaster if role is changing away from therapist
+        delete_all_user_profiles(user, old_role=old_role, new_role=new_role)
         
         # Update user role
         user.role = new_role
@@ -43,23 +44,29 @@ def change_user_role(user, new_role, profile_data=None):
     except Exception as e:
         return False, f"Error changing role: {str(e)}", None
 
-def delete_all_user_profiles(user):
+def delete_all_user_profiles(user, old_role=None, new_role=None):
     """
     Delete all existing profiles and dependent records for a user
+    Only deletes TherapistMaster if role is changing away from 'therapist'
     """
     # Delete all possible profile types
     if hasattr(user, 'patient_profile'):
         user.patient_profile.delete()
     if hasattr(user, 'therapist_profile'):
-        # Delete therapist master record first
-        from masters.models import TherapistMaster, TherapistLeaveMaster
-        try:
-            therapist_master = TherapistMaster.objects.get(user=user)
-            # Delete therapist leave records first
-            TherapistLeaveMaster.objects.filter(therapist=therapist_master).delete()
-            therapist_master.delete()
-        except TherapistMaster.DoesNotExist:
-            pass
+        # Only delete TherapistMaster if role is changing away from 'therapist'
+        # This prevents accidental deletion when just updating password or other fields
+        should_delete_therapist_master = (old_role != 'therapist' or new_role != 'therapist')
+        
+        if should_delete_therapist_master:
+            # Delete therapist master record first
+            from masters.models import TherapistMaster, TherapistLeaveMaster
+            try:
+                therapist_master = TherapistMaster.objects.get(user=user)
+                # Delete therapist leave records first
+                TherapistLeaveMaster.objects.filter(therapist=therapist_master).delete()
+                therapist_master.delete()
+            except TherapistMaster.DoesNotExist:
+                pass
         user.therapist_profile.delete()
     if hasattr(user, 'doctor_profile'):
         user.doctor_profile.delete()

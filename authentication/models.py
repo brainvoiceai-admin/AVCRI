@@ -55,6 +55,8 @@ class CustomUser(AbstractUser):
     custom_role = models.ForeignKey(Role, on_delete=models.SET_NULL, null=True, blank=True, 
                                    help_text="Custom role with specific module permissions")
     mobile = models.CharField(max_length=15, null=True, blank=True)
+    profile_picture = models.ImageField(upload_to='profile_pictures/', null=True, blank=True, 
+                                        help_text="User profile picture")
     
     GENDER_CHOICES = [
         ('male', 'Male'),
@@ -70,31 +72,77 @@ class CustomUser(AbstractUser):
     def get_accessible_modules(self):
         """Get modules accessible to this user"""
         if self.role == "super_admin":
-            # Super admin has access to all modules
-            return Module.objects.filter(is_active=True)
-        elif self.custom_role:
+            # Check if a Role object exists with name "super_admin" - if so, use its modules
+            # Try exact match first, then try case-insensitive match
+            try:
+                role = Role.objects.prefetch_related('modules').get(name="super_admin", is_active=True)
+                # If a Role object exists, use its modules (allows managing super_admin modules)
+                modules = role.modules.filter(is_active=True).order_by('order', 'name')
+                return modules
+            except Role.DoesNotExist:
+                # Try case-insensitive lookup as fallback
+                try:
+                    from django.db.models import Q
+                    role = Role.objects.prefetch_related('modules').filter(
+                        Q(name__iexact="super_admin") | Q(display_name__icontains="super admin"),
+                        is_active=True
+                    ).first()
+                    if role:
+                        modules = role.modules.filter(is_active=True).order_by('order', 'name')
+                        return modules
+                except:
+                    pass
+                # No Role object exists, so super admin has access to all modules
+                return Module.objects.filter(is_active=True).order_by('order', 'name')
+            except Role.MultipleObjectsReturned:
+                # Multiple roles found, use the first one
+                role = Role.objects.prefetch_related('modules').filter(name="super_admin", is_active=True).first()
+                if role:
+                    return role.modules.filter(is_active=True).order_by('order', 'name')
+                return Module.objects.filter(is_active=True).order_by('order', 'name')
+        elif self.custom_role_id:
             # User has a custom role with specific module permissions
-            return self.custom_role.modules.filter(is_active=True)
+            # Fetch the role fresh from database to ensure we get latest modules
+            try:
+                # Use prefetch_related to ensure fresh data and optimize query
+                role = Role.objects.prefetch_related('modules').get(id=self.custom_role_id, is_active=True)
+                # Get modules with proper ordering
+                modules = role.modules.filter(is_active=True).order_by('order', 'name')
+                return modules
+            except Role.DoesNotExist:
+                return Module.objects.none()
         else:
             # Use default role-based module access
             return self.get_default_modules_for_role()
     
     def get_default_modules_for_role(self):
         """Get default modules for standard roles"""
-        # This will be implemented based on the current navigation logic
-        module_mapping = {
-            "doctor": ["add_therapy", "add_prescription", "reports", "treatment_schedule"],
-            "therapist": ["therapy_schedule"],
-            "patient": ["patient_profiles", "patient_dashboard", "patient_feedback"],
-            "nurse": ["nurse_dashboard"],
-            "ip_pharmacy_staff": ["ip_pharmacy", "procurement_dashboard"],
-            "hr": ["hr_dashboard"],
-            "housekeeping_staff": ["housekeeping"],
-            "admin": ["user_management", "demand_prediction", "audit_log", "master_tables"],
-        }
-        
-        accessible_modules = module_mapping.get(self.role, [])
-        return Module.objects.filter(name__in=accessible_modules, is_active=True)
+        # First, check if a Role object exists with the same name as the default role
+        # This allows admins to manage modules for default roles through the Role management system
+        try:
+            role = Role.objects.prefetch_related('modules').get(name=self.role, is_active=True)
+            # If a Role object exists with this name, use its modules
+            modules = role.modules.filter(is_active=True).order_by('order', 'name')
+            return modules
+        except (Role.DoesNotExist, Role.MultipleObjectsReturned):
+            # Fall back to hardcoded mapping if no Role object exists or multiple found
+            module_mapping = {
+                "doctor": ["add_therapy", "add_prescription"],
+                "therapist": ["therapy_schedule"],
+                "patient": ["patient_profiles", "patient_dashboard", "patient_feedback"],
+                "nurse": ["nurse_dashboard"],
+                "ip_pharmacy_staff": ["ip_pharmacy", "procurement_dashboard"],
+                "hr": ["hr_dashboard"],
+                "housekeeping_staff": ["housekeeping"],
+                "scheduling_staff": ["scheduling_dashboard","prescription_scheduling"],
+                "admin": ["user_management", "demand_prediction", "audit_log", "master_tables"],
+            }
+            
+            accessible_modules = module_mapping.get(self.role, [])
+            if accessible_modules:
+                return Module.objects.filter(name__in=accessible_modules, is_active=True).order_by('order', 'name')
+            else:
+                return Module.objects.none()
     
     def clean(self):
         """Custom validation for the model"""

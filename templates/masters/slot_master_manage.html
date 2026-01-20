@@ -1,22 +1,20 @@
+{%load static%}
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Slot Master Management</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet"
+        integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
-    
-    <style>
-        .main-content {
-            padding-left: 275px;
-        }
-        .table-responsive {
-            max-height: 600px;
-            overflow-y: auto;
-        }
-    </style>
+
+
+    <link rel="stylesheet" href="{% static 'css/masters_slot_master_manage.css' %}">
+    <link rel="stylesheet" href="{% static 'css/dashboards_nav.css' %}">
 </head>
+
 <body>
     {% include 'dashboards/nav.html' %}
 
@@ -24,6 +22,11 @@
         <div class="d-flex justify-content-between align-items-center mb-4">
             <h2><i class="fas fa-clock text-primary"></i> Slot Master Management</h2>
             <div>
+                {% if master_type %}
+                <button type="button" class="btn btn-info" data-bs-toggle="modal" data-bs-target="#bulkUploadModal">
+                    <i class="fas fa-file-excel me-2"></i>Bulk Upload Excel
+                </button>
+                {% endif %}
                 <a href="{% url 'slot_master_add' %}" class="btn btn-success">
                     <i class="fas fa-plus me-2"></i>Add New Slot
                 </a>
@@ -34,37 +37,45 @@
         </div>
 
         {% if messages %}
-            {% for message in messages %}
-                <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
-                    {{ message }}
-                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-                </div>
-            {% endfor %}
+        {% for message in messages %}
+        <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
+            {{ message }}
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+        {% endfor %}
         {% endif %}
 
         <!-- Search and Filter Section -->
         <div class="card mb-4">
             <div class="card-body">
-                <div class="row">
-                    <div class="col-md-4">
-                        <input type="text" class="form-control" id="searchInput" placeholder="Search slots...">
+                <form method="get" action="{% url 'slot_master_manage' %}" id="filterForm">
+                    <div class="row">
+                        <div class="col-md-4">
+                            <input type="text" class="form-control" name="search" id="searchInput"
+                                placeholder="Search slots..." value="{{ search }}">
+                        </div>
+                        <div class="col-md-3">
+                            <select class="form-select" name="status" id="statusFilter">
+                                <option value="">All Status</option>
+                                <option value="active" {% if status_filter == 'active' %}selected{% endif %}>Active
+                                </option>
+                                <option value="inactive" {% if status_filter == 'inactive' %}selected{% endif %}>Inactive
+                                </option>
+                            </select>
+                        </div>
+                        <div class="col-md-3">
+                            <button type="submit" class="btn btn-primary w-100" id="filterButton">
+                                <i class="fas fa-search"></i> Filter
+                            </button>
+                        </div>
+                        <div class="col-md-2">
+                            <a href="{% url 'slot_master_manage' %}" class="btn btn-outline-secondary w-100"
+                                id="clearFilters">
+                                <i class="fas fa-times"></i> Clear
+                            </a>
+                        </div>
                     </div>
-                    <div class="col-md-3">
-                        <select class="form-select" id="statusFilter">
-                            <option value="">All Status</option>
-                            <option value="active">Active</option>
-                            <option value="inactive">Inactive</option>
-                        </select>
-                    </div>
-                    <div class="col-md-3">
-                        <input type="time" class="form-control" id="timeFilter" placeholder="Filter by time">
-                    </div>
-                    <div class="col-md-2">
-                        <button class="btn btn-outline-primary w-100" onclick="clearFilters()">
-                            <i class="fas fa-times"></i> Clear
-                        </button>
-                    </div>
-                </div>
+                </form>
             </div>
         </div>
 
@@ -101,9 +112,9 @@
                                 </td>
                                 <td>
                                     {% if slot.is_active %}
-                                        <span class="badge bg-success">Active</span>
+                                    <span class="badge bg-success">Active</span>
                                     {% else %}
-                                        <span class="badge bg-danger">Inactive</span>
+                                    <span class="badge bg-danger">Inactive</span>
                                     {% endif %}
                                 </td>
                                 <td>
@@ -111,14 +122,13 @@
                                 </td>
                                 <td>
                                     <div class="btn-group" role="group">
-                                        <a href="{% url 'slot_master_update' slot.pk %}" 
-                                           class="btn btn-sm btn-outline-primary" title="Edit">
+                                        <a href="{% url 'slot_master_update' slot.pk %}"
+                                            class="btn btn-sm btn-outline-primary" title="Edit">
                                             <i class="fas fa-edit"></i>
                                         </a>
-                                        <a href="{% url 'slot_master_delete' slot.pk %}" 
-                                           class="btn btn-sm btn-outline-danger" 
-                                           title="Delete"
-                                           onclick="return confirm('Are you sure you want to delete Slot {{ slot.slot_number }}? This action cannot be undone.');">
+                                        <a href="{% url 'slot_master_delete' slot.pk %}"
+                                            class="btn btn-sm btn-outline-danger" title="Delete"
+                                            onclick="return confirm('Are you sure you want to delete Slot {{ slot.slot_number }}? This action cannot be undone.');">
                                             <i class="fas fa-trash"></i>
                                         </a>
                                     </div>
@@ -129,7 +139,8 @@
                                 <td colspan="6" class="text-center py-4">
                                     <div class="text-muted">
                                         <i class="fas fa-clock fa-3x mb-3"></i>
-                                        <p>No time slots found. <a href="{% url 'slot_master_add' %}">Add the first slot</a></p>
+                                        <p>No time slots found. <a href="{% url 'slot_master_add' %}">Add the first
+                                                slot</a></p>
                                     </div>
                                 </td>
                             </tr>
@@ -145,12 +156,15 @@
         <nav aria-label="Slot pagination" class="mt-4">
             <ul class="pagination justify-content-center">
                 {% if page_obj.has_previous %}
-                    <li class="page-item">
-                        <a class="page-link" href="?page=1">&laquo; First</a>
-                    </li>
-                    <li class="page-item">
-                        <a class="page-link" href="?page={{ page_obj.previous_page_number }}">Previous</a>
-                    </li>
+                <li class="page-item">
+                    <a class="page-link"
+                        href="?page=1{% if search %}&search={{ search }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}">&laquo;
+                        First</a>
+                </li>
+                <li class="page-item">
+                    <a class="page-link"
+                        href="?page={{ page_obj.previous_page_number }}{% if search %}&search={{ search }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}">Previous</a>
+                </li>
                 {% endif %}
 
                 <li class="page-item active">
@@ -160,12 +174,15 @@
                 </li>
 
                 {% if page_obj.has_next %}
-                    <li class="page-item">
-                        <a class="page-link" href="?page={{ page_obj.next_page_number }}">Next</a>
-                    </li>
-                    <li class="page-item">
-                        <a class="page-link" href="?page={{ page_obj.paginator.num_pages }}">Last &raquo;</a>
-                    </li>
+                <li class="page-item">
+                    <a class="page-link"
+                        href="?page={{ page_obj.next_page_number }}{% if search %}&search={{ search }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}">Next</a>
+                </li>
+                <li class="page-item">
+                    <a class="page-link"
+                        href="?page={{ page_obj.paginator.num_pages }}{% if search %}&search={{ search }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}">Last
+                        &raquo;</a>
+                </li>
                 {% endif %}
             </ul>
         </nav>
@@ -173,98 +190,14 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
-    <script>
-        // Auto-dismiss messages after 5 seconds
-        document.addEventListener('DOMContentLoaded', function() {
-            const alerts = document.querySelectorAll('.alert');
-            alerts.forEach(function(alert) {
-                setTimeout(function() {
-                    const bsAlert = new bootstrap.Alert(alert);
-                    bsAlert.close();
-                }, 5000);
-            });
-        });
 
-        // Search functionality
-        document.getElementById('searchInput').addEventListener('input', function() {
-            filterTable();
-        });
-
-        // Filter functionality
-        document.getElementById('statusFilter').addEventListener('change', function() {
-            filterTable();
-        });
-
-        document.getElementById('timeFilter').addEventListener('change', function() {
-            filterTable();
-        });
-
-        function filterTable() {
-            const searchTerm = document.getElementById('searchInput').value.toLowerCase();
-            const statusFilter = document.getElementById('statusFilter').value;
-            const timeFilter = document.getElementById('timeFilter').value;
-            const table = document.getElementById('slotTable');
-            const rows = table.getElementsByTagName('tbody')[0].getElementsByTagName('tr');
-            
-            let visibleCount = 0;
-            
-            for (let i = 0; i < rows.length; i++) {
-                const row = rows[i];
-                const cells = row.getElementsByTagName('td');
-                
-                if (cells.length === 0) continue; // Skip empty rows
-                
-                const slotNumber = cells[0].textContent.toLowerCase();
-                const slotName = cells[1].textContent.toLowerCase();
-                const slotTime = cells[2].textContent.toLowerCase();
-                const status = cells[3].textContent.toLowerCase();
-                
-                let showRow = true;
-                
-                // Search filter
-                if (searchTerm && !slotNumber.includes(searchTerm) && !slotName.includes(searchTerm)) {
-                    showRow = false;
-                }
-                
-                // Status filter
-                if (statusFilter) {
-                    if (statusFilter === 'active' && !status.includes('active')) {
-                        showRow = false;
-                    } else if (statusFilter === 'inactive' && !status.includes('inactive')) {
-                        showRow = false;
-                    }
-                }
-                
-                // Time filter (convert 24hr to 12hr for comparison)
-                if (timeFilter) {
-                    const time24 = timeFilter;
-                    const [hours, minutes] = time24.split(':');
-                    const hour = parseInt(hours, 10);
-                    const ampm = hour >= 12 ? 'PM' : 'AM';
-                    const hour12 = hour % 12 || 12;
-                    const time12 = `${hour12}:${minutes} ${ampm}`.toLowerCase();
-                    if (!slotTime.includes(time12)) {
-                        showRow = false;
-                    }
-                }
-                
-                if (showRow) {
-                    row.style.display = '';
-                    visibleCount++;
-                } else {
-                    row.style.display = 'none';
-                }
-            }
-            
-            document.getElementById('totalCount').textContent = visibleCount;
-        }
-
-        function clearFilters() {
-            document.getElementById('searchInput').value = '';
-            document.getElementById('statusFilter').value = '';
-            document.getElementById('timeFilter').value = '';
-            filterTable();
-        }
-    </script>
+    {% if master_type %}
+    {% include 'masters/bulk_upload_modal.html' %}
+    <script src="{% static 'js/masters_bulk_upload_modal.js' %}"></script>
+    {% endif %}
+    <script src="{% static 'js/master_filter_handler.js' %}"></script>
+    <script src="{% static 'js/masters_slot_master_manage.js' %}"></script>
+    <script src="{% static 'js/dashboards_nav.js' %}"></script>
 </body>
+
 </html>

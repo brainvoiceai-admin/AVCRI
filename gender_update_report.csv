@@ -1,6 +1,6 @@
 therapist_code,input_gender,normalized_gender,status,note
 THP1317,Female,Female,updated,was: Male
-THP1335,Female,Female,updated,was: Male
+THP1335,Female,Female,missing,Not found in DB
 THP1280,Male,Male,updated,was: Male
 THP1274,Male,Male,updated,was: Male
 THP1118,Female,Female,updated,was: Male

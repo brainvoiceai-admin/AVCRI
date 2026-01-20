@@ -1,0 +1,115 @@
+{%load static%}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Therapist Availability Dashboard</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  
+    <link rel="stylesheet" href="{% static 'css/therapist_availability.css' %}">
+    <link rel="stylesheet" href="{% static 'css/dashboards_nav.css' %}">
+</head>
+<body>
+  {% include 'dashboards/nav.html' %}
+  <div class="main-content">
+  <div class="container">
+    <header>
+      <div class="logo">
+        <i class="fas fa-user-md"></i>
+        <h1>Therapist Availability Dashboard</h1>
+      </div>
+      <p class="subtitle">Find available therapists and check leave schedules</p>
+    </header>
+
+    <div class="dashboard">
+      <!-- Section 1: Therapist Availability -->
+      <div class="card">
+        <div class="card-header">
+          <i class="fas fa-search"></i>
+          <h2>Find Available Therapists</h2>
+        </div>
+        <div class="card-body">
+          <form id="availabilityForm">
+            <div class="form-group">
+              <label for="date"><i class="far fa-calendar-alt"></i> Date</label>
+              <input type="date" id="date" class="form-control" required>
+            </div>
+            
+            <div class="form-group">
+              <label for="time"><i class="far fa-clock"></i> Time Slot</label>
+              <select id="time" class="form-control" required>
+                <option value="">-- Select Time Slot --</option>
+              </select>
+            </div>
+            
+            <div class="form-group">
+              <label for="gender"><i class="fas fa-venus-mars"></i> Gender Preference</label>
+              <select id="gender" class="form-control" required>
+                <option value="">-- Select Gender --</option>
+                <option value="all">All Genders</option>
+                <option value="male">Male</option>
+                <option value="female">Female</option>
+              </select>
+            </div>
+            
+            <button type="button" class="btn" onclick="findAvailability()" id="availabilityBtn">
+              <i class="fas fa-search"></i> Check Availability
+            </button>
+          </form>
+          
+          <div class="result" id="availableTherapists">
+            <h3><i class="fas fa-list"></i> Available Therapists</h3>
+            <p class="no-result"><i class="far fa-smile"></i> Select filters and click "Check Availability" to see results</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Section 2: Therapist on Leave -->
+      <div class="card">
+        <div class="card-header">
+          <i class="fas fa-umbrella-beach"></i>
+          <h2>Therapists on Leave</h2>
+        </div>
+        <div class="card-body">
+          <form id="leaveForm">
+            <div class="form-group">
+              <label for="leaveDate"><i class="far fa-calendar-alt"></i> Date</label>
+              <input type="date" id="leaveDate" class="form-control" required>
+            </div>
+            
+            <div class="form-group">
+              <label for="leaveGender"><i class="fas fa-venus-mars"></i> Gender</label>
+              <select id="leaveGender" class="form-control" required>
+                <option value="">-- Select Gender --</option>
+                <option value="all">All Genders</option>
+                <option value="male">Male</option>
+                <option value="female">Female</option>
+              </select>
+            </div>
+            
+            <button type="button" class="btn" onclick="checkLeaves()" id="leaveBtn">
+              <i class="fas fa-search"></i> Check Leaves
+            </button>
+          </form>
+          
+          <div class="result" id="therapistLeaves">
+            <h3><i class="fas fa-list"></i> Therapists on Leave</h3>
+            <p class="no-result"><i class="far fa-smile"></i> Select a date to check who is on leave</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <footer>
+      <p>Therapist Availability Dashboard &copy; 2025 | Designed for Better Patient Care</p>
+    </footer>
+  </div>
+
+  
+  </div>
+</div>
+    <script src="{% static 'js/therapist_availability.js' %}"></script>
+    <script src="{% static 'js/dashboards_nav.js' %}"></script>
+</body>
+</html>

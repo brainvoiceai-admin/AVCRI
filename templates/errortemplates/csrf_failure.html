@@ -1,0 +1,46 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>403 - CSRF Verification Failed | AVCRI</title>
+    <link rel="stylesheet" href="{% static 'css/errortemplates_error.css' %}">
+</head>
+<body>
+    <div class="error-container error-403">
+        <div class="error-icon">
+            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2" fill="none" opacity="0.2"/>
+                <path d="M12 8v4M12 16h.01" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                <path d="M9 9l6 6M15 9l-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z" stroke="currentColor" stroke-width="2" fill="none"/>
+            </svg>
+        </div>
+        <div class="error-code">403</div>
+        <h1 class="error-title">CSRF Verification Failed</h1>
+        <p class="error-message">Your session has expired or the security token is invalid.</p>
+        <p class="error-description">
+            For security reasons, your request could not be processed. This usually happens when your session expires or the page was open for too long.
+        </p>
+        
+        <div class="error-details">
+            <h3>What you can do:</h3>
+            <ul>
+                <li>Refresh the page and try again</li>
+                <li>Log in again if your session expired</li>
+                <li>Make sure cookies are enabled in your browser</li>
+                <li>Don't leave forms open for extended periods</li>
+            </ul>
+        </div>
+
+        <div class="error-actions">
+            <a href="javascript:location.reload()" class="btn btn-primary">Refresh Page</a>
+            <a href="/authentication/login/" class="btn btn-secondary">Login Again</a>
+        </div>
+    </div>
+
+    <script src="{% static 'js/errortemplates_error.js' %}"></script>
+</body>
+</html>
+
