@@ -400,9 +400,7 @@
                                                 <div class="nurse-list">
                                                     {% for nurse_assignment in booking.nurse_assignments.all %}
                                                     {% if nurse_assignment.status == 'assigned' %}
-                                                    <span class="nurse-badge">{{
-                                                        nurse_assignment.nurse.nurse_name|default:nurse_assignment.nurse.nurse_code
-                                                        }}</span>
+                                                    <span class="nurse-badge">{{ nurse_assignment.nurse.nurse_name|default:nurse_assignment.nurse.nurse_code }}</span>
                                                     {% endif %}
                                                     {% empty %}
                                                     —

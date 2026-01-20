@@ -1,0 +1,127 @@
+===================================================================================
+PRESCRIPTION PRINT FORMAT - EXACT HOSPITAL CHART STRUCTURE
+===================================================================================
+
+THE ARYA VAIDA CHIKITSALAYAM AND RESEARCH INSTITUTE
+PRESCRIPTIONS AS ON 20/01/2026        PHYSICIAN / PHARMACY / RESEARCH
+
+-----------------------------------------------------------------------------------
+TIME LEGEND:
+-----------------------------------------------------------------------------------
+
+M  (5.30–5.45)  – Morning            ABF (8.00–8.30) – After Breakfast    BD (6.30–7.00)  – Before Dinner
+E  (5.30–6.00)  – Evening            BL (11.00–12.30) – Before Lunch      AD (8.00–8.30)  – After Dinner
+                                     AL (12.30–1.30) – After Lunch        BT (8.30–9.00)  – Bed Time
+                                                                          NT – A Pinch Now And Then
+
+===================================================================================
+SECTION 1: SUITE – GROUND FLOOR
+===================================================================================
+
+Room: DS-1        Name: John Doe
+Gender: Male       Age: 45       Doctor: Dr. Smith
+
+-----------------------------------------------------------------------------------
+PRESCRIPTION TABLE
+-----------------------------------------------------------------------------------
+Time / Usage          | Items                                    | Oil Class    | Ingredients
+-----------------------------------------------------------------------------------
+ABF / Internal        | Rasnaerandadi Kashayam                  | Class A      | Ginger, Turmeric
+                      | + Ashtavargam Kashayam                  |              |
+                      | + Indukantham Kashayam — [10 ml]        |              |
+-----------------------------------------------------------------------------------
+BL / External         | Ksheerabala (101) — [10 drps]           | Class B      | Sesame Oil
+-----------------------------------------------------------------------------------
+
+-----------------------------------------------------------------------------------
+THERAPY TABLE
+-----------------------------------------------------------------------------------
+Therapy Name          | Items                                    | Oil Class    | Time Slot
+-----------------------------------------------------------------------------------
+Dhanyamla Dhara (3)   | Dhanyamla Oil — [50 ml]                 | Class C      | 06:30
+-----------------------------------------------------------------------------------
+Virechanam            | Castor Oil — [30 ml]                    | —            | 10:00
+-----------------------------------------------------------------------------------
+Local Pizhichil       | Dhanwantaram Oil — [100 ml]             | Class A      | 11.00 AM
+-----------------------------------------------------------------------------------
+
+===================================================================================
+SECTION 2: FIRST FLOOR
+===================================================================================
+
+Room: NR-15        Name: Jane Smith
+Gender: Female     Age: 38       Doctor: Dr. Johnson
+
+[Same table structure as above]
+
+===================================================================================
+SECTION 3: COTTAGES – NEW BLOCK
+===================================================================================
+
+[Same structure]
+
+===================================================================================
+SECTION 4: GENERAL WARD ROOMS
+===================================================================================
+
+[Same structure]
+
+===================================================================================
+SECTION 5: OP PATIENTS
+===================================================================================
+
+[Same structure]
+
+===================================================================================
+KEY FORMATTING RULES
+===================================================================================
+
+1. HEADER:
+   - Must be exactly: "THE ARYA VAIDA CHIKITSALAYAM AND RESEARCH INSTITUTE"
+   - Date in DD/MM/YYYY format
+   - "PHYSICIAN / PHARMACY / RESEARCH" on same line as date
+
+2. TIME LEGEND:
+   - Clean 3-column layout
+   - All 9 time codes displayed
+   - Readable spacing
+
+3. SECTION ORDER (STRICT):
+   - SUITE – GROUND FLOOR (DS-1 to DS-6, NR-7 to NR-14, NR-28 to NR-33)
+   - FIRST FLOOR (NR-15 to NR-27)
+   - COTTAGES – NEW BLOCK (CT-1 to CT-23)
+   - GENERAL WARD ROOMS (MG, FG, CB rooms)
+   - OP PATIENTS (OP rooms)
+
+4. PRESCRIPTION TABLE:
+   - Columns: Time / Usage | Items | Oil Class | Ingredients
+   - NO separate Dosage column
+   - Dosage MUST be inside Items column
+   - Group medicines with + symbol
+   - Dosage at end in brackets: [10 ml]
+   - Format: Medicine1 + Medicine2 + Medicine3 — [dosage]
+
+5. THERAPY TABLE:
+   - SEPARATE table AFTER prescriptions
+   - Columns: Therapy Name | Items | Oil Class | Time Slot
+   - Therapy name in first column (NOT in Items)
+   - Therapy medicines in Items column
+   - Time slot MANDATORY
+
+6. PATIENT INFO:
+   - Room, Name on first line
+   - Gender, Age, Doctor on second line
+   - Display ONCE per patient
+
+7. ORDERING:
+   - Room order strictly as defined
+   - Inside each room, preserve row order
+   - Do NOT alphabetically sort
+
+8. CONSTRAINTS:
+   - Print-only (no UI changes)
+   - No data model changes
+   - No business logic changes
+   - Clean, professional, print-ready layout
+
+===================================================================================
