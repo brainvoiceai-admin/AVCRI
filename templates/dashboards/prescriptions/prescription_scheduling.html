@@ -1,216 +1,227 @@
 {%load static%}
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Prescription Scheduling Dashboard</title>
-    
+
     <link rel="stylesheet" href="{% static 'css/prescription_scheduling.css' %}">
     <link rel="stylesheet" href="{% static 'css/dashboards_nav.css' %}">
 </head>
+
 <body>
     {% include 'dashboards/nav.html' %}
     <div class="main-content">
-    <div class="container">
-        <header>
-            <h1>Prescription Scheduling Dashboard</h1>
-            <div class="subtitle">Manage prescription status and dispatch to procurement departments</div>
-        </header>
-        
-        <div class="stats">
-            <div class="stat-card stat-draft">
-                <div class="stat-value" id="draft-count">0</div>
-                <div class="stat-label">Draft Prescriptions</div>
-            </div>
-            <div class="stat-card stat-scheduled">
-                <div class="stat-value" id="scheduled-count">0</div>
-                <div class="stat-label">Scheduled Prescriptions</div>
-            </div>
-            <div class="stat-card stat-dispatched">
-                <div class="stat-value" id="dispatched-count">0</div>
-                <div class="stat-label">Dispatched Prescriptions</div>
-            </div>
-        </div>
-        
-        <div class="card">
-            <div class="tabs">
-                <button class="tab active" data-tab="draft">🟡 Draft Prescriptions</button>
-                <button class="tab" data-tab="scheduled">🔵 Scheduled Prescriptions</button>
-                <button class="tab" data-tab="dispatched">🟢 Dispatched Prescriptions</button>
-            </div>
-            
-            <!-- Draft Prescriptions Tab -->
-            <div id="draft" class="tab-content active">
-                <div class="card-header">
-                    <div>
-                        <div class="card-title">Draft Prescriptions</div>
-                        <div class="card-subtitle">Prescriptions awaiting final approval and dispatch to procurement departments.</div>
-                    </div>
-                </div>
-                
-                <div class="filters">
-                    <div class="filter-group">
-                        <label class="filter-label">Filter by Date</label>
-                        <input type="date" id="draft-date">
-                    </div>
-                    <button class="btn btn-primary" id="send-final-prescription">
-                        <span>📤</span> Send Final Prescription
-                    </button>
-                </div>
-                
-                <div class="loading" id="draft-loading">
-                    <div>Loading prescription data...</div>
-                </div>
-                
-                <div class="table-container">
-                    <table id="draft-table">
-                        <thead>
-                            <tr>
-                                <th>Patient Name</th>
-                                <th>Registration No</th>
-                                <th>Room No</th>
-                                <th>Doctor Name</th>
-                                <th>Prescription Count</th>
-                                <th>Status</th>
-                                <th>Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody id="draft-body">
-                            <!-- Draft prescriptions will be inserted here -->
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-            
-            <!-- Scheduled Prescriptions Tab -->
-            <div id="scheduled" class="tab-content">
-                <div class="card-header">
-                    <div>
-                        <div class="card-title">Scheduled Prescriptions</div>
-                        <div class="card-subtitle">Prescriptions sent to procurement departments for preparation.</div>
-                    </div>
-                    <button class="btn btn-primary" id="print-prescription-pdf" title="Print to PDF" style="background: #2ed573; color: white; font-weight: 600; padding: 12px 24px; display: flex; align-items: center; gap: 8px;">
-                        <span style="font-size: 18px;">🖨️</span> Print to PDF
-                    </button>
-                </div>
-                
-                <div class="filters">
-                    <div class="filter-group">
-                        <label class="filter-label">Filter by Date</label>
-                        <input type="date" id="scheduled-date">
-                    </div>
-                </div>
-                
-                <div class="loading" id="scheduled-loading">
-                    <div>Loading prescription data...</div>
-                </div>
-                
-                <div class="table-container">
-                    <table id="scheduled-table">
-                        <thead>
-                            <tr>
-                                <th>Patient Name</th>
-                                <th>Registration No</th>
-                                <th>Room No</th>
-                                <th>Doctor Name</th>
-                                <th>Prescription Count</th>
-                                <th>Status</th>
-                                <th>Sent To</th>
-                                <th>Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody id="scheduled-body">
-                            <!-- Scheduled prescriptions will be inserted here -->
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-            
-            <!-- Dispatched Prescriptions Tab -->
-            <div id="dispatched" class="tab-content">
-                <div class="card-header">
-                    <div>
-                        <div class="card-title">Dispatched Prescriptions</div>
-                        <div class="card-subtitle">Prescriptions that have been prepared and dispatched to patients.</div>
-                    </div>
-                </div>
-                
-                <div class="filters">
-                    <div class="filter-group">
-                        <label class="filter-label">Filter by Date</label>
-                        <input type="date" id="dispatched-date">
-                    </div>
-                </div>
-                
-                <div class="loading" id="dispatched-loading">
-                    <div>Loading prescription data...</div>
-                </div>
-                
-                <div class="table-container">
-                    <table id="dispatched-table">
-                        <thead>
-                            <tr>
-                                <th>Patient Name</th>
-                                <th>Registration No</th>
-                                <th>Room No</th>
-                                <th>Doctor Name</th>
-                                <th>Prescription Count</th>
-                                <th>Status</th>
-                                <th>Dispatched From</th>
-                                <th>Dispatched At</th>
-                            </tr>
-                        </thead>
-                        <tbody id="dispatched-body">
-                            <!-- Dispatched prescriptions will be inserted here -->
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-        </div>
-    </div>
-    
-    <!-- Prescription Details Modal -->
-    <div id="prescriptionModal" class="modal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3 class="modal-title">Prescription Details</h3>
-                <span class="close" onclick="closePrescriptionModal()">&times;</span>
-            </div>
-            <div class="modal-body">
-                <div id="patient-info" style="margin-bottom: 20px; padding: 15px; background: var(--light); border-radius: 8px;">
-                    <!-- Patient information will be inserted here -->
-                </div>
-                <div class="prescription-items" id="prescription-items">
-                    <!-- Prescription items will be inserted here -->
-                </div>
-            </div>
-        </div>
-    </div>
-    
-    <!-- Change Log Modal -->
-    <div id="changeLogModal" class="modal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3 class="modal-title">Change Log</h3>
-                <span class="close" onclick="closeChangeLogModal()">&times;</span>
-            </div>
-            <div class="modal-body">
-                <div id="change-log-content">
-                    <!-- Change log entries will be inserted here -->
-                </div>
-            </div>
-        </div>
-    </div>
+        <div class="container">
+            <header>
+                <h1>Prescription Scheduling Dashboard</h1>
+                <div class="subtitle">Manage prescription status and dispatch to procurement departments</div>
+            </header>
 
-    <!-- jsPDF Library -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
-    
-    
+            <div class="stats">
+                <div class="stat-card stat-draft">
+                    <div class="stat-value" id="draft-count">0</div>
+                    <div class="stat-label">Draft Prescriptions</div>
+                </div>
+                <div class="stat-card stat-scheduled">
+                    <div class="stat-value" id="scheduled-count">0</div>
+                    <div class="stat-label">Scheduled Prescriptions</div>
+                </div>
+                <div class="stat-card stat-dispatched">
+                    <div class="stat-value" id="dispatched-count">0</div>
+                    <div class="stat-label">Dispatched Prescriptions</div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="tabs">
+                    <button class="tab active" data-tab="draft">🟡 Draft Prescriptions</button>
+                    <button class="tab" data-tab="scheduled">🔵 Scheduled Prescriptions</button>
+                    <button class="tab" data-tab="dispatched">🟢 Dispatched Prescriptions</button>
+                </div>
+
+                <!-- Draft Prescriptions Tab -->
+                <div id="draft" class="tab-content active">
+                    <div class="card-header">
+                        <div>
+                            <div class="card-title">Draft Prescriptions</div>
+                            <div class="card-subtitle">Prescriptions awaiting final approval and dispatch to procurement
+                                departments.</div>
+                        </div>
+                    </div>
+
+                    <div class="filters">
+                        <div class="filter-group">
+                            <label class="filter-label">Filter by Date</label>
+                            <input type="date" id="draft-date">
+                        </div>
+                        <button class="btn btn-primary" id="send-final-prescription">
+                            <span>📤</span> Send Final Prescription
+                        </button>
+                    </div>
+
+                    <div class="loading" id="draft-loading">
+                        <div>Loading prescription data...</div>
+                    </div>
+
+                    <div class="table-container">
+                        <table id="draft-table">
+                            <thead>
+                                <tr>
+                                    <th>Patient Name</th>
+                                    <th>Registration No</th>
+                                    <th>Room No</th>
+                                    <th>Doctor Name</th>
+                                    <th>Prescription Count</th>
+                                    <th>Status</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="draft-body">
+                                <!-- Draft prescriptions will be inserted here -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Scheduled Prescriptions Tab -->
+                <div id="scheduled" class="tab-content">
+                    <div class="card-header">
+                        <div>
+                            <div class="card-title">Scheduled Prescriptions</div>
+                            <div class="card-subtitle">Prescriptions sent to procurement departments for preparation.
+                            </div>
+                        </div>
+                        <button class="btn btn-primary" id="print-prescription-pdf" title="Print to PDF"
+                            style="background: #2ed573; color: white; font-weight: 600; padding: 12px 24px; display: flex; align-items: center; gap: 8px;">
+                            <span style="font-size: 18px;">🖨️</span> Print to PDF
+                        </button>
+                    </div>
+
+                    <div class="filters">
+                        <div class="filter-group">
+                            <label class="filter-label">Filter by Date</label>
+                            <input type="date" id="scheduled-date">
+                        </div>
+                    </div>
+
+                    <div class="loading" id="scheduled-loading">
+                        <div>Loading prescription data...</div>
+                    </div>
+
+                    <div class="table-container">
+                        <table id="scheduled-table">
+                            <thead>
+                                <tr>
+                                    <th>Patient Name</th>
+                                    <th>Registration No</th>
+                                    <th>Room No</th>
+                                    <th>Doctor Name</th>
+                                    <th>Prescription Count</th>
+                                    <th>Status</th>
+                                    <th>Sent To</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="scheduled-body">
+                                <!-- Scheduled prescriptions will be inserted here -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Dispatched Prescriptions Tab -->
+                <div id="dispatched" class="tab-content">
+                    <div class="card-header">
+                        <div>
+                            <div class="card-title">Dispatched Prescriptions</div>
+                            <div class="card-subtitle">Prescriptions that have been prepared and dispatched to patients.
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="filters">
+                        <div class="filter-group">
+                            <label class="filter-label">Filter by Date</label>
+                            <input type="date" id="dispatched-date">
+                        </div>
+                    </div>
+
+                    <div class="loading" id="dispatched-loading">
+                        <div>Loading prescription data...</div>
+                    </div>
+
+                    <div class="table-container">
+                        <table id="dispatched-table">
+                            <thead>
+                                <tr>
+                                    <th>Patient Name</th>
+                                    <th>Registration No</th>
+                                    <th>Room No</th>
+                                    <th>Doctor Name</th>
+                                    <th>Prescription Count</th>
+                                    <th>Status</th>
+                                    <th>Dispatched From</th>
+                                    <th>Dispatched At</th>
+                                </tr>
+                            </thead>
+                            <tbody id="dispatched-body">
+                                <!-- Dispatched prescriptions will be inserted here -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Prescription Details Modal -->
+        <div id="prescriptionModal" class="modal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3 class="modal-title">Prescription Details</h3>
+                    <span class="close" onclick="closePrescriptionModal()">&times;</span>
+                </div>
+                <div class="modal-body">
+                    <div id="patient-info"
+                        style="margin-bottom: 20px; padding: 15px; background: var(--light); border-radius: 8px;">
+                        <!-- Patient information will be inserted here -->
+                    </div>
+                    <div class="prescription-items" id="prescription-items">
+                        <!-- Prescription items will be inserted here -->
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Change Log Modal -->
+        <div id="changeLogModal" class="modal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3 class="modal-title">Change Log</h3>
+                    <span class="close" onclick="closeChangeLogModal()">&times;</span>
+                </div>
+                <div class="modal-body">
+                    <div id="change-log-content">
+                        <!-- Change log entries will be inserted here -->
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- jsPDF Library -->
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+        <script
+            src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
+
+        <!-- New Prescription PDF Generator (Hospital Chart Format) -->
+        <script src="{% static 'js/prescription_pdf_new.js' %}"></script>
+
     </div>
-</div>
+    </div>
     <script src="{% static 'js/prescription_scheduling.js' %}"></script>
     <script src="{% static 'js/dashboards_nav.js' %}"></script>
 </body>
+
 </html>

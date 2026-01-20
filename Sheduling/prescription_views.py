@@ -242,21 +242,47 @@ def get_prescription_details_api(request):
         if not filter_date:
             return JsonResponse({'error': 'Invalid date format'}, status=400)
         
-        # Get patient
+        # Get patient - try PatientSnapshot first, then fall back to therapy data
+        patient = None
+        patient_info = {
+            'name': 'Unknown',
+            'registration_no': '',
+            'room_no': None,
+            'age': '',
+            'sex': '',
+            'doctor_name': None
+        }
+        
         try:
             patient = PatientSnapshot.objects.get(pk=patient_id)
+            patient_info = {
+                'name': patient.pat_name or 'Unknown',
+                'registration_no': patient.pat_reg_no,
+                'room_no': getattr(patient, 'pat_room_no', None),
+                'age': getattr(patient, 'pat_age', '') or '',
+                'sex': getattr(patient, 'pat_sex', '') or '',
+                'doctor_name': None  # Will be set from prescription if available
+            }
         except PatientSnapshot.DoesNotExist:
-            return JsonResponse({'error': 'Patient not found'}, status=404)
-        
-        # Get patient info (include age/sex for print layout)
-        patient_info = {
-            'name': patient.pat_name or 'Unknown',
-            'registration_no': patient.pat_reg_no,
-            'room_no': getattr(patient, 'pat_room_no', None),
-            'age': getattr(patient, 'pat_age', '') or '',
-            'sex': getattr(patient, 'pat_sex', '') or '',
-            'doctor_name': None  # Will be set from prescription if available
-        }
+            # Patient not in snapshot - try to get from therapy allocations
+            from .models import TherapyAllocation
+            therapy_alloc = TherapyAllocation.objects.filter(
+                patient_id=patient_id
+            ).select_related('patient').first()
+            
+            if therapy_alloc and therapy_alloc.patient:
+                patient = therapy_alloc.patient
+                patient_info = {
+                    'name': patient.pat_name or 'Unknown',
+                    'registration_no': patient.pat_reg_no,
+                    'room_no': getattr(patient, 'pat_room_no', None),
+                    'age': getattr(patient, 'pat_age', '') or '',
+                    'sex': getattr(patient, 'pat_sex', '') or '',
+                    'doctor_name': None
+                }
+            else:
+                # If still not found, return 404
+                return JsonResponse({'error': 'Patient not found'}, status=404)
         
         # Get PrescriptionScheduling for the specific date
         prescription_scheduling = PrescriptionScheduling.objects.filter(
