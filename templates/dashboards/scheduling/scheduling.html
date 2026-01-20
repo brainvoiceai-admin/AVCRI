@@ -60,7 +60,7 @@
                         <div class="filters">
                             <div class="filter-group">
                                 <label class="filter-label">Filter by Date</label>
-                                <input type="date" id="draft-date" value="{{ date_filter }}">
+                                <input type="date" id="draft-date" value="">
                             </div>
                             <button class="btn btn-primary" id="final-schedule-btn">
                                 <span>🎯</span> Final Schedule
@@ -180,8 +180,9 @@
                                     {% for allocation in failed_allocations %}
                                     <tr>
                                         <td>
-                                            <div style="font-weight: 500;">{{ allocation.patient.pat_name }}</div>
-                                            <div style="font-size: 12px; color: var(--gray);">{{ allocation.patient.pat_reg_no }}</div>
+                                            <div style="font-weight: 500;">
+                                                {{ allocation.patient.pat_name }} ({{ allocation.patient.pat_reg_no }})
+                                            </div>
                                         </td>
                                         <td>{{ allocation.therapy_name }}</td>
                                         <td>{{ allocation.timeslot.slot_time|format_12hour|default:"—" }}</td>
@@ -283,8 +284,9 @@
                                                 <button type="button" class="patient-name-link"
                                                     data-patient-name="{{ booking.allocation.patient.pat_name }}"
                                                     data-schedule-date="{{ booking.date|date:'Y-m-d' }}">
-                                                    <div style="font-weight: 500;">{{ booking.allocation.patient.pat_name }}</div>
-                                                    <div style="font-size: 12px; color: var(--gray);">{{ booking.allocation.patient.pat_reg_no }}</div>
+                                                    <div style="font-weight: 500;">
+                                                        {{ booking.allocation.patient.pat_name }} ({{ booking.allocation.patient.pat_reg_no }})
+                                                    </div>
                                                 </button>
                                             </td>
                                             <td>{{ booking.allocation.therapy_name }}</td>
@@ -378,8 +380,9 @@
                                                 <button type="button" class="patient-name-link"
                                                     data-patient-name="{{ booking.allocation.patient.pat_name }}"
                                                     data-schedule-date="{{ booking.date|date:'Y-m-d' }}">
-                                                    <div style="font-weight: 500;">{{ booking.allocation.patient.pat_name }}</div>
-                                                    <div style="font-size: 12px; color: var(--gray);">{{ booking.allocation.patient.pat_reg_no }}</div>
+                                                    <div style="font-weight: 500;">
+                                                        {{ booking.allocation.patient.pat_name }} ({{ booking.allocation.patient.pat_reg_no }})
+                                                    </div>
                                                 </button>
                                             </td>
                                             <td>{{ booking.allocation.therapy_name }}</td>

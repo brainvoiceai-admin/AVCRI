@@ -976,7 +976,7 @@ $(function () {
     if (!addedTherapies.length) {
       $therapiesTableBody.append(`
         <tr>
-          <td colspan="10">
+          <td colspan="12">
             <div class="empty-state">
               <i class="fas fa-spa"></i>
               <h3>No Therapies Found</h3>
@@ -1089,6 +1089,7 @@ $(function () {
         <td>${esc(t.ext_int || '')}</td>
         <td>${esc(format12Hour(t.slot || ''))}</td>
         <td>${groupsHtml}</td>
+        <td>${esc(t.procured || '—')}</td>
         <td>${esc(t.from_date || '')}</td>
         <td>${esc(t.to_date || '')}</td>
         <td>${esc(t.days || '')}</td>
