@@ -1,8 +1,11 @@
 # therapies/views.py
 import json
+import sys
+import io
+from contextlib import redirect_stdout
 from datetime import timedelta, datetime
 from django.shortcuts import render
-from django.http import JsonResponse, HttpResponseBadRequest
+from django.http import JsonResponse, HttpResponseBadRequest, HttpResponse
 from django.apps import apps
 from django.db.models import Q
 from django.views.decorators.csrf import csrf_exempt
@@ -15,6 +18,114 @@ from .decorators import scheduling_access_required, scheduling_admin_required, t
 from masters.models import get_staying_room_display_number
 
 EXTERNAL_DB_ALIAS = 'therapy_db'  # external SQL Server alias
+
+def generate_debug_pdf(debug_output, title="Debug Output", date=None):
+    """
+    Generate a PDF from debug output text.
+    
+    Args:
+        debug_output: String containing the debug output
+        title: Title for the PDF
+        date: Date string for the filename
+        
+    Returns:
+        HttpResponse with PDF content
+    """
+    try:
+        from reportlab.lib.pagesizes import letter, A4
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib.units import inch
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak
+        from reportlab.lib.enums import TA_LEFT
+        from reportlab.pdfbase import pdfmetrics
+        from reportlab.pdfbase.ttfonts import TTFont
+        
+        # Create a BytesIO buffer to hold PDF data
+        buffer = io.BytesIO()
+        
+        # Create the PDF document
+        doc = SimpleDocTemplate(
+            buffer,
+            pagesize=letter,
+            rightMargin=72,
+            leftMargin=72,
+            topMargin=72,
+            bottomMargin=18
+        )
+        
+        # Container for the 'Flowable' objects
+        elements = []
+        
+        # Define styles
+        styles = getSampleStyleSheet()
+        title_style = ParagraphStyle(
+            'CustomTitle',
+            parent=styles['Heading1'],
+            fontSize=16,
+            textColor='#000080',
+            spaceAfter=30,
+            alignment=TA_LEFT
+        )
+        heading_style = ParagraphStyle(
+            'CustomHeading',
+            parent=styles['Heading2'],
+            fontSize=12,
+            textColor='#000080',
+            spaceAfter=12,
+            alignment=TA_LEFT
+        )
+        normal_style = ParagraphStyle(
+            'CustomNormal',
+            parent=styles['Normal'],
+            fontSize=9,
+            leading=12,
+            alignment=TA_LEFT,
+            fontName='Courier'
+        )
+        
+        # Add title
+        elements.append(Paragraph(title, title_style))
+        if date:
+            elements.append(Paragraph(f"Date: {date}", styles['Normal']))
+            elements.append(Paragraph(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", styles['Normal']))
+        elements.append(Spacer(1, 0.2*inch))
+        
+        # Split output into lines and add to PDF
+        lines = debug_output.split('\n')
+        for line in lines:
+            # Escape HTML special characters
+            escaped_line = line.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+            # Replace multiple spaces with non-breaking spaces for better formatting
+            escaped_line = escaped_line.replace('  ', ' &nbsp;')
+            elements.append(Paragraph(escaped_line, normal_style))
+        
+        # Build PDF
+        doc.build(elements)
+        
+        # Get the value of the BytesIO buffer
+        pdf = buffer.getvalue()
+        buffer.close()
+        
+        # Create HTTP response with PDF
+        response = HttpResponse(pdf, content_type='application/pdf')
+        filename = f"{title.replace(' ', '_')}_{date or datetime.now().strftime('%Y%m%d')}_{datetime.now().strftime('%H%M%S')}.pdf"
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        
+        return response
+        
+    except ImportError:
+        # Fallback if reportlab is not installed
+        response = HttpResponse(debug_output, content_type='text/plain')
+        filename = f"{title.replace(' ', '_')}_{date or datetime.now().strftime('%Y%m%d')}_{datetime.now().strftime('%H%M%S')}.txt"
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        return response
+    except Exception as e:
+        # If PDF generation fails, return as text
+        error_msg = f"Error generating PDF: {str(e)}\n\nOriginal Output:\n{debug_output}"
+        response = HttpResponse(error_msg, content_type='text/plain')
+        filename = f"{title.replace(' ', '_')}_{date or datetime.now().strftime('%Y%m%d')}_{datetime.now().strftime('%H%M%S')}.txt"
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        return response
 
 def log_therapy_audit(user, action, therapy_allocation=None, description="", additional_data=None, request=None):
     """Log therapy-related audit events"""
@@ -3929,9 +4040,13 @@ def final_schedule_api(request):
     Final Schedule API endpoint that:
     1. Updates emergency leave data via api.py
     2. Triggers final allocation algorithm via final_allocation.py
+    Captures all debug output and returns as PDF download.
     """
     if request.method != 'POST':
         return JsonResponse({'error': 'POST method required'}, status=405)
+    
+    # Capture stdout for debug output
+    debug_output_buffer = io.StringIO()
     
     try:
         data = json.loads(request.body)
@@ -3957,62 +4072,96 @@ def final_schedule_api(request):
         except ValueError:
             return JsonResponse({'error': 'Invalid date format'}, status=400)
         
-        # Step 1: Update emergency leave data via api.py
-        try:
-            import api
-            api.enable_django_for_scheduling()
+        # Redirect stdout to capture debug output
+        with redirect_stdout(debug_output_buffer):
+            # Step 1: Update emergency leave data via api.py
+            try:
+                import api
+                api.enable_django_for_scheduling()
+                
+                # Update emergency leave for the selected date
+                employees_on_leave = api.get_employees_on_leave_and_save(
+                    target_date=date_filter, 
+                    save_to_db=True
+                )
+                
+                leave_update_result = {
+                    'success': True,
+                    'employees_on_leave': employees_on_leave,
+                    'count': len(employees_on_leave)
+                }
+            except Exception as e:
+                leave_update_result = {
+                    'success': False,
+                    'error': str(e)
+                }
+            print(f"[LEAVE UPDATE] {leave_update_result}")
             
-            # Update emergency leave for the selected date
-            employees_on_leave = api.get_employees_on_leave_and_save(
-                target_date=date_filter, 
-                save_to_db=True
-            )
+            # Step 2: Trigger final allocation algorithm
+            try:
+                # Import final allocation functions
+                from final_allocation import bulk_allocate_for_date
+                
+                # Run the final allocation algorithm
+                allocation_result = bulk_allocate_for_date(date_filter)
+                
+                allocation_update_result = {
+                    'success': True,
+                    'result': allocation_result
+                }
+            except Exception as e:
+                allocation_update_result = {
+                    'success': False,
+                    'error': str(e)
+                }
+            print(f"[ALLOCATION RESULT] {allocation_update_result}")
             
-            leave_update_result = {
-                'success': True,
-                'employees_on_leave': employees_on_leave,
-                'count': len(employees_on_leave)
-            }
-        except Exception as e:
-            leave_update_result = {
-                'success': False,
-                'error': str(e)
-            }
-        print(leave_update_result)
-        # Step 2: Trigger final allocation algorithm
-        try:
-            # Import final allocation functions
-            from final_allocation import bulk_allocate_for_date
-            
-            # Run the final allocation algorithm
-            allocation_result = bulk_allocate_for_date(date_filter)
-            
-            allocation_update_result = {
-                'success': True,
-                'result': allocation_result
-            }
-        except Exception as e:
-            allocation_update_result = {
-                'success': False,
-                'error': str(e)
-            }
+            # Step 3: Allocate nurses for nurse treatments
+            try:
+                from .nurse_allocation import allocate_nurses_for_date
+                
+                # Allocate nurses for all nurse treatments on this date
+                nurse_allocation_result = allocate_nurses_for_date(date_filter)
+                
+                nurse_allocation_update_result = {
+                    'success': True,
+                    'result': nurse_allocation_result
+                }
+            except Exception as e:
+                nurse_allocation_update_result = {
+                    'success': False,
+                    'error': str(e)
+                }
+            print(f"[NURSE ALLOCATION RESULT] {nurse_allocation_update_result}")
         
-        # Step 3: Allocate nurses for nurse treatments
-        try:
-            from .nurse_allocation import allocate_nurses_for_date
-            
-            # Allocate nurses for all nurse treatments on this date
-            nurse_allocation_result = allocate_nurses_for_date(date_filter)
-            
-            nurse_allocation_update_result = {
-                'success': True,
-                'result': nurse_allocation_result
-            }
-        except Exception as e:
-            nurse_allocation_update_result = {
-                'success': False,
-                'error': str(e)
-            }
+        # Get captured debug output
+        debug_output = debug_output_buffer.getvalue()
+        debug_output_buffer.close()
+        
+        # Add summary to debug output
+        summary = f"""
+{'='*80}
+FINAL SCHEDULE SUMMARY
+{'='*80}
+Date: {date_filter}
+Run Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+
+Leave Update: {'SUCCESS' if leave_update_result.get('success') else 'FAILED'}
+  - Employees on leave: {leave_update_result.get('count', 0)}
+  - Error: {leave_update_result.get('error', 'None')}
+
+Allocation Update: {'SUCCESS' if allocation_update_result.get('success') else 'FAILED'}
+  - Result: {allocation_update_result.get('result', {})}
+  - Error: {allocation_update_result.get('error', 'None')}
+
+Nurse Allocation: {'SUCCESS' if nurse_allocation_update_result.get('success') else 'FAILED'}
+  - Result: {nurse_allocation_update_result.get('result', {})}
+  - Error: {nurse_allocation_update_result.get('error', 'None')}
+
+Overall Status: {'SUCCESS' if (leave_update_result.get('success') and allocation_update_result.get('success')) else 'FAILED'}
+{'='*80}
+"""
+        debug_output = summary + "\n\n" + debug_output
         
         # Persist run marker when complete (store status and stats)
         try:
@@ -4033,19 +4182,14 @@ def final_schedule_api(request):
         except Exception:
             pass
 
-        # Return combined results
-        return JsonResponse({
-            'success': True,
-            'message': 'Final schedule completed',
-            'date': date_filter,
-            'leave_update': leave_update_result,
-            'allocation_update': allocation_update_result,
-            'overall_success': leave_update_result['success'] and allocation_update_result['success']
-        })
-        print(allocation_update_result)
+        # Return PDF with debug output
+        return generate_debug_pdf(debug_output, title="Final Schedule Debug Output", date=date_filter)
         
     except Exception as e:
-        return JsonResponse({'error': str(e)}, status=500)
+        # Capture error in debug output
+        error_output = f"Error in final_schedule_api: {str(e)}\n\n{debug_output_buffer.getvalue()}"
+        debug_output_buffer.close()
+        return generate_debug_pdf(error_output, title="Final Schedule Error", date=date_filter if 'date_filter' in locals() else None)
 
 @csrf_exempt
 @api_access_required
@@ -4755,9 +4899,13 @@ def reschedule_all_failed_api(request):
     """
     API endpoint to reschedule all failed therapies for a specific date using the rescheduling algorithm.
     Filters failed schedules day-wise and reschedules each one.
+    Captures all debug output and returns as PDF download.
     """
     if request.method != 'POST':
         return JsonResponse({'error': 'POST method required'}, status=405)
+    
+    # Capture stdout for debug output
+    debug_output_buffer = io.StringIO()
     
     try:
         data = json.loads(request.body)
@@ -4773,121 +4921,165 @@ def reschedule_all_failed_api(request):
         if not filter_date:
             return JsonResponse({'error': 'Invalid date format. Use YYYY-MM-DD.'}, status=400)
         
-        # Get allocations that have failed bookings on the target date (day-wise filter)
-        failed_allocations = (
-            TherapyAllocation.objects
-            .filter(
-                from_date__lte=filter_date,
-                to_date__gte=filter_date,
-                bookings__date=filter_date,
-                bookings__status='failed'
-            )
-            .distinct()
-        )
-        
-        if not failed_allocations.exists():
-            return JsonResponse({
-                'success': True,
-                'message': f'No failed therapies found for {date} to reschedule.',
-                'results': [],
-                'stats': {
-                    'total': 0,
-                    'successful': 0,
-                    'failed': 0
-                }
-            })
-        
-        results = []
-        success_count = 0
-        failed_count = 0
-        
-        # Process each failed allocation
-        for allocation in failed_allocations:
-            try:
-                # Ensure booking exists for this date
-                booking = Booking.objects.filter(allocation=allocation, date=filter_date).first()
-                if not booking:
-                    # Create booking if it doesn't exist
-                    booking = Booking.objects.create(
-                        allocation=allocation,
-                        date=filter_date,
-                        timeslot=allocation.timeslot,
-                        room=allocation.room,
-                        status='draft'
-                    )
-                
-                # Call rescheduling algorithm
-                tasks = allocate_therapy_for_visit(
-                    allocation.id,
-                    date,
-                    create_bookings=True
+        # Redirect stdout to capture debug output
+        with redirect_stdout(debug_output_buffer):
+            # Get allocations that have failed bookings on the target date (day-wise filter)
+            failed_allocations = (
+                TherapyAllocation.objects
+                .filter(
+                    from_date__lte=filter_date,
+                    to_date__gte=filter_date,
+                    bookings__date=filter_date,
+                    bookings__status='failed'
                 )
-                
-                if isinstance(tasks, dict) and "error" in tasks:
-                    # Algorithm returned an error
+                .distinct()
+            )
+            
+            print(f"[RESCHEDULE ALL FAILED] Found {failed_allocations.count()} failed allocations for date {date}")
+            
+            if not failed_allocations.exists():
+                summary = f"""
+{'='*80}
+RESCHEDULE ALL FAILED SUMMARY
+{'='*80}
+Date: {date}
+Run Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+
+No failed therapies found for {date} to reschedule.
+
+Total: 0
+Successful: 0
+Failed: 0
+{'='*80}
+"""
+                debug_output = summary + "\n\n" + debug_output_buffer.getvalue()
+                debug_output_buffer.close()
+                return generate_debug_pdf(debug_output, title="Reschedule All Failed Debug Output", date=date)
+            
+            results = []
+            success_count = 0
+            failed_count = 0
+            
+            # Process each failed allocation
+            for idx, allocation in enumerate(failed_allocations, 1):
+                try:
+                    print(f"\n[RESCHEDULE {idx}/{failed_allocations.count()}] Processing allocation ID: {allocation.id}, Therapy: {allocation.therapy_name}")
+                    
+                    # Ensure booking exists for this date
+                    booking = Booking.objects.filter(allocation=allocation, date=filter_date).first()
+                    if not booking:
+                        # Create booking if it doesn't exist
+                        booking = Booking.objects.create(
+                            allocation=allocation,
+                            date=filter_date,
+                            timeslot=allocation.timeslot,
+                            room=allocation.room,
+                            status='draft'
+                        )
+                        print(f"  Created new booking for allocation {allocation.id}")
+                    
+                    # Call rescheduling algorithm
+                    print(f"  Calling allocate_therapy_for_visit for allocation {allocation.id}...")
+                    tasks = allocate_therapy_for_visit(
+                        allocation.id,
+                        date,
+                        create_bookings=True
+                    )
+                    
+                    if isinstance(tasks, dict) and "error" in tasks:
+                        # Algorithm returned an error
+                        allocation.status = 'failed'
+                        allocation.save(update_fields=['status'])
+                        print(f"  ERROR: {tasks['error']}")
+                        results.append({
+                            'allocation_id': allocation.id,
+                            'status': 'failed',
+                            'reason': tasks['error']
+                        })
+                        failed_count += 1
+                    else:
+                        # Process algorithm results
+                        success_tasks = [t for t in tasks if t.get('status') == 'BOOKED']
+                        failed_tasks = [t for t in tasks if t.get('status') == 'FAILED']
+                        
+                        print(f"  Results: {len(success_tasks)} successful, {len(failed_tasks)} failed")
+                        
+                        if success_tasks:
+                            allocation.status = 'allocated'
+                            allocation.save(update_fields=['status'])
+                            # Ensure bookings for this date are marked scheduled
+                            try:
+                                Booking.objects.filter(allocation=allocation, date=filter_date).update(status='scheduled')
+                            except Exception:
+                                pass
+                            success_count += 1
+                            results.append({
+                                'allocation_id': allocation.id,
+                                'status': 'success',
+                                'tasks': success_tasks
+                            })
+                        else:
+                            allocation.status = 'failed'
+                            allocation.save(update_fields=['status'])
+                            failed_count += 1
+                            reason = failed_tasks[0].get('reason', 'Unknown error') if failed_tasks else 'No available slots'
+                            print(f"  FAILED: {reason}")
+                            results.append({
+                                'allocation_id': allocation.id,
+                                'status': 'failed',
+                                'reason': reason
+                            })
+                            
+                except Exception as e:
+                    print(f"  EXCEPTION: {str(e)}")
                     allocation.status = 'failed'
                     allocation.save(update_fields=['status'])
                     results.append({
                         'allocation_id': allocation.id,
                         'status': 'failed',
-                        'reason': tasks['error']
+                        'reason': str(e)
                     })
                     failed_count += 1
-                else:
-                    # Process algorithm results
-                    success_tasks = [t for t in tasks if t.get('status') == 'BOOKED']
-                    failed_tasks = [t for t in tasks if t.get('status') == 'FAILED']
-                    
-                    if success_tasks:
-                        allocation.status = 'allocated'
-                        allocation.save(update_fields=['status'])
-                        # Ensure bookings for this date are marked scheduled
-                        try:
-                            Booking.objects.filter(allocation=allocation, date=filter_date).update(status='scheduled')
-                        except Exception:
-                            pass
-                        success_count += 1
-                        results.append({
-                            'allocation_id': allocation.id,
-                            'status': 'success',
-                            'tasks': success_tasks
-                        })
-                    else:
-                        allocation.status = 'failed'
-                        allocation.save(update_fields=['status'])
-                        failed_count += 1
-                        reason = failed_tasks[0].get('reason', 'Unknown error') if failed_tasks else 'No available slots'
-                        results.append({
-                            'allocation_id': allocation.id,
-                            'status': 'failed',
-                            'reason': reason
-                        })
-                        
-            except Exception as e:
-                allocation.status = 'failed'
-                allocation.save(update_fields=['status'])
-                results.append({
-                    'allocation_id': allocation.id,
-                    'status': 'failed',
-                    'reason': str(e)
-                })
-                failed_count += 1
         
-        return JsonResponse({
-            'success': True,
-            'message': f'Rescheduled {len(failed_allocations)} failed therapies for {date}: {success_count} successful, {failed_count} failed',
-            'results': results,
-            'stats': {
-                'total': len(failed_allocations),
-                'successful': success_count,
-                'failed': failed_count
-            }
-        })
+        # Get captured debug output
+        debug_output = debug_output_buffer.getvalue()
+        debug_output_buffer.close()
+        
+        # Add summary to debug output
+        summary = f"""
+{'='*80}
+RESCHEDULE ALL FAILED SUMMARY
+{'='*80}
+Date: {date}
+Run Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+
+Total Failed Allocations: {len(failed_allocations)}
+Successfully Rescheduled: {success_count}
+Failed to Reschedule: {failed_count}
+
+Results:
+"""
+        for result in results:
+            summary += f"  - Allocation {result['allocation_id']}: {result['status']}"
+            if result['status'] == 'failed':
+                summary += f" - {result.get('reason', 'Unknown error')}"
+            summary += "\n"
+        
+        summary += f"{'='*80}\n"
+        debug_output = summary + "\n\n" + debug_output
+        
+        # Return PDF with debug output
+        return generate_debug_pdf(debug_output, title="Reschedule All Failed Debug Output", date=date)
         
     except json.JSONDecodeError:
-        return JsonResponse({'error': 'Invalid JSON'}, status=400)
+        error_output = f"Invalid JSON in request body\n\n{debug_output_buffer.getvalue()}"
+        debug_output_buffer.close()
+        return generate_debug_pdf(error_output, title="Reschedule All Failed Error", date=date if 'date' in locals() else None)
     except Exception as e:
-        return JsonResponse({'error': str(e)}, status=500)
+        # Capture error in debug output
+        error_output = f"Error in reschedule_all_failed_api: {str(e)}\n\n{debug_output_buffer.getvalue()}"
+        debug_output_buffer.close()
+        return generate_debug_pdf(error_output, title="Reschedule All Failed Error", date=date if 'date' in locals() else None)
 
 
 # ============================================================================
