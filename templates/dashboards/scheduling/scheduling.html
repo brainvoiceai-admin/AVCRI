@@ -1,267 +1,292 @@
-{% load static %}
+{% load static %} <!-- DEBUG -->
 {% load custom_tags %}
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Therapy Scheduling Dashboard</title>
-    
+
     <link rel="stylesheet" href="{% static 'css/scheduling.css' %}">
     <link rel="stylesheet" href="{% static 'css/dashboards_nav.css' %}">
 </head>
+
 <body>
     {% include 'dashboards/nav.html' %}
     <div class="main-content">
-    <div class="container">
-        <header>
-            <h1>Therapy Scheduling Dashboard</h1>
-            <div class="subtitle">Manage draft, failed, and scheduled therapy allocations with therapist assignments</div>
-        </header>
-        
-        <div class="stats">
-            <div class="stat-card stat-draft">
-                <div class="stat-value" id="draft-count">{{ stats.draft_count }}</div>
-                <div class="stat-label">Draft Therapies</div>
-            </div>
-            <div class="stat-card stat-failed">
-                <div class="stat-value" id="failed-count">{{ stats.failed_count }}</div>
-                <div class="stat-label">Failed Schedules</div>
-            </div>
-            <div class="stat-card stat-allocated">
-                <div class="stat-value" id="allocated-count">{{ stats.scheduled_count }}</div>
-                <div class="stat-label">Scheduled Therapies</div>
-            </div>
-        </div>
-        
-        <div class="dashboard">
-            <div class="card">
-                <div class="tabs">
-                    <button class="tab active" data-tab="draft">Draft Therapies</button>
-                    <button class="tab" data-tab="failed">Failed Schedules</button>
-                    <button class="tab" data-tab="scheduled">Scheduled Therapies</button>
+        <div class="container">
+            <header>
+                <h1>Therapy Scheduling Dashboard</h1>
+                <div class="subtitle">Manage draft, failed, and scheduled therapy allocations with therapist assignments
                 </div>
-                
-                <!-- Draft Therapies Tab -->
-                <div id="draft" class="tab-content active">
-                    <div class="card-header">
-                        <div>
-                            <div class="card-title">Draft Therapies</div>
-                            <div class="card-subtitle">Therapies awaiting scheduling. Use date filter to view therapies for specific dates. Click "Final Schedule" to process therapist treatments first, then nurse treatments.</div>
-                        </div>
-                    </div>
-                    
-                    <div class="filters">
-                        <div class="filter-group">
-                            <label class="filter-label">Filter by Date</label>
-                            <input type="date" id="draft-date" value="{{ date_filter }}">
-                        </div>
-                        <button class="btn btn-primary" id="final-schedule-btn">
-                            <span>🎯</span> Final Schedule
-                        </button>
-                        <button class="btn btn-secondary" id="schedule-all" style="display: none;">
-                            <span>📅</span> Schedule All Drafts
-                        </button>
-                    </div>
-                    
-                    <div class="loading" id="draft-loading">
-                        <div>Processing scheduling algorithm...</div>
-                    </div>
-                    
-                    <!-- Therapist Treatments Section -->
-                    <div style="margin-bottom: 32px;">
-                        <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px;">
-                            <h3 style="font-size: 18px; font-weight: 600; color: var(--primary); margin: 0;">👨‍⚕️ Therapist Treatments</h3>
-                            <span id="draft-therapist-count" class="badge" style="background: var(--primary-light); color: var(--primary);">0</span>
-                        </div>
-                        <div class="table-container">
-                            <table id="draft-therapist-table">
-                                <thead>
-                                    <tr>
-                                        <th>Patient</th>
-                                        <th>Therapy</th>
-                                        <th>Date</th>
-                                        <th>Time Slot</th>
-                                        <th>Room</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="draft-therapist-body">
-                                    <tr>
-                                        <td colspan="5" class="empty-state">
-                                            <div class="empty-state-icon">📋</div>
-                                            <div>No draft therapist treatments found. Use date filter to view therapies for specific dates.</div>
-                                        </td>
-                                    </tr>
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                    
-                    <!-- Nurse Treatments Section -->
-                    <div>
-                        <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px;">
-                            <h3 style="font-size: 18px; font-weight: 600; color: var(--secondary); margin: 0;">👩‍⚕️ Nurse Treatments</h3>
-                            <span id="draft-nurse-count" class="badge" style="background: #d1fae5; color: var(--secondary);">0</span>
-                        </div>
-                        <div class="table-container">
-                            <table id="draft-nurse-table">
-                                <thead>
-                                    <tr>
-                                        <th>Patient</th>
-                                        <th>Therapy</th>
-                                        <th>Date</th>
-                                        <th>Patient Room</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="draft-nurse-body">
-                                    <tr>
-                                        <td colspan="4" class="empty-state">
-                                            <div class="empty-state-icon">📋</div>
-                                            <div>No draft nurse treatments found. Use date filter to view therapies for specific dates.</div>
-                                        </td>
-                                    </tr>
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
+            </header>
+
+            <div class="stats">
+                <div class="stat-card stat-draft">
+                    <div class="stat-value" id="draft-count">{{ stats.draft_count }}</div>
+                    <div class="stat-label">Draft Therapies</div>
                 </div>
-                
-                <!-- Failed Schedules Tab -->
-                <div id="failed" class="tab-content">
-                    <div class="card-header">
-                        <div>
-                            <div class="card-title">Failed Schedules</div>
-                            <div class="card-subtitle">Therapies that failed scheduling due to conflicts. Use date filter to view failures for specific dates. Click "Reschedule" to move back to draft.</div>
-                        </div>
-                    </div>
-                    
-                    <div class="filters">
-                        <div class="filter-group">
-                            <label class="filter-label">Filter by Date</label>
-                            <input type="date" id="failed-date" value="{{ date_filter }}">
-                        </div>
-                        <button class="btn btn-secondary" id="reschedule-all">
-                            <span>🔄</span> Reschedule All Failed
-                        </button>
-                    </div>
-                    
-                    <div class="loading" id="failed-loading">
-                        <div>Processing rescheduling algorithm...</div>
-                    </div>
-                    
-                    <div class="table-container">
-                        <table id="failed-table">
-                            <thead>
-                                <tr>
-                                    <th>Patient</th>
-                                    <th>Therapy</th>
-                                    <th>Time Slot</th>
-                                    <th>Room No</th>
-                                    <th>Failure Reason</th>
-                                    <th>Recommendation</th>
-                                    <th>Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody id="failed-body">
-                                {% for allocation in failed_allocations %}
-                                <tr>
-                                    <td>
-                                        <div style="font-weight: 500;">{{ allocation.patient.pat_name }}</div>
-                                        <div style="font-size: 12px; color: var(--gray);">{{ allocation.patient.pat_reg_no }}</div>
-                                    </td>
-                                    <td>{{ allocation.therapy_name }}</td>
-                                    <td>{{ allocation.timeslot.slot_time|format_12hour|default:"—" }}</td>
-                                    <td>
-                                        {% if allocation.patient.pat_room_no %}
-                                            {% with room_no=allocation.patient.pat_room_no|get_staying_room_display %}
-                                                {{ room_no|default:allocation.patient.pat_room_no }}
-                                            {% endwith %}
-                                        {% else %}
-                                            —
-                                        {% endif %}
-                                    </td>
-                                    <td>
-                                        <span class="status-badge status-failed">Slot Conflict</span>
-                                    </td>
-                                    <td>Try different time slot</td>
-                                    <td>
-                                        <button class="btn btn-outline btn-small reschedule-single" data-id="{{ allocation.id }}">
-                                            Reschedule
-                                        </button>
-                                    </td>
-                                </tr>
-                                {% empty %}
-                                <tr>
-                                    <td colspan="7" class="empty-state">
-                                        <div class="empty-state-icon">⚠️</div>
-                                        <div>No failed schedules found. Failed therapies will appear here after scheduling attempts.</div>
-                                    </td>
-                                </tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
-                    </div>
+                <div class="stat-card stat-failed">
+                    <div class="stat-value" id="failed-count">{{ stats.failed_count }}</div>
+                    <div class="stat-label">Failed Schedules</div>
                 </div>
-                
-                <!-- Scheduled Therapies Tab -->
-                <div id="scheduled" class="tab-content">
-                    <div class="card-header">
-                        <div>
-                            <div class="card-title">Scheduled Therapies</div>
-                            <div class="card-subtitle">Successfully scheduled therapies with therapist and nurse assignments. Use date filter to view schedules for specific dates.</div>
+                <div class="stat-card stat-allocated">
+                    <div class="stat-value" id="allocated-count">{{ stats.scheduled_count }}</div>
+                    <div class="stat-label">Scheduled Therapies</div>
+                </div>
+            </div>
+
+            <div class="dashboard">
+                <div class="card">
+                    <div class="tabs">
+                        <button class="tab active" data-tab="draft">Draft Therapies</button>
+                        <button class="tab" data-tab="failed">Failed Schedules</button>
+                        <button class="tab" data-tab="scheduled">Scheduled Therapies</button>
+                        <button class="tab" data-tab="continuity">Continuity Matrix</button>
+                    </div>
+
+                    <!-- Draft Therapies Tab -->
+                    <div id="draft" class="tab-content active">
+                        <div class="card-header">
+                            <div>
+                                <div class="card-title">Draft Therapies</div>
+                                <div class="card-subtitle">Therapies awaiting scheduling. Use date filter to view
+                                    therapies for specific dates. Click "Final Schedule" to process therapist treatments
+                                    first, then nurse treatments.</div>
+                            </div>
                         </div>
-                        <div style="display: flex; gap: 12px; align-items: center;">
-                            <button class="btn btn-primary" id="export-therapy-excel" title="Export to Excel" style="background: #10b981; color: white; font-weight: 600; padding: 12px 24px; display: flex; align-items: center; gap: 8px;">
-                                <span style="font-size: 18px;">📊</span> Export to Excel
+
+                        <div class="filters">
+                            <div class="filter-group">
+                                <label class="filter-label">Filter by Date</label>
+                                <input type="date" id="draft-date" value="">
+                            </div>
+                            <button class="btn btn-primary" id="final-schedule-btn">
+                                <span>🎯</span> Final Schedule
                             </button>
-                            <button class="btn btn-primary" id="print-therapy-pdf" title="Print to PDF" style="background: #2ed573; color: white; font-weight: 600; padding: 12px 24px; display: flex; align-items: center; gap: 8px;">
-                                <span style="font-size: 18px;">🖨️</span> Print to PDF
+                            <button class="btn btn-secondary" id="schedule-all" style="display: none;">
+                                <span>📅</span> Schedule All Drafts
                             </button>
                         </div>
-                    </div>
-                    
-                    <div class="filters">
-                        <div class="filter-group">
-                            <label class="filter-label">Filter by Date</label>
-                            <input type="date" id="scheduled-date" value="{{ date_filter }}">
+
+                        <div class="loading" id="draft-loading">
+                            <div>Processing scheduling algorithm...</div>
                         </div>
-                        <div class="filter-group" style="flex: 1;">
-                            <label class="filter-label">Search by Patient Name</label>
-                            <div class="search-inline">
-                                <input type="text" id="patient-search" placeholder="Type patient name">
-                                <button class="btn btn-secondary btn-small" id="patient-search-btn" type="button">Search</button>
-                                <button class="btn btn-outline btn-small" id="clear-patient-search" type="button">Clear</button>
+
+                        <!-- Therapist Treatments Section -->
+                        <div style="margin-bottom: 32px;">
+                            <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px;">
+                                <h3 style="font-size: 18px; font-weight: 600; color: var(--primary); margin: 0;">👨‍⚕️
+                                    Therapist Treatments</h3>
+                                <span id="draft-therapist-count" class="badge"
+                                    style="background: var(--primary-light); color: var(--primary);">0</span>
+                            </div>
+                            <div class="table-container">
+                                <table id="draft-therapist-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Patient</th>
+                                            <th>Therapy</th>
+                                            <th>Date</th>
+                                            <th>Time Slot</th>
+                                            <th>Room</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="draft-therapist-body">
+                                        <tr>
+                                            <td colspan="5" class="empty-state">
+                                                <div class="empty-state-icon">📋</div>
+                                                <div>No draft therapist treatments found. Use date filter to view
+                                                    therapies for specific dates.</div>
+                                            </td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <!-- Nurse Treatments Section -->
+                        <div>
+                            <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px;">
+                                <h3 style="font-size: 18px; font-weight: 600; color: var(--secondary); margin: 0;">👩‍⚕️
+                                    Nurse Treatments</h3>
+                                <span id="draft-nurse-count" class="badge"
+                                    style="background: #d1fae5; color: var(--secondary);">0</span>
+                            </div>
+                            <div class="table-container">
+                                <table id="draft-nurse-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Patient</th>
+                                            <th>Therapy</th>
+                                            <th>Date</th>
+                                            <th>Patient Room</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="draft-nurse-body">
+                                        <tr>
+                                            <td colspan="4" class="empty-state">
+                                                <div class="empty-state-icon">📋</div>
+                                                <div>No draft nurse treatments found. Use date filter to view therapies
+                                                    for specific dates.</div>
+                                            </td>
+                                        </tr>
+                                    </tbody>
+                                </table>
                             </div>
                         </div>
                     </div>
-                    
-                    <!-- Therapist Schedule Section -->
-                    <div style="margin-bottom: 32px;">
-                        <h3 style="margin-bottom: 16px; color: var(--primary); font-size: 18px; font-weight: 600;">
-                            <i class="fas fa-user-md"></i> Therapist Schedule
-                        </h3>
+
+                    <!-- Failed Schedules Tab -->
+                    <div id="failed" class="tab-content">
+                        <div class="card-header">
+                            <div>
+                                <div class="card-title">Failed Schedules</div>
+                                <div class="card-subtitle">Therapies that failed scheduling due to conflicts. Use date
+                                    filter to view failures for specific dates. Click "Reschedule" to move back to
+                                    draft.</div>
+                            </div>
+                        </div>
+
+                        <div class="filters">
+                            <div class="filter-group">
+                                <label class="filter-label">Filter by Date</label>
+                                <input type="date" id="failed-date" value="{{ date_filter }}">
+                            </div>
+                            <button class="btn btn-secondary" id="reschedule-all">
+                                <span>🔄</span> Reschedule All Failed
+                            </button>
+                        </div>
+
+                        <div class="loading" id="failed-loading">
+                            <div>Processing rescheduling algorithm...</div>
+                        </div>
+
                         <div class="table-container">
-                            <table id="therapist-scheduled-table">
+                            <table id="failed-table">
                                 <thead>
                                     <tr>
                                         <th>Patient</th>
                                         <th>Therapy</th>
                                         <th>Time Slot</th>
-                                        <th>Date</th>
-                                        <th>Treatment Room No</th>
-                                        <th>Patient Room No</th>
-                                        <th>Therapist Assigned</th>
-                                        <th>Scheduled By</th>
+                                        <th>Room No</th>
+                                        <th>Failure Reason</th>
+                                        <th>Recommendation</th>
+                                        <th>Actions</th>
                                     </tr>
                                 </thead>
-                                <tbody id="therapist-scheduled-body">
-                                    {% if therapist_bookings %}
+                                <tbody id="failed-body">
+                                    {% for allocation in failed_allocations %}
+                                    <tr>
+                                        <td>
+                                            <div style="font-weight: 500;">
+                                                {{ allocation.patient.pat_name }} ({{ allocation.patient.pat_reg_no }})
+                                            </div>
+                                        </td>
+                                        <td>{{ allocation.therapy_name }}</td>
+                                        <td>{{ allocation.timeslot.slot_time|format_12hour|default:"—" }}</td>
+                                        <td>
+                                            {% if allocation.patient.pat_room_no %}
+                                            {% with room_no=allocation.patient.pat_room_no|get_staying_room_display %}
+                                            {{ room_no|default:allocation.patient.pat_room_no }}
+                                            {% endwith %}
+                                            {% else %}
+                                            —
+                                            {% endif %}
+                                        </td>
+                                        <td>
+                                            <span class="status-badge status-failed">Slot Conflict</span>
+                                        </td>
+                                        <td>Try different time slot</td>
+                                        <td>
+                                            <button class="btn btn-outline btn-small reschedule-single"
+                                                data-id="{{ allocation.id }}">
+                                                Reschedule
+                                            </button>
+                                        </td>
+                                    </tr>
+                                    {% empty %}
+                                    <tr>
+                                        <td colspan="7" class="empty-state">
+                                            <div class="empty-state-icon">⚠️</div>
+                                            <div>No failed schedules found. Failed therapies will appear here after
+                                                scheduling attempts.</div>
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- Scheduled Therapies Tab -->
+                    <div id="scheduled" class="tab-content">
+                        <div class="card-header">
+                            <div>
+                                <div class="card-title">Scheduled Therapies</div>
+                                <div class="card-subtitle">Successfully scheduled therapies with therapist and nurse
+                                    assignments. Use date filter to view schedules for specific dates.</div>
+                            </div>
+                            <div style="display: flex; gap: 12px; align-items: center;">
+                                <button class="btn btn-primary" id="export-therapy-excel" title="Export to Excel"
+                                    style="background: #10b981; color: white; font-weight: 600; padding: 12px 24px; display: flex; align-items: center; gap: 8px;">
+                                    <span style="font-size: 18px;">📊</span> Export to Excel
+                                </button>
+                                <button class="btn btn-primary" id="print-therapy-pdf" title="Print to PDF"
+                                    style="background: #2ed573; color: white; font-weight: 600; padding: 12px 24px; display: flex; align-items: center; gap: 8px;">
+                                    <span style="font-size: 18px;">🖨️</span> Print to PDF
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="filters">
+                            <div class="filter-group">
+                                <label class="filter-label">Filter by Date</label>
+                                <input type="date" id="scheduled-date" value="{{ date_filter }}">
+                            </div>
+                            <div class="filter-group" style="flex: 1;">
+                                <label class="filter-label">Search by Patient Name</label>
+                                <div class="search-inline">
+                                    <input type="text" id="patient-search" placeholder="Type patient name">
+                                    <button class="btn btn-secondary btn-small" id="patient-search-btn"
+                                        type="button">Search</button>
+                                    <button class="btn btn-outline btn-small" id="clear-patient-search"
+                                        type="button">Clear</button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Therapist Schedule Section -->
+                        <div style="margin-bottom: 32px;">
+                            <h3 style="margin-bottom: 16px; color: var(--primary); font-size: 18px; font-weight: 600;">
+                                <i class="fas fa-user-md"></i> Therapist Schedule
+                            </h3>
+                            <div class="table-container">
+                                <table id="therapist-scheduled-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Patient</th>
+                                            <th>Therapy</th>
+                                            <th>Time Slot</th>
+                                            <th>Date</th>
+                                            <th>Treatment Room No</th>
+                                            <th>Patient Room No</th>
+                                            <th>Therapist Assigned</th>
+                                            <th>Scheduled By</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="therapist-scheduled-body">
+                                        {% if therapist_bookings %}
                                         {% for booking in therapist_bookings %}
                                         <tr>
                                             <td>
-                                                <button type="button" class="patient-name-link" data-patient-name="{{ booking.allocation.patient.pat_name }}" data-schedule-date="{{ booking.date|date:'Y-m-d' }}">
-                                                    <div style="font-weight: 500;">{{ booking.allocation.patient.pat_name }}</div>
-                                                    <div style="font-size: 12px; color: var(--gray);">{{ booking.allocation.patient.pat_reg_no }}</div>
+                                                <button type="button" class="patient-name-link"
+                                                    data-patient-name="{{ booking.allocation.patient.pat_name }}"
+                                                    data-schedule-date="{{ booking.date|date:'Y-m-d' }}">
+                                                    <div style="font-weight: 500;">
+                                                        {{ booking.allocation.patient.pat_name }} ({{ booking.allocation.patient.pat_reg_no }})
+                                                    </div>
                                                 </button>
                                             </td>
                                             <td>{{ booking.allocation.therapy_name }}</td>
@@ -269,191 +294,389 @@
                                             <td>{{ booking.date|date:"Y-m-d" }}</td>
                                             <td>
                                                 {% if booking.room %}
-                                                    {{ booking.room.room_no }}
+                                                {{ booking.room.room_no }}
                                                 {% else %}
-                                                    {% with rb=booking.room_bookings.first %}
-                                                        {% if rb %}
-                                                            {{ rb.room.room_no }}
-                                                        {% else %}
-                                                            —
-                                                        {% endif %}
-                                                    {% endwith %}
+                                                {% with rb=booking.room_bookings.first %}
+                                                {% if rb %}
+                                                {{ rb.room.room_no }}
+                                                {% else %}
+                                                —
+                                                {% endif %}
+                                                {% endwith %}
                                                 {% endif %}
                                             </td>
                                             <td>
                                                 {% if booking.allocation.patient.pat_room_no %}
-                                                    {% with room_no=booking.allocation.patient.pat_room_no|get_staying_room_display %}
-                                                        {{ room_no|default:booking.allocation.patient.pat_room_no }}
-                                                    {% endwith %}
+                                                {% with room_no=booking.allocation.patient.pat_room_no|get_staying_room_display %}
+                                                {{ room_no|default:booking.allocation.patient.pat_room_no }}
+                                                {% endwith %}
                                                 {% else %}
-                                                    —
+                                                —
                                                 {% endif %}
                                             </td>
                                             <td>
                                                 <div class="therapist-list">
                                                     {% for assignment in booking.assignments.all %}
-                                                        {% with therapist_name=assignment.therapist.therapist_name|default:assignment.therapist.therapist_code %}
-                                                            {% with is_bathing=assignment|get_therapist_bathing_flag:booking %}
-                                                                {% with is_senior=assignment|is_senior_therapist_for_dhara:booking %}
-                                                                    {% with clean_name=therapist_name|cut:"(bathing)" %}
-                                                                        {% if is_senior %}
-                                                                            <span class="therapist-badge senior-therapist">
-                                                                                {% if is_bathing %}*{% endif %}{{ clean_name }} (senior)
-                                                                            </span>
-                                                                        {% else %}
-                                                                            <span class="therapist-badge{% if is_bathing %} bathing-therapist{% endif %}">
-                                                                                {% if is_bathing %}*{% endif %}{{ clean_name }}
-                                                                            </span>
-                                                                        {% endif %}
-                                                                    {% endwith %}
-                                                                {% endwith %}
-                                                            {% endwith %}
-                                                        {% endwith %}
+                                                    {% with therapist_name=assignment.therapist.therapist_name|default:assignment.therapist.therapist_code %}
+                                                    {% with is_bathing=assignment|get_therapist_bathing_flag:booking %}
+                                                    {% with is_senior=assignment|is_senior_therapist_for_dhara:booking %}
+                                                    {% with clean_name=therapist_name|cut:"(bathing)" %}
+                                                    {% if is_senior %}
+                                                    <span class="therapist-badge senior-therapist">
+                                                        {% if is_bathing %}*{% endif %}{{ clean_name }} (senior)
+                                                    </span>
+                                                    {% else %}
+                                                    <span
+                                                        class="therapist-badge{% if is_bathing %} bathing-therapist{% endif %}">
+                                                        {% if is_bathing %}*{% endif %}{{ clean_name }}
+                                                    </span>
+                                                    {% endif %}
+                                                    {% endwith %}
+                                                    {% endwith %}
+                                                    {% endwith %}
+                                                    {% endwith %}
                                                     {% empty %}
-                                                        —
+                                                    —
                                                     {% endfor %}
                                                 </div>
                                             </td>
                                             <td>{{ booking.allocation.allocated_by.username|default:"System" }}</td>
                                         </tr>
                                         {% endfor %}
-                                    {% else %}
+                                        {% else %}
                                         <tr>
                                             <td colspan="8" class="empty-state">
                                                 <div class="empty-state-icon">✅</div>
                                                 <div>No therapist schedules found for this date.</div>
                                             </td>
                                         </tr>
-                                    {% endif %}
-                                </tbody>
-                            </table>
+                                        {% endif %}
+                                    </tbody>
+                                </table>
+                            </div>
                         </div>
-                    </div>
-                    
-                    <!-- Nurse Schedule Section -->
-                    <div>
-                        <h3 style="margin-bottom: 16px; color: var(--primary); font-size: 18px; font-weight: 600;">
-                            <i class="fas fa-user-nurse"></i> Nurse Schedule
-                        </h3>
-                        <div class="table-container">
-                            <table id="nurse-scheduled-table">
-                                <thead>
-                                    <tr>
-                                        <th>Patient Name</th>
-                                        <th>Treatment Name</th>
-                                        <th>Date</th>
-                                        <th>Patient Room No</th>
-                                        <th>Nurse Assigned</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="nurse-scheduled-body">
-                                    {% if nurse_bookings %}
+
+                        <!-- Nurse Schedule Section -->
+                        <div>
+                            <h3 style="margin-bottom: 16px; color: var(--primary); font-size: 18px; font-weight: 600;">
+                                <i class="fas fa-user-nurse"></i> Nurse Schedule
+                            </h3>
+                            <div class="table-container">
+                                <table id="nurse-scheduled-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Patient Name</th>
+                                            <th>Treatment Name</th>
+                                            <th>Date</th>
+                                            <th>Patient Room No</th>
+                                            <th>Nurse Assigned</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="nurse-scheduled-body">
+                                        {% if nurse_bookings %}
                                         {% for booking in nurse_bookings %}
                                         <tr>
                                             <td>
-                                                <button type="button" class="patient-name-link" data-patient-name="{{ booking.allocation.patient.pat_name }}" data-schedule-date="{{ booking.date|date:'Y-m-d' }}">
-                                                    <div style="font-weight: 500;">{{ booking.allocation.patient.pat_name }}</div>
-                                                    <div style="font-size: 12px; color: var(--gray);">{{ booking.allocation.patient.pat_reg_no }}</div>
+                                                <button type="button" class="patient-name-link"
+                                                    data-patient-name="{{ booking.allocation.patient.pat_name }}"
+                                                    data-schedule-date="{{ booking.date|date:'Y-m-d' }}">
+                                                    <div style="font-weight: 500;">
+                                                        {{ booking.allocation.patient.pat_name }} ({{ booking.allocation.patient.pat_reg_no }})
+                                                    </div>
                                                 </button>
                                             </td>
                                             <td>{{ booking.allocation.therapy_name }}</td>
                                             <td>{{ booking.date|date:"Y-m-d" }}</td>
                                             <td>
                                                 {% if booking.allocation.patient.pat_room_no %}
-                                                    {% with room_no=booking.allocation.patient.pat_room_no|get_staying_room_display %}
-                                                        {{ room_no|default:booking.allocation.patient.pat_room_no }}
-                                                    {% endwith %}
+                                                {% with room_no=booking.allocation.patient.pat_room_no|get_staying_room_display %}
+                                                {{ room_no|default:booking.allocation.patient.pat_room_no }}
+                                                {% endwith %}
                                                 {% else %}
-                                                    —
+                                                —
                                                 {% endif %}
                                             </td>
                                             <td>
                                                 <div class="nurse-list">
                                                     {% for nurse_assignment in booking.nurse_assignments.all %}
-                                                        {% if nurse_assignment.status == 'assigned' %}
-                                                            <span class="nurse-badge">{{ nurse_assignment.nurse.nurse_name|default:nurse_assignment.nurse.nurse_code }}</span>
-                                                        {% endif %}
+                                                    {% if nurse_assignment.status == 'assigned' %}
+                                                    <span class="nurse-badge">{{
+                                                        nurse_assignment.nurse.nurse_name|default:nurse_assignment.nurse.nurse_code
+                                                        }}</span>
+                                                    {% endif %}
                                                     {% empty %}
-                                                        —
+                                                    —
                                                     {% endfor %}
                                                 </div>
                                             </td>
                                         </tr>
                                         {% endfor %}
-                                    {% else %}
+                                        {% else %}
                                         <tr>
                                             <td colspan="5" class="empty-state">
                                                 <div class="empty-state-icon">✅</div>
                                                 <div>No nurse schedules found for this date.</div>
                                             </td>
                                         </tr>
-                                    {% endif %}
+                                        {% endif %}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Continuity Matrix Tab -->
+                    <div id="continuity" class="tab-content">
+                        <div class="card-header">
+                            <div>
+                                <div class="card-title">Therapist Continuity Matrix</div>
+                                <div class="card-subtitle">Analyze therapist continuity across dates. <span
+                                        style="color:#10b981">Green</span>=Continued, <span
+                                        style="color:#ef4444">Red</span>=Changed, <span
+                                        style="color:#6b7280">Gray</span>=Excused (Leave). (*) indicates Bathing
+                                    Therapist.</div>
+                            </div>
+                        </div>
+
+                        <div class="filters">
+                            <div class="filter-group">
+                                <label class="filter-label">From Date</label>
+                                <input type="date" id="cont-from">
+                            </div>
+                            <div class="filter-group">
+                                <label class="filter-label">To Date</label>
+                                <input type="date" id="cont-to">
+                            </div>
+                            <div class="filter-group" style="align-self: flex-end; margin-bottom: 8px;">
+                                <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
+                                    <input type="checkbox" id="cont-exclude" checked> Exclude Leave
+                                </label>
+                            </div>
+                            <button class="btn btn-primary" id="load-matrix-btn">
+                                <span>📊</span> Load Matrix
+                            </button>
+                        </div>
+
+                        <div class="loading" id="cont-loading">
+                            <div>Loading continuity data...</div>
+                        </div>
+
+                        <div class="table-container" style="overflow-x: auto;">
+                            <table id="continuity-table" style="border-collapse: separate; border-spacing: 2px;">
+                                <thead>
+                                    <tr id="cont-header-row">
+                                        <!-- Dynamic Headers -->
+                                    </tr>
+                                </thead>
+                                <tbody id="cont-body">
+                                    <!-- Dynamic Rows -->
                                 </tbody>
                             </table>
                         </div>
                     </div>
+
                 </div>
             </div>
         </div>
-    </div>
 
-    <!-- Schedule Date Modal -->
-    <div id="scheduleModal" class="modal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3 class="modal-title">Select Schedule Date</h3>
-                <span class="close" onclick="closeScheduleModal()">&times;</span>
-            </div>
-            <div class="modal-body">
-                <div class="form-group">
-                    <label class="form-label" for="scheduleDate">Schedule Date</label>
-                    <input type="date" id="scheduleDate" class="form-control" required>
+        <!-- Schedule Date Modal -->
+        <div id="scheduleModal" class="modal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3 class="modal-title">Select Schedule Date</h3>
+                    <span class="close" onclick="closeScheduleModal()">&times;</span>
                 </div>
-                <div id="scheduleModalMessage" style="color: var(--gray); font-size: 14px; margin-top: 10px;">
-                    Select the date when you want to schedule this therapy.
+                <div class="modal-body">
+                    <div class="form-group">
+                        <label class="form-label" for="scheduleDate">Schedule Date</label>
+                        <input type="date" id="scheduleDate" class="form-control" required>
+                    </div>
+                    <div id="scheduleModalMessage" style="color: var(--gray); font-size: 14px; margin-top: 10px;">
+                        Select the date when you want to schedule this therapy.
+                    </div>
                 </div>
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-outline" onclick="closeScheduleModal()">Cancel</button>
-                <button type="button" class="btn btn-primary" id="confirmScheduleBtn">Schedule</button>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline" onclick="closeScheduleModal()">Cancel</button>
+                    <button type="button" class="btn btn-primary" id="confirmScheduleBtn">Schedule</button>
+                </div>
             </div>
         </div>
-    </div>
 
-    <!-- Reschedule Date Modal -->
-    <div id="rescheduleModal" class="modal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3 class="modal-title">Select Reschedule Date</h3>
-                <span class="close" onclick="closeRescheduleModal()">&times;</span>
-            </div>
-            <div class="modal-body">
-                <div class="form-group">
-                    <label class="form-label" for="rescheduleDate">Reschedule Date</label>
-                    <input type="date" id="rescheduleDate" class="form-control" required>
+        <!-- Reschedule Date Modal -->
+        <div id="rescheduleModal" class="modal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3 class="modal-title">Select Reschedule Date</h3>
+                    <span class="close" onclick="closeRescheduleModal()">&times;</span>
                 </div>
-                <div id="rescheduleModalMessage" style="color: var(--gray); font-size: 14px; margin-top: 10px;">
-                    Select the date when you want to reschedule this therapy.
+                <div class="modal-body">
+                    <div class="form-group">
+                        <label class="form-label" for="rescheduleDate">Reschedule Date</label>
+                        <input type="date" id="rescheduleDate" class="form-control" required>
+                    </div>
+                    <div id="rescheduleModalMessage" style="color: var(--gray); font-size: 14px; margin-top: 10px;">
+                        Select the date when you want to reschedule this therapy.
+                    </div>
                 </div>
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-outline" onclick="closeRescheduleModal()">Cancel</button>
-                <button type="button" class="btn btn-primary" id="confirmRescheduleBtn">Reschedule</button>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline" onclick="closeRescheduleModal()">Cancel</button>
+                    <button type="button" class="btn btn-primary" id="confirmRescheduleBtn">Reschedule</button>
+                </div>
             </div>
         </div>
-    </div>
 
-    <!-- jsPDF Library -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
-    
-    <!-- SheetJS Library for Excel Export -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-    
-    
+        <!-- jsPDF Library -->
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+        <script
+            src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
+
+        <!-- SheetJS Library for Excel Export -->
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+
+
     </div>
-</div>
+    </div>
+    </div>
+    </div>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            // --- Continuity Matrix Logic ---
+
+            // Set Defaults
+            const today = new Date();
+            const lastWeek = new Date(today);
+            lastWeek.setDate(today.getDate() - 6);
+
+            document.getElementById('cont-from').value = lastWeek.toISOString().split('T')[0];
+            document.getElementById('cont-to').value = today.toISOString().split('T')[0];
+
+            // Tab Switching Override (to handle new tab)
+            const tabs = document.querySelectorAll('.tab');
+            tabs.forEach(tab => {
+                tab.addEventListener('click', () => {
+                    const target = tab.dataset.tab;
+
+                    // Hide all content
+                    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+                    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+
+                    // Show target
+                    document.getElementById(target).classList.add('active');
+                    tab.classList.add('active');
+                });
+            });
+
+            document.getElementById('load-matrix-btn').addEventListener('click', loadContinuityMatrix);
+
+            async function loadContinuityMatrix() {
+                const from = document.getElementById('cont-from').value;
+                const to = document.getElementById('cont-to').value;
+                const exclude = document.getElementById('cont-exclude').checked;
+
+                if (!from || !to) { alert('Please select dates'); return; }
+
+                const loading = document.getElementById('cont-loading');
+                loading.style.display = 'flex';
+
+                try {
+                    const url = `/sheduling/scheduling/api/continuity-matrix/?from_date=${from}&to_date=${to}&exclude_leave=${exclude}`;
+                    const res = await fetch(url);
+                    const data = await res.json();
+
+                    if (data.error) throw new Error(data.error);
+
+                    renderMatrix(data);
+                } catch (e) {
+                    alert('Error loading matrix: ' + e.message);
+                } finally {
+                    loading.style.display = 'none';
+                }
+            }
+
+            function renderMatrix(data) {
+                const thead = document.getElementById('cont-header-row');
+                const tbody = document.getElementById('cont-body');
+
+                // Clear
+                thead.innerHTML = '<th style="position:sticky; left:0; background:#f9fafb; z-index:10; min-width:150px;">Patient</th>';
+                tbody.innerHTML = '';
+
+                // Render Headers
+                data.columns.forEach(dateStr => {
+                    const th = document.createElement('th');
+                    th.innerText = new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                    th.style.minWidth = '120px';
+                    thead.appendChild(th);
+                });
+
+                // Render Rows
+                if (data.rows.length === 0) {
+                    tbody.innerHTML = `<tr><td colspan="${data.columns.length + 1}" style="text-align:center; padding:20px;">No data found</td></tr>`;
+                    return;
+                }
+
+                data.rows.forEach(row => {
+                    const tr = document.createElement('tr');
+
+                    // Patient Name Cell
+                    const tdPat = document.createElement('td');
+                    tdPat.style.position = 'sticky';
+                    tdPat.style.left = '0';
+                    tdPat.style.background = '#fff';
+                    tdPat.style.zIndex = '5';
+                    tdPat.style.borderRight = '1px solid #e5e7eb';
+                    tdPat.innerHTML = `
+                    <div style="font-weight:600; color:#1f2937;">${row.patient.name}</div>
+                    <div style="font-size:11px; color:#6b7280;">${row.patient.reg_no}</div>
+                `;
+                    tr.appendChild(tdPat);
+
+                    // Date Cells
+                    data.columns.forEach(dateStr => {
+                        const td = document.createElement('td');
+                        const cell = row.cells[dateStr];
+
+                        if (!cell || !cell.therapists || cell.therapists.length === 0) {
+                            td.style.background = '#f9fafb'; // Empty
+                        } else {
+                            // Determine Color - Default Background
+                            td.style.background = '#fff';
+                            td.style.padding = '8px';
+                            td.style.fontSize = '12px';
+                            td.style.borderRadius = '4px';
+
+                            // Render Therapists
+                            // Render Therapists
+                            cell.therapists.forEach(t => {
+                                const div = document.createElement('div');
+                                let style = 'color: #374151;'; // Default dark
+
+                                if (t.status === 'green') {
+                                    style = 'color: #059669; font-weight: 500;'; // Green
+                                } else if (t.status === 'red') {
+                                    style = 'color: #ef4444; font-weight: 700;'; // Red + Bold
+                                } else if (t.status === 'gray') {
+                                    style = 'color: #6b7280; font-style: italic;'; // Gray + Italic
+                                } else if (t.status === 'new') {
+                                    // Fallback for new if not covered above
+                                    style = 'color: #374151;';
+                                }
+
+                                div.style.cssText = style;
+                                div.innerHTML = `${t.name} ${t.is_bathing ? '<b>*</b>' : ''}`;
+                                td.appendChild(div);
+                            });
+                        }
+                        tr.appendChild(td);
+                    });
+
+                    tbody.appendChild(tr);
+                });
+            }
+        });
+    </script>
     <script src="{% static 'js/scheduling.js' %}"></script>
     <script src="{% static 'js/dashboards_nav.js' %}"></script>
 </body>
+
 </html>
