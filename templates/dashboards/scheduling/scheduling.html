@@ -181,8 +181,7 @@
                                     <tr>
                                         <td>
                                             <div style="font-weight: 500;">{{ allocation.patient.pat_name }}</div>
-                                            <div style="font-size: 12px; color: var(--gray);">{{
-                                                allocation.patient.pat_reg_no }}</div>
+                                            <div style="font-size: 12px; color: var(--gray);">{{ allocation.patient.pat_reg_no }}</div>
                                         </td>
                                         <td>{{ allocation.therapy_name }}</td>
                                         <td>{{ allocation.timeslot.slot_time|format_12hour|default:"—" }}</td>
@@ -284,10 +283,8 @@
                                                 <button type="button" class="patient-name-link"
                                                     data-patient-name="{{ booking.allocation.patient.pat_name }}"
                                                     data-schedule-date="{{ booking.date|date:'Y-m-d' }}">
-                                                    <div style="font-weight: 500;">{{
-                                                        booking.allocation.patient.pat_name }}</div>
-                                                    <div style="font-size: 12px; color: var(--gray);">{{
-                                                        booking.allocation.patient.pat_reg_no }}</div>
+                                                    <div style="font-weight: 500;">{{ booking.allocation.patient.pat_name }}</div>
+                                                    <div style="font-size: 12px; color: var(--gray);">{{ booking.allocation.patient.pat_reg_no }}</div>
                                                 </button>
                                             </td>
                                             <td>{{ booking.allocation.therapy_name }}</td>
@@ -381,10 +378,8 @@
                                                 <button type="button" class="patient-name-link"
                                                     data-patient-name="{{ booking.allocation.patient.pat_name }}"
                                                     data-schedule-date="{{ booking.date|date:'Y-m-d' }}">
-                                                    <div style="font-weight: 500;">{{
-                                                        booking.allocation.patient.pat_name }}</div>
-                                                    <div style="font-size: 12px; color: var(--gray);">{{
-                                                        booking.allocation.patient.pat_reg_no }}</div>
+                                                    <div style="font-weight: 500;">{{ booking.allocation.patient.pat_name }}</div>
+                                                    <div style="font-size: 12px; color: var(--gray);">{{ booking.allocation.patient.pat_reg_no }}</div>
                                                 </button>
                                             </td>
                                             <td>{{ booking.allocation.therapy_name }}</td>
@@ -402,9 +397,7 @@
                                                 <div class="nurse-list">
                                                     {% for nurse_assignment in booking.nurse_assignments.all %}
                                                     {% if nurse_assignment.status == 'assigned' %}
-                                                    <span class="nurse-badge">{{
-                                                        nurse_assignment.nurse.nurse_name|default:nurse_assignment.nurse.nurse_code
-                                                        }}</span>
+                                                    <span class="nurse-badge">{{ nurse_assignment.nurse.nurse_name|default:nurse_assignment.nurse.nurse_code }}</span>
                                                     {% endif %}
                                                     {% empty %}
                                                     —
