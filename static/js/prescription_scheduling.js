@@ -544,6 +544,70 @@ function viewChangeLog(patientId, date) {
         });
 }
 
+function formatChangeLogValues(values) {
+    if (values === null || values === undefined || values === '') {
+        return '';
+    }
+    if (typeof values === 'string') {
+        return values;
+    }
+
+    // Special handling for prescription structures so normal users can understand
+    // Example: { items_groups: [ { items: [...], dosage, time, procured_from, oil_class, ... }, ... ] }
+    if (typeof values === 'object' && Array.isArray(values.items_groups)) {
+        const groups = values.items_groups;
+        const lines = [];
+
+        groups.forEach((group, index) => {
+            const entryNo = index + 1;
+            const items = Array.isArray(group.items)
+                ? group.items.map(it => it.item_name || '').filter(Boolean).join(', ')
+                : '';
+            const dosage = group.dosage || '';
+            const time = group.time || '';
+            const oilClass = group.oil_class || '';
+            const procuredFrom = group.procured_from || '';
+            const ingredients = Array.isArray(group.ingredients)
+                ? group.ingredients.map(ing => ing.ingredient_name || ing.text || '').filter(Boolean).join(', ')
+                : '';
+
+            lines.push(`Entry ${entryNo}:`);
+            if (items) {
+                lines.push(`  Medicines: ${items}`);
+            }
+            if (dosage) {
+                lines.push(`  Dosage: ${dosage}`);
+            }
+            if (time) {
+                lines.push(`  Time: ${time}`);
+            }
+            if (procuredFrom) {
+                lines.push(`  Procured From: ${procuredFrom}`);
+            }
+            if (oilClass) {
+                lines.push(`  Oil Class: ${oilClass}`);
+            }
+            if (ingredients) {
+                lines.push(`  Ingredients: ${ingredients}`);
+            }
+            // Blank line between entries
+            if (index !== groups.length - 1) {
+                lines.push('');
+            }
+        });
+
+        return lines.join('\n');
+    }
+
+    try {
+        // Pretty-print objects/arrays so they are readable in the UI
+        return JSON.stringify(values, null, 2);
+    } catch (e) {
+        // Fallback to default string conversion
+        return String(values);
+    }
+}
+
 function showChangeLogModal(changeLog) {
     const modal = document.getElementById('changeLogModal');
     const content = document.getElementById('change-log-content');
@@ -558,8 +622,8 @@ function showChangeLogModal(changeLog) {
                         <p><strong>Date:</strong> ${formatDate(entry.date)}</p>
                         <p><strong>Changed By:</strong> ${escapeHtml(entry.changed_by)}</p>
                         <p><strong>Time:</strong> ${escapeHtml(entry.timestamp)}</p>
-                        ${entry.before_values ? `<p><strong>Before:</strong> ${escapeHtml(entry.before_values)}</p>` : ''}
-                        ${entry.after_values ? `<p><strong>After:</strong> ${escapeHtml(entry.after_values)}</p>` : ''}
+                        ${entry.before_values ? `<p><strong>Before:</strong><br><pre style="white-space: pre-wrap; background:#f8fafc; padding:8px; border-radius:4px; margin-top:4px;">${escapeHtml(formatChangeLogValues(entry.before_values))}</pre></p>` : ''}
+                        ${entry.after_values ? `<p><strong>After:</strong><br><pre style="white-space: pre-wrap; background:#f8fafc; padding:8px; border-radius:4px; margin-top:4px;">${escapeHtml(formatChangeLogValues(entry.after_values))}</pre></p>` : ''}
                     </div>
                 `).join('');
     }
