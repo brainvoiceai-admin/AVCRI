@@ -4562,6 +4562,7 @@ def get_therapy_data_api(request):
                     
                     data.append({
                         'id': booking.allocation.id,
+                        'patient_id': booking.allocation.patient.id,
                         'booking_id': booking.id,
                         'patient_name': booking.allocation.patient.pat_name,
                         'patient_reg_no': booking.allocation.patient.pat_reg_no,
@@ -4754,6 +4755,7 @@ def get_therapy_data_api(request):
                     
                     data.append({
                         'id': allocation.id,
+                        'patient_id': allocation.patient.id,
                         'patient_name': allocation.patient.pat_name,
                         'patient_reg_no': allocation.patient.pat_reg_no,
                         'therapy_name': allocation.therapy_name,

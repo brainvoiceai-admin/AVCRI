@@ -64,15 +64,15 @@ Patients are organized by room number into sections, then printed in the exact o
 
 ### Prescription Grouping
 Medicines are grouped by allocation ID, with:
-- First medicine in group: no prefix
-- Subsequent medicines: `+` prefix
-- Dosage at end: `— [dosage]`
+- First medicine in group: on its own line
+- Subsequent medicines: `+ ` prefix on new line
+- Dosage per medicine/group: `[dosage]` appended to the item name
 
 Example output:
 ```
-Rasnaerandadi Kashayam
-+ Ashtavargam Kashayam  
-+ Indukantham Kashayam — [10 ml]
+Rasnaerandadi Kashayam [10 ml]
++ Ashtavargam Kashayam [5 ml]
++ Indukantham Kashayam [15 ml]
 ```
 
 ### Therapy Separation

@@ -730,10 +730,12 @@ function printPrescriptionScheduleToPDF() {
 
             Promise.all([
                 fetch(`/sheduling/scheduling/api/therapy-data/?status=allocated&date=${selectedDate}&include_zero_therapist=true`).then(r => r.json()),
-                fetch(`/sheduling/scheduling/api/therapy-data/?status=scheduled&date=${selectedDate}&include_zero_therapist=true`).then(r => r.json())
-            ]).then(([allocatedData, scheduledData]) => {
+                fetch(`/sheduling/scheduling/api/therapy-data/?status=scheduled&date=${selectedDate}&include_zero_therapist=true`).then(r => r.json()),
+                fetch(`/sheduling/scheduling/api/therapy-data/?status=draft&date=${selectedDate}&include_zero_therapist=true`).then(r => r.json())
+            ]).then(([allocatedData, scheduledData, draftData]) => {
                 console.log('[PDF] Therapy API Response - Allocated:', allocatedData.success, 'count:', allocatedData.data?.length || 0);
                 console.log('[PDF] Therapy API Response - Scheduled:', scheduledData.success, 'count:', scheduledData.data?.length || 0);
+                console.log('[PDF] Therapy API Response - Draft:', draftData.success, 'count:', draftData.data?.length || 0);
 
                 if (allocatedData.data && allocatedData.data.length > 0) {
                     console.log('[PDF] Sample allocated therapy:', allocatedData.data[0]);
@@ -741,11 +743,14 @@ function printPrescriptionScheduleToPDF() {
                 if (scheduledData.data && scheduledData.data.length > 0) {
                     console.log('[PDF] Sample scheduled therapy:', scheduledData.data[0]);
                 }
+                if (draftData.data && draftData.data.length > 0) {
+                    console.log('[PDF] Sample draft therapy:', draftData.data[0]);
+                }
 
-                // Combine both responses
+                // Combine all responses
                 const therapyData = {
-                    success: allocatedData.success || scheduledData.success,
-                    data: [...(allocatedData.data || []), ...(scheduledData.data || [])]
+                    success: allocatedData.success || scheduledData.success || draftData.success,
+                    data: [...(allocatedData.data || []), ...(scheduledData.data || []), ...(draftData.data || [])]
                 };
 
                 // Deduplicate by booking_id or id
@@ -1164,34 +1169,91 @@ function printPrescriptionScheduleToPDF() {
 
                                     // Convert therapies from therapy API to therapy items format
                                     const therapyItemsFromAPI = therapiesFromAPI.map(convertTherapyToTherapyItem);
+                                    const zeroTherapyItemsFromAPI = zeroTherapies.map(convertTherapyToTherapyItem);
 
-                                    // Combine both sources and enhance with timeslot information
-                                    const allTherapyItems = [...therapyItemsFromDetails, ...therapyItemsFromAPI];
+                                    // Combine ALL sources (Details, Regular API, Zero API) and enhance with timeslot information
+                                    // Merging zero-therapist items here ensures they participate in deduplication and aren't printed twice
+                                    const allTherapyItems = [...therapyItemsFromDetails, ...therapyItemsFromAPI, ...zeroTherapyItemsFromAPI];
 
-                                    // Remove duplicates based on therapy_name and booking_id
-                                    const uniqueTherapyItems = [];
-                                    const seenTherapies = new Set();
-                                    allTherapyItems.forEach(therapyItem => {
-                                        const therapyName = therapyItem.therapy_name || '';
-                                        const bookingId = therapyItem.booking_id || '';
-                                        const key = `${therapyName}_${bookingId}`;
+                                    // Deduplicate and Merge Logic
+                                    // We likely have the same therapy from multiple sources (Details API vs Therapy API)
+                                    // Details API gives Allocation info (From/To). Therapy API gives specific Booking info (Time) for today.
+                                    // We need to merge them into a single comprehensive entry per Allocation ID.
 
-                                        if (!seenTherapies.has(key)) {
-                                            seenTherapies.add(key);
-                                            // Enhance with timeslot information
-                                            const lookupKey = `${reg}_${therapyName}`;
-                                            const timeslot = therapyTimeMap[lookupKey] || therapyItem.timeslot || therapyItem.time || '';
-                                            uniqueTherapyItems.push({
-                                                ...therapyItem,
-                                                timeslot: timeslot
-                                            });
+                                    // Deduplicate and Merge Logic - Two Pass Approach
+                                    // Pass 1: Deduplicate by therapy_id (Allocation ID)
+                                    const mergedById = new Map();
+
+                                    // Helper function to merge properties
+                                    function mergeTherapyItems(target, source) {
+                                        // Prioritize fields that are present in Source but missing in Target
+                                        if (!target.timeslot && source.timeslot) target.timeslot = source.timeslot;
+                                        if ((!target.time || target.time === '—') && source.time) target.time = source.time;
+
+                                        // Usage merging
+                                        if (!target.usage && source.usage) target.usage = source.usage;
+                                        if ((!target.usage_array || target.usage_array.length === 0) && source.usage_array && source.usage_array.length > 0) {
+                                            target.usage_array = source.usage_array;
+                                        }
+
+                                        // Dates
+                                        if ((!target.from_date || target.from_date === '—') && source.from_date) target.from_date = source.from_date;
+                                        if ((!target.to_date || target.to_date === '—') && source.to_date) target.to_date = source.to_date;
+
+                                        // Booking status
+                                        if (source.booking_status === 'scheduled' || source.booking_status === 'allocated') {
+                                            target.booking_status = source.booking_status;
+                                        }
+
+                                        // ID Corrections
+                                        if ((!target.therapy_id) && source.therapy_id) target.therapy_id = source.therapy_id;
+
+                                        // Items (Ingredients/Dosage) logic
+                                        const targetHasRealItems = target.items && target.items.length > 0 && target.items.some(i => i.item_name !== target.therapy_name);
+                                        const sourceHasRealItems = source.items && source.items.length > 0 && source.items.some(i => i.item_name !== source.therapy_name);
+
+                                        if (!targetHasRealItems && sourceHasRealItems) {
+                                            target.items = source.items;
+                                        }
+                                    }
+
+                                    allTherapyItems.forEach(item => {
+                                        let uniqueId = (item.therapy_id || '').toString();
+                                        if (!uniqueId) {
+                                            uniqueId = `temp_no_id_${item.therapy_name || 'unknown'}_${item.booking_id || Math.random()}`;
+                                        }
+
+                                        if (!mergedById.has(uniqueId)) {
+                                            mergedById.set(uniqueId, { ...item });
+                                        } else {
+                                            const existing = mergedById.get(uniqueId);
+                                            mergeTherapyItems(existing, item);
                                         }
                                     });
+
+                                    // Pass 2: Deduplicate by Name (Merge orphans with missing/different IDs)
+                                    const mergedByName = new Map();
+
+                                    mergedById.forEach(item => {
+                                        const nameKey = (item.therapy_name || '').trim().toLowerCase();
+                                        if (!nameKey) return;
+
+                                        if (!mergedByName.has(nameKey)) {
+                                            mergedByName.set(nameKey, item);
+                                        } else {
+                                            // Duplicate Name found - Merge!
+                                            const existing = mergedByName.get(nameKey);
+                                            mergeTherapyItems(existing, item);
+                                        }
+                                    });
+
+                                    // Convert map back to array
+                                    const uniqueTherapyItems = Array.from(mergedByName.values());
 
                                     return {
                                         ...item,
                                         therapy_items: uniqueTherapyItems,
-                                        zero_therapist_therapies: zeroTherapies
+                                        zero_therapist_therapies: [] // Empty this since we merged them into therapy_items above
                                     };
                                 });
 
