@@ -93,6 +93,7 @@ class Booking(models.Model):
     timeslot = models.ForeignKey('masters.SlotMaster', null=True, blank=True, on_delete=models.SET_NULL)
     room = models.ForeignKey(TreatmentRoom, null=True, blank=True, on_delete=models.SET_NULL)
     status = models.CharField(max_length=30, default='draft')  # draft / scheduled / partially_cancelled / cancelled / completed
+    is_rescheduled = models.BooleanField(default=False, help_text="True if this booking was rescheduled after a failure")
     therapist_note = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

@@ -4572,6 +4572,7 @@ def get_therapy_data_api(request):
                         'to_date': booking.allocation.to_date.isoformat(),
                         'status': booking.status,
                         'booking_status': booking.status,
+                        'is_rescheduled': booking.is_rescheduled,
                         'room_no': room_no,
                         'patient_room_no': patient_room_no,
                         'timeslot': booking.timeslot.slot_time.strftime('%H:%M') if booking.timeslot else None,
@@ -4761,6 +4762,7 @@ def get_therapy_data_api(request):
                         'from_date': allocation.from_date.isoformat(),
                         'to_date': allocation.to_date.isoformat(),
                         'status': allocation.status,  # Keep allocation status but filter was based on booking
+                        'is_rescheduled': any([b.is_rescheduled for b in allocation.bookings.all()]),  # Check if any booking is rescheduled
                         'room_no': allocation.room.room_no if allocation.room else None,
                         'patient_room_no': patient_room_no,
                         'timeslot': allocation.timeslot.slot_time.strftime('%H:%M') if allocation.timeslot else None,
@@ -4856,6 +4858,9 @@ def reschedule_therapy_api(request):
                     failed_tasks = [t for t in tasks if t.get('status') == 'FAILED']
                     
                     if success_tasks:
+                        # Mark booking as rescheduled
+                        Booking.objects.filter(allocation=allocation, date=target_date).update(is_rescheduled=True)
+                        
                         allocation.status = 'allocated'
                         allocation.save(update_fields=['status'])
                         return JsonResponse({
@@ -4996,6 +5001,9 @@ def reschedule_all_failed_api(request):
                     print(f"  Results: {len(success_tasks)} successful, {len(failed_tasks)} failed")
 
                     if success_tasks:
+                        # Mark booking as rescheduled
+                        Booking.objects.filter(allocation=allocation, date=filter_date).update(is_rescheduled=True)
+                        
                         allocation.status = 'allocated'
                         allocation.save(update_fields=['status'])
                         # Ensure bookings for this date are marked scheduled
