@@ -1,8 +1,8 @@
 from django.urls import path
-from . import views, prescription_views, procurement_views, patient_views, therapist_views, availability_views, matrix_views
+from . import views, prescription_views, procurement_views, patient_views, therapist_views, availability_views, matrix_views, room_availability_views
 
 urlpatterns = [
-   
+    
     path('therapy-entry/', views.therapy_entry, name='patient_therapy'),
     path('api/allocate_therapy/', views.allocate_therapy, name='allocate_therapy'),
     path('prescriptions/', views.prescription_entry_page, name='prescription_entry_page'),
@@ -50,6 +50,12 @@ urlpatterns = [
     path('therapist-availability/api/available-therapists/', availability_views.get_available_therapists_api, name='get_available_therapists_api'),
     path('therapist-availability/api/therapists-on-leave/', availability_views.get_therapists_on_leave_api, name='get_therapists_on_leave_api'),
     path('therapist-availability/api/time-slots/', availability_views.get_time_slots_api, name='get_time_slots_api'),
+
+    # Room Availability URLs
+    path('room-availability/', room_availability_views.room_availability_dashboard, name='room_availability_dashboard'),
+    path('room-availability/api/available-rooms/', room_availability_views.get_available_rooms_api, name='get_available_rooms_api'),
+    path('room-availability/api/booked-rooms/', room_availability_views.get_booked_rooms_api, name='get_booked_rooms_api'),
+    path('room-availability/api/floors/', room_availability_views.get_floors_api, name='get_floors_api'),
     
     # Bulk Excel Upload/Download for Testing
     path('therapy-bulk-excel/', views.therapy_bulk_excel, name='therapy_bulk_excel'),

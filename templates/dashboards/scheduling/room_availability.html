@@ -1,0 +1,126 @@
+{%load static%}
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Treatment Room Availability Dashboard</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+
+    <link rel="stylesheet" href="{% static 'css/room_availability.css' %}">
+    <link rel="stylesheet" href="{% static 'css/dashboards_nav.css' %}">
+</head>
+
+<body>
+    {% include 'dashboards/nav.html' %}
+
+    <div class="main-content">
+        <div class="container">
+            <header>
+                <div class="logo">
+                    <i class="fas fa-door-open"></i>
+                    <h1>Treatment Room Availability</h1>
+                </div>
+                <p class="subtitle">Check real-time availability and manage treatment room schedules</p>
+            </header>
+
+            <div class="dashboard">
+                <!-- Section 1: Find Available Rooms -->
+                <div class="card">
+                    <div class="card-header">
+                        <i class="fas fa-search-location"></i>
+                        <h2>Find Available Rooms</h2>
+                    </div>
+                    <div class="card-body">
+                        <form id="availabilityForm">
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="date"><i class="far fa-calendar-alt"></i> Date</label>
+                                    <input type="date" id="date" class="form-control" required>
+                                </div>
+
+                                <div class="form-group">
+                                    <label for="time"><i class="far fa-clock"></i> Time Slot</label>
+                                    <select id="time" class="form-control" required>
+                                        <option value="">-- Select Time Slot --</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="floor"><i class="fas fa-layer-group"></i> Floor Preference</label>
+                                <select id="floor" class="form-control">
+                                    <option value="all">All Floors</option>
+                                </select>
+                            </div>
+
+                            <button type="button" class="btn" onclick="findAvailability()" id="availabilityBtn">
+                                <i class="fas fa-search"></i> Check Availability
+                            </button>
+                        </form>
+
+                        <div class="result-container" id="availableRoomsContainer">
+                            <div class="result-header">
+                                <h3><i class="fas fa-list-ul"></i> Available Rooms</h3>
+                                <span id="availableCount" class="badge">0 found</span>
+                            </div>
+                            <div class="result-body" id="availableRooms">
+                                <p class="placeholder-text"><i class="far fa-smile"></i> Select filters and click
+                                    "Check Availability"</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Section 2: Booked Rooms Overview -->
+                <div class="card">
+                    <div class="card-header">
+                        <i class="fas fa-calendar-check"></i>
+                        <h2>Room Booking Overview</h2>
+                    </div>
+                    <div class="card-body">
+                        <form id="bookedForm">
+                            <div class="form-group">
+                                <label for="bookedDate"><i class="far fa-calendar-alt"></i> Date</label>
+                                <input type="date" id="bookedDate" class="form-control" required>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="bookedFloor"><i class="fas fa-layer-group"></i> Filter by Floor</label>
+                                <select id="bookedFloor" class="form-control">
+                                    <option value="all">All Floors</option>
+                                </select>
+                            </div>
+
+                            <button type="button" class="btn btn-secondary" onclick="checkBookings()" id="bookedBtn">
+                                <i class="fas fa-search"></i> View Bookings
+                            </button>
+                        </form>
+
+                        <div class="result-container" id="bookedRoomsContainer">
+                            <div class="result-header">
+                                <h3><i class="fas fa-calendar-day"></i> Booked Sessions</h3>
+                                <span id="bookedCount" class="badge">0 sessions</span>
+                            </div>
+                            <div class="result-body" id="bookedRooms">
+                                <p class="placeholder-text"><i class="far fa-smile"></i> Select a date to view
+                                    current bookings</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <footer>
+                <p>Treatment Room Management System &copy; 2026 | AVCRI Dashboard</p>
+            </footer>
+        </div>
+    </div>
+
+    <script src="{% static 'js/room_availability.js' %}"></script>
+    <script src="{% static 'js/dashboards_nav.js' %}"></script>
+</body>
+
+</html>
