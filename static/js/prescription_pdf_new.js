@@ -238,9 +238,12 @@ function generatePrescriptionPDF_NEW(prescriptionData, date) {
                 if (!gender && patient.patient_gender) gender = patient.patient_gender;
                 if (!gender && patient.patient_sex) gender = patient.patient_sex;
 
-                const doctor = patientInfo.doctor_name || patient.doctor_name || patient.details?.doctor_name || 'N/A';
+                // Get doctor name and team from multiple possible sources
+                // Only use doctor name from Registration->doctor_master, not from PrescriptionScheduling
+                const doctorName = patientInfo.doctor_name || patient.doctor_name || patient.details?.doctor_name || patient.details?.patient_info?.doctor_name || '';
+                const doctorTeam = patientInfo.doctor_team || patient.doctor_team || patient.details?.doctor_team || patient.details?.patient_info?.doctor_team || '';
 
-                console.log('[PDF NEW] Patient:', name, '| Age:', age, '| Gender:', gender, '| Doctor:', doctor);
+                console.log('[PDF NEW] Patient:', name, '| Age:', age, '| Gender:', gender, '| Doctor:', doctorName, '| Team:', doctorTeam);
                 console.log('[PDF NEW] Patient data structure:', {
                     has_details: !!patient.details,
                     has_patient_info: !!patientInfo,
@@ -257,8 +260,19 @@ function generatePrescriptionPDF_NEW(prescriptionData, date) {
                 yPos += 5;
                 doc.text(`Gender: ${gender || 'N/A'}`, margin, yPos);
                 doc.text(`Age: ${age || 'N/A'}`, margin + 30, yPos);
-                doc.text(`Doctor: ${doctor}`, margin + 60, yPos);
-                yPos += 8;
+                // Only show doctor if name is available (not empty)
+                if (doctorName) {
+                    doc.text(`Doctor: ${doctorName}`, margin + 60, yPos);
+                    yPos += 5;
+                } else {
+                    yPos += 5;
+                }
+                // Display doctor team if available
+                if (doctorTeam) {
+                    doc.text(`Doctor Team: ${doctorTeam}`, margin + 60, yPos);
+                    yPos += 5;
+                }
+                yPos += 3;
 
                 // ========== PRESCRIPTION TABLE WITH BORDERS ==========
                 const prescriptionGroups = patient.details?.prescription_groups || [];
@@ -298,7 +312,7 @@ function generatePrescriptionPDF_NEW(prescriptionData, date) {
                             if (g.time) commonTime = g.time;
                             if (commonUsage && commonTime) break;
                         }
-
+                        
                         // Collect ALL medicines in this allocation, but keep them grouped with their dosages
                         const formattedLines = [];
                         let groupOilClass = '';
@@ -336,15 +350,55 @@ function generatePrescriptionPDF_NEW(prescriptionData, date) {
                                 formattedLines.push(line);
                             }
 
-                            // Capture Oil Class (usually common, but take first found)
-                            if (!groupOilClass && group.oil_class) {
-                                groupOilClass = group.oil_class;
+                            // Capture Oil Class - check all groups and use first non-empty value
+                            // If multiple groups have different oil classes, we'll use the first one
+                            // Also check for alternative field names
+                            if (!groupOilClass) {
+                                const oilClassValue = group.oil_class || group.oilClass || group.oil_class_name || '';
+                                if (oilClassValue) {
+                                    const trimmedValue = String(oilClassValue).trim();
+                                    if (trimmedValue) {
+                                        groupOilClass = trimmedValue;
+                                    }
+                                }
                             }
 
-                            // Capture Ingredients
-                            if (group.ingredients && group.ingredients.length > 0) {
-                                const ings = group.ingredients.map(ing => ing.ingredient_name || ing.text || '').filter(Boolean).join(', ');
-                                if (ings) allIngredients.push(ings);
+                            // Capture Ingredients - handle multiple formats:
+                            // 1. Array of objects: [{ingredient_name: "..."}, {text: "..."}]
+                            // 2. Array of strings: ["ingredient1", "ingredient2"]
+                            // 3. String: "ingredient1, ingredient2"
+                            // 4. Empty/null: skip
+                            if (group.ingredients) {
+                                let ingredientText = '';
+                                
+                                if (Array.isArray(group.ingredients)) {
+                                    if (group.ingredients.length > 0) {
+                                        // Check if it's an array of objects or strings
+                                        if (typeof group.ingredients[0] === 'object' && group.ingredients[0] !== null) {
+                                            // Array of objects
+                                            ingredientText = group.ingredients
+                                                .map(ing => {
+                                                    if (typeof ing === 'string') return ing;
+                                                    return ing.ingredient_name || ing.text || ing.name || '';
+                                                })
+                                                .filter(Boolean)
+                                                .join(', ');
+                                        } else {
+                                            // Array of strings
+                                            ingredientText = group.ingredients
+                                                .filter(ing => ing && String(ing).trim())
+                                                .map(ing => String(ing).trim())
+                                                .join(', ');
+                                        }
+                                    }
+                                } else if (typeof group.ingredients === 'string') {
+                                    // Single string
+                                    ingredientText = group.ingredients.trim();
+                                }
+                                
+                                if (ingredientText) {
+                                    allIngredients.push(ingredientText);
+                                }
                             }
                         });
 
@@ -409,24 +463,9 @@ function generatePrescriptionPDF_NEW(prescriptionData, date) {
 
                     // Regular therapies
                     allTherapyItems.forEach((therapyItem, index) => {
-                        // Debug: log first therapy item to see structure
-                        if (index === 0) {
-                            console.log('[PDF NEW] THERAPY ITEM STRUCTURE:', JSON.stringify(therapyItem, null, 2));
-                        }
-
                         const therapyName = therapyItem.therapy_name || 'Unknown Therapy';
                         const timeslot24 = therapyItem.timeslot || therapyItem.time || '—';
                         const timeslot = convertTo12Hour(timeslot24);
-
-                        // Extract usage
-                        let usage = therapyItem.usage || '';
-                        if (!usage && therapyItem.usage_array && Array.isArray(therapyItem.usage_array)) {
-                            usage = therapyItem.usage_array.filter(u => u).join(', ');
-                        }
-                        if (!usage && therapyItem.items && Array.isArray(therapyItem.items) && therapyItem.items[0]) {
-                            usage = therapyItem.items[0].usage || '';
-                        }
-                        if (!usage) usage = '—';
 
                         // Extract dates
                         let fromDate = '—';
@@ -436,53 +475,148 @@ function generatePrescriptionPDF_NEW(prescriptionData, date) {
                         if (rawFrom) fromDate = formatDateDDMMYYYY(rawFrom);
                         if (rawTo) toDate = formatDateDDMMYYYY(rawTo);
 
-                        let itemsWithDosage = '';
-
-                        // Check items structure
+                        // Process items_groups to match items with their usage
+                        // Each group has its own usage, so we need to create separate rows for each group
                         if (therapyItem.items && Array.isArray(therapyItem.items) && therapyItem.items.length > 0) {
-                            const formattedGroups = [];
-
                             // Check if items are actually groups (nested items) or flat items
-                            // Logic: if first item has 'items' array, treat as groups. Else treat as list of items (single group).
                             const isNested = therapyItem.items[0] && therapyItem.items[0].items && Array.isArray(therapyItem.items[0].items);
 
                             if (isNested) {
-                                // It's a list of groups
+                                // It's a list of groups - each group gets its own row
                                 therapyItem.items.forEach((group, idx) => {
                                     const subItems = group.items || [];
                                     const itemNames = subItems.map(it => it.item_name || '').filter(Boolean).join(' + ');
 
+                                    // Get usage for THIS group
+                                    let groupUsage = group.usage || '';
+                                    if (!groupUsage && group.usage_array && Array.isArray(group.usage_array)) {
+                                        groupUsage = group.usage_array.filter(u => u).join(', ');
+                                    }
+                                    if (!groupUsage && therapyItem.usage) {
+                                        groupUsage = therapyItem.usage;
+                                    }
+                                    if (!groupUsage && therapyItem.usage_array && Array.isArray(therapyItem.usage_array)) {
+                                        groupUsage = therapyItem.usage_array.filter(u => u).join(', ');
+                                    }
+                                    if (!groupUsage) groupUsage = '—';
+
+                                    // Get dosage for THIS group
                                     let dosage = group.dosage || group.dose || group.quantity || '';
                                     if (group.uno) dosage = dosage ? `${dosage} (${group.uno})` : group.uno;
 
-                                    let line = itemNames;
-                                    if (dosage) line += ` [${dosage}]`;
+                                    let itemsWithDosage = itemNames;
+                                    if (dosage) itemsWithDosage += ` [${dosage}]`;
+                                    if (!itemsWithDosage) itemsWithDosage = '—';
 
-                                    if (idx > 0 && line) line = '+ ' + line;
-                                    if (line) formattedGroups.push(line);
+                                    // Get oil class for THIS group
+                                    let oilClass = group.oil_class || group.oilClass || group.oil_class_name || '';
+                                    if (!oilClass && therapyItem.oil_class) {
+                                        oilClass = therapyItem.oil_class;
+                                    }
+                                    if (!oilClass) oilClass = '—';
+
+                                    // Get ingredients for THIS group
+                                    let ingredients = '—';
+                                    if (group.ingredients) {
+                                        if (Array.isArray(group.ingredients) && group.ingredients.length > 0) {
+                                            // Check if it's an array of objects or strings
+                                            if (typeof group.ingredients[0] === 'object' && group.ingredients[0] !== null) {
+                                                // Array of objects
+                                                ingredients = group.ingredients
+                                                    .map(ing => {
+                                                        if (typeof ing === 'string') return ing;
+                                                        return ing.ingredient_name || ing.text || ing.name || '';
+                                                    })
+                                                    .filter(Boolean)
+                                                    .join(', ');
+                                            } else {
+                                                // Array of strings
+                                                ingredients = group.ingredients
+                                                    .filter(ing => ing && String(ing).trim())
+                                                    .map(ing => String(ing).trim())
+                                                    .join(', ');
+                                            }
+                                        } else if (typeof group.ingredients === 'string') {
+                                            // Single string
+                                            ingredients = group.ingredients.trim();
+                                        }
+                                    }
+                                    if (!ingredients || ingredients === '') ingredients = '—';
+
+                                    // Create a separate row for this group
+                                    // Only show therapy name, time, and dates on first row
+                                    therapyTableData.push([
+                                        idx === 0 ? therapyName : '',  // Therapy name only on first row
+                                        groupUsage,                    // Usage for this group
+                                        itemsWithDosage,               // Items with dosage for this group
+                                        oilClass,                      // Oil class for this group
+                                        idx === 0 ? timeslot : '',     // Time only on first row
+                                        idx === 0 ? fromDate : '',     // From date only on first row
+                                        idx === 0 ? toDate : ''        // To date only on first row
+                                    ]);
                                 });
                             } else {
-                                // Flat list - treat as one group OR check if "is_group" flag logic applies
-                                // For now, assume flat list = one line unless they have individual dosages?
-                                // Usually flat list in therapy means components of ONE therapy.
+                                // Flat list - treat as one group with single usage
                                 const itemNames = therapyItem.items.map(it => it.item_name || '').filter(Boolean).join(' + ');
+                                
+                                // Get usage
+                                let usage = therapyItem.usage || '';
+                                if (!usage && therapyItem.usage_array && Array.isArray(therapyItem.usage_array)) {
+                                    usage = therapyItem.usage_array.filter(u => u).join(', ');
+                                }
+                                if (!usage) usage = '—';
+
+                                // Get dosage
                                 let dosage = therapyItem.dosage || therapyItem.dose || '';
                                 if (therapyItem.uno) dosage = dosage ? `${dosage} (${therapyItem.uno})` : therapyItem.uno;
 
-                                let line = itemNames;
-                                if (dosage) line += ` [${dosage}]`;
-                                if (line) formattedGroups.push(line);
+                                let itemsWithDosage = itemNames;
+                                if (dosage) itemsWithDosage += ` [${dosage}]`;
+                                if (!itemsWithDosage) itemsWithDosage = '—';
+
+                                // Get oil class
+                                let oilClass = therapyItem.oil_class || therapyItem.oilClass || '—';
+                                if (!oilClass) oilClass = '—';
+
+                                // Get ingredients
+                                let ingredients = '—';
+                                if (therapyItem.ingredients) {
+                                    if (Array.isArray(therapyItem.ingredients) && therapyItem.ingredients.length > 0) {
+                                        if (typeof therapyItem.ingredients[0] === 'object' && therapyItem.ingredients[0] !== null) {
+                                            ingredients = therapyItem.ingredients
+                                                .map(ing => {
+                                                    if (typeof ing === 'string') return ing;
+                                                    return ing.ingredient_name || ing.text || ing.name || '';
+                                                })
+                                                .filter(Boolean)
+                                                .join(', ');
+                                        } else {
+                                            ingredients = therapyItem.ingredients
+                                                .filter(ing => ing && String(ing).trim())
+                                                .map(ing => String(ing).trim())
+                                                .join(', ');
+                                        }
+                                    } else if (typeof therapyItem.ingredients === 'string') {
+                                        ingredients = therapyItem.ingredients.trim();
+                                    }
+                                }
+                                if (!ingredients || ingredients === '') ingredients = '—';
+
+                                therapyTableData.push([therapyName, usage, itemsWithDosage, oilClass, timeslot, fromDate, toDate]);
                             }
+                        } else {
+                            // No items - fallback to therapy-level data
+                            let usage = therapyItem.usage || '';
+                            if (!usage && therapyItem.usage_array && Array.isArray(therapyItem.usage_array)) {
+                                usage = therapyItem.usage_array.filter(u => u).join(', ');
+                            }
+                            if (!usage) usage = '—';
 
-                            itemsWithDosage = formattedGroups.join('\n');
+                            let itemsWithDosage = therapyItem.dosage || therapyItem.dose || '—';
+                            let oilClass = therapyItem.oil_class || therapyItem.oilClass || '—';
+
+                            therapyTableData.push([therapyName, usage, itemsWithDosage, oilClass, timeslot, fromDate, toDate]);
                         }
-
-                        // Fallback
-                        if (!itemsWithDosage) {
-                            itemsWithDosage = therapyItem.dosage || therapyItem.dose || '—';
-                        }
-
-                        therapyTableData.push([therapyName, usage, itemsWithDosage, timeslot, fromDate, toDate]);
                     });
 
                     // Zero-therapist therapies
@@ -490,13 +624,6 @@ function generatePrescriptionPDF_NEW(prescriptionData, date) {
                         const therapyName = therapy.therapy_name || 'Unknown Therapy';
                         const timeslot24 = therapy.timeslot || '—';
                         const timeslot = convertTo12Hour(timeslot24);
-
-                        // Extract usage
-                        let usage = therapy.usage || '';
-                        if (!usage && therapy.usage_array && Array.isArray(therapy.usage_array)) {
-                            usage = therapy.usage_array.filter(u => u).join(', ');
-                        }
-                        if (!usage) usage = '—';
 
                         // Extract dates
                         let fromDate = '—';
@@ -506,32 +633,94 @@ function generatePrescriptionPDF_NEW(prescriptionData, date) {
                         if (rawFrom) fromDate = formatDateDDMMYYYY(rawFrom);
                         if (rawTo) toDate = formatDateDDMMYYYY(rawTo);
 
-                        let itemsWithDosage = '';
-                        // Processing zero therapist items which might have items_groups or flat items
+                        // Process items_groups to match items with their usage
+                        // Each group gets its own row
                         if (therapy.items_groups && Array.isArray(therapy.items_groups) && therapy.items_groups.length > 0) {
-                            const formattedLines = [];
                             therapy.items_groups.forEach((group, idx) => {
                                 const subItems = group.items || [];
                                 const itemNames = subItems.map(it => it.item_name || '').filter(Boolean).join(' + ');
 
+                                // Get usage for THIS group
+                                let groupUsage = group.usage || '';
+                                if (!groupUsage && group.usage_array && Array.isArray(group.usage_array)) {
+                                    groupUsage = group.usage_array.filter(u => u).join(', ');
+                                }
+                                if (!groupUsage && therapy.usage) {
+                                    groupUsage = therapy.usage;
+                                }
+                                if (!groupUsage && therapy.usage_array && Array.isArray(therapy.usage_array)) {
+                                    groupUsage = therapy.usage_array.filter(u => u).join(', ');
+                                }
+                                if (!groupUsage) groupUsage = '—';
+
+                                // Get dosage for THIS group
                                 let dosage = group.dosage || group.dose || group.quantity || '';
                                 if (group.uno) dosage = dosage ? `${dosage} (${group.uno})` : group.uno;
 
-                                let line = itemNames;
-                                if (dosage) line += ` [${dosage}]`;
+                                let itemsWithDosage = itemNames;
+                                if (dosage) itemsWithDosage += ` [${dosage}]`;
+                                if (!itemsWithDosage) itemsWithDosage = '—';
 
-                                if (idx > 0 && line) line = '+ ' + line;
-                                if (line) formattedLines.push(line);
+                                // Get oil class for THIS group
+                                let oilClass = group.oil_class || group.oilClass || group.oil_class_name || '';
+                                if (!oilClass && therapy.oil_class) {
+                                    oilClass = therapy.oil_class;
+                                }
+                                if (!oilClass) oilClass = '—';
+
+                                // Get ingredients for THIS group
+                                let ingredients = '—';
+                                if (group.ingredients) {
+                                    if (Array.isArray(group.ingredients) && group.ingredients.length > 0) {
+                                        // Check if it's an array of objects or strings
+                                        if (typeof group.ingredients[0] === 'object' && group.ingredients[0] !== null) {
+                                            // Array of objects
+                                            ingredients = group.ingredients
+                                                .map(ing => {
+                                                    if (typeof ing === 'string') return ing;
+                                                    return ing.ingredient_name || ing.text || ing.name || '';
+                                                })
+                                                .filter(Boolean)
+                                                .join(', ');
+                                        } else {
+                                            // Array of strings
+                                            ingredients = group.ingredients
+                                                .filter(ing => ing && String(ing).trim())
+                                                .map(ing => String(ing).trim())
+                                                .join(', ');
+                                        }
+                                    } else if (typeof group.ingredients === 'string') {
+                                        // Single string
+                                        ingredients = group.ingredients.trim();
+                                    }
+                                }
+                                if (!ingredients || ingredients === '') ingredients = '—';
+
+                                // Create a separate row for this group
+                                // Only show therapy name, time, and dates on first row
+                                therapyTableData.push([
+                                    idx === 0 ? therapyName : '',  // Therapy name only on first row
+                                    groupUsage,                    // Usage for this group
+                                    itemsWithDosage,               // Items with dosage for this group
+                                    oilClass,                      // Oil class for this group
+                                    idx === 0 ? timeslot : '',     // Time only on first row
+                                    idx === 0 ? fromDate : '',     // From date only on first row
+                                    idx === 0 ? toDate : ''        // To date only on first row
+                                ]);
                             });
-                            itemsWithDosage = formattedLines.join('\n');
-                        }
+                        } else {
+                            // No items_groups - fallback to therapy-level data
+                            let usage = therapy.usage || '';
+                            if (!usage && therapy.usage_array && Array.isArray(therapy.usage_array)) {
+                                usage = therapy.usage_array.filter(u => u).join(', ');
+                            }
+                            if (!usage) usage = '—';
 
-                        // Fallback
-                        if (!itemsWithDosage) {
-                            itemsWithDosage = therapy.dosage || therapy.dose || '—';
-                        }
+                            let itemsWithDosage = therapy.dosage || therapy.dose || '—';
+                            let oilClass = therapy.oil_class || therapy.oilClass || '—';
 
-                        therapyTableData.push([therapyName, usage, itemsWithDosage, timeslot, fromDate, toDate]);
+                            therapyTableData.push([therapyName, usage, itemsWithDosage, oilClass, timeslot, fromDate, toDate]);
+                        }
                     });
 
                     if (therapyTableData.length > 0) {
@@ -539,7 +728,7 @@ function generatePrescriptionPDF_NEW(prescriptionData, date) {
 
                         doc.autoTable({
                             startY: yPos,
-                            head: [['Therapy', 'Usage', 'Items (Dosage)', 'Time', 'From', 'To']],
+                            head: [['Therapy', 'Usage', 'Items (Dosage)', 'Oil Class', 'Time', 'From', 'To']],
                             body: therapyTableData,
                             theme: 'grid',
                             styles: {
@@ -555,13 +744,14 @@ function generatePrescriptionPDF_NEW(prescriptionData, date) {
                                 halign: 'left'
                             },
                             columnStyles: {
-                                0: { cellWidth: 32 },   // Therapy
+                                0: { cellWidth: 28 },   // Therapy
                                 1: { cellWidth: 15 },   // Usage
-                                2: { cellWidth: 70 },   // Items (Dosage)
-                                3: { cellWidth: 18 },   // Time
-                                4: { cellWidth: 22 },   // From
-                                5: { cellWidth: 22 }    // To
-                                // Total: 179mm (fits in 237mm landscape with margins)
+                                2: { cellWidth: 55 },   // Items (Dosage)
+                                3: { cellWidth: 20 },   // Oil Class
+                                4: { cellWidth: 15 },   // Time
+                                5: { cellWidth: 20 },   // From
+                                6: { cellWidth: 20 }    // To
+                                // Total: 173mm (fits in 237mm landscape with margins)
                             },
                             margin: { left: margin, right: margin },
                             tableWidth: 'auto'
