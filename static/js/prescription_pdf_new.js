@@ -312,7 +312,7 @@ function generatePrescriptionPDF_NEW(prescriptionData, date) {
                             if (g.time) commonTime = g.time;
                             if (commonUsage && commonTime) break;
                         }
-
+                        
                         // Collect ALL medicines in this allocation, but keep them grouped with their dosages
                         const formattedLines = [];
                         let groupOilClass = '';
@@ -350,15 +350,55 @@ function generatePrescriptionPDF_NEW(prescriptionData, date) {
                                 formattedLines.push(line);
                             }
 
-                            // Capture Oil Class (usually common, but take first found)
-                            if (!groupOilClass && group.oil_class) {
-                                groupOilClass = group.oil_class;
+                            // Capture Oil Class - check all groups and use first non-empty value
+                            // If multiple groups have different oil classes, we'll use the first one
+                            // Also check for alternative field names
+                            if (!groupOilClass) {
+                                const oilClassValue = group.oil_class || group.oilClass || group.oil_class_name || '';
+                                if (oilClassValue) {
+                                    const trimmedValue = String(oilClassValue).trim();
+                                    if (trimmedValue) {
+                                        groupOilClass = trimmedValue;
+                                    }
+                                }
                             }
 
-                            // Capture Ingredients
-                            if (group.ingredients && group.ingredients.length > 0) {
-                                const ings = group.ingredients.map(ing => ing.ingredient_name || ing.text || '').filter(Boolean).join(', ');
-                                if (ings) allIngredients.push(ings);
+                            // Capture Ingredients - handle multiple formats:
+                            // 1. Array of objects: [{ingredient_name: "..."}, {text: "..."}]
+                            // 2. Array of strings: ["ingredient1", "ingredient2"]
+                            // 3. String: "ingredient1, ingredient2"
+                            // 4. Empty/null: skip
+                            if (group.ingredients) {
+                                let ingredientText = '';
+                                
+                                if (Array.isArray(group.ingredients)) {
+                                    if (group.ingredients.length > 0) {
+                                        // Check if it's an array of objects or strings
+                                        if (typeof group.ingredients[0] === 'object' && group.ingredients[0] !== null) {
+                                            // Array of objects
+                                            ingredientText = group.ingredients
+                                                .map(ing => {
+                                                    if (typeof ing === 'string') return ing;
+                                                    return ing.ingredient_name || ing.text || ing.name || '';
+                                                })
+                                                .filter(Boolean)
+                                                .join(', ');
+                                        } else {
+                                            // Array of strings
+                                            ingredientText = group.ingredients
+                                                .filter(ing => ing && String(ing).trim())
+                                                .map(ing => String(ing).trim())
+                                                .join(', ');
+                                        }
+                                    }
+                                } else if (typeof group.ingredients === 'string') {
+                                    // Single string
+                                    ingredientText = group.ingredients.trim();
+                                }
+                                
+                                if (ingredientText) {
+                                    allIngredients.push(ingredientText);
+                                }
                             }
                         });
 
