@@ -816,7 +816,8 @@ function printPrescriptionScheduleToPDF() {
                                         patient_name: detailData.patient_info.name || therapyForPatient.patient_name || 'Unknown',
                                         registration_no: therapyForPatient.patient_reg_no,
                                         room_no: detailData.patient_info.room_no || therapyForPatient.patient_room_no || null,
-                                        doctor_name: detailData.patient_info.doctor_name || 'N/A',
+                                        doctor_name: detailData.patient_info.doctor_name || '',
+                                        doctor_team: detailData.patient_info.doctor_team || '',
                                         age: detailData.patient_info.age || '',
                                         sex: detailData.patient_info.sex || '',
                                         prescription_count: 0,
@@ -836,7 +837,8 @@ function printPrescriptionScheduleToPDF() {
                                         patient_name: therapyForPatient ? therapyForPatient.patient_name : 'Unknown',
                                         registration_no: regNo,
                                         room_no: therapyForPatient ? therapyForPatient.patient_room_no : null,
-                                        doctor_name: 'N/A',
+                                        doctor_name: '',
+                                        doctor_team: '',
                                         prescription_count: 0,
                                         status: 'scheduled',
                                         details: {
@@ -847,7 +849,8 @@ function printPrescriptionScheduleToPDF() {
                                                 room_no: therapyForPatient ? therapyForPatient.patient_room_no : null,
                                                 age: '',
                                                 sex: '',
-                                                doctor_name: 'N/A'
+                                                doctor_name: '',
+                                                doctor_team: ''
                                             },
                                             prescription_groups: [],
                                             therapy_items: []
@@ -864,7 +867,8 @@ function printPrescriptionScheduleToPDF() {
                                     patient_name: therapyForPatient ? therapyForPatient.patient_name : 'Unknown',
                                     registration_no: regNo,
                                     room_no: therapyForPatient ? therapyForPatient.patient_room_no : null,
-                                    doctor_name: 'N/A',
+                                                doctor_name: '',
+                                    doctor_team: '',
                                     prescription_count: 0,
                                     status: 'scheduled',
                                     details: {
@@ -875,7 +879,8 @@ function printPrescriptionScheduleToPDF() {
                                             room_no: therapyForPatient ? therapyForPatient.patient_room_no : null,
                                             age: '',
                                             sex: '',
-                                            doctor_name: 'N/A'
+                                            doctor_name: '',
+                                            doctor_team: ''
                                         },
                                         prescription_groups: [],
                                         therapy_items: []
@@ -890,7 +895,8 @@ function printPrescriptionScheduleToPDF() {
                             patient_name: therapyForPatient ? therapyForPatient.patient_name : 'Unknown',
                             registration_no: regNo,
                             room_no: therapyForPatient ? therapyForPatient.patient_room_no : null,
-                            doctor_name: 'N/A',
+                                                doctor_name: '',
+                            doctor_team: '',
                             prescription_count: 0,
                             status: 'scheduled',
                             details: {
@@ -901,7 +907,8 @@ function printPrescriptionScheduleToPDF() {
                                     room_no: therapyForPatient ? therapyForPatient.patient_room_no : null,
                                     age: '',
                                     sex: '',
-                                    doctor_name: 'N/A'
+                                                doctor_name: '',
+                                    doctor_team: ''
                                 },
                                 prescription_groups: [],
                                 therapy_items: []
@@ -956,8 +963,11 @@ function printPrescriptionScheduleToPDF() {
                             // Merge age/sex/doctor if missing
                             if (!existing.age && p.age) existing.age = p.age;
                             if (!existing.sex && p.sex) existing.sex = p.sex;
-                            if ((!existing.doctor_name || existing.doctor_name === 'N/A') && p.doctor_name) {
+                            if (!existing.doctor_name && p.doctor_name) {
                                 existing.doctor_name = p.doctor_name;
+                            }
+                            if (!existing.doctor_team && p.doctor_team) {
+                                existing.doctor_team = p.doctor_team;
                             }
 
                             // Ensure we don't lose the registration number if one source had a better one
@@ -987,8 +997,11 @@ function printPrescriptionScheduleToPDF() {
                                         merged.details = detailData;
                                         merged.age = merged.age || detailData.patient_info.age;
                                         merged.sex = merged.sex || detailData.patient_info.sex;
-                                        if (!merged.doctor_name || merged.doctor_name === 'N/A') {
+                                        if (!merged.doctor_name && detailData.patient_info.doctor_name) {
                                             merged.doctor_name = detailData.patient_info.doctor_name;
+                                        }
+                                        if (!merged.doctor_team && detailData.patient_info.doctor_team) {
+                                            merged.doctor_team = detailData.patient_info.doctor_team;
                                         }
                                     }
                                     return merged;

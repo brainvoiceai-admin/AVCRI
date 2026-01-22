@@ -131,7 +131,48 @@ def get_prescription_data_api(request):
                 
                 # Handle potential None values
                 patient_name = patient.pat_name or 'Unknown'
-                doctor_name = prescription_scheduling.doctor.get_full_name() if prescription_scheduling.doctor and hasattr(prescription_scheduling.doctor, 'get_full_name') else (prescription_scheduling.doctor.username if prescription_scheduling.doctor else 'Unknown')
+                
+                # Get doctor information from Registration and doctor_master tables
+                doctor_name = ''
+                doctor_team = ''
+                try:
+                    from MySql_Data_pull.models import Registration, doctor_master
+                    
+                    # Extract numeric digits from pat_reg_no (handle string format)
+                    reg_no_str = str(patient.pat_reg_no).strip()
+                    digits_only = ''.join(ch for ch in reg_no_str if ch.isdigit())
+                    
+                    # Check if patient is OP (5 digits) - OP patients are not in Registration table
+                    is_op = len(digits_only) == 5
+                    
+                    if not is_op and digits_only:
+                        # IP patient - convert to integer for querying Registration table
+                        try:
+                            reg_no_int = int(digits_only)
+                            # Use the therapy_db connection for Registration table
+                            registration = Registration.objects.using('therapy_db').filter(
+                                pat_reg_no=reg_no_int
+                            ).first()
+                            
+                            if registration:
+                                # Get doctor team from Registration table
+                                doctor_team = registration.dct_team or ''
+                                
+                                # Get doctor name from doctor_master table using doctcode
+                                if registration.doctcode:
+                                    doctor = doctor_master.objects.using('therapy_db').filter(
+                                        Doct_Code=registration.doctcode
+                                    ).first()
+                                    
+                                    if doctor:
+                                        doctor_name = doctor.Doct_Name or ''
+                        except (ValueError, TypeError) as e:
+                            print(f"Error converting registration number to integer: {e}")
+                except Exception as e:
+                    # If there's an error fetching from Registration/doctor_master, show empty
+                    print(f"Error fetching doctor info from Registration: {e}")
+                    doctor_name = ''
+                    doctor_team = ''
                 
                 # Get room_no - fallback to PatientSnapshot.pat_room_no
                 room_no = getattr(patient, 'pat_room_no', None)
@@ -199,6 +240,7 @@ def get_prescription_data_api(request):
                     'registration_no': patient.pat_reg_no,
                     'room_no': room_no,
                     'doctor_name': doctor_name,
+                    'doctor_team': doctor_team,
                     'prescription_count': prescription_count,
                     'status': prescription_scheduling.status,
                     'prescription_name': prescription_name,
@@ -250,7 +292,8 @@ def get_prescription_details_api(request):
             'room_no': None,
             'age': '',
             'sex': '',
-            'doctor_name': None
+            'doctor_name': None,
+            'doctor_team': ''
         }
         
         try:
@@ -261,7 +304,8 @@ def get_prescription_details_api(request):
                 'room_no': getattr(patient, 'pat_room_no', None),
                 'age': getattr(patient, 'pat_age', '') or '',
                 'sex': getattr(patient, 'pat_sex', '') or '',
-                'doctor_name': None  # Will be set from prescription if available
+                'doctor_name': None,  # Will be set from Registration->doctor_master
+                'doctor_team': ''  # Will be set from Registration
             }
         except PatientSnapshot.DoesNotExist:
             # Patient not in snapshot - try to get from therapy allocations
@@ -278,20 +322,75 @@ def get_prescription_details_api(request):
                     'room_no': getattr(patient, 'pat_room_no', None),
                     'age': getattr(patient, 'pat_age', '') or '',
                     'sex': getattr(patient, 'pat_sex', '') or '',
-                    'doctor_name': None
+                    'doctor_name': None,  # Will be set from Registration->doctor_master
+                    'doctor_team': ''  # Will be set from Registration
                 }
             else:
                 # If still not found, return 404
                 return JsonResponse({'error': 'Patient not found'}, status=404)
         
-        # Get PrescriptionScheduling for the specific date
+        # Get doctor information from Registration and doctor_master tables
+        # First, get doctcode and dct_team from Registration table using pat_reg_no
+        try:
+            from MySql_Data_pull.models import Registration, doctor_master
+            from django.db import connections
+            
+            # Extract numeric digits from registration_no (handle string format)
+            reg_no_str = str(patient_info['registration_no']).strip()
+            digits_only = ''.join(ch for ch in reg_no_str if ch.isdigit())
+            
+            # Check if patient is OP (5 digits) - OP patients are not in Registration table
+            is_op = len(digits_only) == 5
+            
+            if not is_op and digits_only:
+                # IP patient - convert to integer for querying Registration table
+                try:
+                    reg_no_int = int(digits_only)
+                    # Use the therapy_db connection for Registration table
+                    registration = Registration.objects.using('therapy_db').filter(
+                        pat_reg_no=reg_no_int
+                    ).first()
+                    
+                    if registration:
+                        # Get doctor team from Registration table
+                        patient_info['doctor_team'] = registration.dct_team or ''
+                        
+                        # Get doctor name from doctor_master table using doctcode
+                        if registration.doctcode:
+                            doctor = doctor_master.objects.using('therapy_db').filter(
+                                Doct_Code=registration.doctcode
+                            ).first()
+                            
+                            if doctor:
+                                patient_info['doctor_name'] = doctor.Doct_Name or ''
+                            else:
+                                patient_info['doctor_name'] = ''
+                        else:
+                            patient_info['doctor_name'] = ''
+                    else:
+                        patient_info['doctor_name'] = ''
+                        patient_info['doctor_team'] = ''
+                except (ValueError, TypeError) as e:
+                    print(f"Error converting registration number to integer: {e}")
+                    patient_info['doctor_name'] = ''
+                    patient_info['doctor_team'] = ''
+            else:
+                # OP patient - not in Registration table
+                patient_info['doctor_name'] = ''
+                patient_info['doctor_team'] = ''
+        except Exception as e:
+            # If there's an error fetching from Registration/doctor_master, show empty
+            print(f"Error fetching doctor info from Registration: {e}")
+            patient_info['doctor_name'] = ''
+            patient_info['doctor_team'] = ''
+        
+        # Get PrescriptionScheduling for the specific date (for other purposes, not doctor name)
         prescription_scheduling = PrescriptionScheduling.objects.filter(
             patient_id=patient_id,
             prescription_date=filter_date
         ).select_related('doctor').first()
         
-        if prescription_scheduling and prescription_scheduling.doctor:
-            patient_info['doctor_name'] = prescription_scheduling.doctor.get_full_name() if hasattr(prescription_scheduling.doctor, 'get_full_name') else (prescription_scheduling.doctor.username if prescription_scheduling.doctor else None)
+        # Don't use PrescriptionScheduling.doctor as fallback - only use doctor from Registration->doctor_master
         
         # ===== PRESCRIPTION ITEMS =====
         prescription_groups = []  # List of groups with items
