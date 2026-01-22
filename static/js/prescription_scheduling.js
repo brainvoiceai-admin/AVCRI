@@ -1123,6 +1123,8 @@ function printPrescriptionScheduleToPDF() {
                                         usage_array: therapy.usage_array || [],
                                         internal_external: therapy.internal_external || '',
                                         uno: therapy.uno || '',
+                                        oil_class: therapy.oil_class || '',
+                                        ingredients: therapy.ingredients || [],
                                         booking_id: therapy.booking_id,
                                         booking_status: therapy.status || therapy.booking_status || 'scheduled',
                                         booking_is_cancelled: false,
