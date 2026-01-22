@@ -522,3 +522,5 @@
                 gap: 4px;
             }
         }
+.row-rescheduled { background-color: #f3e5f5; }
+.row-rescheduled:hover { background-color: #e1bee7; }

@@ -4560,8 +4560,21 @@ def get_therapy_data_api(request):
                     except Exception:
                         is_nurse_treatment_flag = False
                     
+
+                    # Determine if rescheduled (booking differs from allocation preferences)
+                    is_rescheduled = False
+                    if booking.status in ('scheduled', 'allocated', 'completed'):
+                        # Check timeslot change
+                        if booking.allocation.timeslot_id and booking.timeslot_id and booking.allocation.timeslot_id != booking.timeslot_id:
+                            is_rescheduled = True
+                        # Check room change
+                        elif booking.allocation.room_id and booking.room_id and booking.allocation.room_id != booking.room_id:
+                            is_rescheduled = True
+
                     data.append({
                         'id': booking.allocation.id,
+                        'is_rescheduled': is_rescheduled,
+                        'patient_id': booking.allocation.patient.id,
                         'booking_id': booking.id,
                         'patient_name': booking.allocation.patient.pat_name,
                         'patient_reg_no': booking.allocation.patient.pat_reg_no,
@@ -4754,6 +4767,7 @@ def get_therapy_data_api(request):
                     
                     data.append({
                         'id': allocation.id,
+                        'patient_id': allocation.patient.id,
                         'patient_name': allocation.patient.pat_name,
                         'patient_reg_no': allocation.patient.pat_reg_no,
                         'therapy_name': allocation.therapy_name,

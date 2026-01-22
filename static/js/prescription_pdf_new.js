@@ -124,26 +124,111 @@ function generatePrescriptionPDF_NEW(prescriptionData, date) {
         // Group patients by room
         const patientsByRoom = {};
         prescriptionData.forEach(patient => {
-            const roomNo = (patient.details?.patient_info?.room_no || patient.room_no || 'N/A').trim();
-            if (!patientsByRoom[roomNo]) {
-                patientsByRoom[roomNo] = [];
+            let roomNo = (patient.details?.patient_info?.room_no || patient.room_no || 'N/A').trim();
+            const roomKey = roomNo.toUpperCase();
+            if (!patientsByRoom[roomKey]) {
+                patientsByRoom[roomKey] = [];
             }
-            patientsByRoom[roomNo].push(patient);
+            patientsByRoom[roomKey].push(patient);
         });
 
-        // Process each room
-        const rooms = Object.keys(patientsByRoom).sort();
+        // STRICT HOSPITAL CHART ORDER CONFIGURATION
+        const SECTION_CONFIG = [
+            {
+                title: 'SUITE – GROUND FLOOR',
+                rooms: ['DS-1', 'DS-2', 'DS-3', 'DS-4', 'DS-5', 'DS-6', 'NR-7', 'NR-8', 'NR-9', 'NR-10', 'NR-11', 'NR-12', 'NR-13', 'NR-14', 'NR-28', 'NR-29', 'NR-31', 'NR-32', 'NR-33']
+            },
+            {
+                title: 'FIRST FLOOR',
+                rooms: ['NR-15', 'NR-15A', 'NR-16', 'NR-17', 'NR-18', 'NR-19', 'NR-20', 'NR-21', 'NR-22', 'NR-23', 'NR-24', 'NR-25', 'NR-26', 'NR-27']
+            },
+            {
+                title: 'COTTAGES – NEW BLOCK',
+                rooms: ['CT-1', 'CT-2', 'CT-3', 'CT-4', 'CT-5', 'CT-6', 'CT-7', 'CT-8', 'CT-9', 'CT-10', 'CT-11', 'CT-12', 'CT-14', 'CT-16', 'CT-17', 'CT-19', 'CT-20', 'CT-21', 'CT-22', 'CT-23']
+            },
+            {
+                title: 'GENERAL WARD ROOMS',
+                rooms: ['MG-1', 'MG-3', 'MG-4', 'MG-5', 'FG-1', 'FG-2', 'FG-3', 'FG-5', 'FG-7', 'FG-8']
+            },
+            {
+                title: 'CABIN',
+                rooms: ['CB-1', 'CB-2']
+            }
+        ];
 
-        for (let roomNo of rooms) {
-            const patients = patientsByRoom[roomNo];
+        const processedRooms = new Set();
 
+        // 1. Process Defined Sections
+        SECTION_CONFIG.forEach(section => {
+            let sectionHeaderPrinted = false;
+            section.rooms.forEach(roomDef => {
+                const roomKey = roomDef.toUpperCase();
+                if (patientsByRoom[roomKey]) {
+                    if (!sectionHeaderPrinted) {
+                        checkNewPage(20);
+                        doc.setFontSize(11);
+                        doc.setFont(undefined, 'bold');
+                        doc.text(section.title, margin, yPos);
+                        yPos += 8;
+                        doc.line(margin, yPos - 3, pageWidth - margin, yPos - 3);
+                        sectionHeaderPrinted = true;
+                    }
+                    processRoomPatients(roomKey);
+                    processedRooms.add(roomKey);
+                }
+            });
+        });
+
+        // 2. Process OP Patients
+        const opRooms = Object.keys(patientsByRoom).filter(r => r.startsWith('OP') && !processedRooms.has(r));
+        if (opRooms.length > 0) {
+            opRooms.sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+            let sectionHeaderPrinted = false;
+            opRooms.forEach(roomKey => {
+                if (!sectionHeaderPrinted) {
+                    checkNewPage(20);
+                    doc.setFontSize(11);
+                    doc.setFont(undefined, 'bold');
+                    doc.text('OP PATIENTS', margin, yPos);
+                    yPos += 8;
+                    doc.line(margin, yPos - 3, pageWidth - margin, yPos - 3);
+                    sectionHeaderPrinted = true;
+                }
+                processRoomPatients(roomKey);
+                processedRooms.add(roomKey);
+            });
+        }
+
+        // 3. Process Remaining Rooms
+        const remainingRooms = Object.keys(patientsByRoom).filter(r => !processedRooms.has(r));
+        if (remainingRooms.length > 0) {
+            remainingRooms.sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+            let sectionHeaderPrinted = false;
+            remainingRooms.forEach(roomKey => {
+                if (!sectionHeaderPrinted) {
+                    checkNewPage(20);
+                    doc.setFontSize(11);
+                    doc.setFont(undefined, 'bold');
+                    doc.text('OTHER ROOMS', margin, yPos);
+                    yPos += 8;
+                    doc.line(margin, yPos - 3, pageWidth - margin, yPos - 3);
+                    sectionHeaderPrinted = true;
+                }
+                processRoomPatients(roomKey);
+            });
+        }
+
+        function processRoomPatients(roomKey) {
+            const patients = patientsByRoom[roomKey];
             for (let patient of patients) {
                 checkNewPage(50);
+
+                // Get display room no
+                const roomNo = (patient.details?.patient_info?.room_no || patient.room_no || 'N/A').trim();
 
                 // Extract patient info from multiple possible sources
                 const patientInfo = patient.details?.patient_info || {};
                 const name = patientInfo.name || patient.patient_name || 'Unknown';
-
                 // Try to get age and gender from multiple sources
                 let age = patientInfo.age || patient.age || patient.details?.age || '';
                 let gender = patientInfo.sex || patientInfo.gender || patient.gender || patient.sex || patient.details?.sex || patient.details?.gender || '';
@@ -183,11 +268,11 @@ function generatePrescriptionPDF_NEW(prescriptionData, date) {
                     const groupsByAllocation = {};
                     prescriptionGroups.forEach(group => {
                         let allocationId = 'unknown';
-                        const groupMatch = group.group_id.match(/prescription_group_(\\d+)_/);
+                        const groupMatch = group.group_id.match(/prescription_group_(\d+)_/);
                         if (groupMatch) {
                             allocationId = groupMatch[1];
                         } else {
-                            const itemMatch = group.group_id.match(/prescription_item_(\\d+)/);
+                            const itemMatch = group.group_id.match(/prescription_item_(\d+)/);
                             if (itemMatch) {
                                 allocationId = `item_${itemMatch[1]}`;
                             }
@@ -203,56 +288,77 @@ function generatePrescriptionPDF_NEW(prescriptionData, date) {
                     Object.values(groupsByAllocation).forEach(allocationGroups => {
                         let commonUsage = '';
                         let commonTime = '';
-                        if (allocationGroups.length > 0) {
-                            const g0 = allocationGroups[0];
-                            if (g0.usage) {
-                                commonUsage = g0.usage;
-                            } else if (g0.usage_array && Array.isArray(g0.usage_array)) {
-                                commonUsage = g0.usage_array.join(', ');
+                        // Try to find common usage/time from the first group that has them
+                        for (const g of allocationGroups) {
+                            if (g.usage) {
+                                commonUsage = g.usage;
+                            } else if (g.usage_array && Array.isArray(g.usage_array)) {
+                                commonUsage = g.usage_array.join(', ');
                             }
-                            commonTime = g0.time || '';
+                            if (g.time) commonTime = g.time;
+                            if (commonUsage && commonTime) break;
                         }
 
-                        // Collect ALL medicines in this allocation
-                        const allMedicines = [];
-                        let groupDosage = '';
+                        // Collect ALL medicines in this allocation, but keep them grouped with their dosages
+                        const formattedLines = [];
                         let groupOilClass = '';
-                        let groupIngredients = '';
+                        const allIngredients = [];
 
-                        allocationGroups.forEach(group => {
+                        allocationGroups.forEach((group, idx) => {
                             const items = group.items || [];
-                            items.forEach(item => {
-                                allMedicines.push(item.item_name || 'N/A');
-                            });
+                            const itemNames = items.map(item => item.item_name || 'N/A').join(' + ');
 
-                            if (!groupDosage) {
-                                const dose = group.dose || '';
-                                const unoNote = group.notes || '';
-                                groupDosage = (dose && unoNote) ? `${dose} (${unoNote})` : (dose || unoNote);
+                            // Get dosage for THIS group
+                            let currentDosage = group.dose || group.dosage || '';
+                            const notes = group.notes || group.uno || '';
+                            if (notes) {
+                                currentDosage = currentDosage ? `${currentDosage} (${notes})` : notes;
+                            }
+                            // Fallback to item dosage if group dosage missing
+                            if (!currentDosage && items.length > 0) {
+                                // Try first item's dosage
+                                if (items[0].dose || items[0].dosage) {
+                                    currentDosage = items[0].dose || items[0].dosage;
+                                }
                             }
 
+                            let line = itemNames;
+                            if (currentDosage) {
+                                line += ` [${currentDosage}]`;
+                            }
+
+                            // Add prefix for subsequent groups (visual separation)
+                            if (idx > 0) {
+                                line = '+ ' + line;
+                            }
+
+                            if (line.trim()) {
+                                formattedLines.push(line);
+                            }
+
+                            // Capture Oil Class (usually common, but take first found)
                             if (!groupOilClass && group.oil_class) {
                                 groupOilClass = group.oil_class;
                             }
 
-                            if (!groupIngredients && group.ingredients && group.ingredients.length > 0) {
-                                groupIngredients = group.ingredients.map(ing => ing.ingredient_name || ing.text || '').join(', ');
+                            // Capture Ingredients
+                            if (group.ingredients && group.ingredients.length > 0) {
+                                const ings = group.ingredients.map(ing => ing.ingredient_name || ing.text || '').filter(Boolean).join(', ');
+                                if (ings) allIngredients.push(ings);
                             }
                         });
 
-                        // Combine all medicines with + and add dosage at END
-                        const medicinesText = allMedicines.join(' + ');
-                        const itemsWithDosage = groupDosage
-                            ? `${medicinesText} — [${groupDosage}]`
-                            : medicinesText;
+                        // Join all lines with newline for the cell
+                        const itemsWithDosage = formattedLines.join('\n');
+                        const ingredientsText = allIngredients.join('\n'); // Join ingredients with newline to match structure if possible
 
-                        const timeUsageText = commonTime ? `${commonTime} / ${commonUsage}` : commonUsage;
+                        const timeUsageText = commonTime ? `${commonTime}\n${commonUsage}` : commonUsage;
 
                         tableData.push([
                             timeUsageText || '—',
                             itemsWithDosage,
                             groupOilClass || '—',
-                            groupIngredients || '—'
+                            ingredientsText || '—'
                         ]);
                     });
 
@@ -288,9 +394,12 @@ function generatePrescriptionPDF_NEW(prescriptionData, date) {
                 }
 
                 // ========== THERAPY TABLE WITH BORDERS ==========
-                const therapyItemsFromDetails = patient.details?.therapy_items || [];
-                const therapyItemsFromAPI = patient.therapy_items || [];
-                const allTherapyItems = [...therapyItemsFromDetails, ...therapyItemsFromAPI];
+                // Use the pre-processed and deduplicated list from the caller if available
+                // prescription_scheduling.js already combines details + API + zero items into patient.therapy_items
+                const allTherapyItems = patient.therapy_items && patient.therapy_items.length > 0
+                    ? patient.therapy_items
+                    : (patient.details?.therapy_items || []);
+
                 const zeroTherapistTherapies = patient.zero_therapist_therapies || [];
 
                 console.log('[PDF NEW] Patient:', name, 'Therapies:', allTherapyItems.length, 'Zero:', zeroTherapistTherapies.length);
@@ -309,55 +418,66 @@ function generatePrescriptionPDF_NEW(prescriptionData, date) {
                         const timeslot24 = therapyItem.timeslot || therapyItem.time || '—';
                         const timeslot = convertTo12Hour(timeslot24);
 
-                        // Extract usage from multiple possible fields
+                        // Extract usage
                         let usage = therapyItem.usage || '';
                         if (!usage && therapyItem.usage_array && Array.isArray(therapyItem.usage_array)) {
                             usage = therapyItem.usage_array.filter(u => u).join(', ');
                         }
-                        // Fallback: Check if usage is in the items array (nested)
                         if (!usage && therapyItem.items && Array.isArray(therapyItem.items) && therapyItem.items[0]) {
                             usage = therapyItem.items[0].usage || '';
                         }
                         if (!usage) usage = '—';
 
-                        // Extract dates - check multiple possible fields
+                        // Extract dates
                         let fromDate = '—';
                         let toDate = '—';
-
                         const rawFrom = therapyItem.from_date || therapyItem.from || '';
                         const rawTo = therapyItem.to_date || therapyItem.to || '';
-
                         if (rawFrom) fromDate = formatDateDDMMYYYY(rawFrom);
                         if (rawTo) toDate = formatDateDDMMYYYY(rawTo);
 
                         let itemsWithDosage = '';
 
-                        // Check if items structure is nested (groups of items)
+                        // Check items structure
                         if (therapyItem.items && Array.isArray(therapyItem.items) && therapyItem.items.length > 0) {
-                            const allItems = [];
-                            let dosage = therapyItem.dosage || therapyItem.dose || '';
+                            const formattedGroups = [];
 
-                            therapyItem.items.forEach(group => {
-                                // If it's a group object with an internal items array
-                                if (group && group.items && Array.isArray(group.items)) {
-                                    group.items.forEach(it => {
-                                        if (it && it.item_name) allItems.push(it.item_name);
-                                    });
-                                    if (!dosage) dosage = group.dosage || group.dose || group.quantity || '';
-                                } else if (group && group.item_name) {
-                                    // If it's just a flat item object
-                                    allItems.push(group.item_name);
-                                    if (!dosage) dosage = group.dosage || group.dose || group.quantity || '';
-                                }
-                            });
+                            // Check if items are actually groups (nested items) or flat items
+                            // Logic: if first item has 'items' array, treat as groups. Else treat as list of items (single group).
+                            const isNested = therapyItem.items[0] && therapyItem.items[0].items && Array.isArray(therapyItem.items[0].items);
 
-                            itemsWithDosage = allItems.join(' + ');
-                            if (dosage) {
-                                itemsWithDosage += ` [${dosage}]`;
+                            if (isNested) {
+                                // It's a list of groups
+                                therapyItem.items.forEach((group, idx) => {
+                                    const subItems = group.items || [];
+                                    const itemNames = subItems.map(it => it.item_name || '').filter(Boolean).join(' + ');
+
+                                    let dosage = group.dosage || group.dose || group.quantity || '';
+                                    if (group.uno) dosage = dosage ? `${dosage} (${group.uno})` : group.uno;
+
+                                    let line = itemNames;
+                                    if (dosage) line += ` [${dosage}]`;
+
+                                    if (idx > 0 && line) line = '+ ' + line;
+                                    if (line) formattedGroups.push(line);
+                                });
+                            } else {
+                                // Flat list - treat as one group OR check if "is_group" flag logic applies
+                                // For now, assume flat list = one line unless they have individual dosages?
+                                // Usually flat list in therapy means components of ONE therapy.
+                                const itemNames = therapyItem.items.map(it => it.item_name || '').filter(Boolean).join(' + ');
+                                let dosage = therapyItem.dosage || therapyItem.dose || '';
+                                if (therapyItem.uno) dosage = dosage ? `${dosage} (${therapyItem.uno})` : therapyItem.uno;
+
+                                let line = itemNames;
+                                if (dosage) line += ` [${dosage}]`;
+                                if (line) formattedGroups.push(line);
                             }
+
+                            itemsWithDosage = formattedGroups.join('\n');
                         }
 
-                        // Fallback: If still empty, use the therapy's top-level dosage
+                        // Fallback
                         if (!itemsWithDosage) {
                             itemsWithDosage = therapyItem.dosage || therapyItem.dose || '—';
                         }
@@ -381,34 +501,29 @@ function generatePrescriptionPDF_NEW(prescriptionData, date) {
                         // Extract dates
                         let fromDate = '—';
                         let toDate = '—';
-
                         const rawFrom = therapy.from_date || therapy.from || '';
                         const rawTo = therapy.to_date || therapy.to || '';
-
                         if (rawFrom) fromDate = formatDateDDMMYYYY(rawFrom);
                         if (rawTo) toDate = formatDateDDMMYYYY(rawTo);
 
                         let itemsWithDosage = '';
-                        if (therapy.items_groups && Array.isArray(therapy.items_groups)) {
-                            const allItems = [];
-                            let dosage = therapy.dosage || therapy.dose || '';
+                        // Processing zero therapist items which might have items_groups or flat items
+                        if (therapy.items_groups && Array.isArray(therapy.items_groups) && therapy.items_groups.length > 0) {
+                            const formattedLines = [];
+                            therapy.items_groups.forEach((group, idx) => {
+                                const subItems = group.items || [];
+                                const itemNames = subItems.map(it => it.item_name || '').filter(Boolean).join(' + ');
 
-                            therapy.items_groups.forEach(group => {
-                                if (group.items && Array.isArray(group.items)) {
-                                    group.items.forEach(item => {
-                                        if (item && item.item_name) allItems.push(item.item_name);
-                                    });
-                                }
-                                // Check multiple dosage fields
-                                if (!dosage) {
-                                    dosage = group.dosage || group.dose || group.quantity || '';
-                                }
+                                let dosage = group.dosage || group.dose || group.quantity || '';
+                                if (group.uno) dosage = dosage ? `${dosage} (${group.uno})` : group.uno;
+
+                                let line = itemNames;
+                                if (dosage) line += ` [${dosage}]`;
+
+                                if (idx > 0 && line) line = '+ ' + line;
+                                if (line) formattedLines.push(line);
                             });
-
-                            itemsWithDosage = allItems.join(' + ');
-                            if (dosage) {
-                                itemsWithDosage += ` [${dosage}]`;
-                            }
+                            itemsWithDosage = formattedLines.join('\n');
                         }
 
                         // Fallback
