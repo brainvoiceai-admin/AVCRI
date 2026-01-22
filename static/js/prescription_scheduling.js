@@ -867,7 +867,7 @@ function printPrescriptionScheduleToPDF() {
                                     patient_name: therapyForPatient ? therapyForPatient.patient_name : 'Unknown',
                                     registration_no: regNo,
                                     room_no: therapyForPatient ? therapyForPatient.patient_room_no : null,
-                                                doctor_name: '',
+                                    doctor_name: '',
                                     doctor_team: '',
                                     prescription_count: 0,
                                     status: 'scheduled',
@@ -895,7 +895,7 @@ function printPrescriptionScheduleToPDF() {
                             patient_name: therapyForPatient ? therapyForPatient.patient_name : 'Unknown',
                             registration_no: regNo,
                             room_no: therapyForPatient ? therapyForPatient.patient_room_no : null,
-                                                doctor_name: '',
+                            doctor_name: '',
                             doctor_team: '',
                             prescription_count: 0,
                             status: 'scheduled',
@@ -907,7 +907,7 @@ function printPrescriptionScheduleToPDF() {
                                     room_no: therapyForPatient ? therapyForPatient.patient_room_no : null,
                                     age: '',
                                     sex: '',
-                                                doctor_name: '',
+                                    doctor_name: '',
                                     doctor_team: ''
                                 },
                                 prescription_groups: [],
@@ -1227,7 +1227,9 @@ function printPrescriptionScheduleToPDF() {
                                         const targetHasRealItems = target.items && target.items.length > 0 && target.items.some(i => i.item_name !== target.therapy_name);
                                         const sourceHasRealItems = source.items && source.items.length > 0 && source.items.some(i => i.item_name !== source.therapy_name);
 
-                                        if (!targetHasRealItems && sourceHasRealItems) {
+                                        if (sourceHasRealItems) {
+                                            // Always prioritize items from therapy-data API (source) as it contains the most up-to-date scheduling info
+                                            // and our local converter correctly handles items_groups vs flat items
                                             target.items = source.items;
                                         }
                                     }
