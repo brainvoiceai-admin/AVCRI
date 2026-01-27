@@ -739,28 +739,77 @@ def allocate_therapists(date, time_slot, therapy_requirements, last_therapists=N
             except TherapistMaster.DoesNotExist:
                 continue
             therapist_grade_name = get_therapist_grade_name(t)
+            
+            # PRIORITIZE CONTINUITY: Assign previous therapists regardless of grade match
+            # Check if grade is needed or can substitute, but don't skip if not needed
+            grade_substitution_map = {
+                "Super Senior Therapist": ["Senior Therapist", "Junior Therapist", "Trainee Therapist"],
+                "Senior Therapist": ["Junior Therapist", "Trainee Therapist"],
+                "Junior Therapist": ["Trainee Therapist"],
+                "Trainee Therapist": []  # Cannot substitute for higher grades
+            }
+            
+            grade_can_be_used = False
+            grade_to_decrement = None
+            
+            # First check if exact grade is needed
             if grade_map.get(therapist_grade_name, 0) > 0:
-                # Gender match: skip if therapist gender does not match desired
-                if desired_gender:
-                    t_gender = get_therapist_gender(t)
-                    if t_gender != desired_gender:
-                        continue
-                # Check bathing requirement: if bathing is required, therapist must be a bathing therapist
-                if needs_bathing and not getattr(t, 'is_bathing_therapist', False):
+                grade_can_be_used = True
+                grade_to_decrement = therapist_grade_name
+            else:
+                # Check if this grade can substitute for a needed grade (for continuity)
+                for needed_grade, substitutes in grade_substitution_map.items():
+                    if therapist_grade_name in substitutes and grade_map.get(needed_grade, 0) > 0:
+                        grade_can_be_used = True
+                        grade_to_decrement = needed_grade
+                        print(f"[DEBUG Continuity] {t.therapist_code} ({therapist_grade_name}) - using for continuity to substitute {needed_grade}")
+                        break
+            
+            # If no grade can be used, still assign for continuity but log it
+            if not grade_can_be_used:
+                # Find any grade that still needs therapists (for continuity)
+                for needed_grade in grade_map:
+                    if grade_map.get(needed_grade, 0) > 0:
+                        grade_to_decrement = needed_grade
+                        grade_can_be_used = True
+                        print(f"[DEBUG Continuity] {t.therapist_code} ({therapist_grade_name}) - assigning for continuity, will use for {needed_grade} requirement")
+                        break
+            
+            # If still no grade available, assign anyway for continuity (will reduce total requirement)
+            if not grade_can_be_used:
+                # Use the highest priority grade that's still needed
+                priority_order = ["Trainee Therapist", "Junior Therapist", "Senior Therapist", "Super Senior Therapist"]
+                for priority_grade in priority_order:
+                    if grade_map.get(priority_grade, 0) > 0:
+                        grade_to_decrement = priority_grade
+                        print(f"[DEBUG Continuity] {t.therapist_code} ({therapist_grade_name}) - assigning for continuity, using for {priority_grade} requirement")
+                        break
+            
+            # Gender match: skip if therapist gender does not match desired
+            if desired_gender:
+                t_gender = get_therapist_gender(t)
+                if t_gender != desired_gender:
                     continue
-                if therapist_on_leave(t):
-                    continue
-                if TherapistBooking.objects.filter(therapist=t, date=date, time_slot=time_slot, status='BOOKED').exists():
-                    continue
-                
-                # Check daily session limit (max 6 sessions)
-                session_count = get_therapist_daily_session_count(t)
-                if session_count >= 6:
-                    print(f"[DEBUG Allocation] Therapist {t.therapist_code} at max sessions ({session_count}/6) - skipping")
-                    continue
-                
-                allocated.append(t)
-                grade_map[therapist_grade_name] -= 1
+            # Check bathing requirement: if bathing is required, therapist must be a bathing therapist
+            if needs_bathing and not getattr(t, 'is_bathing_therapist', False):
+                continue
+            if therapist_on_leave(t):
+                continue
+            if TherapistBooking.objects.filter(therapist=t, date=date, time_slot=time_slot, status='BOOKED').exists():
+                continue
+            
+            # Check daily session limit (max 6 sessions)
+            session_count = get_therapist_daily_session_count(t)
+            if session_count >= 6:
+                print(f"[DEBUG Allocation] Therapist {t.therapist_code} at max sessions ({session_count}/6) - skipping")
+                continue
+            
+            # All checks passed - assign this therapist for continuity
+            allocated.append(t)
+            # Decrement the appropriate grade (may be different from therapist's grade for continuity)
+            if grade_to_decrement and grade_map.get(grade_to_decrement, 0) > 0:
+                grade_map[grade_to_decrement] -= 1
+            print(f"[DEBUG Continuity] ✓ Assigned previous therapist {t.therapist_code} ({therapist_grade_name}) for continuity. Used for {grade_to_decrement} requirement.")
 
     # Allocate remaining
     for grade_original, needed_original in list(grade_map.items()):
@@ -2498,31 +2547,53 @@ def assign_continuity_therapists_pass1(booking, allocation, target_date, locked_
                 print(f"[RESCHEDULE PASS1] Therapist {t.therapist_code} gender mismatch ({t_gender} vs {desired_gender}) - skipping")
                 continue
         
-        # Check if grade is still needed (with substitution support)
+        # PRIORITIZE CONTINUITY: Assign previous therapists regardless of grade match
+        # Check if grade is needed or can substitute, but don't skip if not needed
         therapist_grade_name = get_therapist_grade_name(t)
         
-        # Grade substitution hierarchy: Senior can be replaced by Super Senior
+        # Grade substitution hierarchy for continuity (higher grades can substitute for lower)
         substitution_map = {
-            "Senior Therapist": ["Super Senior Therapist"],
-            "Junior Therapist": ["Senior Therapist", "Super Senior Therapist"],
-            "Trainee Therapist": ["Junior Therapist", "Senior Therapist", "Super Senior Therapist"],
-            "Super Senior Therapist": []  # No substitution for highest grade
+            "Super Senior Therapist": ["Senior Therapist", "Junior Therapist", "Trainee Therapist"],
+            "Senior Therapist": ["Junior Therapist", "Trainee Therapist"],
+            "Junior Therapist": ["Trainee Therapist"],
+            "Trainee Therapist": []  # Cannot substitute for higher grades
         }
         
-        grade_needed = False
+        grade_can_be_used = False
+        grade_to_decrement = None
+        
+        # First check if exact grade is needed
         if grade_map.get(therapist_grade_name, 0) > 0:
-            grade_needed = True
+            grade_can_be_used = True
+            grade_to_decrement = therapist_grade_name
         else:
-            # Check if this grade can substitute for a needed grade
+            # Check if this grade can substitute for a needed grade (for continuity)
             for needed_grade, substitutes in substitution_map.items():
                 if therapist_grade_name in substitutes and grade_map.get(needed_grade, 0) > 0:
-                    grade_needed = True
-                    print(f"[RESCHEDULE PASS1] Therapist {t.therapist_code} grade {therapist_grade_name} can substitute for needed {needed_grade}")
+                    grade_can_be_used = True
+                    grade_to_decrement = needed_grade
+                    print(f"[RESCHEDULE PASS1] Therapist {t.therapist_code} grade {therapist_grade_name} can substitute for needed {needed_grade} (continuity)")
                     break
         
-        if not grade_needed:
-            print(f"[RESCHEDULE PASS1] Therapist {t.therapist_code} grade {therapist_grade_name} not needed and cannot substitute - skipping")
-            continue
+        # If no grade can be used, still assign for continuity
+        if not grade_can_be_used:
+            # Find any grade that still needs therapists (for continuity)
+            for needed_grade in grade_map:
+                if grade_map.get(needed_grade, 0) > 0:
+                    grade_to_decrement = needed_grade
+                    grade_can_be_used = True
+                    print(f"[RESCHEDULE PASS1] Therapist {t.therapist_code} ({therapist_grade_name}) - assigning for continuity, will use for {needed_grade} requirement")
+                    break
+        
+        # If still no grade available, assign anyway for continuity (will reduce total requirement)
+        if not grade_can_be_used:
+            # Use the highest priority grade that's still needed
+            priority_order = ["Trainee Therapist", "Junior Therapist", "Senior Therapist", "Super Senior Therapist"]
+            for priority_grade in priority_order:
+                if grade_map.get(priority_grade, 0) > 0:
+                    grade_to_decrement = priority_grade
+                    print(f"[RESCHEDULE PASS1] Therapist {t.therapist_code} ({therapist_grade_name}) - assigning for continuity, using for {priority_grade} requirement")
+                    break
         
         # Check bathing requirement
         if needs_bath_flag and not getattr(t, 'is_bathing_therapist', False):
@@ -2548,16 +2619,11 @@ def assign_continuity_therapists_pass1(booking, allocation, target_date, locked_
         # All checks passed - assign this continuity therapist
         assigned_continuity.append(t)
         
-        # Decrement grade map (handle substitution)
-        if grade_map.get(therapist_grade_name, 0) > 0:
-            grade_map[therapist_grade_name] -= 1
-        else:
-            # This is a substitution - find which grade this substitutes for
-            for needed_grade, substitutes in substitution_map.items():
-                if therapist_grade_name in substitutes and grade_map.get(needed_grade, 0) > 0:
-                    grade_map[needed_grade] -= 1
-                    print(f"[RESCHEDULE PASS1] Using {therapist_grade_name} to substitute for {needed_grade}")
-                    break
+        # Decrement the appropriate grade (may be different from therapist's grade for continuity)
+        if grade_to_decrement and grade_map.get(grade_to_decrement, 0) > 0:
+            grade_map[grade_to_decrement] -= 1
+            if grade_to_decrement != therapist_grade_name:
+                print(f"[RESCHEDULE PASS1] Using {therapist_grade_name} for continuity to satisfy {grade_to_decrement} requirement")
         
         locked_therapist_slots.add(lock_key)
         
