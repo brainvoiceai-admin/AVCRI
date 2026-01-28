@@ -4006,6 +4006,147 @@ def scheduling_dashboard(request):
     return render(request, 'dashboards/scheduling/scheduling.html', context)
 
 
+@scheduling_access_required
+def user_therapy_entry_dashboard(request):
+    """
+    Display therapies entered by the currently logged-in user only.
+    Shows draft, scheduled, and failed therapies with same columns as scheduling dashboard.
+    Users can only see therapies they entered themselves.
+    No user filter - automatically filters by request.user.
+    """
+    from .models import TherapyAllocation, Booking
+    from django.db.models import Q
+    
+    # Get date filter from request
+    date_filter = request.GET.get('date', '')
+    
+    # Parse date if provided
+    filter_date = None
+    if date_filter:
+        try:
+            filter_date = parse_date(date_filter)
+        except Exception:
+            filter_date = None
+    
+    # Filter by currently logged-in user only
+    current_user = request.user if request.user.is_authenticated else None
+    if not current_user:
+        # If user is not authenticated, return empty results
+        context = {
+            'draft_allocations': TherapyAllocation.objects.none(),
+            'draft_bookings': [],
+            'scheduled_allocations': TherapyAllocation.objects.none(),
+            'scheduled_bookings': [],
+            'therapist_bookings': [],
+            'nurse_bookings': [],
+            'failed_allocations': [],
+            'failed_bookings': [],
+            'date_filter': date_filter,
+            'stats': {
+                'draft_count': 0,
+                'failed_count': 0,
+                'scheduled_count': 0,
+            },
+        }
+        return render(request, 'dashboards/user_therapy_entry/user_therapy_entry.html', context)
+    
+    # Base queryset - filter by current user only
+    base_query = TherapyAllocation.objects.filter(allocated_by=current_user)
+    
+    # Filter by date if provided
+    if filter_date:
+        base_query = base_query.filter(
+            Q(from_date__lte=filter_date) & Q(to_date__gte=filter_date)
+        )
+    
+    # Get draft therapies
+    draft_allocations = base_query.filter(
+        bookings__status='draft'
+    ).distinct().select_related('patient', 'room', 'timeslot', 'allocated_by').prefetch_related('bookings__assignments__therapist')
+    
+    # Get failed therapies
+    failed_allocations = base_query.filter(
+        bookings__status='failed'
+    ).distinct().select_related('patient', 'room', 'timeslot', 'allocated_by').prefetch_related('bookings__assignments__therapist')
+    
+    # Filter out therapies with zero therapist requirements
+    from reshedule import therapist_requirements
+    failed_allocations = [alloc for alloc in failed_allocations if therapist_requirements(alloc).get("total", 1) > 0]
+    
+    # Get scheduled therapies
+    scheduled_allocations = base_query.filter(
+        bookings__status='scheduled'
+    ).distinct().select_related('patient', 'room', 'timeslot', 'allocated_by').prefetch_related(
+        'bookings__assignments__therapist',
+        'bookings__timeslot',
+        'bookings__room'
+    )
+    
+    # Get bookings - filter by current user only
+    booking_query = Booking.objects.filter(allocation__allocated_by=current_user)
+    
+    # Filter by date if provided
+    if filter_date:
+        booking_query = booking_query.filter(date=filter_date)
+    
+    # Get bookings by status
+    draft_bookings = booking_query.filter(status='draft').select_related(
+        'allocation__patient', 'allocation', 'timeslot', 'room', 'allocation__allocated_by'
+    ).prefetch_related('assignments__therapist').order_by('-date', '-created_at')
+    
+    scheduled_bookings = booking_query.filter(status='scheduled').select_related(
+        'allocation__patient', 'allocation', 'timeslot', 'room', 'allocation__allocated_by'
+    ).prefetch_related(
+        'assignments__therapist',
+        'nurse_assignments__nurse',
+        'room_bookings__room'
+    ).order_by('-date', '-created_at')
+    
+    failed_bookings = booking_query.filter(status='failed').select_related(
+        'allocation__patient', 'allocation', 'timeslot', 'room', 'allocation__allocated_by'
+    ).prefetch_related('assignments__therapist').order_by('-date', '-created_at')
+    
+    # Separate therapist and nurse bookings for scheduled
+    from .nurse_allocation import is_nurse_treatment
+    therapist_bookings_list = []
+    nurse_bookings_list = []
+    for booking in scheduled_bookings:
+        is_nurse = is_nurse_treatment(booking.allocation.therapy_code, booking.allocation.therapy_name)
+        therapy_req = therapist_requirements(booking.allocation)
+        
+        # Skip zero-therapist therapies (not nurse treatments)
+        if not is_nurse and therapy_req.get("total", 1) == 0:
+            continue
+        
+        if is_nurse:
+            nurse_bookings_list.append(booking)
+        else:
+            therapist_bookings_list.append(booking)
+    
+    # Calculate stats - use bookings for accurate counts
+    stats = {
+        'draft_count': draft_bookings.count(),
+        'failed_count': failed_bookings.count(),
+        'scheduled_count': scheduled_bookings.count(),
+    }
+    
+    context = {
+        'draft_allocations': draft_allocations,
+        'draft_bookings': draft_bookings,
+        'scheduled_allocations': scheduled_allocations,
+        'scheduled_bookings': scheduled_bookings,
+        'therapist_bookings': therapist_bookings_list,
+        'nurse_bookings': nurse_bookings_list,
+        'failed_allocations': failed_allocations,
+        'failed_bookings': failed_bookings,
+        'date_filter': date_filter,
+        'stats': stats,
+        'current_user': current_user,
+    }
+    
+    return render(request, 'dashboards/user_therapy_entry/user_therapy_entry.html', context)
+
+
 @require_http_methods(["GET"])
 def final_schedule_status_api(request):
     """Return whether Final Schedule has been run for a given date.
