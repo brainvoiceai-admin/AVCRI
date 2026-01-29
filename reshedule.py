@@ -1966,18 +1966,19 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
                     }, False, reason)
         else:
             # Not special treatment or no senior therapist - use normal logic
-            # CRITICAL: Always prioritize previous bathing therapist for continuity
-            # Even if PASS 1 assigned a different bathing therapist, we should use the previous one if available
-            if previous_bathing_therapist and previous_bathing_therapist in assigned_therapists:
-                # Previous bathing therapist is in assigned list - ALWAYS use them for continuity
+            # CRITICAL: Prioritize PASS 1 bathing therapist (first-day / from-start-of-therapy) over previous day's.
+            # PASS 1 implements "from start of therapy" - when original therapist returns from leave, do not override with yesterday's replacement.
+            # Priority order: 1) bath_assigned_from_pass1, 2) previous_bathing_therapist, 3) first from list
+            if bath_assigned_from_pass1 and bath_assigned_from_pass1 in assigned_therapists:
+                # PASS 1 chose the first-day bathing therapist - keep them
+                bath_assigned = bath_assigned_from_pass1
+                print(f"[RESCHEDULE] ✓ Using PASS 1 bathing therapist {bath_assigned.therapist_code} for patient {patient_id} (first-day continuity)")
+            elif previous_bathing_therapist and previous_bathing_therapist in assigned_therapists:
+                # Fallback: previous day's bathing therapist when PASS 1 therapist not in list
                 if bath_assigned != previous_bathing_therapist:
-                    print(f"[RESCHEDULE] ⚠ Overriding PASS 1 bathing therapist {bath_assigned.therapist_code if bath_assigned else None} with previous bathing therapist {previous_bathing_therapist.therapist_code} for continuity")
+                    print(f"[RESCHEDULE] Using previous bathing therapist {previous_bathing_therapist.therapist_code} (PASS 1 therapist not in assigned list)")
                 bath_assigned = previous_bathing_therapist
                 print(f"[RESCHEDULE] ✓ Using previous bathing therapist {previous_bathing_therapist.therapist_code} for patient {patient_id} (maintaining continuity)")
-            elif bath_assigned_from_pass1 and bath_assigned_from_pass1 in assigned_therapists:
-                # PASS 1 assigned a bathing therapist and they're still in the list - keep them
-                bath_assigned = bath_assigned_from_pass1
-                print(f"[RESCHEDULE] ✓ Using PASS 1 bathing therapist {bath_assigned.therapist_code} for patient {patient_id} (no previous therapist found)")
             elif not bath_assigned:
                 # No previous therapist and no PASS 1 assignment - pick from assigned therapists
                 # Find any bathing therapist from assigned list
