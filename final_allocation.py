@@ -1191,8 +1191,11 @@ def assign_continuity_therapists_pass1(booking, allocation, target_date, locked_
                     from masters.models import TherapistLeaveMaster, EmergencyLeave
                     from django.db.models import Q
                     therapy_start_date = getattr(allocation, 'from_date', None)
+                    # Only bathing history for THIS allocation and THIS slot (Dhara & Pizichil 7-day: day 1 bathing must carry to day 2-7)
                     prev_bath_bookings_qs = TherapistBooking.objects.filter(
                         patient_id=patient_id,
+                        visit_id=allocation.id,
+                        time_slot=slot_master,
                         date__lt=target_date,
                         is_bathing=True,
                         status='BOOKED'
@@ -1879,8 +1882,11 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                         from masters.models import TherapistLeaveMaster, EmergencyLeave
                         from django.db.models import Q
                         therapy_start_date = getattr(allocation, 'from_date', None)
+                        # Only bathing history for THIS allocation and THIS slot
                         prev_bath_qs = TherapistBooking.objects.filter(
                             patient_id=patient_id,
+                            visit_id=allocation.id,
+                            time_slot=allocate_slot,
                             date__lt=target_date,
                             is_bathing=True,
                             status='BOOKED'

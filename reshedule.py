@@ -1325,15 +1325,17 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
                 previous_therapist_group = available_previous_therapists
                 print(f"[DEBUG] Found complete previous therapist group ({len(previous_therapist_group)} therapists) for patient {patient_id} - will assign together for continuity")
                 
-                # Identify bathing therapist: from START OF THERAPY (first available in order)
+                # Identify bathing therapist: from START OF THERAPY for THIS allocation and slot (day 1 bathing carries to day 2-7)
                 if needs_bath_flag:
                     therapy_start_date = getattr(allocation, 'from_date', None)
                     prev_bath_qs = TherapistBooking.objects.filter(
                         patient_id=patient_id,
+                        visit_id=allocation.id,
+                        time_slot=canonical_slot,
                         date__lt=date,
                         is_bathing=True,
                         status='BOOKED'
-                    ).exclude(visit=allocation).select_related('therapist').order_by('date', 'created_at')
+                    ).select_related('therapist').order_by('date', 'created_at')
                     if therapy_start_date:
                         prev_bath_qs = prev_bath_qs.filter(date__gte=therapy_start_date)
                     prev_bath_list = list(prev_bath_qs)
@@ -1365,15 +1367,17 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
                                 previous_bathing_therapist = prev_tm
                                 break
             else:
-                # Not all available - use "from start of therapy" bathing logic
+                # Not all available - use "from start of therapy" bathing logic for THIS allocation and slot
                 if needs_bath_flag:
                     therapy_start_date = getattr(allocation, 'from_date', None)
                     prev_bath_qs = TherapistBooking.objects.filter(
                         patient_id=patient_id,
+                        visit_id=allocation.id,
+                        time_slot=canonical_slot,
                         date__lt=date,
                         is_bathing=True,
                         status='BOOKED'
-                    ).exclude(visit=allocation).select_related('therapist').order_by('date', 'created_at')
+                    ).select_related('therapist').order_by('date', 'created_at')
                     if therapy_start_date:
                         prev_bath_qs = prev_bath_qs.filter(date__gte=therapy_start_date)
                     prev_bath_list = list(prev_bath_qs)
@@ -2427,17 +2431,19 @@ def assign_continuity_therapists_pass1(booking, allocation, target_date, locked_
             continuity_therapists = [row.therapist for row in continuity_qs if row.therapist]
             
             if needs_bath_flag:
-                # BATHING: Always prefer first-day bathing therapist when available (do not use plan bath_row alone).
+                # BATHING: Always prefer first-day bathing therapist when available (this allocation + slot only).
                 try:
                     from masters.models import TherapistLeaveMaster, EmergencyLeave
                     from django.db.models import Q
                     therapy_start_date = getattr(allocation, 'from_date', None)
                     prev_bath_qs = TherapistBooking.objects.filter(
                         patient_id=patient_id,
+                        visit_id=allocation.id,
+                        time_slot=slot_master,
                         date__lt=target_date,
                         is_bathing=True,
                         status='BOOKED'
-                    ).exclude(visit=allocation).select_related('therapist').order_by('date', 'created_at')
+                    ).select_related('therapist').order_by('date', 'created_at')
                     if therapy_start_date:
                         prev_bath_qs = prev_bath_qs.filter(date__gte=therapy_start_date)
                     prev_bath_list = list(prev_bath_qs)
@@ -2577,11 +2583,11 @@ def assign_continuity_therapists_pass1(booking, allocation, target_date, locked_
                         therapy_start_date = getattr(allocation, 'from_date', None)
                         prev_bath_bookings_qs = TherapistBooking.objects.filter(
                             patient_id=patient_id,
+                            visit_id=allocation.id,
+                            time_slot=slot_master,
                             date__lt=target_date,
                             is_bathing=True,
                             status='BOOKED'
-                        ).exclude(
-                            visit=allocation
                         ).select_related('therapist').order_by('date', 'created_at')
                         if therapy_start_date:
                             prev_bath_bookings_qs = prev_bath_bookings_qs.filter(date__gte=therapy_start_date)
