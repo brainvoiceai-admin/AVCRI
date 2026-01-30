@@ -1965,12 +1965,41 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                 try:
                     pat_sex = getattr(getattr(allocation, 'patient', None), 'pat_sex', None)
                     
-                    # Allocate remaining therapists
+                    # Prefer "from start of therapy" therapists when filling remaining slots (e.g. they were on leave yesterday, back today)
+                    last_therapists_for_remaining = None
+                    try:
+                        from Patient.models import TherapistBooking as _TB
+                        therapy_start_date = getattr(allocation, 'from_date', None)
+                        if therapy_start_date and allocate_slot:
+                            from_start_qs = _TB.objects.filter(
+                                visit_id=allocation.id,
+                                date__gte=therapy_start_date,
+                                date__lt=target_date,
+                                time_slot=allocate_slot,
+                                status='BOOKED',
+                            ).select_related('therapist').order_by('date', 'created_at')
+                            assigned_codes = {getattr(t, 'therapist_code', None) for t in assigned_continuity if getattr(t, 'therapist_code', None)}
+                            from_start_codes = []
+                            seen = set()
+                            for tb in from_start_qs:
+                                if not tb.therapist:
+                                    continue
+                                code = getattr(tb.therapist, 'therapist_code', None)
+                                if code and code not in seen and code not in assigned_codes:
+                                    seen.add(code)
+                                    from_start_codes.append(code)
+                            if from_start_codes:
+                                last_therapists_for_remaining = from_start_codes
+                                print(f"[CONTINUITY PASS2] Preferring {len(from_start_codes)} from-start therapist(s) when filling remaining: {from_start_codes}")
+                    except Exception as e:
+                        print(f"[CONTINUITY PASS2] Error building from-start for remaining: {e}")
+                    
+                    # Allocate remaining therapists (prefer from-start who are available)
                     additional_therapists = allocate_therapists(
                         target_date,
                         allocate_slot,
                         remaining_req,
-                        last_therapists=None,  # Don't use continuity therapists again
+                        last_therapists=last_therapists_for_remaining,
                         needs_bathing=needs_bath_flag and (result_bath_assigned is None),  # Only if no bathing therapist yet
                         patient_gender=pat_sex,
                         avoid_therapists=None,  # Don't avoid - continuity already locked
@@ -3542,6 +3571,40 @@ def bulk_allocate_for_date(target_date_str):
 
             continuity_rows = []
 
+            # FROM START OF THERAPY: Add all therapists who have done this allocation from from_date to today (in order of first appearance).
+            # Use distinct priorities (-1000, -999, ...) so order is preserved: first-day therapist always tried first when they return from leave.
+            therapy_start_date = getattr(allocation, 'from_date', None)
+            if therapy_start_date and slot:
+                try:
+                    from_start_qs = _TB.objects.filter(
+                        visit_id=allocation.id,
+                        date__gte=therapy_start_date,
+                        date__lt=target_date,
+                        time_slot=slot,
+                        status='BOOKED',
+                    ).select_related('therapist').order_by('date', 'created_at')
+                    seen_from_start = set()
+                    from_start_index = 0
+                    for tb in from_start_qs:
+                        if not tb.therapist:
+                            continue
+                        tid = getattr(tb.therapist, 'id', None)
+                        if tid is None or tid in seen_from_start:
+                            continue
+                        seen_from_start.add(tid)
+                        # Priority -1000, -999, ... so first-appearance order is preserved (first-day therapist gets -1000 and is tried first)
+                        continuity_rows.append({
+                            "therapist": tb.therapist,
+                            "is_bathing": bool(getattr(tb, 'is_bathing', False)),
+                            "priority": -1000 + from_start_index,
+                            "source_date": tb.date,
+                        })
+                        from_start_index += 1
+                    if seen_from_start:
+                        print(f"[CONTINUITY PLAN]   From start of therapy (priority -1000..): {len(seen_from_start)} therapists in order of first appearance")
+                except Exception as e:
+                    print(f"[CONTINUITY PLAN]   Error building from-start list: {e}")
+
             def _add_rows_for_date(source_date, base_priority):
                 if not source_date:
                     return
@@ -3832,19 +3895,35 @@ def bulk_allocate_for_date(target_date_str):
     # Sort patients by priority (same as allocations)
     allocation_id_to_priority = {alloc.id: (p, d) for alloc, p, d in allocation_priorities}
     
+    # Tie-breaker: earliest "from start" date in continuity plan (priority < 0).
+    # Patients whose therapy started earliest get processed first so their first-day therapists (e.g. Latha) are locked for them, not for a patient who had that therapist only on a later date.
+    from django.db.models import Min
+    try:
+        plan_earliest = dict(
+            TherapistContinuityPlan.objects.filter(
+                date=target_date,
+                priority__lt=0
+            ).values('patient_id').annotate(earliest=Min('source_date')).values_list('patient_id', 'earliest')
+        )
+    except Exception:
+        plan_earliest = {}
+    
     def get_patient_priority(patient_id):
-        """Get highest priority (lowest score) among allocations for this patient"""
+        """Get (priority_score, date_ordinal, earliest_from_start_ordinal) for sorting.
+        Patients with earlier 'from start' date get processed first so first-day therapists are assigned to them."""
         if patient_id is None:
-            return (3, 0)
+            return (3, 0, 999999)
         min_priority = (3, 0)
         for booking in patient_bookings_map[patient_id]:
             alloc_id = booking.allocation_id
             priority = allocation_id_to_priority.get(alloc_id, (3, 0))
             if priority[0] < min_priority[0] or (priority[0] == min_priority[0] and priority[1] > min_priority[1]):
                 min_priority = priority
-        return min_priority
+        earliest_sd = plan_earliest.get(patient_id)
+        earliest_ord = earliest_sd.toordinal() if earliest_sd else 999999
+        return (min_priority[0], min_priority[1], earliest_ord)
     
-    # Sort patients by priority
+    # Sort patients by priority, then by earliest from-start date (therapy started first = process first)
     sorted_patient_ids = sorted(
         patient_bookings_map.keys(),
         key=lambda pid: get_patient_priority(pid)

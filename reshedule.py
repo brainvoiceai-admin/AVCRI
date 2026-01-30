@@ -49,8 +49,7 @@ def is_treatment_requiring_senior_tag(therapy_name):
         special_normalized = ' '.join(special_treatment.lower().strip().split())
         if therapy_normalized == special_normalized:
             return True
-    
-        return False
+    return False
     
 # -----------------------
 # Senior tag usage helper (max N per therapist per day)
@@ -1419,6 +1418,33 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
                 assigned_therapists = continuity_assigned.get('assigned_therapists', [])
                 last_therapists = [getattr(t, 'therapist_code', None) for t in assigned_therapists if getattr(t, 'therapist_code', None)]
                 print(f"[RESCHEDULE PASS2] Using {len(last_therapists)} continuity therapists from PASS 1: {last_therapists}")
+                # Prefer "from start of therapy" when filling remaining slots (e.g. therapist returned from leave)
+                try:
+                    from Patient.models import TherapistBooking as _TB
+                    therapy_start_date = getattr(allocation, 'from_date', None)
+                    if therapy_start_date and canonical_slot:
+                        from_start_qs = _TB.objects.filter(
+                            visit_id=allocation.id,
+                            date__gte=therapy_start_date,
+                            date__lt=date,
+                            time_slot=canonical_slot,
+                            status='BOOKED',
+                        ).select_related('therapist').order_by('date', 'created_at')
+                        assigned_codes = set(last_therapists)
+                        from_start_codes = []
+                        seen = set()
+                        for tb in from_start_qs:
+                            if not tb.therapist:
+                                continue
+                            code = getattr(tb.therapist, 'therapist_code', None)
+                            if code and code not in seen and code not in assigned_codes:
+                                seen.add(code)
+                                from_start_codes.append(code)
+                        if from_start_codes:
+                            last_therapists = list(last_therapists) + from_start_codes
+                            print(f"[RESCHEDULE PASS2] Preferring {len(from_start_codes)} from-start therapist(s) when filling remaining: {from_start_codes}")
+                except Exception as e:
+                    print(f"[RESCHEDULE PASS2] Error building from-start for remaining: {e}")
             elif last_allocation.get('therapists'):
                 last_therapists = last_allocation.get('therapists', [])
                 print(f"[RESCHEDULE PASS2] Using continuity therapists from last_allocation: {last_therapists}")
@@ -2513,6 +2539,33 @@ def assign_continuity_therapists_pass1(booking, allocation, target_date, locked_
                 if previous_therapist_masters:
                     continuity_therapists = previous_therapist_masters
                     print(f"[RESCHEDULE PASS1] Booking {booking.pk}: Found {len(continuity_therapists)} continuity therapists from previous day ({most_recent_date})")
+                    # NORMAL THERAPIST CONTINUITY: Prefer "from start of therapy" for whole set (same as bathing).
+                    therapy_start_date = getattr(allocation, 'from_date', None)
+                    if therapy_start_date and slot_master:
+                        try:
+                            from_start_qs = TherapistBooking.objects.filter(
+                                visit_id=allocation.id,
+                                date__gte=therapy_start_date,
+                                date__lt=target_date,
+                                time_slot=slot_master,
+                                status='BOOKED',
+                            ).select_related('therapist').order_by('date', 'created_at')
+                            seen_fs = set()
+                            therapists_from_start = []
+                            for tb in from_start_qs:
+                                if not tb.therapist:
+                                    continue
+                                tid = getattr(tb.therapist, 'id', None)
+                                if tid is None or tid in seen_fs:
+                                    continue
+                                seen_fs.add(tid)
+                                therapists_from_start.append(tb.therapist)
+                            if therapists_from_start:
+                                # Prefer from-start first, then previous-day only
+                                continuity_therapists = therapists_from_start + [t for t in continuity_therapists if t not in therapists_from_start]
+                                print(f"[RESCHEDULE PASS1] Preferring {len(therapists_from_start)} from-start therapist(s), then previous-day: {[getattr(t, 'therapist_code', '?') for t in continuity_therapists]}")
+                        except Exception as e:
+                            print(f"[RESCHEDULE PASS1] Error building from-start list: {e}")
                     if needs_bath_flag:
                         # BATHING CONTINUITY: Start from START OF THERAPY (allocation.from_date).
                         # Prefer therapist from Jan 1, then Jan 2, Jan 3, etc. First available today wins.
