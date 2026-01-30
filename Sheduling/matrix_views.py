@@ -106,6 +106,28 @@ def continuity_matrix_api(request):
                 'is_bathing': b.is_bathing # CORRECTED: Use booking specific flag
             }
             
+        # 3.5 Fetch Previous Treatment Info (for Day 1 comparison)
+        previous_map = defaultdict(set)
+        patient_ids = list(schedule_map.keys())
+        if patient_ids:
+            # Fetch most recent booking date prior to from_date for each patient
+            past_bookings = TherapistBooking.objects.filter(
+                patient_id__in=patient_ids,
+                date__lt=from_date,
+                status__in=['BOOKED', 'scheduled', 'COMPLETED']
+            ).values('patient_id', 'date', 'therapist_id').order_by('patient_id', '-date')
+            
+            # Extract latest per patient
+            last_dates = {}
+            for pb in past_bookings:
+                pid = pb['patient_id']
+                d = pb['date']
+                if pid not in last_dates:
+                    last_dates[pid] = d
+                    previous_map[pid].add(pb['therapist_id'])
+                elif last_dates[pid] == d:
+                    previous_map[pid].add(pb['therapist_id'])
+
         # 4. Construct Matrix Rows
         rows = []
         
@@ -123,14 +145,25 @@ def continuity_matrix_api(request):
                 'cells': {}
             }
             
-            prev_set = set() # ids
+            day_1_set = set() # To store the anchor/Day 1 therapist set
             
             for i, d_str in enumerate(date_cols):
                 curr_objs = dates_data.get(d_str, {})
                 curr_set = set(curr_objs.keys())
                 
-                # Analyze Missing Therapists from Previous Day
-                missing_set = prev_set - curr_set
+                # Determine Reference Set for Comparison
+                ref_set = set()
+                if i == 0:
+                    # Day 1: Comparision against Previous Treatment
+                    ref_set = previous_map.get(pat_id, set())
+                    # Capture Day 1 Set for subsequent days
+                    day_1_set = curr_set
+                else:
+                    # Subsequent Days: Compare against the FIRST DAY therapist
+                    ref_set = day_1_set
+                
+                # Analyze Missing Therapists from Reference
+                missing_set = ref_set - curr_set
                 has_unexcused_loss = False
                 
                 if missing_set:
@@ -148,10 +181,8 @@ def continuity_matrix_api(request):
                 for t_vals in curr_objs.values():
                     t_data = t_vals.copy()
                     
-                    if i == 0:
-                        t_data['status'] = 'green'
-                    elif t_data['id'] in prev_set:
-                         t_data['status'] = 'green' # Same as yesterday
+                    if t_data['id'] in ref_set:
+                         t_data['status'] = 'green' # Same as reference (Day 1 or Prev Treatment)
                     else:
                         # New therapist replacing someone or adding on
                         if has_unexcused_loss:
@@ -162,17 +193,14 @@ def continuity_matrix_api(request):
                              t_data['status'] = 'green' # Pure addition (neutral/good)
                         
                     therapist_list.append(t_data)
-
+                
                 cell_data = {
                     'therapists': therapist_list,
                     'status': 'active' if curr_set else 'empty'
                 }
                 
                 row['cells'][d_str] = cell_data
-                
-                if curr_set:
-                    prev_set = curr_set
-                    
+            
             rows.append(row)
             
         return JsonResponse({
