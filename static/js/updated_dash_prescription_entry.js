@@ -427,13 +427,21 @@ $(function () {
     // Reset form state
     resetFormState();
 
-    $('#header-patient-select').val(patient.pat_op_reg_no || patient.pat_reg_no);
+    // Determine correct registration number based on patient type
+    // For IP patients: use pat_reg_no (not pat_op_reg_no)
+    // For OP patients: use pat_op_reg_no if available, otherwise pat_reg_no
+    const patientType = patient.patient_type || 
+      (patient.pat_reg_no && patient.pat_reg_no.toString().replace(/\D/g, '').length === 5 ? 'OP' : 'IP');
+    const patientRegNo = patientType === 'IP' 
+      ? patient.pat_reg_no 
+      : (patient.pat_op_reg_no || patient.pat_reg_no);
+
+    $('#header-patient-select').val(patientRegNo);
     // Make patient name bold/highlighted
     $('#hdr-pat-name').html(`<strong style="font-weight: bold; color: var(--primary);">${patient.pat_name || 'Unknown'}</strong>`);
     updatePatientAvatar(patient);
 
     // Load patient prescriptions
-    const patientRegNo = patient.pat_op_reg_no || patient.pat_reg_no;
     ajax({ action: 'patient_prescriptions', patient_reg_no: patientRegNo }).then(list => {
       addedPrescriptions = decoratePrescriptionList(list || []);
       renderAll();
@@ -1027,9 +1035,18 @@ $(function () {
       notes: ''
     };
 
+    // Determine correct registration number based on patient type
+    // For IP patients: use pat_reg_no (not pat_op_reg_no)
+    // For OP patients: use pat_op_reg_no if available, otherwise pat_reg_no
+    const patientType = selectedPatient.patient_type || 
+      (selectedPatient.pat_reg_no && selectedPatient.pat_reg_no.toString().replace(/\D/g, '').length === 5 ? 'OP' : 'IP');
+    const patientRegNo = patientType === 'IP' 
+      ? selectedPatient.pat_reg_no 
+      : (selectedPatient.pat_op_reg_no || selectedPatient.pat_reg_no);
+
     // Save directly to server as draft
     const payload = {
-      patient_reg_no: selectedPatient.pat_op_reg_no || selectedPatient.pat_reg_no,
+      patient_reg_no: patientRegNo,
       patient_name: selectedPatient.pat_name,
       patient_age: selectedPatient.pat_age || '',
       patient_sex: selectedPatient.pat_sex || '',
@@ -1077,7 +1094,12 @@ $(function () {
         // Reload patient prescriptions from server to get accurate status counts
         // Use the same registration number format that was used to save
         if (selectedPatient) {
-          const patientRegNo = selectedPatient.pat_op_reg_no || selectedPatient.pat_reg_no;
+          // Use correct registration number based on patient type
+          const patientType = selectedPatient.patient_type || 
+            (selectedPatient.pat_reg_no && selectedPatient.pat_reg_no.toString().replace(/\D/g, '').length === 5 ? 'OP' : 'IP');
+          const patientRegNo = patientType === 'IP' 
+            ? selectedPatient.pat_reg_no 
+            : (selectedPatient.pat_op_reg_no || selectedPatient.pat_reg_no);
           // Small delay to ensure server has processed the save
           setTimeout(() => {
             ajax({ action: 'patient_prescriptions', patient_reg_no: patientRegNo }).then(list => {
@@ -1538,7 +1560,12 @@ $(function () {
 
           // Reload from server to get updated data, but preserve last_action
           if (selectedPatient && p.allocation_id) {
-            const patientRegNo = selectedPatient.pat_op_reg_no || selectedPatient.pat_reg_no;
+            // Use correct registration number based on patient type
+          const patientType = selectedPatient.patient_type || 
+            (selectedPatient.pat_reg_no && selectedPatient.pat_reg_no.toString().replace(/\D/g, '').length === 5 ? 'OP' : 'IP');
+          const patientRegNo = patientType === 'IP' 
+            ? selectedPatient.pat_reg_no 
+            : (selectedPatient.pat_op_reg_no || selectedPatient.pat_reg_no);
             if (patientRegNo) {
               ajax({ action: 'patient_prescriptions', patient_reg_no: patientRegNo }).then(list => {
                 if (list && Array.isArray(list)) {
@@ -1813,7 +1840,12 @@ $(function () {
 
           // Then reload from server to get merged cancellation dates (in background)
           if (p.allocation_id && selectedPatient) {
-            const patientRegNo = selectedPatient.pat_op_reg_no || selectedPatient.pat_reg_no;
+            // Use correct registration number based on patient type
+          const patientType = selectedPatient.patient_type || 
+            (selectedPatient.pat_reg_no && selectedPatient.pat_reg_no.toString().replace(/\D/g, '').length === 5 ? 'OP' : 'IP');
+          const patientRegNo = patientType === 'IP' 
+            ? selectedPatient.pat_reg_no 
+            : (selectedPatient.pat_op_reg_no || selectedPatient.pat_reg_no);
             if (patientRegNo) {
               setTimeout(() => {
                 ajax({ action: 'patient_prescriptions', patient_reg_no: patientRegNo }).then(list => {

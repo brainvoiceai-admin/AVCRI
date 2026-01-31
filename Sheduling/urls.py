@@ -7,6 +7,7 @@ urlpatterns = [
     path('api/allocate_therapy/', views.allocate_therapy, name='allocate_therapy'),
     path('prescriptions/', views.prescription_entry_page, name='prescription_entry_page'),
     path('scheduling/', views.scheduling_dashboard, name='scheduling_dashboard'),
+    path('user-therapy-entry/', views.user_therapy_entry_dashboard, name='user_therapy_entry_dashboard'),
     path('scheduling/api/schedule-therapies/', views.schedule_therapies_api, name='schedule_therapies_api'),
     path('scheduling/api/final-schedule/', views.final_schedule_api, name='final_schedule_api'),
     path('scheduling/api/therapy-data/', views.get_therapy_data_api, name='get_therapy_data_api'),

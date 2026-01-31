@@ -49,8 +49,7 @@ def is_treatment_requiring_senior_tag(therapy_name):
         special_normalized = ' '.join(special_treatment.lower().strip().split())
         if therapy_normalized == special_normalized:
             return True
-    
-        return False
+    return False
     
 # -----------------------
 # Senior tag usage helper (max N per therapist per day)
@@ -739,28 +738,77 @@ def allocate_therapists(date, time_slot, therapy_requirements, last_therapists=N
             except TherapistMaster.DoesNotExist:
                 continue
             therapist_grade_name = get_therapist_grade_name(t)
+            
+            # PRIORITIZE CONTINUITY: Assign previous therapists regardless of grade match
+            # Check if grade is needed or can substitute, but don't skip if not needed
+            grade_substitution_map = {
+                "Super Senior Therapist": ["Senior Therapist", "Junior Therapist", "Trainee Therapist"],
+                "Senior Therapist": ["Junior Therapist", "Trainee Therapist"],
+                "Junior Therapist": ["Trainee Therapist"],
+                "Trainee Therapist": []  # Cannot substitute for higher grades
+            }
+            
+            grade_can_be_used = False
+            grade_to_decrement = None
+            
+            # First check if exact grade is needed
             if grade_map.get(therapist_grade_name, 0) > 0:
-                # Gender match: skip if therapist gender does not match desired
-                if desired_gender:
-                    t_gender = get_therapist_gender(t)
-                    if t_gender != desired_gender:
-                        continue
-                # Check bathing requirement: if bathing is required, therapist must be a bathing therapist
-                if needs_bathing and not getattr(t, 'is_bathing_therapist', False):
+                grade_can_be_used = True
+                grade_to_decrement = therapist_grade_name
+            else:
+                # Check if this grade can substitute for a needed grade (for continuity)
+                for needed_grade, substitutes in grade_substitution_map.items():
+                    if therapist_grade_name in substitutes and grade_map.get(needed_grade, 0) > 0:
+                        grade_can_be_used = True
+                        grade_to_decrement = needed_grade
+                        print(f"[DEBUG Continuity] {t.therapist_code} ({therapist_grade_name}) - using for continuity to substitute {needed_grade}")
+                        break
+            
+            # If no grade can be used, still assign for continuity but log it
+            if not grade_can_be_used:
+                # Find any grade that still needs therapists (for continuity)
+                for needed_grade in grade_map:
+                    if grade_map.get(needed_grade, 0) > 0:
+                        grade_to_decrement = needed_grade
+                        grade_can_be_used = True
+                        print(f"[DEBUG Continuity] {t.therapist_code} ({therapist_grade_name}) - assigning for continuity, will use for {needed_grade} requirement")
+                        break
+            
+            # If still no grade available, assign anyway for continuity (will reduce total requirement)
+            if not grade_can_be_used:
+                # Use the highest priority grade that's still needed
+                priority_order = ["Trainee Therapist", "Junior Therapist", "Senior Therapist", "Super Senior Therapist"]
+                for priority_grade in priority_order:
+                    if grade_map.get(priority_grade, 0) > 0:
+                        grade_to_decrement = priority_grade
+                        print(f"[DEBUG Continuity] {t.therapist_code} ({therapist_grade_name}) - assigning for continuity, using for {priority_grade} requirement")
+                        break
+            
+            # Gender match: skip if therapist gender does not match desired
+            if desired_gender:
+                t_gender = get_therapist_gender(t)
+                if t_gender != desired_gender:
                     continue
-                if therapist_on_leave(t):
-                    continue
-                if TherapistBooking.objects.filter(therapist=t, date=date, time_slot=time_slot, status='BOOKED').exists():
-                    continue
-                
-                # Check daily session limit (max 6 sessions)
-                session_count = get_therapist_daily_session_count(t)
-                if session_count >= 6:
-                    print(f"[DEBUG Allocation] Therapist {t.therapist_code} at max sessions ({session_count}/6) - skipping")
-                    continue
-                
-                allocated.append(t)
-                grade_map[therapist_grade_name] -= 1
+            # Check bathing requirement: if bathing is required, therapist must be a bathing therapist
+            if needs_bathing and not getattr(t, 'is_bathing_therapist', False):
+                continue
+            if therapist_on_leave(t):
+                continue
+            if TherapistBooking.objects.filter(therapist=t, date=date, time_slot=time_slot, status='BOOKED').exists():
+                continue
+            
+            # Check daily session limit (max 6 sessions)
+            session_count = get_therapist_daily_session_count(t)
+            if session_count >= 6:
+                print(f"[DEBUG Allocation] Therapist {t.therapist_code} at max sessions ({session_count}/6) - skipping")
+                continue
+            
+            # All checks passed - assign this therapist for continuity
+            allocated.append(t)
+            # Decrement the appropriate grade (may be different from therapist's grade for continuity)
+            if grade_to_decrement and grade_map.get(grade_to_decrement, 0) > 0:
+                grade_map[grade_to_decrement] -= 1
+            print(f"[DEBUG Continuity] ✓ Assigned previous therapist {t.therapist_code} ({therapist_grade_name}) for continuity. Used for {grade_to_decrement} requirement.")
 
     # Allocate remaining
     for grade_original, needed_original in list(grade_map.items()):
@@ -1277,56 +1325,84 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
                 previous_therapist_group = available_previous_therapists
                 print(f"[DEBUG] Found complete previous therapist group ({len(previous_therapist_group)} therapists) for patient {patient_id} - will assign together for continuity")
                 
-                # Identify bathing therapist from the group
+                # Identify bathing therapist: from START OF THERAPY for THIS allocation and slot (day 1 bathing carries to day 2-7)
                 if needs_bath_flag:
-                    for prev_tm in previous_therapist_group:
-                        if getattr(prev_tm, 'is_bathing_therapist', False):
-                            previous_bathing_therapist = prev_tm
-                            break
-            else:
-                # Not all available - fall back to individual checks
-                # Still try to find previous bathing therapist if needed
-                if needs_bath_flag:
-                    prev_bath_booking = TherapistBooking.objects.filter(
+                    therapy_start_date = getattr(allocation, 'from_date', None)
+                    prev_bath_qs = TherapistBooking.objects.filter(
                         patient_id=patient_id,
+                        visit_id=allocation.id,
+                        time_slot=canonical_slot,
+                        date__lt=date,
                         is_bathing=True,
                         status='BOOKED'
-                    ).exclude(
-                        visit=allocation
-                    ).select_related('therapist').order_by('-date', '-created_at').first()
-                    
-                    if prev_bath_booking and prev_bath_booking.therapist:
-                        previous_bathing_therapist = TherapistMaster.objects.filter(
-                            therapist_code=prev_bath_booking.therapist.therapist_code
-                        ).first()
-                        
-                        if previous_bathing_therapist and getattr(previous_bathing_therapist, 'is_bathing_therapist', False):
-                            # Check availability
-                            if TherapistBooking.objects.filter(
-                                therapist=previous_bathing_therapist,
-                                date=date,
-                                time_slot=canonical_slot,
-                                status='BOOKED'
-                            ).exists():
-                                previous_bathing_therapist = None
-                            elif TherapistLeaveMaster.objects.filter(
-                                therapist=previous_bathing_therapist,
-                                leave_day=day_of_week
-                            ).exists():
-                                previous_bathing_therapist = None
-                            elif EmergencyLeave.objects.filter(
-                                from_date__lte=date,
-                                to_date__gte=date
-                            ).filter(
-                                Q(therapist=previous_bathing_therapist) | 
-                                Q(employee_code=previous_bathing_therapist.employee_code)
-                            ).exists():
-                                previous_bathing_therapist = None
-                            
-                            if previous_bathing_therapist:
-                                print(f"[DEBUG] Found previous bathing therapist {previous_bathing_therapist.therapist_code} for patient {patient_id} (not all previous therapists available)")
-                            else:
-                                print(f"[DEBUG] Previous bathing therapist not available for patient {patient_id}")
+                    ).select_related('therapist').order_by('date', 'created_at')
+                    if therapy_start_date:
+                        prev_bath_qs = prev_bath_qs.filter(date__gte=therapy_start_date)
+                    prev_bath_list = list(prev_bath_qs)
+                    seen_b = set()
+                    therapists_from_start = []
+                    for b in prev_bath_list:
+                        if not b.therapist:
+                            continue
+                        if b.therapist.pk not in seen_b:
+                            seen_b.add(b.therapist.pk)
+                            therapists_from_start.append(b.therapist)
+                    for th in therapists_from_start:
+                        on_leave = False
+                        if TherapistBooking.objects.filter(therapist=th, date=date, time_slot=canonical_slot, status='BOOKED').exists():
+                            on_leave = True
+                        if not on_leave and TherapistLeaveMaster.objects.filter(therapist=th, leave_day=day_of_week).exists():
+                            on_leave = True
+                        if not on_leave and EmergencyLeave.objects.filter(
+                            from_date__lte=date, to_date__gte=date
+                        ).filter(Q(therapist=th) | Q(employee_code=th.employee_code)).exists():
+                            on_leave = True
+                        if not on_leave:
+                            previous_bathing_therapist = th
+                            print(f"[DEBUG] Bathing continuity from start of therapy: {th.therapist_code} for patient {patient_id}")
+                            break
+                    if not previous_bathing_therapist:
+                        for prev_tm in previous_therapist_group:
+                            if getattr(prev_tm, 'is_bathing_therapist', False):
+                                previous_bathing_therapist = prev_tm
+                                break
+            else:
+                # Not all available - use "from start of therapy" bathing logic for THIS allocation and slot
+                if needs_bath_flag:
+                    therapy_start_date = getattr(allocation, 'from_date', None)
+                    prev_bath_qs = TherapistBooking.objects.filter(
+                        patient_id=patient_id,
+                        visit_id=allocation.id,
+                        time_slot=canonical_slot,
+                        date__lt=date,
+                        is_bathing=True,
+                        status='BOOKED'
+                    ).select_related('therapist').order_by('date', 'created_at')
+                    if therapy_start_date:
+                        prev_bath_qs = prev_bath_qs.filter(date__gte=therapy_start_date)
+                    prev_bath_list = list(prev_bath_qs)
+                    seen_b = set()
+                    therapists_from_start = []
+                    for b in prev_bath_list:
+                        if not b.therapist:
+                            continue
+                        if b.therapist.pk not in seen_b:
+                            seen_b.add(b.therapist.pk)
+                            therapists_from_start.append(b.therapist)
+                    for th in therapists_from_start:
+                        on_leave = False
+                        if TherapistBooking.objects.filter(therapist=th, date=date, time_slot=canonical_slot, status='BOOKED').exists():
+                            on_leave = True
+                        if not on_leave and TherapistLeaveMaster.objects.filter(therapist=th, leave_day=day_of_week).exists():
+                            on_leave = True
+                        if not on_leave and EmergencyLeave.objects.filter(
+                            from_date__lte=date, to_date__gte=date
+                        ).filter(Q(therapist=th) | Q(employee_code=th.employee_code)).exists():
+                            on_leave = True
+                        if not on_leave:
+                            previous_bathing_therapist = th
+                            print(f"[DEBUG] Found previous bathing therapist {previous_bathing_therapist.therapist_code} for patient {patient_id} (from start of therapy)")
+                            break
     except Exception as e:
         print(f"[DEBUG] Error checking previous therapists: {e}")
         import traceback
@@ -1346,6 +1422,33 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
                 assigned_therapists = continuity_assigned.get('assigned_therapists', [])
                 last_therapists = [getattr(t, 'therapist_code', None) for t in assigned_therapists if getattr(t, 'therapist_code', None)]
                 print(f"[RESCHEDULE PASS2] Using {len(last_therapists)} continuity therapists from PASS 1: {last_therapists}")
+                # Prefer "from start of therapy" when filling remaining slots (e.g. therapist returned from leave)
+                try:
+                    from Patient.models import TherapistBooking as _TB
+                    therapy_start_date = getattr(allocation, 'from_date', None)
+                    if therapy_start_date and canonical_slot:
+                        from_start_qs = _TB.objects.filter(
+                            visit_id=allocation.id,
+                            date__gte=therapy_start_date,
+                            date__lt=date,
+                            time_slot=canonical_slot,
+                            status='BOOKED',
+                        ).select_related('therapist').order_by('date', 'created_at')
+                        assigned_codes = set(last_therapists)
+                        from_start_codes = []
+                        seen = set()
+                        for tb in from_start_qs:
+                            if not tb.therapist:
+                                continue
+                            code = getattr(tb.therapist, 'therapist_code', None)
+                            if code and code not in seen and code not in assigned_codes:
+                                seen.add(code)
+                                from_start_codes.append(code)
+                        if from_start_codes:
+                            last_therapists = list(last_therapists) + from_start_codes
+                            print(f"[RESCHEDULE PASS2] Preferring {len(from_start_codes)} from-start therapist(s) when filling remaining: {from_start_codes}")
+                except Exception as e:
+                    print(f"[RESCHEDULE PASS2] Error building from-start for remaining: {e}")
             elif last_allocation.get('therapists'):
                 last_therapists = last_allocation.get('therapists', [])
                 print(f"[RESCHEDULE PASS2] Using continuity therapists from last_allocation: {last_therapists}")
@@ -1791,18 +1894,16 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
             # Exclude senior therapist from bathing assignment
             bathing_candidates = [t for t in assigned_therapists if t != senior_therapist and getattr(t, 'is_bathing_therapist', False)]
             
-            # CRITICAL: Always prioritize previous bathing therapist for continuity (even for special treatments)
-            # Even if PASS 1 assigned a different bathing therapist, we should use the previous one if available
-            if previous_bathing_therapist and previous_bathing_therapist in bathing_candidates:
-                # Previous bathing therapist is available and not the senior - ALWAYS use them for continuity
+            # CRITICAL: Prefer bath_assigned_from_pass1 first (from start of therapy), then previous_bathing_therapist.
+            # So Dhara & Pizichil use start-of-therapy bathing therapist when available, not just previous day.
+            if bath_assigned_from_pass1 and bath_assigned_from_pass1 in bathing_candidates:
+                bath_assigned = bath_assigned_from_pass1
+                print(f"[RESCHEDULE] ✓ Special treatment: Using PASS 1 bathing therapist {bath_assigned.therapist_code} (from start of therapy, senior {senior_therapist.therapist_code} excluded)")
+            elif previous_bathing_therapist and previous_bathing_therapist in bathing_candidates:
                 if bath_assigned != previous_bathing_therapist:
                     print(f"[RESCHEDULE] ⚠ Special treatment: Overriding PASS 1 bathing therapist {bath_assigned.therapist_code if bath_assigned else None} with previous bathing therapist {previous_bathing_therapist.therapist_code} for continuity")
                 bath_assigned = previous_bathing_therapist
                 print(f"[RESCHEDULE] ✓ Special treatment: Using previous bathing therapist {previous_bathing_therapist.therapist_code} (maintaining continuity, senior {senior_therapist.therapist_code} excluded)")
-            elif bath_assigned_from_pass1 and bath_assigned_from_pass1 in bathing_candidates:
-                # PASS 1 assigned a bathing therapist and they're still in the list - keep them
-                bath_assigned = bath_assigned_from_pass1
-                print(f"[RESCHEDULE] ✓ Special treatment: Using PASS 1 bathing therapist {bath_assigned.therapist_code} (senior {senior_therapist.therapist_code} excluded)")
             elif bathing_candidates:
                 # Pick first available bathing therapist (excluding senior)
                 bath_assigned = bathing_candidates[0]
@@ -1895,18 +1996,19 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
                     }, False, reason)
         else:
             # Not special treatment or no senior therapist - use normal logic
-            # CRITICAL: Always prioritize previous bathing therapist for continuity
-            # Even if PASS 1 assigned a different bathing therapist, we should use the previous one if available
-            if previous_bathing_therapist and previous_bathing_therapist in assigned_therapists:
-                # Previous bathing therapist is in assigned list - ALWAYS use them for continuity
+            # CRITICAL: Prioritize PASS 1 bathing therapist (first-day / from-start-of-therapy) over previous day's.
+            # PASS 1 implements "from start of therapy" - when original therapist returns from leave, do not override with yesterday's replacement.
+            # Priority order: 1) bath_assigned_from_pass1, 2) previous_bathing_therapist, 3) first from list
+            if bath_assigned_from_pass1 and bath_assigned_from_pass1 in assigned_therapists:
+                # PASS 1 chose the first-day bathing therapist - keep them
+                bath_assigned = bath_assigned_from_pass1
+                print(f"[RESCHEDULE] ✓ Using PASS 1 bathing therapist {bath_assigned.therapist_code} for patient {patient_id} (first-day continuity)")
+            elif previous_bathing_therapist and previous_bathing_therapist in assigned_therapists:
+                # Fallback: previous day's bathing therapist when PASS 1 therapist not in list
                 if bath_assigned != previous_bathing_therapist:
-                    print(f"[RESCHEDULE] ⚠ Overriding PASS 1 bathing therapist {bath_assigned.therapist_code if bath_assigned else None} with previous bathing therapist {previous_bathing_therapist.therapist_code} for continuity")
+                    print(f"[RESCHEDULE] Using previous bathing therapist {previous_bathing_therapist.therapist_code} (PASS 1 therapist not in assigned list)")
                 bath_assigned = previous_bathing_therapist
                 print(f"[RESCHEDULE] ✓ Using previous bathing therapist {previous_bathing_therapist.therapist_code} for patient {patient_id} (maintaining continuity)")
-            elif bath_assigned_from_pass1 and bath_assigned_from_pass1 in assigned_therapists:
-                # PASS 1 assigned a bathing therapist and they're still in the list - keep them
-                bath_assigned = bath_assigned_from_pass1
-                print(f"[RESCHEDULE] ✓ Using PASS 1 bathing therapist {bath_assigned.therapist_code} for patient {patient_id} (no previous therapist found)")
             elif not bath_assigned:
                 # No previous therapist and no PASS 1 assignment - pick from assigned therapists
                 # Find any bathing therapist from assigned list
@@ -2329,14 +2431,77 @@ def assign_continuity_therapists_pass1(booking, allocation, target_date, locked_
             continuity_therapists = [row.therapist for row in continuity_qs if row.therapist]
             
             if needs_bath_flag:
-                bath_row = next((row for row in continuity_qs if row.is_bathing and getattr(row.therapist, 'is_bathing_therapist', False)), None)
-                if bath_row:
-                    previous_bathing_therapist = bath_row.therapist
-                else:
-                    for t in continuity_therapists:
-                        if getattr(t, 'is_bathing_therapist', False):
-                            previous_bathing_therapist = t
+                # BATHING: Always prefer first-day bathing therapist when available (this allocation + slot only).
+                try:
+                    from masters.models import TherapistLeaveMaster, EmergencyLeave
+                    from django.db.models import Q
+                    therapy_start_date = getattr(allocation, 'from_date', None)
+                    prev_bath_qs = TherapistBooking.objects.filter(
+                        patient_id=patient_id,
+                        visit_id=allocation.id,
+                        time_slot=slot_master,
+                        date__lt=target_date,
+                        is_bathing=True,
+                        status='BOOKED'
+                    ).select_related('therapist').order_by('date', 'created_at')
+                    if therapy_start_date:
+                        prev_bath_qs = prev_bath_qs.filter(date__gte=therapy_start_date)
+                    prev_bath_list = list(prev_bath_qs)
+                    seen_b = set()
+                    therapists_from_start = []
+                    for b in prev_bath_list:
+                        if not b.therapist:
+                            continue
+                        if b.therapist.pk not in seen_b:
+                            seen_b.add(b.therapist.pk)
+                            therapists_from_start.append(b.therapist)
+                    original_bathing_therapist = None
+                    most_recent_bathing_therapist = therapists_from_start[-1] if therapists_from_start else None
+                    day_w = target_date.weekday()
+                    for th in therapists_from_start:
+                        on_leave = False
+                        if TherapistLeaveMaster.objects.filter(therapist=th, leave_day=day_w).exists():
+                            on_leave = True
+                        if not on_leave and EmergencyLeave.objects.filter(
+                            from_date__lte=target_date, to_date__gte=target_date
+                        ).filter(Q(therapist=th) | Q(employee_code=th.employee_code)).exists():
+                            on_leave = True
+                        if not on_leave and TherapistBooking.objects.filter(
+                            therapist=th, date=target_date, time_slot=slot_master, status='BOOKED'
+                        ).exists():
+                            on_leave = True
+                        if not on_leave:
+                            original_bathing_therapist = th
+                            print(f"[RESCHEDULE PASS1] ✓ Bathing continuity: first-day therapist {th.therapist_code} available - use as bathing")
                             break
+                    if original_bathing_therapist:
+                        previous_bathing_therapist = original_bathing_therapist
+                        if original_bathing_therapist not in continuity_therapists:
+                            continuity_therapists.insert(0, original_bathing_therapist)
+                            print(f"[RESCHEDULE PASS1] ✓ Added first-day bathing therapist {original_bathing_therapist.therapist_code} to continuity_therapists")
+                        print(f"[RESCHEDULE PASS1] ✓ Using bathing therapist {previous_bathing_therapist.therapist_code} (from start of therapy)")
+                    else:
+                        bath_row = next((row for row in continuity_qs if row.is_bathing and getattr(row.therapist, 'is_bathing_therapist', False)), None)
+                        if most_recent_bathing_therapist and most_recent_bathing_therapist in continuity_therapists:
+                            previous_bathing_therapist = most_recent_bathing_therapist
+                        elif bath_row:
+                            previous_bathing_therapist = bath_row.therapist
+                            print(f"[RESCHEDULE PASS1] ⚠ Using plan bath_row (no one from start available)")
+                        else:
+                            for t in continuity_therapists:
+                                if getattr(t, 'is_bathing_therapist', False):
+                                    previous_bathing_therapist = t
+                                    break
+                except Exception as e:
+                    print(f"[RESCHEDULE PASS1] Error finding bathing from start: {e}")
+                    bath_row = next((row for row in continuity_qs if row.is_bathing and getattr(row.therapist, 'is_bathing_therapist', False)), None)
+                    if bath_row:
+                        previous_bathing_therapist = bath_row.therapist
+                    else:
+                        for t in continuity_therapists:
+                            if getattr(t, 'is_bathing_therapist', False):
+                                previous_bathing_therapist = t
+                                break
             
             print(f"[RESCHEDULE PASS1] Booking {booking.pk}: Found {len(continuity_therapists)} continuity therapists from TherapistContinuityPlan")
             if continuity_therapists:
@@ -2380,27 +2545,105 @@ def assign_continuity_therapists_pass1(booking, allocation, target_date, locked_
                 if previous_therapist_masters:
                     continuity_therapists = previous_therapist_masters
                     print(f"[RESCHEDULE PASS1] Booking {booking.pk}: Found {len(continuity_therapists)} continuity therapists from previous day ({most_recent_date})")
+                    # NORMAL THERAPIST CONTINUITY: Prefer "from start of therapy" for whole set (same as bathing).
+                    therapy_start_date = getattr(allocation, 'from_date', None)
+                    if therapy_start_date and slot_master:
+                        try:
+                            from_start_qs = TherapistBooking.objects.filter(
+                                visit_id=allocation.id,
+                                date__gte=therapy_start_date,
+                                date__lt=target_date,
+                                time_slot=slot_master,
+                                status='BOOKED',
+                            ).select_related('therapist').order_by('date', 'created_at')
+                            seen_fs = set()
+                            therapists_from_start = []
+                            for tb in from_start_qs:
+                                if not tb.therapist:
+                                    continue
+                                tid = getattr(tb.therapist, 'id', None)
+                                if tid is None or tid in seen_fs:
+                                    continue
+                                seen_fs.add(tid)
+                                therapists_from_start.append(tb.therapist)
+                            if therapists_from_start:
+                                # Prefer from-start first, then previous-day only
+                                continuity_therapists = therapists_from_start + [t for t in continuity_therapists if t not in therapists_from_start]
+                                print(f"[RESCHEDULE PASS1] Preferring {len(therapists_from_start)} from-start therapist(s), then previous-day: {[getattr(t, 'therapist_code', '?') for t in continuity_therapists]}")
+                        except Exception as e:
+                            print(f"[RESCHEDULE PASS1] Error building from-start list: {e}")
                     if needs_bath_flag:
-                        # CRITICAL FIX: First try to find the actual previous bathing therapist by checking is_bathing=True flag
-                        prev_bath_booking = TherapistBooking.objects.filter(
+                        # BATHING CONTINUITY: Start from START OF THERAPY (allocation.from_date).
+                        # Prefer therapist from Jan 1, then Jan 2, Jan 3, etc. First available today wins.
+                        # Bathing therapist should be continuous unless on leave; if Jan 1 not available, try 2nd, 3rd, etc.
+                        from masters.models import TherapistLeaveMaster, EmergencyLeave
+                        from django.db.models import Q
+                        from datetime import timedelta
+                        
+                        therapy_start_date = getattr(allocation, 'from_date', None)
+                        prev_bath_bookings_qs = TherapistBooking.objects.filter(
                             patient_id=patient_id,
-                            date=most_recent_date,
+                            visit_id=allocation.id,
+                            time_slot=slot_master,
+                            date__lt=target_date,
                             is_bathing=True,
                             status='BOOKED'
-                        ).exclude(
-                            visit=allocation
-                        ).select_related('therapist').order_by('-created_at').first()
+                        ).select_related('therapist').order_by('date', 'created_at')
+                        if therapy_start_date:
+                            prev_bath_bookings_qs = prev_bath_bookings_qs.filter(date__gte=therapy_start_date)
                         
-                        if prev_bath_booking and prev_bath_booking.therapist:
-                            # Found the actual previous bathing therapist from is_bathing=True flag
-                            previous_bathing_therapist = prev_bath_booking.therapist
-                            print(f"[RESCHEDULE PASS1] ✓ Found previous bathing therapist {previous_bathing_therapist.therapist_code} from is_bathing=True flag")
+                        prev_bath_bookings = list(prev_bath_bookings_qs)
+                        seen_therapist_ids = set()
+                        therapists_from_start = []
+                        for prev_bath_booking in prev_bath_bookings:
+                            if not prev_bath_booking.therapist:
+                                continue
+                            tid = prev_bath_booking.therapist.pk
+                            if tid not in seen_therapist_ids:
+                                seen_therapist_ids.add(tid)
+                                therapists_from_start.append(prev_bath_booking.therapist)
+                        
+                        original_bathing_therapist = None
+                        most_recent_bathing_therapist = therapists_from_start[-1] if therapists_from_start else None
+                        day_of_week = target_date.weekday()
+                        
+                        for therapist in therapists_from_start:
+                            is_on_leave = False
+                            if TherapistLeaveMaster.objects.filter(therapist=therapist, leave_day=day_of_week).exists():
+                                is_on_leave = True
+                            if not is_on_leave and EmergencyLeave.objects.filter(
+                                from_date__lte=target_date,
+                                to_date__gte=target_date
+                            ).filter(
+                                Q(therapist=therapist) | Q(employee_code=therapist.employee_code)
+                            ).exists():
+                                is_on_leave = True
+                            if not is_on_leave and TherapistBooking.objects.filter(
+                                therapist=therapist,
+                                date=target_date,
+                                time_slot=slot_master,
+                                status='BOOKED'
+                            ).exists():
+                                is_on_leave = True
+                            if not is_on_leave:
+                                original_bathing_therapist = therapist
+                                print(f"[RESCHEDULE PASS1] ✓ Bathing continuity from start of therapy: using {therapist.therapist_code} (first available in order from therapy start)")
+                                break
+                        
+                        if original_bathing_therapist:
+                            previous_bathing_therapist = original_bathing_therapist
+                            if original_bathing_therapist not in continuity_therapists:
+                                continuity_therapists.insert(0, original_bathing_therapist)
+                                print(f"[RESCHEDULE PASS1] ✓ Added bathing therapist {original_bathing_therapist.therapist_code} to continuity_therapists list")
+                            print(f"[RESCHEDULE PASS1] ✓ Using bathing therapist {previous_bathing_therapist.therapist_code} for continuity (from start of therapy)")
+                        elif most_recent_bathing_therapist and most_recent_bathing_therapist in continuity_therapists:
+                            previous_bathing_therapist = most_recent_bathing_therapist
+                            print(f"[RESCHEDULE PASS1] ⚠ All therapists from start on leave; using most recent {most_recent_bathing_therapist.therapist_code} from continuity list")
                         else:
-                            # Fallback: Look for bathing therapist in continuity list (but log warning)
                             for t in continuity_therapists:
                                 if getattr(t, 'is_bathing_therapist', False):
                                     previous_bathing_therapist = t
-                                    print(f"[RESCHEDULE PASS1] ⚠ Using fallback: Found bathing therapist {t.therapist_code} but could not verify is_bathing=True flag")
+                                    print(f"[RESCHEDULE PASS1] ⚠ Using fallback: Found bathing therapist {t.therapist_code}")
                                     break
         except Exception as e:
             print(f"[RESCHEDULE PASS1] Error finding previous day therapists: {e}")
@@ -2498,31 +2741,53 @@ def assign_continuity_therapists_pass1(booking, allocation, target_date, locked_
                 print(f"[RESCHEDULE PASS1] Therapist {t.therapist_code} gender mismatch ({t_gender} vs {desired_gender}) - skipping")
                 continue
         
-        # Check if grade is still needed (with substitution support)
+        # PRIORITIZE CONTINUITY: Assign previous therapists regardless of grade match
+        # Check if grade is needed or can substitute, but don't skip if not needed
         therapist_grade_name = get_therapist_grade_name(t)
         
-        # Grade substitution hierarchy: Senior can be replaced by Super Senior
+        # Grade substitution hierarchy for continuity (higher grades can substitute for lower)
         substitution_map = {
-            "Senior Therapist": ["Super Senior Therapist"],
-            "Junior Therapist": ["Senior Therapist", "Super Senior Therapist"],
-            "Trainee Therapist": ["Junior Therapist", "Senior Therapist", "Super Senior Therapist"],
-            "Super Senior Therapist": []  # No substitution for highest grade
+            "Super Senior Therapist": ["Senior Therapist", "Junior Therapist", "Trainee Therapist"],
+            "Senior Therapist": ["Junior Therapist", "Trainee Therapist"],
+            "Junior Therapist": ["Trainee Therapist"],
+            "Trainee Therapist": []  # Cannot substitute for higher grades
         }
         
-        grade_needed = False
+        grade_can_be_used = False
+        grade_to_decrement = None
+        
+        # First check if exact grade is needed
         if grade_map.get(therapist_grade_name, 0) > 0:
-            grade_needed = True
+            grade_can_be_used = True
+            grade_to_decrement = therapist_grade_name
         else:
-            # Check if this grade can substitute for a needed grade
+            # Check if this grade can substitute for a needed grade (for continuity)
             for needed_grade, substitutes in substitution_map.items():
                 if therapist_grade_name in substitutes and grade_map.get(needed_grade, 0) > 0:
-                    grade_needed = True
-                    print(f"[RESCHEDULE PASS1] Therapist {t.therapist_code} grade {therapist_grade_name} can substitute for needed {needed_grade}")
+                    grade_can_be_used = True
+                    grade_to_decrement = needed_grade
+                    print(f"[RESCHEDULE PASS1] Therapist {t.therapist_code} grade {therapist_grade_name} can substitute for needed {needed_grade} (continuity)")
                     break
         
-        if not grade_needed:
-            print(f"[RESCHEDULE PASS1] Therapist {t.therapist_code} grade {therapist_grade_name} not needed and cannot substitute - skipping")
-            continue
+        # If no grade can be used, still assign for continuity
+        if not grade_can_be_used:
+            # Find any grade that still needs therapists (for continuity)
+            for needed_grade in grade_map:
+                if grade_map.get(needed_grade, 0) > 0:
+                    grade_to_decrement = needed_grade
+                    grade_can_be_used = True
+                    print(f"[RESCHEDULE PASS1] Therapist {t.therapist_code} ({therapist_grade_name}) - assigning for continuity, will use for {needed_grade} requirement")
+                    break
+        
+        # If still no grade available, assign anyway for continuity (will reduce total requirement)
+        if not grade_can_be_used:
+            # Use the highest priority grade that's still needed
+            priority_order = ["Trainee Therapist", "Junior Therapist", "Senior Therapist", "Super Senior Therapist"]
+            for priority_grade in priority_order:
+                if grade_map.get(priority_grade, 0) > 0:
+                    grade_to_decrement = priority_grade
+                    print(f"[RESCHEDULE PASS1] Therapist {t.therapist_code} ({therapist_grade_name}) - assigning for continuity, using for {priority_grade} requirement")
+                    break
         
         # Check bathing requirement
         if needs_bath_flag and not getattr(t, 'is_bathing_therapist', False):
@@ -2548,16 +2813,11 @@ def assign_continuity_therapists_pass1(booking, allocation, target_date, locked_
         # All checks passed - assign this continuity therapist
         assigned_continuity.append(t)
         
-        # Decrement grade map (handle substitution)
-        if grade_map.get(therapist_grade_name, 0) > 0:
-            grade_map[therapist_grade_name] -= 1
-        else:
-            # This is a substitution - find which grade this substitutes for
-            for needed_grade, substitutes in substitution_map.items():
-                if therapist_grade_name in substitutes and grade_map.get(needed_grade, 0) > 0:
-                    grade_map[needed_grade] -= 1
-                    print(f"[RESCHEDULE PASS1] Using {therapist_grade_name} to substitute for {needed_grade}")
-                    break
+        # Decrement the appropriate grade (may be different from therapist's grade for continuity)
+        if grade_to_decrement and grade_map.get(grade_to_decrement, 0) > 0:
+            grade_map[grade_to_decrement] -= 1
+            if grade_to_decrement != therapist_grade_name:
+                print(f"[RESCHEDULE PASS1] Using {therapist_grade_name} for continuity to satisfy {grade_to_decrement} requirement")
         
         locked_therapist_slots.add(lock_key)
         
