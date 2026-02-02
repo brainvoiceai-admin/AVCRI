@@ -285,7 +285,8 @@
                                                     data-patient-name="{{ booking.allocation.patient.pat_name }}"
                                                     data-schedule-date="{{ booking.date|date:'Y-m-d' }}">
                                                     <div style="font-weight: 500;">
-                                                        {{ booking.allocation.patient.pat_name }} ({{ booking.allocation.patient.pat_reg_no }})
+                                                        {{ booking.allocation.patient.pat_name }} ({{
+                                                        booking.allocation.patient.pat_reg_no }})
                                                     </div>
                                                 </button>
                                             </td>
@@ -381,7 +382,8 @@
                                                     data-patient-name="{{ booking.allocation.patient.pat_name }}"
                                                     data-schedule-date="{{ booking.date|date:'Y-m-d' }}">
                                                     <div style="font-weight: 500;">
-                                                        {{ booking.allocation.patient.pat_name }} ({{ booking.allocation.patient.pat_reg_no }})
+                                                        {{ booking.allocation.patient.pat_name }} ({{
+                                                        booking.allocation.patient.pat_reg_no }})
                                                     </div>
                                                 </button>
                                             </td>
@@ -400,7 +402,9 @@
                                                 <div class="nurse-list">
                                                     {% for nurse_assignment in booking.nurse_assignments.all %}
                                                     {% if nurse_assignment.status == 'assigned' %}
-                                                    <span class="nurse-badge">{{ nurse_assignment.nurse.nurse_name|default:nurse_assignment.nurse.nurse_code }}</span>
+                                                    <span class="nurse-badge">{{
+                                                        nurse_assignment.nurse.nurse_name|default:nurse_assignment.nurse.nurse_code
+                                                        }}</span>
                                                     {% endif %}
                                                     {% empty %}
                                                     —
@@ -596,7 +600,7 @@
                 const tbody = document.getElementById('cont-body');
 
                 // Clear
-                thead.innerHTML = '<th style="position:sticky; left:0; background:#f9fafb; z-index:10; min-width:150px;">Patient</th>';
+                thead.innerHTML = '<th style="position:sticky; left:0; background:#f9fafb; z-index:10; min-width:150px;">Patient</th><th style="min-width:150px; background:#f9fafb;">Therapy</th>';
                 tbody.innerHTML = '';
 
                 // Render Headers
@@ -609,25 +613,53 @@
 
                 // Render Rows
                 if (data.rows.length === 0) {
-                    tbody.innerHTML = `<tr><td colspan="${data.columns.length + 1}" style="text-align:center; padding:20px;">No data found</td></tr>`;
+                    tbody.innerHTML = `<tr><td colspan="${data.columns.length + 2}" style="text-align:center; padding:20px;">No data found</td></tr>`;
                     return;
                 }
 
+                // Pre-calculate row spans for each patient
+                const patientCounts = {};
+                data.rows.forEach(r => {
+                    const pid = r.patient.id;
+                    patientCounts[pid] = (patientCounts[pid] || 0) + 1;
+                });
+
+                const processedPatients = new Set();
+
                 data.rows.forEach(row => {
                     const tr = document.createElement('tr');
+                    const patId = row.patient.id;
 
-                    // Patient Name Cell
-                    const tdPat = document.createElement('td');
-                    tdPat.style.position = 'sticky';
-                    tdPat.style.left = '0';
-                    tdPat.style.background = '#fff';
-                    tdPat.style.zIndex = '5';
-                    tdPat.style.borderRight = '1px solid #e5e7eb';
-                    tdPat.innerHTML = `
-                    <div style="font-weight:600; color:#1f2937;">${row.patient.name}</div>
-                    <div style="font-size:11px; color:#6b7280;">${row.patient.reg_no}</div>
-                `;
-                    tr.appendChild(tdPat);
+                    // Patient Name Cell - Render only once per patient with rowspan
+                    if (!processedPatients.has(patId)) {
+                        const tdPat = document.createElement('td');
+                        tdPat.style.position = 'sticky';
+                        tdPat.style.left = '0';
+                        tdPat.style.background = '#fff';
+                        tdPat.style.zIndex = '5';
+                        tdPat.style.borderRight = '1px solid #e5e7eb';
+                        tdPat.style.verticalAlign = 'top'; // Align to top
+
+                        // Apply RowSpan
+                        tdPat.rowSpan = patientCounts[patId];
+
+                        tdPat.innerHTML = `
+                        <div style="font-weight:600; color:#1f2937;">${row.patient.name}</div>
+                        <div style="font-size:11px; color:#6b7280;">${row.patient.reg_no}</div>
+                        `;
+                        tr.appendChild(tdPat);
+
+                        processedPatients.add(patId);
+                    }
+
+                    // Therapy Name Cell
+                    const tdTherapy = document.createElement('td');
+                    tdTherapy.style.borderRight = '1px solid #e5e7eb';
+                    tdTherapy.style.background = '#fff';
+                    tdTherapy.style.color = '#374151';
+                    tdTherapy.style.fontSize = '12px';
+                    tdTherapy.innerText = row.therapy_name || 'General';
+                    tr.appendChild(tdTherapy);
 
                     // Date Cells
                     data.columns.forEach(dateStr => {
