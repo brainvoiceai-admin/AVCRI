@@ -2967,8 +2967,40 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
     def therapist_entry(t_obj, is_bath=False):
         return {"therapist_code": getattr(t_obj, 'therapist_code', None) or str(t_obj), "is_bathing": bool(is_bath)}
 
+    # PASS 1: If no continuity map provided, run continuity pass so bathing and first-day therapists are assigned (same as final_allocation).
+    # Without this, reschedule would never get first-day continuity because callers do not build the plan or run PASS 1.
+    if booking_continuity_map is None or not booking_continuity_map:
+        booking_continuity_map = {}
+        locked_therapist_slots = set()
+        bookings_list = list(bookings_qs.select_related('allocation', 'timeslot', 'allocation__patient').order_by('timeslot_id', 'pk'))
+        for booking in bookings_list:
+            alloc = booking.allocation
+            if not alloc:
+                continue
+            try:
+                from Sheduling.nurse_allocation import is_nurse_treatment
+                if is_nurse_treatment(getattr(alloc, 'therapy_code', None), getattr(alloc, 'therapy_name', None)):
+                    booking_continuity_map[booking.pk] = None
+                    continue
+            except Exception:
+                pass
+            therapy_req = therapist_requirements(alloc)
+            if therapy_req.get('total', 1) == 0:
+                booking_continuity_map[booking.pk] = None
+                continue
+            try:
+                continuity_result = assign_continuity_therapists_pass1(booking, alloc, target_date, locked_therapist_slots)
+                if continuity_result.get('success'):
+                    booking_continuity_map[booking.pk] = continuity_result
+                    print(f"[RESCHEDULE PASS1] Built continuity for booking {booking.pk}: {len(continuity_result.get('assigned_therapists', []))} therapists")
+                else:
+                    booking_continuity_map[booking.pk] = continuity_result
+            except Exception as e:
+                print(f"[RESCHEDULE PASS1] Error running PASS 1 for booking {booking.pk}: {e}")
+                booking_continuity_map[booking.pk] = None
+        print(f"[RESCHEDULE PASS1] Built booking_continuity_map with {len([v for v in booking_continuity_map.values() if v and v.get('success')])} continuity assignments")
+
     # PASS 2: booking_continuity_map contains continuity assignments from PASS 1
-    # Maps booking_id -> continuity_assigned dict
     if booking_continuity_map is None:
         booking_continuity_map = {}
     
