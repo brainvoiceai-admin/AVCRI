@@ -1968,7 +1968,8 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
                     
                     try:
                         booking.status = 'failed'
-                        booking.save(update_fields=['status', 'updated_at'])
+                        booking.failure_reason = (str(reason) or '')[:512]
+                        booking.save(update_fields=['status', 'failure_reason', 'updated_at'])
                     except Exception as e:
                         print(f"Error updating booking {booking_id} to failed: {e}")
                     
@@ -2024,7 +2025,8 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
                     # Update booking status to failed
                     try:
                         booking.status = 'failed'
-                        booking.save(update_fields=['status', 'updated_at'])
+                        booking.failure_reason = (str(reason) or '')[:512]
+                        booking.save(update_fields=['status', 'failure_reason', 'updated_at'])
                     except Exception as e:
                         print(f"Error updating booking {booking_id} to failed: {e}")
                     

@@ -1639,7 +1639,8 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
             except Exception as e:
                 print(f"Error allocating nurses for booking {booking_id}: {e}")
                 booking.status = 'failed'
-                booking.save(update_fields=['status', 'updated_at'])
+                booking.failure_reason = (f"nurse_allocation_error: {e}" or '')[:512]
+                booking.save(update_fields=['status', 'failure_reason', 'updated_at'])
                 tasks.append({
                     "booking_id": booking_id,
                     "allocation_id": therapy_allocation_id,
@@ -1709,7 +1710,8 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
             # Update booking status to failed
             try:
                 booking.status = 'failed'
-                booking.save(update_fields=['status', 'updated_at'])
+                booking.failure_reason = (str(reason) or '')[:512]
+                booking.save(update_fields=['status', 'failure_reason', 'updated_at'])
             except Exception as e:
                 print(f"Error updating booking {booking_id} to failed: {e}")
             
@@ -1776,7 +1778,8 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
             # Update booking status to failed
             try:
                 booking.status = 'failed'
-                booking.save(update_fields=['status', 'updated_at'])
+                booking.failure_reason = (str(reason) or '')[:512]
+                booking.save(update_fields=['status', 'failure_reason', 'updated_at'])
             except Exception as e:
                 print(f"Error updating booking {booking_id} to failed: {e}")
             
@@ -1803,7 +1806,8 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
             # Update booking status to failed
             try:
                 booking.status = 'failed'
-                booking.save(update_fields=['status', 'updated_at'])
+                booking.failure_reason = (str(reason) or '')[:512]
+                booking.save(update_fields=['status', 'failure_reason', 'updated_at'])
             except Exception as e:
                 print(f"Error updating booking {booking_id} to failed: {e}")
             
@@ -2362,8 +2366,13 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
             therapists_for_audit = [therapist_entry(t, False) for t in candidate_therapists]
             # Update booking status to failed
             try:
+                try:
+                    fail_reason = reason
+                except NameError:
+                    fail_reason = 'insufficient_therapists_available'
                 booking.status = 'failed'
-                booking.save(update_fields=['status', 'updated_at'])
+                booking.failure_reason = (str(fail_reason) or '')[:512]
+                booking.save(update_fields=['status', 'failure_reason', 'updated_at'])
             except Exception as e:
                 print(f"Error updating booking {booking_id} to failed: {e}")
             
@@ -2458,7 +2467,8 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                 
                 try:
                     booking.status = 'failed'
-                    booking.save(update_fields=['status', 'updated_at'])
+                    booking.failure_reason = (str(reason) or '')[:512]
+                    booking.save(update_fields=['status', 'failure_reason', 'updated_at'])
                 except Exception as e:
                     print(f"Error updating booking {booking_id} to failed: {e}")
                 
@@ -2575,7 +2585,8 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                             
                             try:
                                 booking.status = 'failed'
-                                booking.save(update_fields=['status', 'updated_at'])
+                                booking.failure_reason = (str(reason) or '')[:512]
+                                booking.save(update_fields=['status', 'failure_reason', 'updated_at'])
                             except Exception as e:
                                 print(f"Error updating booking {booking_id} to failed: {e}")
                             
@@ -2635,7 +2646,8 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                         # Update booking status to failed
                         try:
                             booking.status = 'failed'
-                            booking.save(update_fields=['status', 'updated_at'])
+                            booking.failure_reason = (str(reason) or '')[:512]
+                            booking.save(update_fields=['status', 'failure_reason', 'updated_at'])
                         except Exception as e:
                             print(f"Error updating booking {booking_id} to failed: {e}")
                         
@@ -2776,8 +2788,14 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                         pass
             # Update booking status to failed
             try:
+                try:
+                    fail_reason = reason
+                except NameError:
+                    fail_reason = 'allocation_failed'
+                reason = fail_reason
                 booking.status = 'failed'
-                booking.save(update_fields=['status', 'updated_at'])
+                booking.failure_reason = (str(fail_reason) or '')[:512]
+                booking.save(update_fields=['status', 'failure_reason', 'updated_at'])
             except Exception as e:
                 print(f"Error updating booking {booking_id} to failed: {e}")
             
@@ -3310,7 +3328,8 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                     # Mark booking as failed (outside transaction)
                     try:
                         booking.status = 'failed'
-                        booking.save(update_fields=['status','updated_at'])
+                        booking.failure_reason = (f"booking_transaction_failed: {ie}" or '')[:512]
+                        booking.save(update_fields=['status', 'failure_reason', 'updated_at'])
                     except Exception as e:
                         print(f"[DEBUG] Error marking booking as failed: {e}")
                     # Re-raise to be caught by outer exception handler
@@ -3356,7 +3375,8 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                 # Not all therapists have BookingAssignment records - mark as failed
                 reason = f"incomplete_assignment: Only {actual_ba_count}/{expected_ba_count} BookingAssignment records created. Success: {ba_success_count}/{expected_ba_count}. Errors: {', '.join(ba_errors) if ba_errors else 'None'}"
                 booking.status = 'failed'
-                booking.save(update_fields=['status', 'updated_at'])
+                booking.failure_reason = (str(reason) or '')[:512]
+                booking.save(update_fields=['status', 'failure_reason', 'updated_at'])
                 print(f"[CONTINUITY PASS2] ❌ Booking {booking_id} marked as 'failed': {reason}")
                 
                 # Release locked therapists from PASS 1 if booking failed
@@ -4105,7 +4125,8 @@ def bulk_allocate_for_date(target_date_str):
                                 booking.save(update_fields=['status', 'updated_at'])
                             elif task.get('status') == 'FAILED' and booking.status == 'draft':
                                 booking.status = 'failed'
-                                booking.save(update_fields=['status', 'updated_at'])
+                                booking.failure_reason = (str(task.get('reason') or ''))[:512]
+                                booking.save(update_fields=['status', 'failure_reason', 'updated_at'])
                         except Booking.DoesNotExist:
                             pass
                         except Exception as e:

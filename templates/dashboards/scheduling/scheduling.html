@@ -143,7 +143,7 @@
                         <div class="card-header">
                             <div>
                                 <div class="card-title">Failed Schedules</div>
-                                <div class="card-subtitle">Therapies that failed scheduling due to conflicts. Use date
+                                <div class="card-subtitle">Therapies that failed scheduling (exact reason shown when date is selected). Use date
                                     filter to view failures for specific dates. Click "Reschedule" to move back to
                                     draft.</div>
                             </div>
@@ -177,6 +177,36 @@
                                     </tr>
                                 </thead>
                                 <tbody id="failed-body">
+                                    {% for booking in failed_bookings %}
+                                    <tr>
+                                        <td>
+                                            <div style="font-weight: 500;">
+                                                {{ booking.allocation.patient.pat_name }} ({{ booking.allocation.patient.pat_reg_no }})
+                                            </div>
+                                        </td>
+                                        <td>{{ booking.allocation.therapy_name }}</td>
+                                        <td>{{ booking.timeslot.slot_time|format_12hour|default:"—" }}</td>
+                                        <td>
+                                            {% if booking.allocation.patient.pat_room_no %}
+                                            {% with room_no=booking.allocation.patient.pat_room_no|get_staying_room_display %}
+                                            {{ room_no|default:booking.allocation.patient.pat_room_no }}
+                                            {% endwith %}
+                                            {% else %}
+                                            —
+                                            {% endif %}
+                                        </td>
+                                        <td>
+                                            <span class="status-badge status-failed" title="{{ booking.failure_reason }}">{{ booking.failure_reason|default:"—" }}</span>
+                                        </td>
+                                        <td>Try different time slot</td>
+                                        <td>
+                                            <button class="btn btn-outline btn-small reschedule-single"
+                                                data-id="{{ booking.allocation.id }}">
+                                                Reschedule
+                                            </button>
+                                        </td>
+                                    </tr>
+                                    {% empty %}
                                     {% for allocation in failed_allocations %}
                                     <tr>
                                         <td>
@@ -196,9 +226,9 @@
                                             {% endif %}
                                         </td>
                                         <td>
-                                            <span class="status-badge status-failed">Slot Conflict</span>
+                                            <span class="status-badge status-failed">—</span>
                                         </td>
-                                        <td>Try different time slot</td>
+                                        <td>Select date to see reason</td>
                                         <td>
                                             <button class="btn btn-outline btn-small reschedule-single"
                                                 data-id="{{ allocation.id }}">
@@ -214,6 +244,7 @@
                                                 scheduling attempts.</div>
                                         </td>
                                     </tr>
+                                    {% endfor %}
                                     {% endfor %}
                                 </tbody>
                             </table>
