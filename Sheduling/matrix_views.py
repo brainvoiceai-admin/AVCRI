@@ -41,8 +41,8 @@ def continuity_matrix_api(request):
         # (A) Patient Info Cache
         patient_info = {} # pat_id -> {name, reg_no}
         
-        # (B) Schedule Map: pat_id -> date_str -> { therapist_id: {name, is_bathing} }
-        schedule_map = defaultdict(lambda: defaultdict(dict))
+        # (B) Schedule Map: pat_id -> therapy_name -> date_str -> { therapist_id: {name, is_bathing} }
+        schedule_map = defaultdict(lambda: defaultdict(lambda: defaultdict(dict)))
         
         # (C) Leave Cache
         leave_cache = defaultdict(set) # date -> {therapist_ids}
@@ -86,6 +86,7 @@ def continuity_matrix_api(request):
             if pat_id not in patient_info:
                 if b.visit and b.visit.patient:
                     patient_info[pat_id] = {
+                        'id': pat_id,
                         'name': b.visit.patient.pat_name,
                         'reg_no': b.visit.patient.pat_reg_no
                     }
@@ -93,14 +94,16 @@ def continuity_matrix_api(request):
                     try:
                         s = PatientSnapshot.objects.filter(id=pat_id).first()
                         if s:
-                            patient_info[pat_id] = {'name': s.pat_name, 'reg_no': s.pat_reg_no}
+                            patient_info[pat_id] = {'id': pat_id, 'name': s.pat_name, 'reg_no': s.pat_reg_no}
                         else:
-                            patient_info[pat_id] = {'name': f"ID {pat_id}", 'reg_no': str(pat_id)} 
+                            patient_info[pat_id] = {'id': pat_id, 'name': f"ID {pat_id}", 'reg_no': str(pat_id)} 
                     except:
-                        patient_info[pat_id] = {'name': f"ID {pat_id}", 'reg_no': str(pat_id)}
+                        patient_info[pat_id] = {'id': pat_id, 'name': f"ID {pat_id}", 'reg_no': str(pat_id)}
 
             t_id = b.therapist.id
-            schedule_map[pat_id][d_str][t_id] = {
+            t_name = b.therapy_name if b.therapy_name else "General"
+            
+            schedule_map[pat_id][t_name][d_str][t_id] = {
                 'id': t_id,
                 'name': b.therapist.therapist_name,
                 'is_bathing': b.is_bathing # CORRECTED: Use booking specific flag
@@ -117,63 +120,123 @@ def continuity_matrix_api(request):
             curr += timedelta(days=1)
             
         # Process each patient
-        for pat_id, dates_data in schedule_map.items():
-            row = {
-                'patient': patient_info[pat_id],
-                'cells': {}
-            }
-            
-            prev_set = set() # ids
-            
-            for i, d_str in enumerate(date_cols):
-                curr_objs = dates_data.get(d_str, {})
-                curr_set = set(curr_objs.keys())
-                
-                # Analyze Missing Therapists from Previous Day
-                missing_set = prev_set - curr_set
-                has_unexcused_loss = False
-                
-                if missing_set:
-                    # Check if any missing therapist was NOT on leave (i.e. available but changed)
-                    date_obj = parse_date(d_str)
-                    leaves_today = leave_cache.get(date_obj, set())
-                    
-                    for m_id in missing_set:
-                        if m_id not in leaves_today:
-                            has_unexcused_loss = True
-                            break
-                            
-                # Enrich therapists with status
-                therapist_list = []
-                for t_vals in curr_objs.values():
-                    t_data = t_vals.copy()
-                    
-                    if i == 0:
-                        t_data['status'] = 'green'
-                    elif t_data['id'] in prev_set:
-                         t_data['status'] = 'green' # Same as yesterday
-                    else:
-                        # New therapist replacing someone or adding on
-                        if has_unexcused_loss:
-                            t_data['status'] = 'red' # Replaced available therapist
-                        elif missing_set:
-                             t_data['status'] = 'gray' # Replaced therapist on leave
-                        else:
-                             t_data['status'] = 'green' # Pure addition (neutral/good)
-                        
-                    therapist_list.append(t_data)
-
-                cell_data = {
-                    'therapists': therapist_list,
-                    'status': 'active' if curr_set else 'empty'
+        for pat_id, therapies_data in schedule_map.items():
+            for t_name, dates_data in therapies_data.items():
+                row = {
+                    'patient': patient_info[pat_id],
+                    'therapy_name': t_name,
+                    'cells': {}
                 }
                 
-                row['cells'][d_str] = cell_data
+                baseline_set = None # This preserves Day-1 therapists for subsequent days
                 
-                if curr_set:
-                    prev_set = curr_set
+                for i, d_str in enumerate(date_cols):
+                    curr_objs = dates_data.get(d_str, {})
+                    curr_set = set(curr_objs.keys())
                     
-            rows.append(row)
+                    # If no data for this day, mark as empty
+                    if not curr_set:
+                        row['cells'][d_str] = {
+                            'therapists': [],
+                            'status': 'empty'
+                        }
+                        continue
+                        
+                    date_obj = parse_date(d_str)
+                    reference_set = set()
+                    
+                    if baseline_set is None:
+                        # === DAY 1 LOGIC (First day of treatment in this range) ===
+                        # Verify continuity by comparing with PREVIOUS TREATMENT therapist
+                        # (if any exists)
+                        
+                        # Fetch last valid booking BEFORE this date
+                        last_booking = TherapistBooking.objects.filter(
+                            patient_id=pat_id,
+                            therapy_name=t_name,
+                            date__lt=date_obj,
+                            status__in=['BOOKED', 'scheduled', 'COMPLETED']
+                        ).order_by('-date').first()
+                        
+                        if last_booking:
+                            # Get all therapists for that previous day
+                            prev_bookings = TherapistBooking.objects.filter(
+                                patient_id=pat_id,
+                                therapy_name=t_name,
+                                date=last_booking.date,
+                                status__in=['BOOKED', 'scheduled', 'COMPLETED']
+                            ).values_list('therapist_id', flat=True)
+                            reference_set = set(prev_bookings)
+                        else:
+                            reference_set = set() # No history found
+                            
+                        # Set Baseline for FUTURE days (Day 2 -> End)
+                        baseline_set = curr_set
+                    else:
+                        # === SUBSEQUENT DAYS LOGIC ===
+                        # Verify against FIRST DAY only (baseline_set)
+                        # Do NOT compare against immediately previous day
+                        reference_set = baseline_set
+                        
+                    # === COMMON VERIFICATION LOGIC ===
+                    # Check for missing therapists FROM THE REFERENCE SET
+                    missing_set = reference_set - curr_set
+                    has_unexcused_loss = False
+                    
+                    if missing_set:
+                        leaves_today = leave_cache.get(date_obj, set())
+                        for m_id in missing_set:
+                            if m_id not in leaves_today:
+                                has_unexcused_loss = True
+                                break
+                                
+                    # Determine colors for each allocated therapist
+                    therapist_list = []
+                    for t_vals in curr_objs.values():
+                        t_data = t_vals.copy()
+                        
+                        # DEBUG LOGGING
+                        debug_info = {
+                            'patient': patient_info[pat_id]['name'],
+                            'therapy': t_name,
+                            'date': d_str,
+                            'therapist': t_data['name'],
+                            'therapist_id': t_data['id'],
+                            'is_day_1': (baseline_set == curr_set),
+                            'reference_set': [curr_objs.get(rid, {}).get('name', f'ID_{rid}') for rid in reference_set] if reference_set else 'NO_HISTORY',
+                            'current_set': list(curr_objs.values()),
+                            'missing_set': list(missing_set) if missing_set else [],
+                            'has_unexcused_loss': has_unexcused_loss
+                        }
+                        
+                        if t_data['id'] in reference_set:
+                            t_data['status'] = 'green' # Same as reference
+                            debug_info['decision'] = 'GREEN: Therapist matches reference'
+                        else:
+                            # New or Replacement
+                            if has_unexcused_loss:
+                                t_data['status'] = 'red' # Reference therapist matched was available but replaced
+                                debug_info['decision'] = 'RED: Reference therapist(s) were available but replaced'
+                            elif missing_set:
+                                 t_data['status'] = 'gray' # Reference therapist on leave
+                                 debug_info['decision'] = 'GRAY: Reference therapist is on leave'
+                            else:
+                                 t_data['status'] = 'green' # Pure addition
+                                 debug_info['decision'] = 'GREEN: Pure addition (no prior history or adding therapist)'
+                        
+                        # Log to console for debugging
+                        print(f"[CONTINUITY DEBUG] {debug_info}")
+                            
+                        therapist_list.append(t_data)
+
+                    cell_data = {
+                        'therapists': therapist_list,
+                        'status': 'active'
+                    }
+                    
+                    row['cells'][d_str] = cell_data
+                
+                rows.append(row)
             
         return JsonResponse({
             'columns': date_cols,

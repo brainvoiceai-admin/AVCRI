@@ -492,6 +492,7 @@ function updateTable(status, data) {
             : '<span class="muted">Not assigned</span>';
 
         if (status === 'failed') {
+            const failureReason = (item.failure_reason && String(item.failure_reason).trim()) ? escapeHtml(item.failure_reason) : '—';
             row.innerHTML = `
                         <td>
                             <div style="font-weight: 500;">${escapeHtml(item.patient_name)}</div>
@@ -501,7 +502,7 @@ function updateTable(status, data) {
                         <td>${format12Hour(item.timeslot) || '—'}</td>
                         <td>${item.patient_room_no || '—'}</td>
                         <td>
-                            <span class="status-badge status-failed">Slot Conflict</span>
+                            <span class="status-badge status-failed" title="${escapeHtml(item.failure_reason || '')}">${failureReason}</span>
                         </td>
                         <td>Try different time slot</td>
                         <td>

@@ -123,21 +123,33 @@
                             </div>
 
                             <div class="row">
-                                <div class="col-md-6 mb-3">
-                                    <label for="{{ form.min_max.id_for_label }}" class="form-label">
-                                        Min/Max
+                                <div class="col-md-4 mb-3">
+                                    <label for="{{ form.min_quantity.id_for_label }}" class="form-label">
+                                        Min Quantity
                                     </label>
-                                    {{ form.min_max }}
-                                    {% if form.min_max.errors %}
+                                    {{ form.min_quantity }}
+                                    {% if form.min_quantity.errors %}
                                     <div class="text-danger small">
-                                        {% for error in form.min_max.errors %}
+                                        {% for error in form.min_quantity.errors %}
                                         {{ error }}
                                         {% endfor %}
                                     </div>
                                     {% endif %}
                                 </div>
-
-                                <div class="col-md-6 mb-3">
+                                <div class="col-md-4 mb-3">
+                                    <label for="{{ form.max_quantity.id_for_label }}" class="form-label">
+                                        Max Quantity
+                                    </label>
+                                    {{ form.max_quantity }}
+                                    {% if form.max_quantity.errors %}
+                                    <div class="text-danger small">
+                                        {% for error in form.max_quantity.errors %}
+                                        {{ error }}
+                                        {% endfor %}
+                                    </div>
+                                    {% endif %}
+                                </div>
+                                <div class="col-md-4 mb-3">
                                     <label for="{{ form.procured_from.id_for_label }}" class="form-label">
                                         Procured From
                                     </label>
