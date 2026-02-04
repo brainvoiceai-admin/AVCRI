@@ -654,13 +654,34 @@ def Manage_user(request):
             user_id = request.POST.get('user_id')
             user = get_object_or_404(CustomUser, id=user_id)
             
+            new_username = (request.POST.get('username') or '').strip()
+            new_email = (request.POST.get('email') or '').strip()
+            
+            # Validate username/email uniqueness (exclude current user)
+            username_taken = new_username and CustomUser.objects.filter(username=new_username).exclude(id=user.id).exists()
+            email_taken = new_email and CustomUser.objects.filter(email=new_email).exclude(id=user.id).exists()
+            if username_taken or email_taken:
+                if username_taken and email_taken:
+                    request.session['edit_error_message'] = 'Username and email already exist. Use another.'
+                elif username_taken:
+                    request.session['edit_error_message'] = 'Username already exists. Use another.'
+                else:
+                    request.session['edit_error_message'] = 'Email already exists. Use another.'
+                request.session['edit_error_user_id'] = user_id
+                from django.urls import reverse
+                from urllib.parse import urlencode
+                filter_params = {k: request.GET[k] for k in ('search', 'status', 'role') if request.GET.get(k)}
+                redirect_url = reverse('authentication:Manage_user') + ('?' + urlencode(filter_params) if filter_params else '')
+                return redirect(redirect_url)
+            
             # Store old role to check if it changed
             old_role = user.role
             new_role = request.POST.get('role')
             
+            user.username = new_username
             user.first_name = request.POST.get('first_name')
             user.last_name = request.POST.get('last_name')
-            user.email = request.POST.get('email')
+            user.email = new_email
             user.role = new_role
             mobile = request.POST.get('mobile')
             user.mobile = mobile if mobile else None
@@ -896,10 +917,16 @@ def Manage_user(request):
         
         return JsonResponse(result)
     
+    # Pop edit-modal error from session so it shows in the modal and we reopen that modal
+    edit_error_user_id = request.session.pop('edit_error_user_id', None)
+    edit_error_message = request.session.pop('edit_error_message', None)
+    
     context = {
         'users': users,
         'roles': roles,
         'modules': modules,
+        'edit_error_user_id': edit_error_user_id,
+        'edit_error_message': edit_error_message,
     }
     return render(request, 'dashboards/superadmin/Manage_user.html', context)
 
