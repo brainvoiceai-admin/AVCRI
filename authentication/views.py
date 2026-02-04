@@ -1058,6 +1058,42 @@ def Audit_Log(request):
         except ValueError:
             pass
     
+    # Export CSV if requested (before pagination)
+    export_flag = request.GET.get('export')
+    if export_flag:
+        # Reuse filtered queryset, export all matching rows
+        from django.http import HttpResponse
+        import csv
+        response = HttpResponse(content_type='text/csv')
+        from datetime import datetime
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        response['Content-Disposition'] = f'attachment; filename="audit_log_{timestamp}.csv"'
+        
+        writer = csv.writer(response)
+        writer.writerow(['ID', 'User', 'Role', 'Action', 'Description', 'Object', 'Timestamp', 'IP Address', 'Status'])
+        
+        for log in audit_logs.select_related('user').order_by('timestamp'):
+            user = log.user.username if log.user else 'System'
+            role = log.user.get_role_display() if log.user else ''
+            if log.object_type and log.object_id:
+                object_info = f"{log.object_type} ({log.object_id})"
+            elif log.object_type:
+                object_info = log.object_type
+            else:
+                object_info = ''
+            writer.writerow([
+                log.id,
+                user,
+                role,
+                log.get_action_display(),
+                (log.description or '').replace('\n', ' ').replace('\r', ' '),
+                object_info,
+                timezone.localtime(log.timestamp).strftime('%Y-%m-%d %H:%M:%S'),
+                log.ip_address or '',
+                log.get_status_display(),
+            ])
+        return response
+    
     # Pagination
     paginator = Paginator(audit_logs, 50)  # Show 50 logs per page
     page_number = request.GET.get('page')
@@ -1250,6 +1286,64 @@ def Therapy_Audit_Log(request):
             audit_logs = audit_logs.filter(timestamp__date__lte=date_to_obj.date())
         except ValueError:
             pass
+    
+    # Export CSV if requested (before pagination)
+    export_flag = request.GET.get('export')
+    if export_flag:
+        from django.http import HttpResponse
+        import csv
+        response = HttpResponse(content_type='text/csv')
+        from datetime import datetime
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        response['Content-Disposition'] = f'attachment; filename="therapy_audit_log_{timestamp}.csv"'
+        
+        writer = csv.writer(response)
+        writer.writerow(['ID', 'User', 'Role', 'Action', 'Description', 'Therapy Details', 'Timestamp', 'IP Address', 'Status'])
+        
+        for log in audit_logs.select_related('user').order_by('timestamp'):
+            user = log.user.username if log.user else 'System'
+            role = log.user.get_role_display() if log.user else ''
+            # Build therapy details summary from additional_data JSON if present
+            details = ''
+            if log.additional_data:
+                try:
+                    data = log.additional_data
+                    if isinstance(data, str):
+                        import json
+                        data = json.loads(data)
+                    patient = data.get('patient_reg_no') or data.get('patient') or ''
+                    therapy = data.get('therapy_name') or data.get('therapy') or ''
+                    period_from = data.get('from_date') or data.get('cancel_from') or data.get('resume_from') or ''
+                    period_to = data.get('to_date') or data.get('cancel_to') or data.get('resume_to') or ''
+                    extra = []
+                    if data.get('updated_fields'):
+                        extra.append(f"Updated: {', '.join(data.get('updated_fields'))}")
+                    if data.get('remaining_items_count') is not None:
+                        extra.append(f"Remaining items: {data.get('remaining_items_count')}")
+                    parts = []
+                    if patient:
+                        parts.append(f"Patient: {patient}")
+                    if therapy:
+                        parts.append(f"Therapy: {therapy}")
+                    if period_from or period_to:
+                        parts.append(f"Period: {period_from} to {period_to}")
+                    if extra:
+                        parts.append(' | '.join(extra))
+                    details = ' | '.join(parts)
+                except Exception:
+                    details = str(log.additional_data)
+            writer.writerow([
+                log.id,
+                user,
+                role,
+                log.get_action_display(),
+                (log.description or '').replace('\n', ' ').replace('\r', ' '),
+                details,
+                timezone.localtime(log.timestamp).strftime('%Y-%m-%d %H:%M:%S'),
+                log.ip_address or '',
+                log.get_status_display(),
+            ])
+        return response
     
     # Pagination
     paginator = Paginator(audit_logs, 50)  # Show 50 logs per page

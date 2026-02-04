@@ -1,0 +1,364 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>User Therapy Entry Dashboard</title>
+
+    <!-- Use the exact same styles as therapy scheduling -->
+    <link rel="stylesheet" href="{% static 'css/scheduling.css' %}">
+    <link rel="stylesheet" href="{% static 'css/dashboards_nav.css' %}">
+</head>
+
+<body>
+    {% include 'dashboards/nav.html' %}
+    <div class="main-content">
+        <div class="container">
+            <header>
+                <h1>User Therapy Entry Dashboard</h1>
+                <div class="subtitle">
+                    View draft, failed and scheduled therapies that <strong>you</strong> have entered, with the same layout as the scheduling dashboard.
+                </div>
+            </header>
+
+            <div class="stats">
+                <div class="stat-card stat-draft">
+                    <div class="stat-value" id="draft-count">{{ stats.draft_count }}</div>
+                    <div class="stat-label">Draft Therapies</div>
+                </div>
+                <div class="stat-card stat-failed">
+                    <div class="stat-value" id="failed-count">{{ stats.failed_count }}</div>
+                    <div class="stat-label">Failed Schedules</div>
+                </div>
+                <div class="stat-card stat-allocated">
+                    <div class="stat-value" id="allocated-count">{{ stats.scheduled_count }}</div>
+                    <div class="stat-label">Scheduled Therapies</div>
+                </div>
+            </div>
+
+            <div class="dashboard">
+                <div class="card">
+                    <div class="tabs">
+                        <button class="tab active" data-tab="draft">Draft Therapies</button>
+                        <button class="tab" data-tab="failed">Failed Schedules</button>
+                        <button class="tab" data-tab="scheduled">Scheduled Therapies</button>
+                    </div>
+
+                    <!-- Draft Therapies Tab -->
+                    <div id="draft" class="tab-content active">
+                        <div class="card-header">
+                            <div>
+                                <div class="card-title">Draft Therapies</div>
+                                <div class="card-subtitle">
+                                    Therapies you entered that are still in draft status. Use date filter to view therapies for specific dates.
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="filters"></div>
+
+                        <div class="table-container">
+                                <table id="draft-therapist-table">
+                                <thead>
+                                    <tr>
+                                        <th>Patient</th>
+                                        <th>Therapy</th>
+                                        <th>Date</th>
+                                        <th>Time Slot</th>
+                                        <th>Room</th>
+                                            <th>Entered By</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="draft-therapist-body">
+                                    {% if draft_bookings %}
+                                        {% for booking in draft_bookings %}
+                                            <tr>
+                                                <td>
+                                                    {% if booking.allocation.patient %}
+                                                        {{ booking.allocation.patient.pat_name }} ({{ booking.allocation.patient.pat_reg_no }})
+                                                    {% else %}-{% endif %}
+                                                </td>
+                                                <td>{{ booking.allocation.therapy_name }}</td>
+                                                <td>{{ booking.date|date:"Y-m-d" }}</td>
+                                                <td>{{ booking.timeslot.slot_time|default:"—" }}</td>
+                                                <td>
+                                                    {% if booking.room %}
+                                                        {{ booking.room.room_no }}
+                                                    {% else %}
+                                                        {% with rb=booking.room_bookings.first %}
+                                                            {% if rb %}{{ rb.room.room_no }}{% else %}—{% endif %}
+                                                        {% endwith %}
+                                                    {% endif %}
+                                                </td>
+                                                <td>
+                                                    {{ booking.allocation.allocated_by.username|default:"System" }}
+                                                </td>
+                                            </tr>
+                                        {% endfor %}
+                                    {% else %}
+                                        <tr>
+                                            <td colspan="6" class="empty-state">
+                                                <div class="empty-state-icon">📋</div>
+                                                <div>No draft therapies found for this date/user.</div>
+                                            </td>
+                                        </tr>
+                                    {% endif %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- Failed Schedules Tab -->
+                    <div id="failed" class="tab-content">
+                        <div class="card-header">
+                            <div>
+                                <div class="card-title">Failed Schedules</div>
+                                <div class="card-subtitle">
+                                    Therapies you entered that failed scheduling. Use date filter to view failures for specific dates.
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="filters"></div>
+
+                        <div class="table-container">
+                            <table id="failed-table">
+                                <thead>
+                                    <tr>
+                                        <th>Patient</th>
+                                        <th>Therapy</th>
+                                        <th>Time Slot</th>
+                                        <th>Room No</th>
+                                        <th>Failure Reason</th>
+                                        <th>Recommendation</th>
+                                        <th>Entered By</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="failed-body">
+                                    {% if failed_bookings %}
+                                        {% for booking in failed_bookings %}
+                                            <tr>
+                                                <td>
+                                                    {% if booking.allocation.patient %}
+                                                        {{ booking.allocation.patient.pat_name }} ({{ booking.allocation.patient.pat_reg_no }})
+                                                    {% else %}-{% endif %}
+                                                </td>
+                                                <td>{{ booking.allocation.therapy_name }}</td>
+                                                <td>{{ booking.timeslot.slot_time|default:"—" }}</td>
+                                                <td>
+                                                    {% if booking.room %}
+                                                        {{ booking.room.room_no }}
+                                                    {% else %}
+                                                        {% with rb=booking.room_bookings.first %}
+                                                            {% if rb %}{{ rb.room.room_no }}{% else %}—{% endif %}
+                                                        {% endwith %}
+                                                    {% endif %}
+                                                </td>
+                                                <td>{{ booking.failure_reason|default:"—" }}</td>
+                                                <td>Try different time slot</td>
+                                                <td>{{ booking.allocation.allocated_by.username|default:"System" }}</td>
+                                            </tr>
+                                        {% endfor %}
+                                    {% else %}
+                                        <tr>
+                                            <td colspan="7" class="empty-state">
+                                                <div class="empty-state-icon">⚠️</div>
+                                                <div>No failed schedules found for this date/user.</div>
+                                            </td>
+                                        </tr>
+                                    {% endif %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- Scheduled Therapies Tab -->
+                    <div id="scheduled" class="tab-content">
+                        <div class="card-header">
+                            <div>
+                                <div class="card-title">Scheduled Therapies</div>
+                                <div class="card-subtitle">
+                                    Successfully scheduled therapies you entered. Use date and patient filters to refine the view.
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="filters">
+                            <div class="filter-group">
+                                <label class="filter-label">Filter by Date</label>
+                                <input type="date" id="scheduled-date" value="{{ date_filter }}">
+                            </div>
+                            <div class="filter-group" style="flex: 1;">
+                                <label class="filter-label">Search by Patient Name</label>
+                                <div class="search-inline">
+                                    <input type="text" id="patient-search" placeholder="Type patient name">
+                                    <button class="btn btn-secondary btn-small" id="patient-search-btn"
+                                        type="button">Search</button>
+                                    <button class="btn btn-outline btn-small" id="clear-patient-search"
+                                        type="button">Clear</button>
+                                </div>
+                            </div>
+                            <div class="filter-group" style="display:flex; gap:8px; justify-content:flex-end;">
+                                <button class="btn btn-primary" id="export-scheduled-excel" title="Export scheduled therapies to Excel">
+                                    <span style="font-size:16px;">📊</span> Export Excel
+                                </button>
+                                <button class="btn btn-primary" id="export-scheduled-pdf" title="Export scheduled therapies to PDF">
+                                    <span style="font-size:16px;">🖨️</span> Export PDF
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Therapist Schedule Section -->
+                        <div style="margin-bottom: 32px;">
+                            <h3 style="margin-bottom: 16px; color: var(--primary); font-size: 18px; font-weight: 600;">
+                                👨‍⚕️ Therapist Schedule
+                            </h3>
+                            <div class="table-container">
+                                <table id="therapist-scheduled-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Patient</th>
+                                            <th>Therapy</th>
+                                            <th>Time Slot</th>
+                                            <th>Date</th>
+                                            <th>Treatment Room No</th>
+                                            <th>Patient Room No</th>
+                                            <th>Therapist Assigned</th>
+                                            <th>Entered By</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% if therapist_bookings %}
+                                            {% for booking in therapist_bookings %}
+                                                <tr>
+                                                    <td class="patient-cell">
+                                                        {% if booking.allocation.patient %}
+                                                            {{ booking.allocation.patient.pat_name }} ({{ booking.allocation.patient.pat_reg_no }})
+                                                        {% else %}-{% endif %}
+                                                    </td>
+                                                    <td>{{ booking.allocation.therapy_name }}</td>
+                                                    <td>{{ booking.timeslot.slot_time|default:"—" }}</td>
+                                                    <td>{{ booking.date|date:"Y-m-d" }}</td>
+                                                    <td>
+                                                        {% if booking.room %}
+                                                            {{ booking.room.room_no }}
+                                                        {% else %}
+                                                            {% with rb=booking.room_bookings.first %}
+                                                                {% if rb %}{{ rb.room.room_no }}{% else %}—{% endif %}
+                                                            {% endwith %}
+                                                        {% endif %}
+                                                    </td>
+                                                    <td>
+                                                        {% if booking.allocation.patient and booking.allocation.patient.pat_room_no %}
+                                                            {{ booking.allocation.patient.pat_room_no }}
+                                                        {% else %}
+                                                            —
+                                                        {% endif %}
+                                                    </td>
+                                                    <td>
+                                                        {% if booking.assignments.all %}
+                                                            {% for a in booking.assignments.all %}
+                                                                {{ a.therapist.therapist_name|default:a.therapist.therapist_code }}{% if not forloop.last %}, {% endif %}
+                                                            {% endfor %}
+                                                        {% else %}
+                                                            —
+                                                        {% endif %}
+                                                    </td>
+                                                    <td>
+                                                        {{ booking.allocation.allocated_by.username|default:"System" }}
+                                                    </td>
+                                                </tr>
+                                            {% endfor %}
+                                        {% else %}
+                                            <tr>
+                                            <td colspan="8" class="empty-state">
+                                                    <div class="empty-state-icon">✅</div>
+                                                    <div>No therapist schedules found for this date/user.</div>
+                                                </td>
+                                            </tr>
+                                        {% endif %}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <!-- Nurse Schedule Section -->
+                        <div>
+                            <h3 style="margin-bottom: 16px; color: var(--secondary); font-size: 18px; font-weight: 600;">
+                                👩‍⚕️ Nurse Schedule
+                            </h3>
+                            <div class="table-container">
+                                <table id="nurse-scheduled-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Patient</th>
+                                            <th>Therapy</th>
+                                            <th>Date</th>
+                                            <th>Patient Room No</th>
+                                            <th>Nurse Assigned</th>
+                                            <th>Entered By</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% if nurse_bookings %}
+                                            {% for booking in nurse_bookings %}
+                                                <tr>
+                                                    <td class="patient-cell">
+                                                        {% if booking.allocation.patient %}
+                                                            {{ booking.allocation.patient.pat_name }} ({{ booking.allocation.patient.pat_reg_no }})
+                                                        {% else %}-{% endif %}
+                                                    </td>
+                                                    <td>{{ booking.allocation.therapy_name }}</td>
+                                                    <td>{{ booking.date|date:"Y-m-d" }}</td>
+                                                    <td>
+                                                        {% if booking.allocation.patient and booking.allocation.patient.pat_room_no %}
+                                                            {{ booking.allocation.patient.pat_room_no }}
+                                                        {% else %}
+                                                            —
+                                                        {% endif %}
+                                                    </td>
+                                                    <td>
+                                                        {% if booking.nurse_assignments.all %}
+                                                            {% for na in booking.nurse_assignments.all %}
+                                                                {{ na.nurse.nurse_name|default:na.nurse.nurse_code }}{% if not forloop.last %}, {% endif %}
+                                                            {% endfor %}
+                                                        {% else %}
+                                                            —
+                                                        {% endif %}
+                                                    </td>
+                                                    <td>
+                                                        {{ booking.allocation.allocated_by.username|default:"System" }}
+                                                    </td>
+                                                </tr>
+                                            {% endfor %}
+                                        {% else %}
+                                            <tr>
+                                            <td colspan="6" class="empty-state">
+                                                    <div class="empty-state-icon">✅</div>
+                                                    <div>No nurse schedules found for this date/user.</div>
+                                                </td>
+                                            </tr>
+                                        {% endif %}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- jsPDF & SheetJS for exports -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+
+    <script src="{% static 'js/user_therapy_entry.js' %}"></script>
+    <script src="{% static 'js/dashboards_nav.js' %}"></script>
+</body>
+
+</html>
+

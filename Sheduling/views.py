@@ -4025,16 +4025,24 @@ def user_therapy_entry_dashboard(request):
     from .models import TherapyAllocation, Booking
     from django.db.models import Q
     
-    # Get date filter from request
+    # Get date filter from request; default to today if not provided
+    from django.utils import timezone
+    # Raw string from query
     date_filter = request.GET.get('date', '')
     
-    # Parse date if provided
+    # Parse date; if missing or invalid, fall back to today
     filter_date = None
     if date_filter:
         try:
             filter_date = parse_date(date_filter)
         except Exception:
             filter_date = None
+    
+    if filter_date is None:
+        # Default: today's date
+        today = timezone.now().date()
+        filter_date = today
+        date_filter = today.isoformat()
     
     # Filter by currently logged-in user only
     current_user = request.user if request.user.is_authenticated else None

@@ -469,6 +469,16 @@
                                         style="color:#6b7280">Gray</span>=Excused (Leave). (*) indicates Bathing
                                     Therapist.</div>
                             </div>
+                            <div style="display: flex; gap: 12px; align-items: center; margin-left: auto;">
+                                <button class="btn btn-primary" id="export-continuity-excel" title="Export Continuity Matrix to Excel"
+                                    style="background: #10b981; color: white; font-weight: 600; padding: 8px 18px; display: flex; align-items: center; gap: 6px;">
+                                    <span style="font-size: 16px;">📊</span> Export Excel
+                                </button>
+                                <button class="btn btn-primary" id="export-continuity-pdf" title="Export Continuity Matrix to PDF"
+                                    style="background: #2ed573; color: white; font-weight: 600; padding: 8px 18px; display: flex; align-items: center; gap: 6px;">
+                                    <span style="font-size: 16px;">🖨️</span> Export PDF
+                                </button>
+                            </div>
                         </div>
 
                         <div class="filters">
@@ -732,6 +742,124 @@
                     });
 
                     tbody.appendChild(tr);
+                });
+            }
+        });
+    </script>
+    <script>
+        // Continuity Matrix export (table-based, non-intrusive)
+        document.addEventListener('DOMContentLoaded', function () {
+            const excelBtn = document.getElementById('export-continuity-excel');
+            const pdfBtn = document.getElementById('export-continuity-pdf');
+
+            if (excelBtn) {
+                excelBtn.addEventListener('click', function () {
+                    const table = document.getElementById('continuity-table');
+                    if (!table) {
+                        alert('Continuity table not found.');
+                        return;
+                    }
+
+                    const rows = [];
+                    const headerRow = table.querySelector('thead tr');
+                    if (!headerRow) {
+                        alert('No header row found for continuity matrix.');
+                        return;
+                    }
+
+                    const headerCells = Array.from(headerRow.querySelectorAll('th')).map(th =>
+                        (th.innerText || '').trim()
+                    );
+                    rows.push(headerCells);
+
+                    const bodyRows = table.querySelectorAll('tbody tr');
+                    bodyRows.forEach(tr => {
+                        const cells = Array.from(tr.querySelectorAll('td')).map(td =>
+                            (td.innerText || '').trim()
+                        );
+                        rows.push(cells);
+                    });
+
+                    if (rows.length <= 1) {
+                        alert('No continuity data to export. Please load the matrix first.');
+                        return;
+                    }
+
+                    const wb = XLSX.utils.book_new();
+                    const ws = XLSX.utils.aoa_to_sheet(rows);
+                    XLSX.utils.book_append_sheet(wb, ws, 'Continuity Matrix');
+
+                    const from = document.getElementById('cont-from')?.value || '';
+                    const to = document.getElementById('cont-to')?.value || '';
+                    let filename = 'Continuity_Matrix';
+                    if (from && to) {
+                        filename += `_${from.replace(/-/g, '')}_${to.replace(/-/g, '')}`;
+                    }
+                    filename += '.xlsx';
+
+                    XLSX.writeFile(wb, filename);
+                });
+            }
+
+            if (pdfBtn) {
+                pdfBtn.addEventListener('click', function () {
+                    const table = document.getElementById('continuity-table');
+                    if (!table) {
+                        alert('Continuity table not found.');
+                        return;
+                    }
+
+                    const headerRow = table.querySelector('thead tr');
+                    if (!headerRow) {
+                        alert('No header row found for continuity matrix.');
+                        return;
+                    }
+
+                    const head = [
+                        Array.from(headerRow.querySelectorAll('th')).map(th =>
+                            (th.innerText || '').trim()
+                        ),
+                    ];
+
+                    const body = [];
+                    const bodyRows = table.querySelectorAll('tbody tr');
+                    bodyRows.forEach(tr => {
+                        const cells = Array.from(tr.querySelectorAll('td')).map(td =>
+                            (td.innerText || '').trim()
+                        );
+                        body.push(cells);
+                    });
+
+                    if (body.length === 0) {
+                        alert('No continuity data to export. Please load the matrix first.');
+                        return;
+                    }
+
+                    const { jsPDF } = window.jspdf || {};
+                    if (!jsPDF || !window.jspdf || !window.jspdf.jsPDF) {
+                        alert('PDF library not loaded.');
+                        return;
+                    }
+
+                    const doc = new window.jspdf.jsPDF('l', 'pt', 'a4');
+
+                    doc.autoTable({
+                        head,
+                        body,
+                        styles: { fontSize: 7, cellPadding: 3 },
+                        headStyles: { fillColor: [37, 99, 235] },
+                        startY: 40,
+                    });
+
+                    const from = document.getElementById('cont-from')?.value || '';
+                    const to = document.getElementById('cont-to')?.value || '';
+                    let filename = 'Continuity_Matrix';
+                    if (from && to) {
+                        filename += `_${from.replace(/-/g, '')}_${to.replace(/-/g, '')}`;
+                    }
+                    filename += '.pdf';
+
+                    doc.save(filename);
                 });
             }
         });
