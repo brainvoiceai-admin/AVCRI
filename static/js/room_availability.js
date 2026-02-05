@@ -211,7 +211,7 @@ function displayOccupiedRooms(rooms, totalCount) {
               <div class="patient-info">
                 <span class="therapy-name">${room.therapy_name}</span> • 
                 Patient: ${room.patient_name}
-                ${room.patient_id ? ` (${room.patient_id})` : ''}
+                ${room.patient_reg_no && room.patient_reg_no !== 'N/A' ? ` (${room.patient_reg_no})` : ''}
               </div>
             </div>
           </li>

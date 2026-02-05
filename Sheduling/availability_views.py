@@ -572,6 +572,7 @@ def get_occupied_rooms_api(request):
                         
                         # Get patient name if available
                         patient_name = 'N/A'
+                        patient_reg_no = 'N/A'
                         if booking.patient_id:
                             try:
                                 # Try lookup by integer ID first
@@ -579,13 +580,22 @@ def get_occupied_rooms_api(request):
                                     pat_reg_no=booking.patient_id
                                 ).first()
                                 
-                                # If not found, try string conversion
+                                # 1. Try Primary Key (Most likely)
+                                patient_snapshot = PatientSnapshot.objects.filter(pk=booking.patient_id).first()
+
+                                # 2. If not found, try Reg No (exact)
+                                if not patient_snapshot:
+                                    patient_snapshot = PatientSnapshot.objects.filter(
+                                        pat_reg_no=booking.patient_id
+                                    ).first()
+                                
+                                # 3. If not found, try string conversion
                                 if not patient_snapshot:
                                     patient_snapshot = PatientSnapshot.objects.filter(
                                         pat_reg_no=str(booking.patient_id)
                                     ).first()
 
-                                # If still not found, try partial match (e.g. OP-500 matching 500)
+                                # 4. If still not found, try partial match
                                 if not patient_snapshot:
                                     patient_snapshot = PatientSnapshot.objects.filter(
                                         pat_reg_no__icontains=str(booking.patient_id)
@@ -593,6 +603,7 @@ def get_occupied_rooms_api(request):
                                     
                                 if patient_snapshot:
                                     patient_name = patient_snapshot.pat_name
+                                    patient_reg_no = patient_snapshot.pat_reg_no
                             except Exception as e:
                                 print(f"Error fetching patient name for {booking.patient_id}: {e}")
                         
@@ -602,6 +613,7 @@ def get_occupied_rooms_api(request):
                             'floor': room.floor or 'N/A',
                             'therapy_name': booking.therapy_name or 'N/A',
                             'patient_name': patient_name,
+                            'patient_reg_no': patient_reg_no,
                             'patient_id': booking.patient_id,
                             'status': booking.status,
                             'date': booking.date.strftime('%Y-%m-%d'),
@@ -633,6 +645,7 @@ def get_occupied_rooms_api(request):
                 
                 # Get patient name if available
                 patient_name = 'N/A'
+                patient_reg_no = 'N/A'
                 if booking.patient_id:
                     try:
                         # Try lookup by integer ID first
@@ -640,13 +653,22 @@ def get_occupied_rooms_api(request):
                             pat_reg_no=booking.patient_id
                         ).first()
                         
-                        # If not found, try string conversion
+                        # 1. Try Primary Key (Most likely)
+                        patient_snapshot = PatientSnapshot.objects.filter(pk=booking.patient_id).first()
+
+                        # 2. If not found, try Reg No (exact)
+                        if not patient_snapshot:
+                            patient_snapshot = PatientSnapshot.objects.filter(
+                                pat_reg_no=booking.patient_id
+                            ).first()
+
+                        # 3. If not found, try string conversion
                         if not patient_snapshot:
                             patient_snapshot = PatientSnapshot.objects.filter(
                                 pat_reg_no=str(booking.patient_id)
                             ).first()
 
-                        # If still not found, try partial match
+                        # 4. If still not found, try partial match
                         if not patient_snapshot:
                             patient_snapshot = PatientSnapshot.objects.filter(
                                 pat_reg_no__icontains=str(booking.patient_id)
@@ -654,6 +676,7 @@ def get_occupied_rooms_api(request):
                             
                         if patient_snapshot:
                             patient_name = patient_snapshot.pat_name
+                            patient_reg_no = patient_snapshot.pat_reg_no
                     except Exception as e:
                         print(f"Error fetching patient name for {booking.patient_id}: {e}")
                 
@@ -663,6 +686,7 @@ def get_occupied_rooms_api(request):
                     'floor': room.floor or 'N/A',
                     'therapy_name': booking.therapy_name or 'N/A',
                     'patient_name': patient_name,
+                    'patient_reg_no': patient_reg_no,
                     'patient_id': booking.patient_id,
                     'status': booking.status,
                     'date': booking.date.strftime('%Y-%m-%d'),
