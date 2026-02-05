@@ -52,6 +52,12 @@ urlpatterns = [
     path('therapist-availability/api/therapists-on-leave/', availability_views.get_therapists_on_leave_api, name='get_therapists_on_leave_api'),
     path('therapist-availability/api/time-slots/', availability_views.get_time_slots_api, name='get_time_slots_api'),
     
+    # Treatment Room Availability URLs
+    path('room-availability/', availability_views.room_availability_dashboard, name='room_availability_dashboard'),
+    path('room-availability/api/available-rooms/', availability_views.get_available_rooms_api, name='get_available_rooms_api'),
+    path('room-availability/api/occupied-rooms/', availability_views.get_occupied_rooms_api, name='get_occupied_rooms_api'),
+    path('room-availability/api/time-slots/', availability_views.get_time_slots_api, name='get_room_time_slots_api'),
+    
     # Bulk Excel Upload/Download for Testing
     path('therapy-bulk-excel/', views.therapy_bulk_excel, name='therapy_bulk_excel'),
 ]

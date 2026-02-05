@@ -260,16 +260,18 @@ function generatePrescriptionPDF_NEW(prescriptionData, date) {
                 yPos += 5;
                 doc.text(`Gender: ${gender || 'N/A'}`, margin, yPos);
                 doc.text(`Age: ${age || 'N/A'}`, margin + 30, yPos);
-                // Only show doctor if name is available (not empty)
-                if (doctorName) {
+                // Display doctor and doctor team on the same line if available
+                if (doctorName && doctorTeam) {
+                    doc.text(`Doctor: ${doctorName}`, margin + 60, yPos);
+                    doc.text(`Doctor Team: ${doctorTeam}`, margin + 135, yPos);
+                    yPos += 5;
+                } else if (doctorName) {
                     doc.text(`Doctor: ${doctorName}`, margin + 60, yPos);
                     yPos += 5;
-                } else {
-                    yPos += 5;
-                }
-                // Display doctor team if available
-                if (doctorTeam) {
+                } else if (doctorTeam) {
                     doc.text(`Doctor Team: ${doctorTeam}`, margin + 60, yPos);
+                    yPos += 5;
+                } else {
                     yPos += 5;
                 }
                 yPos += 3;
@@ -312,7 +314,7 @@ function generatePrescriptionPDF_NEW(prescriptionData, date) {
                             if (g.time) commonTime = g.time;
                             if (commonUsage && commonTime) break;
                         }
-                        
+
                         // Collect ALL medicines in this allocation, but keep them grouped with their dosages
                         const formattedLines = [];
                         let groupOilClass = '';
@@ -370,7 +372,7 @@ function generatePrescriptionPDF_NEW(prescriptionData, date) {
                             // 4. Empty/null: skip
                             if (group.ingredients) {
                                 let ingredientText = '';
-                                
+
                                 if (Array.isArray(group.ingredients)) {
                                     if (group.ingredients.length > 0) {
                                         // Check if it's an array of objects or strings
@@ -395,7 +397,7 @@ function generatePrescriptionPDF_NEW(prescriptionData, date) {
                                     // Single string
                                     ingredientText = group.ingredients.trim();
                                 }
-                                
+
                                 if (ingredientText) {
                                     allIngredients.push(ingredientText);
                                 }
@@ -558,7 +560,7 @@ function generatePrescriptionPDF_NEW(prescriptionData, date) {
                             } else {
                                 // Flat list - treat as one group with single usage
                                 const itemNames = therapyItem.items.map(it => it.item_name || '').filter(Boolean).join(' + ');
-                                
+
                                 // Get usage
                                 let usage = therapyItem.usage || '';
                                 if (!usage && therapyItem.usage_array && Array.isArray(therapyItem.usage_array)) {
@@ -744,14 +746,14 @@ function generatePrescriptionPDF_NEW(prescriptionData, date) {
                                 halign: 'left'
                             },
                             columnStyles: {
-                                0: { cellWidth: 28 },   // Therapy
-                                1: { cellWidth: 15 },   // Usage
-                                2: { cellWidth: 55 },   // Items (Dosage)
-                                3: { cellWidth: 20 },   // Oil Class
-                                4: { cellWidth: 15 },   // Time
-                                5: { cellWidth: 20 },   // From
-                                6: { cellWidth: 20 }    // To
-                                // Total: 173mm (fits in 237mm landscape with margins)
+                                0: { cellWidth: 38 },   // Therapy
+                                1: { cellWidth: 45 },   // Usage (widened to prevent awkward wrapping)
+                                2: { cellWidth: 87 },   // Items (Dosage)
+                                3: { cellWidth: 25 },   // Oil Class
+                                4: { cellWidth: 18 },   // Time
+                                5: { cellWidth: 21 },   // From
+                                6: { cellWidth: 21 }    // To
+                                // Total: 255mm (matches Prescription table width)
                             },
                             margin: { left: margin, right: margin },
                             tableWidth: 'auto'
