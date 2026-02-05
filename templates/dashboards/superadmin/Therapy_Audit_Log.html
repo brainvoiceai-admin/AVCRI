@@ -23,8 +23,15 @@
         <div class="d-flex justify-content-between align-items-center mb-4">
           <h2>Therapy Audit Log Dashboard</h2>
           <div>
-            <button class="btn btn-primary" onclick="exportLogs()">Export Logs</button>
-            <button class="btn btn-success" onclick="refreshLogs()">Refresh</button>
+            <button class="btn btn-primary" id="therapy-export-excel">
+              <i class="fas fa-file-excel"></i> Export Excel
+            </button>
+            <button class="btn btn-info" id="therapy-export-pdf">
+              <i class="fas fa-file-pdf"></i> Export PDF
+            </button>
+            <button class="btn btn-success" id="therapy-refresh-btn">
+              Refresh
+            </button>
           </div>
         </div>
 
@@ -285,9 +292,125 @@
       </div>
     </div>
   </div>
-
+  <!-- jsPDF Library -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
+  <!-- SheetJS for Excel export -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   
-    <script src="{% static 'js/dashboards_superadmin_Therapy_Audit_Log.js' %}"></script>
-    <script src="{% static 'js/dashboards_nav.js' %}"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', function () {
+      const excelBtn = document.getElementById('therapy-export-excel');
+      const pdfBtn = document.getElementById('therapy-export-pdf');
+      const refreshBtn = document.getElementById('therapy-refresh-btn');
+
+      if (refreshBtn) {
+        refreshBtn.addEventListener('click', function () {
+          window.location.reload();
+        });
+      }
+
+      function getTherapyTable() {
+        return document.querySelector('.card table.table');
+      }
+
+      if (excelBtn) {
+        excelBtn.addEventListener('click', function () {
+          const table = getTherapyTable();
+          if (!table) {
+            alert('Therapy audit log table not found.');
+            return;
+          }
+
+          const rows = [];
+          const headerRow = table.querySelector('thead tr');
+          if (!headerRow) {
+            alert('No header row found for therapy audit log table.');
+            return;
+          }
+
+          const headers = Array.from(headerRow.querySelectorAll('th')).map(th =>
+            (th.innerText || '').trim()
+          );
+          rows.push(headers);
+
+          table.querySelectorAll('tbody tr').forEach(tr => {
+            const cols = Array.from(tr.querySelectorAll('td')).map(td =>
+              (td.innerText || '').trim()
+            );
+            rows.push(cols);
+          });
+
+          if (rows.length <= 1) {
+            alert('No therapy audit logs to export on this page.');
+            return;
+          }
+
+          const wb = XLSX.utils.book_new();
+          const ws = XLSX.utils.aoa_to_sheet(rows);
+          XLSX.utils.book_append_sheet(wb, ws, 'Therapy Audit Logs');
+
+          const today = new Date().toISOString().split('T')[0];
+          XLSX.writeFile(wb, `Therapy_Audit_Logs_${today}.xlsx`);
+        });
+      }
+
+      if (pdfBtn) {
+        pdfBtn.addEventListener('click', function () {
+          const table = getTherapyTable();
+          if (!table) {
+            alert('Therapy audit log table not found.');
+            return;
+          }
+
+          const headerRow = table.querySelector('thead tr');
+          if (!headerRow) {
+            alert('No header row found for therapy audit log table.');
+            return;
+          }
+
+          const head = [
+            Array.from(headerRow.querySelectorAll('th')).map(th =>
+              (th.innerText || '').trim()
+            ),
+          ];
+
+          const body = [];
+          table.querySelectorAll('tbody tr').forEach(tr => {
+            const cols = Array.from(tr.querySelectorAll('td')).map(td =>
+              (td.innerText || '').trim()
+            );
+            body.push(cols);
+          });
+
+          if (body.length === 0) {
+            alert('No therapy audit logs to export on this page.');
+            return;
+          }
+
+          const { jsPDF } = window.jspdf || {};
+          if (!jsPDF || !window.jspdf || !window.jspdf.jsPDF) {
+            alert('PDF library not loaded.');
+            return;
+          }
+
+          const doc = new window.jspdf.jsPDF('l', 'pt', 'a4');
+
+          doc.autoTable({
+            head,
+            body,
+            styles: { fontSize: 8, cellPadding: 3 },
+            headStyles: { fillColor: [37, 99, 235] },
+            startY: 40,
+          });
+
+          const today = new Date().toISOString().split('T')[0];
+          doc.save(`Therapy_Audit_Logs_${today}.pdf`);
+        });
+      }
+    });
+  </script>
+  
+  <script src="{% static 'js/dashboards_nav.js' %}"></script>
 </body>
 </html>

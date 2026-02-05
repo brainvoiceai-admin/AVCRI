@@ -351,13 +351,18 @@
           <input type="hidden" name="action" value="update_user">
           <input type="hidden" name="user_id" value="{{ user.id }}">
           <div class="modal-body">
+            {% if edit_error_user_id == user.id and edit_error_message %}
+            <div class="alert alert-danger edit-modal-error mb-3" role="alert">
+              {{ edit_error_message }}
+            </div>
+            {% endif %}
             <div class="row">
               <div class="col-md-6">
                 <div class="mb-3">
-                  <label for="edit_username{{ user.id }}" class="form-label">Username</label>
+                  <label for="edit_username{{ user.id }}" class="form-label">Username *</label>
                   <input type="text" class="form-control" id="edit_username{{ user.id }}" 
-                         value="{{ user.username }}" readonly>
-                  <small class="text-muted">Username cannot be changed</small>
+                         name="username" value="{{ user.username }}" required>
+                  <small class="text-muted">Must be unique</small>
                 </div>
               </div>
               <div class="col-md-6">
@@ -563,5 +568,16 @@
   <input type="hidden" id="roleChangeUserId" value="">
     <script src="{% static 'js/dashboards_superadmin_Manage_user.js' %}"></script>
     <script src="{% static 'js/dashboards_nav.js' %}"></script>
+    {% if edit_error_user_id %}
+    <script>
+      document.addEventListener('DOMContentLoaded', function() {
+        var modalEl = document.getElementById('editUserModal{{ edit_error_user_id }}');
+        if (modalEl) {
+          var modal = new bootstrap.Modal(modalEl);
+          modal.show();
+        }
+      });
+    </script>
+    {% endif %}
 </body>
 </html>
