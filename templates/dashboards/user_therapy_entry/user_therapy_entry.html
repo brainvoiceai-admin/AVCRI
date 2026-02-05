@@ -57,7 +57,12 @@
                             </div>
                         </div>
 
-                        <div class="filters"></div>
+                        <div class="filters">
+                            <div class="filter-group">
+                                <label class="filter-label">Filter by Date</label>
+                                <input type="date" id="draft-date" value="{{ draft_date_filter }}">
+                            </div>
+                        </div>
 
                         <div class="table-container">
                                 <table id="draft-therapist-table">
@@ -121,7 +126,12 @@
                             </div>
                         </div>
 
-                        <div class="filters"></div>
+                        <div class="filters">
+                            <div class="filter-group">
+                                <label class="filter-label">Filter by Date</label>
+                                <input type="date" id="failed-date" value="{{ failed_date_filter }}">
+                            </div>
+                        </div>
 
                         <div class="table-container">
                             <table id="failed-table">
@@ -188,7 +198,7 @@
                         <div class="filters">
                             <div class="filter-group">
                                 <label class="filter-label">Filter by Date</label>
-                                <input type="date" id="scheduled-date" value="{{ date_filter }}">
+                                <input type="date" id="scheduled-date" value="{{ scheduled_date_filter }}">
                             </div>
                             <div class="filter-group" style="flex: 1;">
                                 <label class="filter-label">Search by Patient Name</label>

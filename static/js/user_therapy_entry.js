@@ -1,9 +1,28 @@
 // User Therapy Entry Dashboard JavaScript
 document.addEventListener('DOMContentLoaded', function () {
+    activateTabFromUrl();
     setupTabs();
     setupFilters();
     setupPatientSearch();
 });
+
+function getTabFromUrl() {
+    const params = new URLSearchParams(window.location.search);
+    const tab = params.get('tab');
+    if (tab === 'draft' || tab === 'failed' || tab === 'scheduled') return tab;
+    return null;
+}
+
+function activateTabFromUrl() {
+    const tab = getTabFromUrl();
+    if (!tab) return;
+    document.querySelectorAll('.tab').forEach(t => {
+        t.classList.toggle('active', t.dataset.tab === tab);
+    });
+    document.querySelectorAll('.tab-content').forEach(c => {
+        c.classList.toggle('active', c.id === tab);
+    });
+}
 
 function setupTabs() {
     document.querySelectorAll('.tab').forEach(tab => {
@@ -21,25 +40,42 @@ function setupTabs() {
 }
 
 function setupFilters() {
+    const draftDate = document.getElementById('draft-date');
+    const failedDate = document.getElementById('failed-date');
     const scheduledDate = document.getElementById('scheduled-date');
 
-    function applyDateFilter() {
-        if (!scheduledDate) return;
-        const dateVal = scheduledDate.value;
+    function getCurrentDateParams() {
+        const params = new URLSearchParams(window.location.search);
+        return {
+            draft_date: params.get('draft_date') || (draftDate ? draftDate.value : ''),
+            failed_date: params.get('failed_date') || (failedDate ? failedDate.value : ''),
+            scheduled_date: params.get('scheduled_date') || (scheduledDate ? scheduledDate.value : ''),
+        };
+    }
+
+    function applyDateFilter(tab, dateInput) {
+        if (!dateInput) return;
+        const dateVal = dateInput.value;
+        const current = getCurrentDateParams();
         const params = new URLSearchParams();
-        if (dateVal) {
-            params.append('date', dateVal);
-        }
-        const url = window.location.pathname + (params.toString() ? '?' + params.toString() : '');
+        params.set('draft_date', tab === 'draft' ? dateVal : (current.draft_date || dateVal));
+        params.set('failed_date', tab === 'failed' ? dateVal : (current.failed_date || dateVal));
+        params.set('scheduled_date', tab === 'scheduled' ? dateVal : (current.scheduled_date || dateVal));
+        params.set('tab', tab);
+        const url = window.location.pathname + '?' + params.toString();
         window.location.href = url;
     }
 
+    if (draftDate) {
+        draftDate.addEventListener('change', function () { applyDateFilter('draft', draftDate); });
+    }
+    if (failedDate) {
+        failedDate.addEventListener('change', function () { applyDateFilter('failed', failedDate); });
+    }
     if (scheduledDate) {
-        scheduledDate.addEventListener('change', applyDateFilter);
+        scheduledDate.addEventListener('change', function () { applyDateFilter('scheduled', scheduledDate); });
         scheduledDate.addEventListener('keyup', function (e) {
-            if (e.key === 'Enter') {
-                applyDateFilter();
-            }
+            if (e.key === 'Enter') applyDateFilter('scheduled', scheduledDate);
         });
     }
 }
