@@ -143,7 +143,8 @@
                         <div class="card-header">
                             <div>
                                 <div class="card-title">Failed Schedules</div>
-                                <div class="card-subtitle">Therapies that failed scheduling due to conflicts. Use date
+                                <div class="card-subtitle">Therapies that failed scheduling (exact reason shown when
+                                    date is selected). Use date
                                     filter to view failures for specific dates. Click "Reschedule" to move back to
                                     draft.</div>
                             </div>
@@ -177,6 +178,37 @@
                                     </tr>
                                 </thead>
                                 <tbody id="failed-body">
+                                    {% for booking in failed_bookings %}
+                                    <tr>
+                                        <td>
+                                            <div style="font-weight: 500;">
+                                                {{ booking.allocation.patient.pat_name }} ({{ booking.allocation.patient.pat_reg_no }})
+                                            </div>
+                                        </td>
+                                        <td>{{ booking.allocation.therapy_name }}</td>
+                                        <td>{{ booking.timeslot.slot_time|format_12hour|default:"—" }}</td>
+                                        <td>
+                                            {% if booking.allocation.patient.pat_room_no %}
+                                            {% with room_no=booking.allocation.patient.pat_room_no|get_staying_room_display %}
+                                            {{ room_no|default:booking.allocation.patient.pat_room_no }}
+                                            {% endwith %}
+                                            {% else %}
+                                            —
+                                            {% endif %}
+                                        </td>
+                                        <td>
+                                            <span class="status-badge status-failed"
+                                                title="{{ booking.failure_reason }}">{{ booking.failure_reason|default:"—" }}</span>
+                                        </td>
+                                        <td>Try different time slot</td>
+                                        <td>
+                                            <button class="btn btn-outline btn-small reschedule-single"
+                                                data-id="{{ booking.allocation.id }}">
+                                                Reschedule
+                                            </button>
+                                        </td>
+                                    </tr>
+                                    {% empty %}
                                     {% for allocation in failed_allocations %}
                                     <tr>
                                         <td>
@@ -196,9 +228,9 @@
                                             {% endif %}
                                         </td>
                                         <td>
-                                            <span class="status-badge status-failed">Slot Conflict</span>
+                                            <span class="status-badge status-failed">—</span>
                                         </td>
-                                        <td>Try different time slot</td>
+                                        <td>Select date to see reason</td>
                                         <td>
                                             <button class="btn btn-outline btn-small reschedule-single"
                                                 data-id="{{ allocation.id }}">
@@ -214,6 +246,7 @@
                                                 scheduling attempts.</div>
                                         </td>
                                     </tr>
+                                    {% endfor %}
                                     {% endfor %}
                                 </tbody>
                             </table>
@@ -400,7 +433,9 @@
                                                 <div class="nurse-list">
                                                     {% for nurse_assignment in booking.nurse_assignments.all %}
                                                     {% if nurse_assignment.status == 'assigned' %}
-                                                    <span class="nurse-badge">{{ nurse_assignment.nurse.nurse_name|default:nurse_assignment.nurse.nurse_code }}</span>
+                                                    <span class="nurse-badge">{{
+                                                        nurse_assignment.nurse.nurse_name|default:nurse_assignment.nurse.nurse_code
+                                                        }}</span>
                                                     {% endif %}
                                                     {% empty %}
                                                     —
@@ -433,6 +468,18 @@
                                         style="color:#ef4444">Red</span>=Changed, <span
                                         style="color:#6b7280">Gray</span>=Excused (Leave). (*) indicates Bathing
                                     Therapist.</div>
+                            </div>
+                            <div style="display: flex; gap: 12px; align-items: center; margin-left: auto;">
+                                <button class="btn btn-primary" id="export-continuity-excel"
+                                    title="Export Continuity Matrix to Excel"
+                                    style="background: #10b981; color: white; font-weight: 600; padding: 8px 18px; display: flex; align-items: center; gap: 6px;">
+                                    <span style="font-size: 16px;">📊</span> Export Excel
+                                </button>
+                                <button class="btn btn-primary" id="export-continuity-pdf"
+                                    title="Export Continuity Matrix to PDF"
+                                    style="background: #2ed573; color: white; font-weight: 600; padding: 8px 18px; display: flex; align-items: center; gap: 6px;">
+                                    <span style="font-size: 16px;">🖨️</span> Export PDF
+                                </button>
                             </div>
                         </div>
 
@@ -583,6 +630,7 @@
 
                     if (data.error) throw new Error(data.error);
 
+                    window._continuityMatrixData = data;  // Store for PDF/Excel export colors
                     renderMatrix(data);
                 } catch (e) {
                     alert('Error loading matrix: ' + e.message);
@@ -596,7 +644,7 @@
                 const tbody = document.getElementById('cont-body');
 
                 // Clear
-                thead.innerHTML = '<th style="position:sticky; left:0; background:#f9fafb; z-index:10; min-width:150px;">Patient</th>';
+                thead.innerHTML = '<th style="position:sticky; left:0; background:#f9fafb; z-index:10; min-width:150px;">Patient</th><th style="min-width:150px; background:#f9fafb;">Therapy</th><th style="min-width:100px; background:#f9fafb;">Slot</th>';
                 tbody.innerHTML = '';
 
                 // Render Headers
@@ -607,68 +655,307 @@
                     thead.appendChild(th);
                 });
 
-                // Render Rows
-                if (data.rows.length === 0) {
-                    tbody.innerHTML = `<tr><td colspan="${data.columns.length + 1}" style="text-align:center; padding:20px;">No data found</td></tr>`;
+                // No data check
+                if (!data.rows || data.rows.length === 0) {
+                    const tr = document.createElement('tr');
+                    const td = document.createElement('td');
+                    td.colSpan = data.columns.length + 3; // +3 for Patient, Therapy, Slot columns
+                    td.innerText = 'No data found for this date range';
+                    td.style.textAlign = 'center';
+                    td.style.padding = '20px';
+                    td.style.color = '#6b7280';
+                    tr.appendChild(td);
+                    tbody.appendChild(tr);
                     return;
                 }
 
+                // Calculate rowspan for each patient (count rows per patient)
+                const patientRowCounts = {};
+                data.rows.forEach(row => {
+                    const patientId = row.patient.id;
+                    patientRowCounts[patientId] = (patientRowCounts[patientId] || 0) + 1;
+                });
+
+                // Track which patients we've already rendered
+                const renderedPatients = new Set();
+
+                // Render Rows
                 data.rows.forEach(row => {
                     const tr = document.createElement('tr');
+                    const patientId = row.patient.id;
 
-                    // Patient Name Cell
-                    const tdPat = document.createElement('td');
-                    tdPat.style.position = 'sticky';
-                    tdPat.style.left = '0';
-                    tdPat.style.background = '#fff';
-                    tdPat.style.zIndex = '5';
-                    tdPat.style.borderRight = '1px solid #e5e7eb';
-                    tdPat.innerHTML = `
-                    <div style="font-weight:600; color:#1f2937;">${row.patient.name}</div>
-                    <div style="font-size:11px; color:#6b7280;">${row.patient.reg_no}</div>
-                `;
-                    tr.appendChild(tdPat);
+                    // Patient cell - only render once per patient with rowspan
+                    if (!renderedPatients.has(patientId)) {
+                        const tdPatient = document.createElement('td');
+                        tdPatient.style.position = 'sticky';
+                        tdPatient.style.left = '0';
+                        tdPatient.style.background = '#fff';
+                        tdPatient.style.zIndex = '5';
+                        tdPatient.style.borderRight = '1px solid #e5e7eb';
+                        tdPatient.style.verticalAlign = 'top';
+                        tdPatient.rowSpan = patientRowCounts[patientId];
+                        tdPatient.innerHTML = `
+                            <div style="font-weight:600; color:#1f2937; font-size:14px;">${row.patient.name}</div>
+                            <div style="font-size:11px; color:#6b7280; margin-top:2px;">${row.patient.reg_no}</div>
+                        `;
+                        tr.appendChild(tdPatient);
+                        renderedPatients.add(patientId);
+                    }
 
-                    // Date Cells
+                    // Therapy cell
+                    const tdTherapy = document.createElement('td');
+                    tdTherapy.innerText = row.therapy_name;
+                    tdTherapy.style.fontSize = '12px';
+                    tdTherapy.style.color = '#374151';
+                    tr.appendChild(tdTherapy);
+
+                    // Slot cell
+                    const tdSlot = document.createElement('td');
+                    tdSlot.innerText = row.slot || '—';
+                    tdSlot.style.fontSize = '12px';
+                    tdSlot.style.fontWeight = '500';
+                    tdSlot.style.color = '#374151';
+                    tr.appendChild(tdSlot);
+
+                    // Date cells
                     data.columns.forEach(dateStr => {
-                        const td = document.createElement('td');
                         const cell = row.cells[dateStr];
+                        const td = document.createElement('td');
+                        td.style.borderLeft = '1px solid #e5e7eb';
 
-                        if (!cell || !cell.therapists || cell.therapists.length === 0) {
-                            td.style.background = '#f9fafb'; // Empty
-                        } else {
-                            // Determine Color - Default Background
-                            td.style.background = '#fff';
-                            td.style.padding = '8px';
+                        if (!cell || cell.status === 'empty' || !cell.therapists || cell.therapists.length === 0) {
+                            td.innerText = '—';
+                            td.style.color = '#d1d5db';
+                            td.style.textAlign = 'center';
                             td.style.fontSize = '12px';
-                            td.style.borderRadius = '4px';
+                        } else {
+                            // Create therapist list without background colors
+                            const div = document.createElement('div');
+                            div.style.fontSize = '12px';
 
-                            // Render Therapists
-                            // Render Therapists
-                            cell.therapists.forEach(t => {
-                                const div = document.createElement('div');
-                                let style = 'color: #374151;'; // Default dark
+                            cell.therapists.forEach((t, index) => {
+                                const span = document.createElement('div');
 
+                                // Apply text color based on status (NO background)
                                 if (t.status === 'green') {
-                                    style = 'color: #059669; font-weight: 500;'; // Green
+                                    span.style.color = '#059669';  // Green text
+                                    span.style.fontWeight = '500';
                                 } else if (t.status === 'red') {
-                                    style = 'color: #ef4444; font-weight: 700;'; // Red + Bold
+                                    span.style.color = '#dc2626';  // Red text  
+                                    span.style.fontWeight = '700';  // Bold for emphasis
                                 } else if (t.status === 'gray') {
-                                    style = 'color: #6b7280; font-style: italic;'; // Gray + Italic
-                                } else if (t.status === 'new') {
-                                    // Fallback for new if not covered above
-                                    style = 'color: #374151;';
+                                    span.style.color = '#6b7280';  // Gray text
+                                    span.style.fontStyle = 'italic';
                                 }
 
-                                div.style.cssText = style;
-                                div.innerHTML = `${t.name} ${t.is_bathing ? '<b>*</b>' : ''}`;
-                                td.appendChild(div);
+                                // Add bathing indicator
+                                let displayName = t.name;
+                                if (t.is_bathing) {
+                                    displayName = '* ' + displayName;
+                                }
+
+                                span.innerText = displayName;
+                                div.appendChild(span);
                             });
+
+                            td.appendChild(div);
                         }
+
                         tr.appendChild(td);
                     });
 
                     tbody.appendChild(tr);
+                });
+            }
+        });
+    </script>
+    <script>
+        // Continuity Matrix export (table-based, non-intrusive)
+        document.addEventListener('DOMContentLoaded', function () {
+            const excelBtn = document.getElementById('export-continuity-excel');
+            const pdfBtn = document.getElementById('export-continuity-pdf');
+
+            if (excelBtn) {
+                excelBtn.addEventListener('click', function () {
+                    const table = document.getElementById('continuity-table');
+                    if (!table) {
+                        alert('Continuity table not found.');
+                        return;
+                    }
+
+                    const rows = [];
+                    const headerRow = table.querySelector('thead tr');
+                    if (!headerRow) {
+                        alert('No header row found for continuity matrix.');
+                        return;
+                    }
+
+                    const headerCells = Array.from(headerRow.querySelectorAll('th')).map(th =>
+                        (th.innerText || '').trim()
+                    );
+                    rows.push(headerCells);
+
+                    const bodyRows = table.querySelectorAll('tbody tr');
+                    bodyRows.forEach(tr => {
+                        const cells = Array.from(tr.querySelectorAll('td')).map(td =>
+                            (td.innerText || '').trim()
+                        );
+                        rows.push(cells);
+                    });
+
+                    if (rows.length <= 1) {
+                        alert('No continuity data to export. Please load the matrix first.');
+                        return;
+                    }
+
+                    const wb = XLSX.utils.book_new();
+                    const ws = XLSX.utils.aoa_to_sheet(rows);
+                    XLSX.utils.book_append_sheet(wb, ws, 'Continuity Matrix');
+
+                    const from = document.getElementById('cont-from')?.value || '';
+                    const to = document.getElementById('cont-to')?.value || '';
+                    let filename = 'Continuity_Matrix';
+                    if (from && to) {
+                        filename += `_${from.replace(/-/g, '')}_${to.replace(/-/g, '')}`;
+                    }
+                    filename += '.xlsx';
+
+                    XLSX.writeFile(wb, filename);
+                });
+            }
+
+            if (pdfBtn) {
+                pdfBtn.addEventListener('click', function () {
+                    const data = window._continuityMatrixData;
+                    if (!data || !data.rows || data.rows.length === 0) {
+                        alert('No continuity data to export. Please load the matrix first.');
+                        return;
+                    }
+
+                    const { jsPDF } = window.jspdf || {};
+                    if (!jsPDF || !window.jspdf || !window.jspdf.jsPDF) {
+                        alert('PDF library not loaded.');
+                        return;
+                    }
+
+                    // Build header: Patient, Therapy, Slot, then date columns
+                    const head = [
+                        ['Patient', 'Therapy', 'Slot'].concat(
+                            (data.columns || []).map(dateStr =>
+                                new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+                            )
+                        ),
+                    ];
+
+                    // Build body and per-therapist data for date cells (one colour per therapist, like the page)
+                    const body = [];
+                    const cellTherapistData = [];  // rowIdx -> [ colIdx -> [{ name, status, is_bathing }, ...] ]
+
+                    function cellText(cell) {
+                        if (!cell || cell.status === 'empty' || !cell.therapists || cell.therapists.length === 0) return '—';
+                        return cell.therapists.map(t => (t.is_bathing ? '* ' : '') + t.name).join('\n');
+                    }
+                    function therapistList(cell) {
+                        if (!cell || cell.status === 'empty' || !cell.therapists || cell.therapists.length === 0) return [];
+                        return cell.therapists.map(t => ({ name: t.name, status: t.status || 'green', is_bathing: t.is_bathing }));
+                    }
+
+                    data.rows.forEach(row => {
+                        const rowData = [
+                            (row.patient.name || '') + (row.patient.reg_no ? '\n' + row.patient.reg_no : ''),
+                            row.therapy_name || '',
+                            row.slot || '—',
+                        ];
+                        const rowTherapists = [null, null, null];  // first 3 cols have no therapist list
+
+                        (data.columns || []).forEach(dateStr => {
+                            const cell = row.cells[dateStr];
+                            rowData.push(cellText(cell));
+                            rowTherapists.push(therapistList(cell));
+                        });
+
+                        body.push(rowData);
+                        cellTherapistData.push(rowTherapists);
+                    });
+
+                    const padding = 4;
+                    const paddingBottom = 8;   // extra space after last name before column line
+                    const fontSize = 6;
+                    const lineHeight = fontSize * 1.3;
+                    const textColorByStatus = {
+                        green: [5, 150, 105],    // #059669
+                        red: [220, 38, 38],       // #dc2626
+                        gray: [107, 114, 128],   // #6b7280
+                    };
+
+                    const doc = new window.jspdf.jsPDF('l', 'pt', 'a4');
+                    const pageWidth = doc.internal.pageSize.getWidth();
+                    const margin = 20;
+                    const tableWidth = pageWidth - 2 * margin;
+
+                    doc.autoTable({
+                        head,
+                        body,
+                        tableWidth: tableWidth,
+                        margin: { left: margin, right: margin },
+                        styles: {
+                            fontSize: fontSize,
+                            cellPadding: { top: padding, right: padding, bottom: paddingBottom, left: padding },
+                            overflow: 'linebreak'
+                        },
+                        headStyles: { fillColor: [37, 99, 235] },
+                        startY: 40,
+                        columnStyles: {
+                            0: { cellWidth: 52 },   // Patient - fixed so date cols get space
+                            1: { cellWidth: 42 },   // Therapy
+                            2: { cellWidth: 36 },   // Slot
+                        },
+                        didDrawCell: function (cellData) {
+                            const section = cellData.section;
+                            if (section !== 'body') return;
+                            const ri = cellData.row?.index;
+                            const ci = cellData.column?.index;
+                            if (ri == null || ci == null || ci < 3) return;
+                            const therapists = cellTherapistData[ri] && cellTherapistData[ri][ci];
+                            if (!therapists || therapists.length === 0) return;
+
+                            const cell = cellData.cell;
+                            const docRef = cellData.doc;
+                            const x = cell.x + padding;
+                            let y = cell.y + padding + fontSize;
+                            const maxTextWidth = Math.max(20, cell.width - 2 * padding);
+
+                            docRef.setFillColor(255, 255, 255);
+                            docRef.rect(cell.x + 1, cell.y + 1, cell.width - 2, cell.height - 2, 'F');
+                            docRef.setFontSize(fontSize);
+
+                            therapists.forEach(function (t) {
+                                const displayName = (t.is_bathing ? '* ' : '') + t.name;
+                                const color = textColorByStatus[t.status] || textColorByStatus.gray;
+                                docRef.setTextColor(color[0], color[1], color[2]);
+                                const lines = docRef.splitTextToSize(displayName, maxTextWidth);
+                                if (Array.isArray(lines)) {
+                                    lines.forEach(function (line) {
+                                        docRef.text(line, x, y);
+                                        y += lineHeight;
+                                    });
+                                } else {
+                                    docRef.text(displayName, x, y);
+                                    y += lineHeight;
+                                }
+                            });
+                        },
+                    });
+
+                    const from = document.getElementById('cont-from')?.value || '';
+                    const to = document.getElementById('cont-to')?.value || '';
+                    let filename = 'Continuity_Matrix';
+                    if (from && to) {
+                        filename += `_${from.replace(/-/g, '')}_${to.replace(/-/g, '')}`;
+                    }
+                    filename += '.pdf';
+
+                    doc.save(filename);
                 });
             }
         });
