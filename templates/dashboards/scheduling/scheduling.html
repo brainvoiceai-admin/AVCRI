@@ -878,9 +878,10 @@
                         cellTherapistData.push(rowTherapists);
                     });
 
-                    const padding = 3;
-                    const fontSize = 7;
-                    const lineHeight = fontSize * 1.35;
+                    const padding = 4;
+                    const paddingBottom = 8;   // extra space after last name before column line
+                    const fontSize = 6;
+                    const lineHeight = fontSize * 1.3;
                     const textColorByStatus = {
                         green: [5, 150, 105],    // #059669
                         red: [220, 38, 38],       // #dc2626
@@ -888,13 +889,27 @@
                     };
 
                     const doc = new window.jspdf.jsPDF('l', 'pt', 'a4');
+                    const pageWidth = doc.internal.pageSize.getWidth();
+                    const margin = 20;
+                    const tableWidth = pageWidth - 2 * margin;
 
                     doc.autoTable({
                         head,
                         body,
-                        styles: { fontSize: fontSize, cellPadding: padding },
+                        tableWidth: tableWidth,
+                        margin: { left: margin, right: margin },
+                        styles: {
+                            fontSize: fontSize,
+                            cellPadding: { top: padding, right: padding, bottom: paddingBottom, left: padding },
+                            overflow: 'linebreak'
+                        },
                         headStyles: { fillColor: [37, 99, 235] },
                         startY: 40,
+                        columnStyles: {
+                            0: { cellWidth: 52 },   // Patient - fixed so date cols get space
+                            1: { cellWidth: 42 },   // Therapy
+                            2: { cellWidth: 36 },   // Slot
+                        },
                         didDrawCell: function (cellData) {
                             const section = cellData.section;
                             if (section !== 'body') return;
@@ -908,8 +923,8 @@
                             const docRef = cellData.doc;
                             const x = cell.x + padding;
                             let y = cell.y + padding + fontSize;
+                            const maxTextWidth = Math.max(20, cell.width - 2 * padding);
 
-                            // White out the cell content area so default black text is hidden, then draw each line in its colour
                             docRef.setFillColor(255, 255, 255);
                             docRef.rect(cell.x + 1, cell.y + 1, cell.width - 2, cell.height - 2, 'F');
                             docRef.setFontSize(fontSize);
@@ -918,8 +933,16 @@
                                 const displayName = (t.is_bathing ? '* ' : '') + t.name;
                                 const color = textColorByStatus[t.status] || textColorByStatus.gray;
                                 docRef.setTextColor(color[0], color[1], color[2]);
-                                docRef.text(displayName, x, y);
-                                y += lineHeight;
+                                const lines = docRef.splitTextToSize(displayName, maxTextWidth);
+                                if (Array.isArray(lines)) {
+                                    lines.forEach(function (line) {
+                                        docRef.text(line, x, y);
+                                        y += lineHeight;
+                                    });
+                                } else {
+                                    docRef.text(displayName, x, y);
+                                    y += lineHeight;
+                                }
                             });
                         },
                     });
