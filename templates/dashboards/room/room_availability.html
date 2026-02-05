@@ -1,0 +1,126 @@
+{%load static%}
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Treatment Room Availability Dashboard</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <link rel="stylesheet" href="{% static 'css/room_availability.css' %}">
+    <link rel="stylesheet" href="{% static 'css/dashboards_nav.css' %}">
+</head>
+
+<body>
+    {% include 'dashboards/nav.html' %}
+    <div class="main-content">
+        <div class="container">
+            <header>
+                <div class="logo">
+                    <i class="fas fa-door-open"></i>
+                    <h1>Treatment Room Availability Dashboard</h1>
+                </div>
+                <p class="subtitle">Find available treatment rooms and check occupancy schedules</p>
+            </header>
+
+            <div class="dashboard">
+                <!-- Section 1: Room Availability -->
+                <div class="card">
+                    <div class="card-header">
+                        <i class="fas fa-search"></i>
+                        <h2>Find Available Rooms</h2>
+                    </div>
+                    <div class="card-body">
+                        <form id="availabilityForm">
+                            <div class="form-group">
+                                <label for="date"><i class="far fa-calendar-alt"></i> Date</label>
+                                <input type="date" id="date" class="form-control" required>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="time"><i class="far fa-clock"></i> Time Slot</label>
+                                <select id="time" class="form-control" required>
+                                    <option value="">-- Select Time Slot --</option>
+                                </select>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="floor"><i class="fas fa-building"></i> Floor</label>
+                                <select id="floor" class="form-control">
+                                    <option value="all">-- All Floors --</option>
+                                    {% for floor in floors %}
+                                    <option value="{{ floor }}">{{ floor }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+
+                            <button type="button" class="btn" onclick="findAvailability()" id="availabilityBtn">
+                                <i class="fas fa-search"></i> Check Availability
+                            </button>
+                        </form>
+
+                        <div class="result" id="availableRooms">
+                            <h3><i class="fas fa-list"></i> Available Rooms</h3>
+                            <p class="no-result"><i class="far fa-smile"></i> Select filters and click "Check
+                                Availability" to see results</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Section 2: Occupied Rooms -->
+                <div class="card">
+                    <div class="card-header">
+                        <i class="fas fa-clipboard-list"></i>
+                        <h2>Occupied Rooms</h2>
+                    </div>
+                    <div class="card-body">
+                        <form id="occupiedForm">
+                            <div class="form-group">
+                                <label for="occupiedDate"><i class="far fa-calendar-alt"></i> Date</label>
+                                <input type="date" id="occupiedDate" class="form-control" required>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="occupiedTime"><i class="far fa-clock"></i> Time Slot</label>
+                                <select id="occupiedTime" class="form-control" required>
+                                    <option value="">-- Select Time Slot --</option>
+                                </select>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="occupiedFloor"><i class="fas fa-building"></i> Floor</label>
+                                <select id="occupiedFloor" class="form-control">
+                                    <option value="all">-- All Floors --</option>
+                                    {% for floor in floors %}
+                                    <option value="{{ floor }}">{{ floor }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+
+                            <button type="button" class="btn" onclick="checkOccupied()" id="occupiedBtn">
+                                <i class="fas fa-search"></i> Check Occupied
+                            </button>
+                        </form>
+
+                        <div class="result" id="occupiedRooms">
+                            <h3><i class="fas fa-list"></i> Occupied Rooms</h3>
+                            <p class="no-result"><i class="far fa-smile"></i> Select filters to check occupied rooms</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <footer>
+                <p>Treatment Room Availability Dashboard &copy; 2025 | Designed for Better Patient Care</p>
+            </footer>
+        </div>
+
+
+    </div>
+    </div>
+    <script src="{% static 'js/room_availability.js' %}"></script>
+    <script src="{% static 'js/dashboards_nav.js' %}"></script>
+</body>
+
+</html>

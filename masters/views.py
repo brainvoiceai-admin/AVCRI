@@ -191,7 +191,8 @@ def create_master_item(request):
                 item_name=data['item_name'],
                 item_group=item_group,
                 umo=umo,
-                min_max=data.get('min_max', '')
+                min_quantity=data.get('min_quantity'),
+                max_quantity=data.get('max_quantity')
             )
         elif master_type == 'slot':
             from datetime import datetime
@@ -293,7 +294,8 @@ def update_master_item(request, item_id):
                     item.umo = None
             else:
                 item.umo = None
-            item.min_max = data.get('min_max', item.min_max)
+            item.min_quantity = data.get('min_quantity', item.min_quantity)
+            item.max_quantity = data.get('max_quantity', item.max_quantity)
             # Handle procured_from as ForeignKey - can be ID or name
             procured_from_data = data.get('procured_from')
             if procured_from_data:
@@ -1618,7 +1620,7 @@ class ItemMasterManagementView(ListView):
         context['master_type'] = 'item'
         context['master_name'] = 'Item Master'
         context['required_fields'] = ['item_name']
-        context['optional_fields'] = ['item_group', 'umo', 'min_max', 'procured_from', 'is_active']
+        context['optional_fields'] = ['item_group', 'umo', 'min_quantity', 'max_quantity', 'procured_from', 'is_active']
         context['search'] = self.request.GET.get('search', '')
         context['status_filter'] = self.request.GET.get('status', '')
         context['group_filter'] = self.request.GET.get('group', '')
@@ -1630,12 +1632,13 @@ class ItemMasterForm(forms.ModelForm):
     """Custom form for ItemMaster with filtered procured_from dropdown"""
     class Meta:
         model = ItemMaster
-        fields = ['item_name', 'item_group', 'umo', 'min_max', 'procured_from', 'is_active']
+        fields = ['item_name', 'item_group', 'umo', 'min_quantity', 'max_quantity', 'procured_from', 'is_active']
         widgets = {
             'item_name': forms.TextInput(attrs={'class': 'form-control'}),
             'item_group': forms.Select(attrs={'class': 'form-control'}),
             'umo': forms.Select(attrs={'class': 'form-control'}),
-            'min_max': forms.TextInput(attrs={'class': 'form-control'}),
+            'min_quantity': forms.NumberInput(attrs={'class': 'form-control', 'min': 0, 'placeholder': 'Min'}),
+            'max_quantity': forms.NumberInput(attrs={'class': 'form-control', 'min': 0, 'placeholder': 'Max'}),
             'procured_from': forms.Select(attrs={'class': 'form-control'}),
             'is_active': forms.CheckboxInput(attrs={'class': 'form-check-input'}),
         }
@@ -2591,10 +2594,10 @@ def download_master_template(request, master_type):
             }
         elif master_type == 'item' or master_type == 'itemmaster':
             template_data = {
-                'columns': ['item_name', 'item_group', 'umo', 'min_max', 'procured_from', 'is_active'],
+                'columns': ['item_name', 'item_group', 'umo', 'min_quantity', 'max_quantity', 'procured_from', 'is_active'],
                 'example_rows': [
-                    ['Sesame Oil', 'Oil', 'ml', '', 'IP Pharmacy', 'true'],
-                    ['Turmeric Powder', 'Herb', 'gm', '', 'Kashaya Room', 'true'],
+                    ['Sesame Oil', 'Oil', 'ml', 10, 100, 'IP Pharmacy', 'true'],
+                    ['Turmeric Powder', 'Herb', 'gm', 5, 50, 'Kashaya Room', 'true'],
                 ]
             }
         elif master_type == 'slot' or master_type == 'slotmaster':
@@ -2917,7 +2920,8 @@ def bulk_upload_master(request):
                             item.item_name = item_name
                             item.item_group = item_group_obj
                             item.umo = umo_obj
-                            item.min_max = str(row.get('min_max', '')).strip() or None
+                            item.min_quantity = _parse_int(row.get('min_quantity'), None)
+                            item.max_quantity = _parse_int(row.get('max_quantity'), None)
                             item.procured_from = procured_from_obj
                             item.is_active = is_active
                             item.save()
@@ -2930,7 +2934,8 @@ def bulk_upload_master(request):
                                 item_name=item_name,
                                 item_group=item_group_obj,
                                 umo=umo_obj,
-                                min_max=str(row.get('min_max', '')).strip() or None,
+                                min_quantity=_parse_int(row.get('min_quantity'), None),
+                                max_quantity=_parse_int(row.get('max_quantity'), None),
                                 procured_from=procured_from_obj,
                                 is_active=is_active
                             )

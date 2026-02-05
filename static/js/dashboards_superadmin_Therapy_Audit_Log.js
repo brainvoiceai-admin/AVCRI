@@ -1,7 +1,14 @@
 function exportLogs() {
       // Get current URL parameters
       const urlParams = new URLSearchParams(window.location.search);
-      const exportUrl = '{% url "authentication:Therapy_Audit_Log" %}' + '?' + urlParams.toString() + '&export=csv';
+      const base = window.THERAPY_AUDIT_LOG_EXPORT_BASE || '/authentication/Therapy_Audit_Log/dashboard/';
+      let exportUrl = base;
+      const query = urlParams.toString();
+      if (query) {
+        exportUrl += '?' + query + '&export=csv';
+      } else {
+        exportUrl += '?export=csv';
+      }
       window.open(exportUrl, '_blank');
     }
 
