@@ -211,6 +211,14 @@ STATICFILES_DIRS = [
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 AUTH_USER_MODEL = "authentication.CustomUser"
 
+# ---------------------------------------------------------------------------
+# Session settings
+# ---------------------------------------------------------------------------
+# Enforce automatic logout after 30 minutes of inactivity.
+# Frontend also shows a warning popup at 28 minutes (see static/js/idle_timeout.js).
+SESSION_COOKIE_AGE = 30 * 60  # 30 minutes, in seconds
+SESSION_SAVE_EVERY_REQUEST = True  # Keep active users logged in, idle users time out
+
 # REST Framework Configuration
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [

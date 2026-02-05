@@ -409,18 +409,23 @@ def logout_view(request):
     user = request.user
     logout(request)
     
-    # Log logout (before user is logged out)
-    if user.is_authenticated:
-        log_audit_event(
-            user=user,
-            action='logout',
-            description=f'User {user.username} logged out',
-            status='success',
-            request=request
-        )
+    # Log logout (best-effort; user object is still available here)
+    try:
+        if user and user.is_authenticated:
+            log_audit_event(
+                user=user,
+                action='logout',
+                description=f'User {user.username} logged out',
+                status='success',
+                request=request
+            )
+    except Exception:
+        # Never block logout on audit/logging issues
+        pass
     
-    messages.info(request, 'You have been logged out.')
-    return redirect('patient:home')
+    messages.info(request, 'You have been logged out due to inactivity or manual logout.')
+    # After logout, always send the user back to the login page
+    return redirect('authentication:login')
 
 @login_required
 @role_required(['therapist'])

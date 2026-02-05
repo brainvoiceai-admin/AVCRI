@@ -1,3 +1,4 @@
+{% load static %}
 <div class="sidebar" id="sidebar">
     <div class="sidebar-header">
         <div class="profile-section">
@@ -525,6 +526,6 @@
     <span></span>
 </button>
 
-
-
+<!-- Global idle timeout handling: 28-minute warning, 30-minute auto logout -->
+<script src="{% static 'js/idle_timeout.js' %}"></script>
 
