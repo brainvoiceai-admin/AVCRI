@@ -30,15 +30,83 @@ def continuity_matrix_api(request):
             
         exclude_leave = (exclude_leave_str.lower() == 'true')
         
+        # === ENHANCED DEBUG: Check RAJALAKSHMY BEFORE filter ===
+        print(f"\n{'='*80}")
+        print(f"[DEBUG] RAJALAKSHMY INVESTIGATION - BEFORE STATUS FILTER")
+        print(f"{'='*80}")
+        
+        # Get ALL bookings for patient_id 423 (RAJALAKSHMY) before any filter
+        rajalakshmy_id = 423
+        all_rajalakshmy = TherapistBooking.objects.filter(
+            date__range=[from_date, to_date],
+            patient_id=rajalakshmy_id
+        )
+        print(f"[DEBUG] Total RAJALAKSHMY bookings (patient_id={rajalakshmy_id}): {all_rajalakshmy.count()}")
+        
+        for b in all_rajalakshmy:
+            print(f"\n  Booking ID: {b.id}")
+            print(f"  patient_id: {b.patient_id}")
+            if b.visit and b.visit.patient:
+                print(f"  visit.patient.id: {b.visit.patient.id}")
+                print(f"  visit.patient.pat_name: {b.visit.patient.pat_name}")
+            else:
+                print(f"  visit.patient: NULL/N/A")
+            print(f"  Date: {b.date}")
+            print(f"  Therapy: {b.therapy_name}")
+            print(f"  Status: [{b.status}]")
+            print(f"  Status length: {len(b.status)}")
+            print(f"  Status repr: {repr(b.status)}")
+            print(f"  Status bytes: {b.status.encode('utf-8')}")
+            print(f"  Status stripped: [{b.status.strip()}]")
+            print(f"  'cancel' in status.lower(): {'cancel' in b.status.lower()}")
+            print(f"  'CANCEL' in status: {'CANCEL' in b.status}")
+            print(f"  'CANCELLED' in status: {'CANCELLED' in b.status}")
+            print(f"  Should be excluded: {'cancel' in b.status.lower()}")
+        
+        print(f"\n{'='*80}\n")
+        # === END ENHANCED DEBUG ===
+        
         # 1. Fetch Schedule Data (TherapistBooking is the source of truth for assignments)
         # Using 'visit__patient' to get patient details
-        # CRITICAL: Explicitly exclude CANCELED status to prevent cancelled treatments from appearing in matrix
+        # CRITICAL: Explicitly exclude both spellings of CANCELLED/CANCELED to prevent cancelled treatments from appearing in matrix
         bookings = TherapistBooking.objects.filter(
-            date__range=[from_date, to_date],
-            status__in=['BOOKED', 'scheduled', 'COMPLETED']
+            date__range=[from_date, to_date]
         ).exclude(
-            status='CANCELED'  # Explicit exclusion of cancelled treatments
+            status__icontains='cancel'  # Exclude both CANCELLED and CANCELED (any case variation)
         ).select_related('therapist', 'visit__patient', 'time_slot').order_by('date')
+        
+        # === DEBUG: Check RAJALAKSHMY AFTER filter ===
+        rajalakshmy_after = bookings.filter(patient_id=rajalakshmy_id)
+        print(f"[DEBUG] RAJALAKSHMY bookings AFTER status filter: {rajalakshmy_after.count()}")
+        if rajalakshmy_after.exists():
+            print(f"⚠️⚠️⚠️ FILTER DID NOT WORK! ⚠️⚠️⚠️")
+            print(f"These bookings passed the filter:")
+            for b in rajalakshmy_after:
+                print(f"  ID: {b.id}, Date: {b.date}, Status: [{b.status}]")
+        else:
+            print(f"✅ Filter worked correctly - no RAJALAKSHMY bookings after filter")
+        print(f"{'='*80}\n")
+        
+        # DEBUG: Log what we're fetching
+        print(f"[CONTINUITY MATRIX] Date range: {from_date} to {to_date}")
+        print(f"[CONTINUITY MATRIX] Total bookings after filter: {bookings.count()}")
+        
+        # Check for RAJALAKSHMY specifically
+        rajalakshmy_bookings = bookings.filter(visit__patient__pat_name__icontains='RAJALAK')
+        if rajalakshmy_bookings.exists():
+            print(f"\n⚠️⚠️⚠️ RAJALAKSHMY BOOKINGS FOUND IN MATRIX! ⚠️⚠️⚠️")
+            print(f"Total RAJALAKSHMY bookings: {rajalakshmy_bookings.count()}")
+            for b in rajalakshmy_bookings[:5]:  # Show first 5
+                print(f"  Patient ID: {b.patient_id}")
+                print(f"  Patient Name: {b.visit.patient.pat_name if b.visit and b.visit.patient else 'N/A'}")
+                print(f"  Date: {b.date}")
+                print(f"  Therapy: {b.therapy_name}")
+                print(f"  Status: [{b.status}] (type: {type(b.status).__name__}, len: {len(b.status)})")
+                print(f"  Status bytes: {b.status.encode('utf-8')}")
+                print(f"  Contains 'cancel': {'cancel' in b.status.lower()}")
+                print(f"  ---")
+            print(f"⚠️⚠️⚠️ END RAJALAKSHMY DEBUG ⚠️⚠️⚠️\n")
+        
         
         # 2. Build Caches
         # (A) Patient Info Cache
@@ -187,10 +255,9 @@ def continuity_matrix_api(request):
                             last_booking = TherapistBooking.objects.filter(
                                 patient_id=pat_id,
                                 therapy_name=t_name,
-                                date__lt=date_obj,
-                                status__in=['BOOKED', 'scheduled', 'COMPLETED']
+                                date__lt=date_obj
                             ).exclude(
-                                status='CANCELED'  # Explicit exclusion of cancelled treatments
+                                status__icontains='cancel'  # Exclude both CANCELLED and CANCELED (any case variation)
                             ).order_by('-date').first()
                             
                             if last_booking:
@@ -198,10 +265,9 @@ def continuity_matrix_api(request):
                                 prev_bookings = TherapistBooking.objects.filter(
                                     patient_id=pat_id,
                                     therapy_name=t_name,
-                                    date=last_booking.date,
-                                    status__in=['BOOKED', 'scheduled', 'COMPLETED']
+                                    date=last_booking.date
                                 ).exclude(
-                                    status='CANCELED'  # Explicit exclusion of cancelled treatments
+                                    status__icontains='cancel'  # Exclude both CANCELLED and CANCELED (any case variation)
                                 ).values_list('therapist_id', flat=True)
                                 reference_set = set(prev_bookings)
                             else:
@@ -275,10 +341,21 @@ def continuity_matrix_api(request):
                     
                     rows.append(row)
             
-        return JsonResponse({
+        response = JsonResponse({
             'columns': date_cols,
-            'rows': rows
+            'rows': rows,
+            'meta': {
+                'total_bookings_fetched': bookings.count(),
+                'total_patients': len(schedule_map),
+                'total_rows': len(rows),
+                'date_range': f"{from_date} to {to_date}"
+            }
         })
+        # Add cache-control headers to prevent browser caching
+        response['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+        response['Pragma'] = 'no-cache'
+        response['Expires'] = '0'
+        return response
     except Exception as e:
         import traceback
         return JsonResponse({
