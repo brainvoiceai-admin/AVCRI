@@ -75,6 +75,8 @@ $(function () {
   let resumingTherapyIndex = null;
   let selectedPatient = null;
   let therapyActionById = {};
+  // Track insertion index for item groups to preserve order during edits
+  let editingGroupInsertionIndex = null;
 
   // Track the last action performed on each therapy so we can color-code rows
   function rememberTherapyAction(id, action) {
@@ -340,8 +342,10 @@ $(function () {
     editTherapyIndex = null;
     cancelingTherapyIndex = null;
     resumingTherapyIndex = null;
+    resumingTherapyIndex = null;
     viewingStatusTherapyIndex = null;
     pendingSlotValue = null;
+    editingGroupInsertionIndex = null;
     // Clear remembered actions when switching patients to avoid stale data
     therapyActionById = {};
 
@@ -666,9 +670,26 @@ $(function () {
       return;
     }
 
-    const items = selected.length > 0 ? selected.map(s => ({ item_code: s.id, item_name: s.text || s.id })) : [];
+    // Deduplicate items to ensure uniqueness within the group
+    const uniqueItemsMap = new Map();
+    if (selected && selected.length > 0) {
+      selected.forEach(s => {
+        if (!uniqueItemsMap.has(s.id)) {
+          uniqueItemsMap.set(s.id, { item_code: s.id, item_name: s.text || s.id });
+        }
+      });
+    }
+    const items = Array.from(uniqueItemsMap.values());
     const grp = { id: Math.random().toString(36).slice(2, 9), items, dosage, uno, oil_class: oilClass };
-    itemGroups.push(grp);
+
+    // If we are editing (insertion index is set), insert at that position
+    if (editingGroupInsertionIndex !== null && editingGroupInsertionIndex >= 0 && editingGroupInsertionIndex <= itemGroups.length) {
+      itemGroups.splice(editingGroupInsertionIndex, 0, grp);
+      editingGroupInsertionIndex = null; // Reset after insertion
+    } else {
+      itemGroups.push(grp);
+    }
+
     $itemBuilder.val(null).trigger('change');
     $('#item-builder-dosage').val('');
     $('#item-builder-uno').val('');
@@ -718,19 +739,41 @@ $(function () {
 
   $itemGroupsList.on('click', '.edit-group', function () {
     const id = $(this).data('id');
-    const g = itemGroups.find(x => x.id === id);
-    if (!g) return;
+    const index = itemGroups.findIndex(x => x.id === id);
+    if (index === -1) return;
+    const g = itemGroups[index];
+
+    // Store index to preserve order
+    editingGroupInsertionIndex = index;
+
     $itemBuilder.val(null).trigger('change');
+    const codesToSelect = [];
     g.items.forEach(it => {
-      const opt = new Option(it.item_name, it.item_code, true, true);
-      $itemBuilder.append(opt);
+      // Check if option already exists to prevent duplicates
+      let exists = false;
+      $itemBuilder.find('option').each(function () {
+        if ($(this).val() == it.item_code) {
+          exists = true;
+          return false; // break
+        }
+      });
+
+      if (!exists) {
+        // Create unselected option first
+        const opt = new Option(it.item_name, it.item_code, false, false);
+        $itemBuilder.append(opt);
+      }
+      codesToSelect.push(it.item_code);
     });
-    $itemBuilder.trigger('change');
+    // Set values and trigger change to update selection
+    $itemBuilder.val(codesToSelect).trigger('change');
     $('#item-builder-dosage').val(g.dosage || '');
     $('#item-builder-uno').val(g.uno || '');
     // Set Oil Class in item builder
     $itemBuilderOilClass.val(g.oil_class || '');
-    itemGroups = itemGroups.filter(x => x.id !== id);
+
+    // Use splice to remove proper index
+    itemGroups.splice(index, 1);
     renderItemGroups();
   });
 
@@ -2147,7 +2190,7 @@ $(function () {
 
   // Initialize UnitNo dropdown
   loadUnitNumbers();
-  
+
   // Set from date to current date on page load
   const today = new Date().toISOString().split('T')[0];
   $fromDate.val(today);
