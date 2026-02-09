@@ -145,17 +145,21 @@
                                     {% endif %}
                                 </td>
                                 <td>
-                                    {% if therapy.bathing_required %}
-                                    <span class="badge bg-info">Yes</span>
+                                    {% if therapy.bathing_required == 'Yes' %}
+                                        <span class="badge bg-info">Yes</span>
+                                    {% elif therapy.bathing_required == 'Optional' %}
+                                        <span class="badge bg-secondary">Optional</span>
                                     {% else %}
-                                    <span class="badge bg-secondary">No</span>
+                                        <span class="badge bg-secondary">No</span>
                                     {% endif %}
                                 </td>
                                 <td>
-                                    {% if therapy.treatment_room_required %}
-                                    <span class="badge bg-warning">Yes</span>
+                                    {% if therapy.treatment_room_required == 'Yes' %}
+                                        <span class="badge bg-warning">Yes</span>
+                                    {% elif therapy.treatment_room_required == 'Optional' %}
+                                        <span class="badge bg-secondary">Optional</span>
                                     {% else %}
-                                    <span class="badge bg-secondary">No</span>
+                                        <span class="badge bg-secondary">No</span>
                                     {% endif %}
                                 </td>
                                 <td>
