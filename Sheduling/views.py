@@ -1758,7 +1758,7 @@ def therapy_entry(request):
             try:
                 # Try with select_related first, fallback to regular query if it fails
                 try:
-                    qs = ItemMaster.objects.filter(is_active=True).select_related('procured_from').all()
+                    qs = ItemMaster.objects.filter(is_active=True).select_related('procured_from', 'umo').all()
                 except Exception:
                     # If select_related fails (e.g., field doesn't exist yet), use regular query
                     qs = ItemMaster.objects.filter(is_active=True).all()
@@ -1773,11 +1773,14 @@ def therapy_entry(request):
                             procured_from_name = i.procured_from.name if hasattr(i.procured_from, 'name') else str(i.procured_from)
                     except Exception:
                         pass
-                    
+                    # UOM from ItemMaster: umo is FK to UnitNo, use unit_name
+                    item_uom = ''
+                    if getattr(i, 'umo', None) and hasattr(i.umo, 'unit_name'):
+                        item_uom = (i.umo.unit_name or '').strip()
                     results.append({
                         'item_code': getattr(i, 'item_code', ''),
                         'item_name': getattr(i, 'item_name', ''),
-                        'item_uom': getattr(i, 'unit_of_measure', '') or '',
+                        'item_uom': item_uom,
                         'procured_from': procured_from_name
                     })
             except Exception as e:
@@ -2481,11 +2484,9 @@ def prescription_entry_page(request):
         results = []
         if ItemMaster is not None:
             try:
-                # Try with select_related first, fallback to regular query if it fails
                 try:
-                    qs = ItemMaster.objects.filter(is_active=True).select_related('procured_from').all()
+                    qs = ItemMaster.objects.filter(is_active=True).select_related('procured_from', 'umo').all()
                 except Exception:
-                    # If select_related fails (e.g., field doesn't exist yet), use regular query
                     qs = ItemMaster.objects.filter(is_active=True).all()
                 
                 if q:
@@ -2498,18 +2499,19 @@ def prescription_entry_page(request):
                             procured_from_name = i.procured_from.name if hasattr(i.procured_from, 'name') else str(i.procured_from)
                     except Exception:
                         pass
-                    
+                    item_uom = ''
+                    if getattr(i, 'umo', None) and hasattr(i.umo, 'unit_name'):
+                        item_uom = (i.umo.unit_name or '').strip()
                     results.append({
                         'item_code': getattr(i, 'item_code', ''),
                         'item_name': getattr(i, 'item_name', ''),
-                        'item_uom': getattr(i, 'unit_of_measure', '') or '',
+                        'item_uom': item_uom,
                         'procured_from': procured_from_name
                     })
             except Exception as e:
                 print(f"Error in search_items: {e}")
                 import traceback
                 traceback.print_exc()
-                # Return empty results on error rather than failing completely
                 results = []
         else:
             print("ItemMaster model not found - check if masters app is installed")
@@ -3146,11 +3148,9 @@ def prescription_entry_page(request):
         results = []
         if ItemMaster is not None:
             try:
-                # Try with select_related first, fallback to regular query if it fails
                 try:
-                    qs = ItemMaster.objects.filter(is_active=True).select_related('procured_from').all()
+                    qs = ItemMaster.objects.filter(is_active=True).select_related('procured_from', 'umo').all()
                 except Exception:
-                    # If select_related fails (e.g., field doesn't exist yet), use regular query
                     qs = ItemMaster.objects.filter(is_active=True).all()
                 
                 if q:
@@ -3163,11 +3163,13 @@ def prescription_entry_page(request):
                             procured_from_name = i.procured_from.name if hasattr(i.procured_from, 'name') else str(i.procured_from)
                     except Exception:
                         pass
-                    
+                    item_uom = ''
+                    if getattr(i, 'umo', None) and hasattr(i.umo, 'unit_name'):
+                        item_uom = (i.umo.unit_name or '').strip()
                     results.append({
                         'item_code': getattr(i, 'item_code', ''),
                         'item_name': getattr(i, 'item_name', ''),
-                        'item_uom': getattr(i, 'unit_of_measure', '') or '',
+                        'item_uom': item_uom,
                         'procured_from': procured_from_name
                     })
             except Exception as e:

@@ -1999,8 +1999,9 @@ def search_patients_by_room(request):
             from datetime import datetime
             today_start = datetime.combine(today, datetime.min.time())
             
+            # Partial match so "ds" finds "ds, nr" or "ds-4"
             treatment_records = Treatment.objects.using('iptherapy_db').filter(
-                Pat_Room_No__iexact=room_query
+                Pat_Room_No__icontains=room_query
             ).filter(
                 Q(Pat_DoD__isnull=True) | Q(Pat_DoD__date__gte=today)
             ).filter(
@@ -2026,18 +2027,17 @@ def search_patients_by_room(request):
         
         # Also search PatientSnapshot table (has room numbers stored directly as CharField)
         snapshot_patients = []
-        snapshot_room_numbers_to_search = [room_query]  # Start with the original query
-        
-        # Check if StayingRoom has a mapping (e.g., "OP-1" -> "76")
+        # Match room by display format like "ds, nr" or "ds-4": partial match on StayingRoom.room_no
+        snapshot_room_numbers_to_search = [room_query]
         try:
-            staying_room = StayingRoom.objects.filter(
-                room_no__iexact=room_query
-            ).first()
-            
-            if staying_room and staying_room.number:
-                # Add the mapped number to search list
-                snapshot_room_numbers_to_search.append(staying_room.number)
-                print(f"[DEBUG] StayingRoom mapping found: {room_query} -> {staying_room.number}")
+            staying_rooms_partial = StayingRoom.objects.filter(
+                room_no__icontains=room_query
+            ).values_list('number', flat=True).distinct()
+            for num in staying_rooms_partial:
+                if num and str(num).strip() and str(num).strip() not in snapshot_room_numbers_to_search:
+                    snapshot_room_numbers_to_search.append(str(num).strip())
+            if staying_rooms_partial:
+                print(f"[DEBUG] StayingRoom partial match '{room_query}' -> numbers: {list(staying_rooms_partial)}")
         except Exception:
             pass
         
@@ -2045,8 +2045,8 @@ def search_patients_by_room(request):
             from Sheduling.models import PatientSnapshot
             from django.db.models import Q
             
-            # Search PatientSnapshot by pat_room_no (can store "CT-16", "OP-1" directly or mapped numbers)
-            snapshot_q = Q()
+            # Search PatientSnapshot: exact match on collected room numbers OR pat_room_no contains query (e.g. "ds" matches "ds, nr")
+            snapshot_q = Q(pat_room_no__icontains=room_query)
             for room_num in snapshot_room_numbers_to_search:
                 snapshot_q |= Q(pat_room_no__iexact=room_num)
             
@@ -2129,36 +2129,47 @@ def search_patients_by_room(request):
             ip_patients_list = []
             room_numbers_to_search = []
             
-            # First, try to find StayingRoom by display format (e.g., "CT-16", "OP-1")
-            # This handles searches like "CT-16", "OP-1", etc.
-            staying_room = StayingRoom.objects.filter(
+            # Match by display format (e.g. "ds", "ds, nr", "ds-4"): partial match on room_no so "ds" finds "ds, nr"
+            staying_rooms_partial = StayingRoom.objects.filter(
+                room_no__icontains=room_query
+            ).values_list('number', flat=True).distinct()
+            for num in staying_rooms_partial:
+                if num is None or not str(num).strip():
+                    continue
+                try:
+                    room_db_number = int(num)
+                    if room_db_number not in room_numbers_to_search:
+                        room_numbers_to_search.append(room_db_number)
+                except (ValueError, TypeError):
+                    pass
+            if staying_rooms_partial:
+                print(f"[DEBUG] StayingRoom partial match '{room_query}' -> numbers: {list(staying_rooms_partial)}")
+            
+            # Exact match on room_no (e.g. user typed "ds, nr" exactly)
+            staying_room_exact = StayingRoom.objects.filter(
                 room_no__iexact=room_query
             ).first()
-            
-            if staying_room:
-                # Found a match in StayingRoom, get the number field (stored in DB)
+            if staying_room_exact and staying_room_exact.number:
                 try:
-                    room_db_number = int(staying_room.number)
-                    room_numbers_to_search.append(room_db_number)
-                    print(f"[DEBUG] Found StayingRoom: {staying_room.room_no} -> number: {staying_room.number}")
+                    room_db_number = int(staying_room_exact.number)
+                    if room_db_number not in room_numbers_to_search:
+                        room_numbers_to_search.append(room_db_number)
                 except (ValueError, TypeError):
                     pass
             
-            # Also try to find by number field directly (in case user searches by the stored number)
+            # Also try by number field (user searches by stored number)
             staying_room_by_number = StayingRoom.objects.filter(
                 number__iexact=room_query
             ).first()
-            
             if staying_room_by_number:
                 try:
                     room_db_number = int(staying_room_by_number.number)
                     if room_db_number not in room_numbers_to_search:
                         room_numbers_to_search.append(room_db_number)
-                    print(f"[DEBUG] Found StayingRoom by number: {staying_room_by_number.number}")
                 except (ValueError, TypeError):
                     pass
             
-            # If it's a pure integer and not found in StayingRoom, search directly
+            # If it's a pure integer and still no matches from StayingRoom, search by that integer
             if room_query_int is not None and not room_numbers_to_search:
                 room_numbers_to_search.append(room_query_int)
             

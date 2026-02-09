@@ -636,9 +636,32 @@ $(function () {
       transport: function (p, s, f) {
         ajax({ action: 'search_items', q: p.data.q }).then(s).catch(function () { s({ results: [] }); });
       },
-      processResults: data => ({ results: (data || []).map(i => ({ id: i.item_code, text: i.item_name })) }),
+      processResults: data => ({ results: (data || []).map(i => ({ id: i.item_code, text: i.item_name, unit: (i.item_uom || '').trim() })) }),
       cache: true
     }
+  });
+
+  // Autofill unit from Item Master UOM when therapy item(s) are selected
+  function updateUnitFromSelectedItems() {
+    const selected = $itemBuilder.select2('data') || [];
+    const units = selected.map(s => (s.unit || '').trim()).filter(Boolean);
+    const uniqueUnits = [...new Set(units)];
+    const $unitSelect = $('#item-builder-uno');
+    if (uniqueUnits.length === 0) {
+      $unitSelect.val('');
+    } else if (uniqueUnits.length === 1) {
+      const u = uniqueUnits[0];
+      const hasOption = $unitSelect.find('option').filter(function () { return $(this).val() === u; }).length > 0;
+      if (!hasOption) {
+        $unitSelect.append($('<option></option>').attr('value', u).text(u));
+      }
+      $unitSelect.val(u);
+    } else {
+      $unitSelect.val('');
+    }
+  }
+  $itemBuilder.on('select2:select select2:unselect', function () {
+    setTimeout(updateUnitFromSelectedItems, 0);
   });
 
   // populate masters & slots with fallback
