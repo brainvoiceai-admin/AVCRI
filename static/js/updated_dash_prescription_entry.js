@@ -736,8 +736,66 @@ $(function () {
   // Listen for item selection changes
   $itemBuilder.on('select2:select select2:unselect', function () {
     // Small delay to ensure select2 data is updated
-    setTimeout(updateProcuredFromField, 100);
+    setTimeout(function() {
+      updateProcuredFromField();
+      updateUOMField();
+    }, 100);
   });
+
+  // Function to check and auto-fill UOM based on selected items
+  function updateUOMField() {
+    const selected = $itemBuilder.select2('data') || [];
+
+    if (selected.length === 0) {
+        $('#item-builder-uno').val('').trigger('change');
+        return;
+    }
+
+    // Get UOM values from selected items using cached data
+    const uomValues = [];
+    let missingData = false;
+
+    selected.forEach(item => {
+        const itemData = itemDataCache[item.id];
+        if (itemData && typeof itemData.item_uom !== 'undefined') {
+            // Treat empty string as a valid UOM (it might be "No UOM") or should we ignore it?
+            // Requirement: "Evaluate... ALL medicines have SAME UOM".
+            // If one has "ml" and one has "", they are different.
+            // If both have "", they are same.
+            uomValues.push(itemData.item_uom || '');
+        } else {
+            missingData = true;
+        }
+    });
+
+    if (missingData) {
+        // If we allow auto-fetch here it would be better, but for now fallback to empty
+        $('#item-builder-uno').val('').trigger('change');
+        return;
+    }
+
+    // Check if all items have the same UOM
+    if (uomValues.length > 0) {
+        const firstUOM = uomValues[0];
+        const allSame = uomValues.every(u => u === firstUOM);
+
+        if (allSame && firstUOM) {
+            // Auto-populate
+            const $uomSelect = $('#item-builder-uno');
+            // Check if option exists, if not add it
+            if ($uomSelect.find(`option[value="${firstUOM}"]`).length === 0) {
+                $uomSelect.append(new Option(firstUOM, firstUOM));
+            }
+            $uomSelect.val(firstUOM).trigger('change');
+        } else if (allSame && !firstUOM) {
+            // All specify NO UOM.
+             $('#item-builder-uno').val('').trigger('change');
+        } else {
+            // Different UOMs
+            $('#item-builder-uno').val('').trigger('change');
+        }
+    }
+  }
 
   // Add Group
   let isAddingGroup = false; // Prevent double-click
@@ -927,56 +985,99 @@ $(function () {
     const g = itemGroups.find(x => x.id === id);
     if (!g) return;
 
-    // Set the editing group ID so duplicate checking excludes this group
-    editingGroupId = id;
+    // Show loading indicator on button
+    const $btn = $(this);
+    const originalText = $btn.html();
+    $btn.html('<i class="fas fa-spinner fa-spin"></i> Loading...').prop('disabled', true);
 
-    // Completely clear Select2 - remove all options and values
-    $itemBuilder.empty(); // Remove all option elements
-    $itemBuilder.val(null).trigger('change'); // Clear selection
-
-    // Add the group's items as new options
-    g.items.forEach(it => {
-      const opt = new Option(it.item_name, it.item_code, true, true);
-      $itemBuilder.append(opt);
+    // Fetch details for all items in the group to populate cache (UOM, procured_from)
+    const promises = (g.items || []).map(it => {
+        if (it.item_code && !itemDataCache[it.item_code]) {
+            return ajax({ action: 'search_items', q: it.item_code }).then(data => {
+                if (data && Array.isArray(data)) {
+                     const match = data.find(x => x.item_code === it.item_code) || data[0];
+                     if (match) {
+                         itemDataCache[it.item_code] = match;
+                     }
+                }
+            }).catch(err => console.error('Error fetching item details:', err));
+        }
+        return Promise.resolve();
     });
-    $itemBuilder.trigger('change');
-    $('#item-builder-dosage').val(g.dosage || '');
-    $('#item-builder-time').val(g.time || '');
-    $('#item-builder-uno').val(g.uno || '');
-    $itemBuilderOilClass.val(g.oil_class || '');
-    $itemBuilderProcuredFrom.val(g.procured_from || '');
-    // Handle ingredients - now a free text field
-    const ingredientInput = $('#item-builder-ingredients');
-    if (g.ingredients && Array.isArray(g.ingredients) && g.ingredients.length > 0) {
-      // Extract ingredient names from array and join them
-      const ingredientText = g.ingredients.map(ing => ing.ingredient_name || ing.text || '').filter(Boolean).join(', ');
-      ingredientInput.val(ingredientText);
-    } else if (typeof g.ingredients === 'string') {
-      // Handle case where ingredients is stored as a string
-      ingredientInput.val(g.ingredients);
-    } else {
-      ingredientInput.val('');
-    }
 
-    // Debug logging
-    console.log('=== Edit Group Debug ===');
-    console.log('Editing group ID:', id);
-    console.log('Group items:', g.items.map(i => `${i.item_name} (${i.item_code})`));
-    console.log('itemGroups count before removal:', itemGroups.length);
+    Promise.all(promises).then(() => {
+        // Restore button state
+        $btn.html(originalText).prop('disabled', false);
 
-    // Store the original index of this group so we can restore it to the same position
-    const originalIndex = itemGroups.findIndex(x => x.id === id);
-    editingGroupIndex = originalIndex; // Track the position
+        // Set the editing group ID so duplicate checking excludes this group
+        editingGroupId = id;
 
-    // Remove the group from the list (it will be re-added at the same position when user clicks "Add Group")
-    itemGroups = itemGroups.filter(x => x.id !== id);
+        // Completely clear Select2 - remove all options and values
+        $itemBuilder.empty(); // Remove all option elements
+        $itemBuilder.val(null).trigger('change'); // Clear selection
 
-    console.log('itemGroups count after removal:', itemGroups.length);
-    console.log('Original group index:', originalIndex);
-    console.log('Remaining item codes:', Array.from(getAllSelectedItemCodes()));
-    console.log('========================');
+        // Add the group's items as new options
+        g.items.forEach(it => {
+            const opt = new Option(it.item_name, it.item_code, true, true);
+            $itemBuilder.append(opt);
+        });
+        
+        // Trigger change to update Select2 display
+        $itemBuilder.trigger('change');
+        
+        // Manually trigger UOM and Procured From updates since 'change' might not trigger our custom handlers depending on binding
+        // And we want to ensure fields are populated based on the now-cached data
+        updateProcuredFromField();
+        updateUOMField();
 
-    renderItemGroups();
+        // If the group had explicit saved values, override the auto-filled ones
+        // This is important: if user manually changed UOM/Procured but it was valid auto-fill, we should respect saved?
+        // Requirement: "user edits an existing prescription... Existing medicines must be evaluated... UOM must auto-select ONLY if all... share same UOM"
+        // This suggests re-evaluation is preferred on edit opening.
+        // However, if the saved group had a specific UOM (maybe manually selected when auto-select wasn't applicable, OR manually changed), 
+        // strictly speaking, we should load what was saved.
+        // BUT, if the user adds/removes items, auto-logic kicks in.
+        // Let's set the saved values LAST, so they override auto-fill if present.
+        
+        if (g.dosage) $('#item-builder-dosage').val(g.dosage);
+        if (g.time) $('#item-builder-time').val(g.time);
+        if (g.uno) $('#item-builder-uno').val(g.uno).trigger('change');
+        if (g.oil_class) $itemBuilderOilClass.val(g.oil_class).trigger('change');
+        if (g.procured_from) $itemBuilderProcuredFrom.val(g.procured_from).trigger('change');
+        
+        // Handle ingredients - now a free text field
+        const ingredientInput = $('#item-builder-ingredients');
+        if (g.ingredients && Array.isArray(g.ingredients) && g.ingredients.length > 0) {
+            // Extract ingredient names from array and join them
+            const ingredientText = g.ingredients.map(ing => ing.ingredient_name || ing.text || '').filter(Boolean).join(', ');
+            ingredientInput.val(ingredientText);
+        } else if (typeof g.ingredients === 'string') {
+            // Handle case where ingredients is stored as a string
+            ingredientInput.val(g.ingredients);
+        } else {
+            ingredientInput.val('');
+        }
+
+        // Debug logging
+        console.log('=== Edit Group Debug ===');
+        console.log('Editing group ID:', id);
+        console.log('Group items:', g.items.map(i => `${i.item_name} (${i.item_code})`));
+        console.log('itemGroups count before removal:', itemGroups.length);
+
+        // Store the original index of this group so we can restore it to the same position
+        const originalIndex = itemGroups.findIndex(x => x.id === id);
+        editingGroupIndex = originalIndex; // Track the position
+
+        // Remove the group from the list (it will be re-added at the same position when user clicks "Add Group")
+        itemGroups = itemGroups.filter(x => x.id !== id);
+
+        console.log('itemGroups count after removal:', itemGroups.length);
+        console.log('Original group index:', originalIndex);
+        console.log('Remaining item codes:', Array.from(getAllSelectedItemCodes()));
+        console.log('========================');
+
+        renderItemGroups();
+    });
   });
 
   // days calc

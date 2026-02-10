@@ -1952,7 +1952,7 @@ def search_patients(request):
 
 @login_required
 def search_patients_by_room(request):
-    """API endpoint to search patients by room number"""
+    """API endpoint to search patients by room number with prefix-based, case-insensitive, hyphen-insensitive matching"""
     if request.method != 'GET':
         return JsonResponse({'error': 'Only GET method allowed'}, status=405)
     
@@ -1964,7 +1964,11 @@ def search_patients_by_room(request):
             'patients': []
         }, status=400)
     
-    print(f"[DEBUG] search_patients_by_room called - room: '{room_query}'")
+    # Normalize the search query: remove hyphens and convert to uppercase for matching
+    # This allows "NR", "nr", "NR-15", "NR15", "ds" to all work correctly
+    normalized_query = room_query.replace('-', '').replace(' ', '').upper()
+    
+    print(f"[DEBUG] search_patients_by_room called - room: '{room_query}', normalized: '{normalized_query}'")
     
     try:
         from MySql_Data_pull.models import Registration, OPMaster, Treatment
@@ -1999,27 +2003,37 @@ def search_patients_by_room(request):
             from datetime import datetime
             today_start = datetime.combine(today, datetime.min.time())
             
-            # Partial match so "ds" finds "ds, nr" or "ds-4"
+            # Fetch all active treatment records, then filter by normalized room number in Python
+            # This allows proper prefix matching with case and hyphen insensitivity
             treatment_records = Treatment.objects.using('iptherapy_db').filter(
-                Pat_Room_No__icontains=room_query
-            ).filter(
                 Q(Pat_DoD__isnull=True) | Q(Pat_DoD__date__gte=today)
             ).filter(
                 Q(DOA__isnull=True) | Q(DOA__date__lte=today)
-            ).values('Pat_Reg_No', 'Pat_Room_No', 'Pat_Name', 'Pat_Sex', 'Pat_Age', 'DOA', 'Pat_DoD').distinct()[:100]
+            ).filter(
+                Pat_Room_No__isnull=False  # Only get records with room numbers
+            ).values('Pat_Reg_No', 'Pat_Room_No', 'Pat_Name', 'Pat_Sex', 'Pat_Age', 'DOA', 'Pat_DoD').distinct()[:500]
             
-            print(f"[DEBUG] Found {len(list(treatment_records))} treatment records for room: '{room_query}'")
-            
+            # Filter by normalized room number prefix in Python
+            matched_count = 0
             for treatment in treatment_records:
-                reg_no = treatment['Pat_Reg_No']
-                treatment_patients.append({
-                    'reg_no': reg_no,
-                    'room_no': treatment.get('Pat_Room_No'),
-                    'name': treatment.get('Pat_Name'),
-                    'sex': treatment.get('Pat_Sex'),
-                    'age': treatment.get('Pat_Age'),
-                    'source': 'treatment'
-                })
+                room_no = treatment.get('Pat_Room_No', '').strip()
+                if room_no:
+                    # Normalize the room number from database
+                    normalized_room = room_no.replace('-', '').replace(' ', '').upper()
+                    # Check if it starts with the normalized query (prefix match)
+                    if normalized_room.startswith(normalized_query):
+                        reg_no = treatment['Pat_Reg_No']
+                        treatment_patients.append({
+                            'reg_no': reg_no,
+                            'room_no': room_no,  # Keep original format for display
+                            'name': treatment.get('Pat_Name'),
+                            'sex': treatment.get('Pat_Sex'),
+                            'age': treatment.get('Pat_Age'),
+                            'source': 'treatment'
+                        })
+                        matched_count += 1
+            
+            print(f"[DEBUG] Found {matched_count} treatment records matching normalized prefix '{normalized_query}'")
         except Exception as e:
             print(f"[DEBUG] Error searching Treatment table: {e}")
             import traceback
@@ -2027,32 +2041,26 @@ def search_patients_by_room(request):
         
         # Also search PatientSnapshot table (has room numbers stored directly as CharField)
         snapshot_patients = []
-        # Match room by display format like "ds, nr" or "ds-4": partial match on StayingRoom.room_no
-        snapshot_room_numbers_to_search = [room_query]
-        try:
-            staying_rooms_partial = StayingRoom.objects.filter(
-                room_no__icontains=room_query
-            ).values_list('number', flat=True).distinct()
-            for num in staying_rooms_partial:
-                if num and str(num).strip() and str(num).strip() not in snapshot_room_numbers_to_search:
-                    snapshot_room_numbers_to_search.append(str(num).strip())
-            if staying_rooms_partial:
-                print(f"[DEBUG] StayingRoom partial match '{room_query}' -> numbers: {list(staying_rooms_partial)}")
-        except Exception:
-            pass
         
         try:
             from Sheduling.models import PatientSnapshot
             from django.db.models import Q
             
-            # Search PatientSnapshot: exact match on collected room numbers OR pat_room_no contains query (e.g. "ds" matches "ds, nr")
-            snapshot_q = Q(pat_room_no__icontains=room_query)
-            for room_num in snapshot_room_numbers_to_search:
-                snapshot_q |= Q(pat_room_no__iexact=room_num)
-            
+            # Fetch all patient snapshots, then filter by normalized room number prefix in Python
             snapshot_records_list = list(PatientSnapshot.objects.filter(
-                snapshot_q
-            ).values('pat_reg_no', 'pat_room_no', 'pat_name', 'pat_sex', 'pat_age')[:100])
+                pat_room_no__isnull=False  # Only get records with room numbers
+            ).values('pat_reg_no', 'pat_room_no', 'pat_name', 'pat_sex', 'pat_age')[:500])
+            
+            # Filter by normalized prefix match in Python
+            matched_snapshots = []
+            for snapshot in snapshot_records_list:
+                room_no = snapshot.get('pat_room_no', '').strip()
+                if room_no:
+                    # Normalize the room number from database
+                    normalized_room = room_no.replace('-', '').replace(' ', '').replace(',', '').upper()
+                    # Check if it starts with the normalized query (prefix match)
+                    if normalized_room.startswith(normalized_query):
+                        matched_snapshots.append(snapshot)
             
             # Filter snapshot records to include patients currently in room
             # by cross-referencing with Registration table (IP) or OPMaster (OP)
@@ -2060,7 +2068,7 @@ def search_patients_by_room(request):
             from datetime import timedelta
             thirty_days_ago = today - timedelta(days=30)
             
-            for snapshot in snapshot_records_list:
+            for snapshot in matched_snapshots:
                 reg_no = snapshot['pat_reg_no']
                 is_active = False
                 
@@ -2103,7 +2111,7 @@ def search_patients_by_room(request):
                 if is_active:
                     active_snapshot_records.append(snapshot)
             
-            print(f"[DEBUG] Found {len(active_snapshot_records)} active PatientSnapshot records for room: '{room_query}' (filtered for recent visits - includes OP and IP)")
+            print(f"[DEBUG] Found {len(active_snapshot_records)} active PatientSnapshot records matching normalized prefix '{normalized_query}' (filtered for recent visits)")
             
             for snapshot in active_snapshot_records:
                 reg_no = snapshot['pat_reg_no']
@@ -2129,49 +2137,28 @@ def search_patients_by_room(request):
             ip_patients_list = []
             room_numbers_to_search = []
             
-            # Match by display format (e.g. "ds", "ds, nr", "ds-4"): partial match on room_no so "ds" finds "ds, nr"
-            staying_rooms_partial = StayingRoom.objects.filter(
-                room_no__icontains=room_query
-            ).values_list('number', flat=True).distinct()
-            for num in staying_rooms_partial:
-                if num is None or not str(num).strip():
-                    continue
-                try:
-                    room_db_number = int(num)
-                    if room_db_number not in room_numbers_to_search:
-                        room_numbers_to_search.append(room_db_number)
-                except (ValueError, TypeError):
-                    pass
-            if staying_rooms_partial:
-                print(f"[DEBUG] StayingRoom partial match '{room_query}' -> numbers: {list(staying_rooms_partial)}")
+            # Fetch all StayingRoom records and filter by normalized prefix in Python
+            # This ensures proper prefix matching with case and hyphen insensitivity
+            all_staying_rooms = StayingRoom.objects.all().values('number', 'room_no')
+            for room in all_staying_rooms:
+                room_no_display = room.get('room_no', '').strip()
+                if room_no_display:
+                    # Normalize the room_no from database
+                    normalized_room_no = room_no_display.replace('-', '').replace(' ', '').replace(',', '').upper()
+                    # Check if it starts with the normalized query (prefix match)
+                    if normalized_room_no.startswith(normalized_query):
+                        # Add the database number to search list
+                        num = room.get('number')
+                        if num is not None and str(num).strip():
+                            try:
+                                room_db_number = int(num)
+                                if room_db_number not in room_numbers_to_search:
+                                    room_numbers_to_search.append(room_db_number)
+                            except (ValueError, TypeError):
+                                pass
             
-            # Exact match on room_no (e.g. user typed "ds, nr" exactly)
-            staying_room_exact = StayingRoom.objects.filter(
-                room_no__iexact=room_query
-            ).first()
-            if staying_room_exact and staying_room_exact.number:
-                try:
-                    room_db_number = int(staying_room_exact.number)
-                    if room_db_number not in room_numbers_to_search:
-                        room_numbers_to_search.append(room_db_number)
-                except (ValueError, TypeError):
-                    pass
-            
-            # Also try by number field (user searches by stored number)
-            staying_room_by_number = StayingRoom.objects.filter(
-                number__iexact=room_query
-            ).first()
-            if staying_room_by_number:
-                try:
-                    room_db_number = int(staying_room_by_number.number)
-                    if room_db_number not in room_numbers_to_search:
-                        room_numbers_to_search.append(room_db_number)
-                except (ValueError, TypeError):
-                    pass
-            
-            # If it's a pure integer and still no matches from StayingRoom, search by that integer
-            if room_query_int is not None and not room_numbers_to_search:
-                room_numbers_to_search.append(room_query_int)
+            if room_numbers_to_search:
+                print(f"[DEBUG] StayingRoom normalized prefix match '{normalized_query}' -> numbers: {room_numbers_to_search}")
             
             # Build search query
             if room_numbers_to_search:
