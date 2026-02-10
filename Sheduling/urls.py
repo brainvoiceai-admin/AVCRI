@@ -13,6 +13,7 @@ urlpatterns = [
     path('scheduling/api/final-schedule/status/', views.final_schedule_status_api, name='final_schedule_status_api'),
     path('scheduling/api/reschedule-therapy/', views.reschedule_therapy_api, name='reschedule_therapy_api'),
     path('scheduling/api/reschedule-all-failed/', views.reschedule_all_failed_api, name='reschedule_all_failed_api'),
+    path('scheduling/api/change-log/', views.get_therapy_change_log_api, name='get_therapy_change_log_api'),
 
     # Continuity Matrix API
     path('scheduling/api/continuity-matrix/', matrix_views.continuity_matrix_api, name='continuity_matrix_api'),

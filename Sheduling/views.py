@@ -10,6 +10,7 @@ from django.apps import apps
 from django.db.models import Q
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
+from django.contrib.auth.decorators import login_required
 from django.utils.dateparse import parse_date
 from django.utils import timezone
 from django.db import transaction, IntegrityError
@@ -1795,8 +1796,9 @@ def therapy_entry(request):
         model = None
         if typ == 'procured':
             model = Procured
-        elif typ in ('oil', 'oilclass'):
+        if typ in ('oil', 'oilclass'):
             model = OilClass
+
         elif typ in ('usage', 'usagetype'):
             model = UsageType
         elif typ in ('ptime', 'prescriptiontime'):
@@ -5370,84 +5372,101 @@ def therapy_bulk_excel(request):
     return render(request, "dashboards/scheduling/therapy_bulk_excel.html")
 
 @csrf_exempt
-@api_access_required
+@require_http_methods(["GET"])
+@login_required
 def get_therapy_change_log_api(request):
     """
-    API to fetch change log for a therapy booking - comparing Original Allocation vs Current Booking.
+    API endpoint to get change log for a therapy booking/allocation.
+    Called by scheduling.js viewChangeLog(bookingId)
     """
-    booking_id = request.GET.get('booking_id')
-    if not booking_id:
-        return JsonResponse({'error': 'booking_id is required'}, status=400)
-    
     try:
-        from .models import Booking
-        # Get booking with related objects
-        booking = Booking.objects.select_related(
-            'allocation', 
-            'timeslot', 
-            'room', 
-            'allocation__timeslot', 
-            'allocation__room',
-            'allocation__patient'
-        ).prefetch_related('assignments__therapist').get(id=booking_id)
+        from .models import Booking, TherapyAllocation 
+        booking_id = request.GET.get('booking_id')
+        if not booking_id:
+            return JsonResponse({'error': 'booking_id is required'}, status=400)
         
-        allocation = booking.allocation
+        # Get booking and allocation
+        try:
+            booking = Booking.objects.get(id=booking_id)
+            allocation = booking.allocation
+        except Booking.DoesNotExist:
+            return JsonResponse({'error': 'Booking not found'}, status=404)
+            
+        # Get patient and therapy details
+        patient_name = allocation.patient.pat_name if allocation.patient else "Unknown"
+        therapy_name = allocation.therapy_name
+        date_str = booking.date.isoformat()
+        
+        # Fetch audit logs
+        # We look for logs related to this allocation
+        # Using authentication.models.AuditLog as used in log_therapy_audit
+        from authentication.models import AuditLog as AuthAuditLog
+        
+        logs = AuthAuditLog.objects.filter(
+            object_type='TherapyAllocation',
+            object_id=str(allocation.id)
+        ).exclude(action='allocate_therapy').order_by('-timestamp')
+        
         changes = []
-        
-        # 1. Date Comparison (if relevant)
-        # If allocation is single day, date mismatch is a reschedule
-        is_single_day = False
-        if allocation.to_date and allocation.from_date:
-            is_single_day = (allocation.to_date - allocation.from_date).days == 0
-
-        if is_single_day and allocation.from_date:
-            original_date_str = allocation.from_date.strftime('%Y-%m-%d')
-            current_date_str = booking.date.strftime('%Y-%m-%d')
+        for log in logs:
+            # Format the log entry for the frontend
+            # The frontend expects: { field, before, after }
             
-            if original_date_str != current_date_str:
-                changes.append({
-                    'field': 'Date',
-                    'before': allocation.from_date.strftime('%d-%m-%Y'),
-                    'after': booking.date.strftime('%d-%m-%Y')
-                })
+            field = log.get_action_display()
+            before = "-"
+            after = log.description
             
-        # 2. Time Slot Comparison
-        alloc_slot = allocation.timeslot.slot_time.strftime('%H:%M') if allocation.timeslot else "None"
-        book_slot = booking.timeslot.slot_time.strftime('%H:%M') if booking.timeslot else "None"
-        
-        if allocation.timeslot_id != booking.timeslot_id:
+            # Try to extract more details if available
+            if log.additional_data:
+                data = log.additional_data
+                if 'updated_fields' in data:
+                    field += f" ({', '.join(data['updated_fields'])})"
+            
             changes.append({
-                'field': 'Time Slot',
-                'before': alloc_slot,
-                'after': book_slot
-            })
-
-        # 3. Room Comparison
-        alloc_room = allocation.room.room_no if allocation.room else "None"
-        book_room = booking.room.room_no if booking.room else "None"
-        
-        if allocation.room_id != booking.room_id:
-            changes.append({
-                'field': 'Room',
-                'before': alloc_room,
-                'after': book_room
+                'field': field,
+                'before': before,
+                'after': after,
+                'timestamp': log.timestamp.isoformat(),
+                'user': log.user.username if log.user else 'System'
             })
             
-        # 4. Therapist Comparison
-        # Just showing current assignment vs required roles as context if needed, but for "Change Log"
-        # we focus on what CHANGED from original intent (which is abstract roles) to concrete assignment.
-        # But if the user means "Previous Assignment vs Current Assignment", we don't have that unless logged.
-        # We will stop here for MVP as per user request "Fields to compare include... Date, Slot, Room".
-        
+        # Check if booking details differ from allocation (rescheduled)
+        # Helper to format time to 12-hour format
+        def format_slot(slot):
+            if not slot or not slot.slot_time:
+                return "-"
+            return slot.slot_time.strftime('%I:%M %p')
+
+        # Check Time Slot Change
+        if allocation.timeslot != booking.timeslot:
+             changes.insert(0, {
+                 'field': 'Time Slot',
+                 'before': format_slot(allocation.timeslot),
+                 'after': format_slot(booking.timeslot),
+                 'timestamp': booking.updated_at.isoformat() if hasattr(booking, 'updated_at') else '',
+                 'user': 'System'
+             })
+
+        # Check Room Change
+        if allocation.room != booking.room:
+             changes.insert(0, {
+                 'field': 'Room',
+                 'before': allocation.room.room_no if allocation.room else "-",
+                 'after': booking.room.room_no if booking.room else "-",
+                 'timestamp': booking.updated_at.isoformat() if hasattr(booking, 'updated_at') else '',
+                 'user': 'System'
+             })
+
         return JsonResponse({
             'success': True,
-            'changes': changes,
-            'patient_name': allocation.patient.pat_name,
-            'therapy_name': allocation.therapy_name,
-            'date': booking.date.strftime('%d-%m-%Y')
+            'therapy_name': therapy_name,
+            'patient_name': patient_name,
+            'date': date_str,
+            'changes': changes
         })
-
-    except Booking.DoesNotExist:
-        return JsonResponse({'error': 'Booking not found'}, status=404)
+        
     except Exception as e:
+        import traceback
+        print(f"Error in get_therapy_change_log_api: {e}")
+        traceback.print_exc()
         return JsonResponse({'error': str(e)}, status=500)
