@@ -379,7 +379,16 @@ function updateTable(status, data) {
                                     <div style="font-size: 12px; color: var(--gray);">${escapeHtml(item.patient_reg_no)}</div>
                                 </button>
                             </td>
-                            <td>${escapeHtml(item.therapy_name)}</td>
+                            <td>
+                                <div style="display: flex; align-items: center; gap: 8px;">
+                                    ${escapeHtml(item.therapy_name)}
+                                    ${item.is_rescheduled ? `
+                                    <button type="button" class="btn-icon btn-change-log" onclick="viewChangeLog('${item.booking_id}')" title="View Change Log" style="background: #fef3c7; color: #d97706; border: 1px solid #fcd34d; border-radius: 4px; padding: 2px 6px; cursor: pointer;">
+                                        <span style="font-size: 14px;">📝</span>
+                                    </button>
+                                    ` : ''}
+                                </div>
+                            </td>
                             <td>${slotDisplay}</td>
                             <td>${item.date || item.from_date}</td>
                             <td>${escapeHtml(item.room_no || '—')}</td>
@@ -420,7 +429,16 @@ function updateTable(status, data) {
                                     <div style="font-size: 12px; color: var(--gray);">${escapeHtml(item.patient_reg_no)}</div>
                                 </button>
                             </td>
-                            <td>${escapeHtml(item.therapy_name)}</td>
+                            <td>
+                                <div style="display: flex; align-items: center; gap: 8px;">
+                                    ${escapeHtml(item.therapy_name)}
+                                    ${item.is_rescheduled ? `
+                                    <button type="button" class="btn-icon btn-change-log" onclick="viewChangeLog('${item.booking_id}')" title="View Change Log" style="background: #fef3c7; color: #d97706; border: 1px solid #fcd34d; border-radius: 4px; padding: 2px 6px; cursor: pointer;">
+                                        <span style="font-size: 14px;">📝</span>
+                                    </button>
+                                    ` : ''}
+                                </div>
+                            </td>
                             <td>${scheduleDate || '—'}</td>
                             <td>${escapeHtml(item.patient_room_no || '—')}</td>
                             <td>${nursesHtml}</td>

@@ -3154,7 +3154,7 @@ def prescription_entry_page(request):
                     qs = ItemMaster.objects.filter(is_active=True).all()
                 
                 if q:
-                    qs = qs.filter(Q(item_name__icontains=q) | Q(item_code__icontains=q))
+                    qs = qs.filter(Q(item_name__istartswith=q) | Q(item_code__istartswith=q))
                 qs = qs[:50]
                 for i in qs:
                     procured_from_name = ''
@@ -3164,10 +3164,18 @@ def prescription_entry_page(request):
                     except Exception:
                         pass
                     
+                    # Fetch UOM from umo relationship
+                    uom_val = ''
+                    try:
+                        if hasattr(i, 'umo') and i.umo:
+                            uom_val = i.umo.unit_name if hasattr(i.umo, 'unit_name') else str(i.umo)
+                    except Exception:
+                        pass
+
                     results.append({
                         'item_code': getattr(i, 'item_code', ''),
                         'item_name': getattr(i, 'item_name', ''),
-                        'item_uom': getattr(i, 'unit_of_measure', '') or '',
+                        'item_uom': uom_val,
                         'procured_from': procured_from_name
                     })
             except Exception as e:
@@ -3299,11 +3307,42 @@ def prescription_entry_page(request):
                 if status_counts['cancelled'] > 0:
                     status_summary['cancelled'] = status_counts['cancelled']
                 
+
+                # Parse items_groups
+                items_groups_data = p.items_groups if isinstance(p.items_groups, (list, dict)) else (json.loads(p.items_groups) if p.items_groups else [])
+                
+                # Enhanced: Inject UOMs from ItemMaster if missing (for frontend auto-UOM logic)
+                if ItemMaster is not None and items_groups_data:
+                    # Collect codes needed
+                    codes_to_fetch = set()
+                    for g in items_groups_data:
+                        for it in g.get('items', []):
+                            # Only fetch if item_uom is missing
+                            if it.get('item_code') and not it.get('item_uom'):
+                                codes_to_fetch.add(it.get('item_code'))
+                    
+                    if codes_to_fetch:
+                        try:
+                            # Fetch mapping using correct field 'umo__unit_name'
+                            uom_map = {}
+                            found_items = ItemMaster.objects.filter(item_code__in=codes_to_fetch, is_active=True).values('item_code', 'umo__unit_name')
+                            for fi in found_items:
+                                uom_map[fi['item_code']] = fi['umo__unit_name'] or ''
+                            
+                            # Inject back into data
+                            for g in items_groups_data:
+                                for it in g.get('items', []):
+                                    c = it.get('item_code')
+                                    if c and c in uom_map and not it.get('item_uom'):
+                                        it['item_uom'] = uom_map[c]
+                        except Exception as e:
+                            print(f"Error injecting UOMs: {e}")
+
                 results.append({
                     'id': p.id,
                     'allocation_id': p.id,
                     'prescription_name': p.prescription_name,
-                    'items_groups': p.items_groups if isinstance(p.items_groups, (list, dict)) else (json.loads(p.items_groups) if p.items_groups else []),
+                    'items_groups': items_groups_data,
                     'procured_from': p.procured_from,
                     'scope': getattr(p, 'scope', ''),
                     'usage': getattr(p, 'usage', ''),
@@ -3959,6 +3998,18 @@ def scheduling_dashboard(request):
             # Skip zero-therapist therapies (not nurse treatments) - they appear only in prescription PDF
             if not is_nurse and therapy_req.get("total", 1) == 0:
                 continue  # Skip from scheduled list
+                
+            # Check for reschedule status (Allocation intent vs Booking reality)
+            is_rescheduled = False
+            # Check timeslot change
+            if booking.allocation.timeslot_id and booking.timeslot_id and booking.allocation.timeslot_id != booking.timeslot_id:
+                is_rescheduled = True
+            # Check room change
+            elif booking.allocation.room_id and booking.room_id and booking.allocation.room_id != booking.room_id:
+                is_rescheduled = True
+            
+            # Attach to booking object for template access
+            booking.is_rescheduled = is_rescheduled
             
             if is_nurse:
                 nurse_bookings.append(booking)
@@ -5317,3 +5368,86 @@ def therapy_bulk_excel(request):
     
     # Default: render the page
     return render(request, "dashboards/scheduling/therapy_bulk_excel.html")
+
+@csrf_exempt
+@api_access_required
+def get_therapy_change_log_api(request):
+    """
+    API to fetch change log for a therapy booking - comparing Original Allocation vs Current Booking.
+    """
+    booking_id = request.GET.get('booking_id')
+    if not booking_id:
+        return JsonResponse({'error': 'booking_id is required'}, status=400)
+    
+    try:
+        from .models import Booking
+        # Get booking with related objects
+        booking = Booking.objects.select_related(
+            'allocation', 
+            'timeslot', 
+            'room', 
+            'allocation__timeslot', 
+            'allocation__room',
+            'allocation__patient'
+        ).prefetch_related('assignments__therapist').get(id=booking_id)
+        
+        allocation = booking.allocation
+        changes = []
+        
+        # 1. Date Comparison (if relevant)
+        # If allocation is single day, date mismatch is a reschedule
+        is_single_day = False
+        if allocation.to_date and allocation.from_date:
+            is_single_day = (allocation.to_date - allocation.from_date).days == 0
+
+        if is_single_day and allocation.from_date:
+            original_date_str = allocation.from_date.strftime('%Y-%m-%d')
+            current_date_str = booking.date.strftime('%Y-%m-%d')
+            
+            if original_date_str != current_date_str:
+                changes.append({
+                    'field': 'Date',
+                    'before': allocation.from_date.strftime('%d-%m-%Y'),
+                    'after': booking.date.strftime('%d-%m-%Y')
+                })
+            
+        # 2. Time Slot Comparison
+        alloc_slot = allocation.timeslot.slot_time.strftime('%H:%M') if allocation.timeslot else "None"
+        book_slot = booking.timeslot.slot_time.strftime('%H:%M') if booking.timeslot else "None"
+        
+        if allocation.timeslot_id != booking.timeslot_id:
+            changes.append({
+                'field': 'Time Slot',
+                'before': alloc_slot,
+                'after': book_slot
+            })
+
+        # 3. Room Comparison
+        alloc_room = allocation.room.room_no if allocation.room else "None"
+        book_room = booking.room.room_no if booking.room else "None"
+        
+        if allocation.room_id != booking.room_id:
+            changes.append({
+                'field': 'Room',
+                'before': alloc_room,
+                'after': book_room
+            })
+            
+        # 4. Therapist Comparison
+        # Just showing current assignment vs required roles as context if needed, but for "Change Log"
+        # we focus on what CHANGED from original intent (which is abstract roles) to concrete assignment.
+        # But if the user means "Previous Assignment vs Current Assignment", we don't have that unless logged.
+        # We will stop here for MVP as per user request "Fields to compare include... Date, Slot, Room".
+        
+        return JsonResponse({
+            'success': True,
+            'changes': changes,
+            'patient_name': allocation.patient.pat_name,
+            'therapy_name': allocation.therapy_name,
+            'date': booking.date.strftime('%d-%m-%Y')
+        })
+
+    except Booking.DoesNotExist:
+        return JsonResponse({'error': 'Booking not found'}, status=404)
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)

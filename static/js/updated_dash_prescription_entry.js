@@ -659,7 +659,9 @@ $(function () {
           // Items can be added to multiple groups
           const formattedResults = data.map(i => ({
             id: i.item_code,
-            text: i.item_name || i.item_code
+            text: i.item_name || i.item_code,
+            item_uom: i.item_uom,
+            procured_from: i.procured_from
           }));
           console.log('Formatted results:', formattedResults);
           return { results: formattedResults };
@@ -673,6 +675,68 @@ $(function () {
       return data; // Return data as-is, don't sort
     }
   });
+
+  // Function to check and auto-fill UOM based on selected items
+  function updateUOMField() {
+    const selected = $itemBuilder.select2('data') || [];
+    const $uomField = $('#item-builder-uno');
+
+    if (selected.length === 0) {
+      // No items selected - potentially clear, but user might be typing
+      // Requirement says: "User selects... UOM auto-selects". 
+      // "User removes... UOM auto-selects again".
+      // If nothing selected, maybe clear? Use standard behavior.
+      // Keeping it simple: if list empty, clear UOM to avoid stale data
+      $uomField.val('');
+      return;
+    }
+
+    // Get UOM values from selected items
+    const uomValues = [];
+    let hasKnownUOM = false;
+    let hasUnknownUOM = false;
+
+    selected.forEach(item => {
+      // Primary source: direct property from selection (set in processResults)
+      let uom = item.item_uom;
+
+      // Fallback: Check cache if not on item Object
+      if (!uom && itemDataCache[item.id]) {
+        uom = itemDataCache[item.id].item_uom;
+      }
+
+      if (uom) {
+        uomValues.push(uom);
+        hasKnownUOM = true;
+      } else {
+        hasUnknownUOM = true;
+      }
+    });
+
+    // Debug
+    console.log('UOM Update:', { uomValues, hasKnownUOM, hasUnknownUOM });
+
+    // Logic:
+    // A. ALL medicines have SAME UOM -> Populate
+    // B. Medicines have DIFFERENT UOMs -> Clear
+    // C. Any medicine has NO UOM -> Clear (since it's different from one that has UOM)
+
+    if (uomValues.length > 0 && !hasUnknownUOM) {
+      const uniqueUOMs = [...new Set(uomValues)];
+
+      if (uniqueUOMs.length === 1) {
+        // Match!
+        $uomField.val(uniqueUOMs[0]);
+      } else {
+        // Mismatch
+        $uomField.val('');
+      }
+    } else {
+      // Either empty selection, mixed known/unknown, or all unknown
+      // Clear field to avoid misleading user
+      $uomField.val('');
+    }
+  }
 
   // Function to check and auto-fill procured_from based on selected items
   function updateProcuredFromField() {
@@ -729,6 +793,7 @@ $(function () {
   $itemBuilder.on('select2:select select2:unselect', function () {
     // Small delay to ensure select2 data is updated
     setTimeout(updateProcuredFromField, 100);
+    setTimeout(updateUOMField, 100);
   });
 
   // Add Group
@@ -949,6 +1014,22 @@ $(function () {
     } else {
       ingredientInput.val('');
     }
+
+    // Populate itemDataCache with group items (so UOM/Procured logic works)
+    g.items.forEach(it => {
+      if (it.item_code) {
+        // If item_uom is present (injected by backend), ensure it's cached
+        // Preserve existing cache if more detailed, but ensure UOM is there
+        if (!itemDataCache[it.item_code]) {
+          itemDataCache[it.item_code] = it;
+        } else if (it.item_uom && !itemDataCache[it.item_code].item_uom) {
+          itemDataCache[it.item_code].item_uom = it.item_uom;
+        }
+      }
+    });
+
+    // Re-evaluate auto-fields based on the loaded items
+    setTimeout(updateUOMField, 50);
 
     // Debug logging
     console.log('=== Edit Group Debug ===');

@@ -285,11 +285,24 @@
                                                     data-patient-name="{{ booking.allocation.patient.pat_name }}"
                                                     data-schedule-date="{{ booking.date|date:'Y-m-d' }}">
                                                     <div style="font-weight: 500;">
-                                                        {{ booking.allocation.patient.pat_name }} ({{ booking.allocation.patient.pat_reg_no }})
+                                                        {{ booking.allocation.patient.pat_name }} ({{
+                                                        booking.allocation.patient.pat_reg_no }})
                                                     </div>
                                                 </button>
                                             </td>
-                                            <td>{{ booking.allocation.therapy_name }}</td>
+                                            <td>
+                                                <div style="display: flex; align-items: center; gap: 8px;">
+                                                    {{ booking.allocation.therapy_name }}
+                                                    {% if booking.is_rescheduled %}
+                                                    <button type="button" class="btn-icon btn-change-log"
+                                                        onclick="viewChangeLog('{{ booking.id }}')"
+                                                        title="View Change Log"
+                                                        style="background: #fef3c7; color: #d97706; border: 1px solid #fcd34d; border-radius: 4px; padding: 2px 6px; cursor: pointer;">
+                                                        <span style="font-size: 14px;">📝</span>
+                                                    </button>
+                                                    {% endif %}
+                                                </div>
+                                            </td>
                                             <td>{{ booking.timeslot.slot_time|format_12hour|default:"—" }}</td>
                                             <td>{{ booking.date|date:"Y-m-d" }}</td>
                                             <td>
@@ -381,7 +394,8 @@
                                                     data-patient-name="{{ booking.allocation.patient.pat_name }}"
                                                     data-schedule-date="{{ booking.date|date:'Y-m-d' }}">
                                                     <div style="font-weight: 500;">
-                                                        {{ booking.allocation.patient.pat_name }} ({{ booking.allocation.patient.pat_reg_no }})
+                                                        {{ booking.allocation.patient.pat_name }} ({{
+                                                        booking.allocation.patient.pat_reg_no }})
                                                     </div>
                                                 </button>
                                             </td>
@@ -400,7 +414,9 @@
                                                 <div class="nurse-list">
                                                     {% for nurse_assignment in booking.nurse_assignments.all %}
                                                     {% if nurse_assignment.status == 'assigned' %}
-                                                    <span class="nurse-badge">{{ nurse_assignment.nurse.nurse_name|default:nurse_assignment.nurse.nurse_code }}</span>
+                                                    <span class="nurse-badge">{{
+                                                        nurse_assignment.nurse.nurse_name|default:nurse_assignment.nurse.nurse_code
+                                                        }}</span>
                                                     {% endif %}
                                                     {% empty %}
                                                     —
@@ -476,6 +492,109 @@
                 </div>
             </div>
         </div>
+
+        <!-- Change Log Modal -->
+        <div id="changeLogModal" class="modal">
+            <div class="modal-content" style="max-width: 600px;">
+                <div class="modal-header">
+                    <h3 class="modal-title">Therapy Change Log</h3>
+                    <span class="close" onclick="closeChangeLogModal()">&times;</span>
+                </div>
+                <div class="modal-body">
+                    <div style="margin-bottom: 16px;">
+                        <h4 id="cl-therapy-name" style="margin: 0; color: var(--primary);"></h4>
+                        <div id="cl-patient-name" style="font-size: 14px; color: var(--gray);"></div>
+                        <div id="cl-date" style="font-size: 14px; color: var(--gray);"></div>
+                    </div>
+
+                    <div class="table-container">
+                        <table style="width: 100%; border-collapse: collapse;">
+                            <thead>
+                                <tr style="background: #f9fafb; text-align: left;">
+                                    <th style="padding: 8px; border-bottom: 2px solid #e5e7eb;">Field</th>
+                                    <th style="padding: 8px; border-bottom: 2px solid #e5e7eb; color: #6b7280;">Before
+                                        (Original)</th>
+                                    <th style="padding: 8px; border-bottom: 2px solid #e5e7eb; color: var(--primary);">
+                                        After (Current)</th>
+                                </tr>
+                            </thead>
+                            <tbody id="change-log-body">
+                                <!-- Dynamic rows -->
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <div id="cl-loading" style="display: none; justify-content: center; padding: 20px;">
+                        <span style="color: var(--gray);">Loading change log...</span>
+                    </div>
+                    <div id="cl-error" style="display: none; color: #ef4444; padding: 10px; text-align: center;"></div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-primary" onclick="closeChangeLogModal()">Close</button>
+                </div>
+            </div>
+        </div>
+
+        <script>
+            // Change Log Functions
+            function viewChangeLog(bookingId) {
+                const modal = document.getElementById('changeLogModal');
+                if (!bookingId || !modal) return;
+
+                // Show modal
+                modal.style.display = 'block';
+
+                // Reset UI
+                document.getElementById('change-log-body').innerHTML = '';
+                document.getElementById('cl-loading').style.display = 'flex';
+                document.getElementById('cl-error').style.display = 'none';
+                document.getElementById('cl-therapy-name').innerText = 'Loading...';
+                document.getElementById('cl-patient-name').innerText = '';
+                document.getElementById('cl-date').innerText = '';
+
+                fetch(`/sheduling/scheduling/api/change-log/?booking_id=${bookingId}`)
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.error) throw new Error(data.error);
+
+                        // Update Header
+                        document.getElementById('cl-therapy-name').innerText = data.therapy_name || 'Therapy Details';
+                        document.getElementById('cl-patient-name').innerText = data.patient_name || '';
+                        document.getElementById('cl-date').innerText = data.date ? `Scheduled Date: ${data.date}` : '';
+
+                        // Render Rows
+                        const tbody = document.getElementById('change-log-body');
+                        if (data.changes && data.changes.length > 0) {
+                            data.changes.forEach(change => {
+                                const tr = document.createElement('tr');
+                                tr.innerHTML = `
+                                    <td style="padding: 10px; border-bottom: 1px solid #f3f4f6; font-weight: 500;">${change.field}</td>
+                                    <td style="padding: 10px; border-bottom: 1px solid #f3f4f6; color: #6b7280;">${change.before}</td>
+                                    <td style="padding: 10px; border-bottom: 1px solid #f3f4f6; color: var(--primary); font-weight: 500;">${change.after}</td>
+                                `;
+                                tbody.appendChild(tr);
+                            });
+                        } else {
+                            tbody.innerHTML = `<tr><td colspan="3" style="padding: 20px; text-align: center; color: #6b7280;">No changes detected from original allocation.</td></tr>`;
+                        }
+                    })
+                    .catch(e => {
+                        document.getElementById('cl-error').innerText = 'Error loading change log: ' + e.message;
+                        document.getElementById('cl-error').style.display = 'block';
+                    })
+                    .finally(() => {
+                        document.getElementById('cl-loading').style.display = 'none';
+                    });
+            }
+
+            function closeChangeLogModal() {
+                const modal = document.getElementById('changeLogModal');
+                if (modal) modal.style.display = 'none';
+            }
+
+            // Window click handling for modals is usually global, but let's hook into it if needed
+            // Currently relies on specific close buttons or assumption of global click handler if any
+        </script>
 
         <!-- Schedule Date Modal -->
         <div id="scheduleModal" class="modal">
