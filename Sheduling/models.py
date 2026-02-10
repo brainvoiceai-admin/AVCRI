@@ -94,6 +94,7 @@ class Booking(models.Model):
     room = models.ForeignKey(TreatmentRoom, null=True, blank=True, on_delete=models.SET_NULL)
     status = models.CharField(max_length=30, default='draft')  # draft / scheduled / partially_cancelled / cancelled / completed
     therapist_note = models.TextField(blank=True)
+    failure_reason = models.CharField(max_length=512, blank=True, help_text="Exact reason when status is 'failed' (e.g. no_preferred_slot, insufficient_therapists)")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

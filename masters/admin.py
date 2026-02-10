@@ -103,7 +103,7 @@ class ItemGroupAdmin(admin.ModelAdmin):
 
 @admin.register(ItemMaster)
 class ItemMasterAdmin(admin.ModelAdmin):
-    list_display = ['item_code', 'item_name', 'item_group', 'umo', 'procured_from', 'is_active', 'created_at']
+    list_display = ['item_code', 'item_name', 'item_group', 'umo', 'min_quantity', 'max_quantity', 'procured_from', 'is_active', 'created_at']
     list_filter = ['is_active', 'item_group', 'umo', 'procured_from', 'created_at']
     search_fields = ['item_code', 'item_name', 'item_group__name', 'umo__unit_name', 'procured_from__name']
     list_editable = ['is_active']
@@ -114,7 +114,7 @@ class ItemMasterAdmin(admin.ModelAdmin):
             'fields': ('item_code', 'item_name', 'item_group')
         }),
         ('Details', {
-            'fields': ('umo', 'min_max', 'procured_from')
+            'fields': ('umo', 'min_quantity', 'max_quantity', 'procured_from')
         }),
         ('Status', {
             'fields': ('is_active',)
