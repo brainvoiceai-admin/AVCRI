@@ -65,6 +65,10 @@ $(function () {
   const $resumeModal = $('#resume-modal-backdrop');
   const $resumeCloseBtn = $('#resume-modal-close');
 
+  const $historyModal = $('#patient-history-modal-backdrop');
+  const $historyList = $('#patient-history-list');
+  const $historyInfo = $('#patient-history-info');
+
   // --- state ---
   let itemGroups = [];
   let addedTherapies = [];
@@ -452,6 +456,87 @@ $(function () {
   $('#clear-patient-btn').on('click', function () {
     clearPatientSelection();
     $('#search-results').hide();
+  });
+
+  // --- Patient history (PatientHistory model) ---
+  function openPatientHistoryModal() {
+    if (!selectedPatient) {
+      alert('Please select a patient first.');
+      return;
+    }
+    const regNo = selectedPatient.pat_reg_no || selectedPatient.pat_op_reg_no;
+    if (!regNo) {
+      alert('Patient registration number is missing.');
+      return;
+    }
+
+    $historyInfo.text(`Loading history for Reg No: ${regNo} ...`);
+    $historyList.html('<div style="padding:10px;color:#666;">Loading...</div>');
+    $historyModal.show();
+
+    fetch('/patient-history/?pat_reg_no=' + encodeURIComponent(regNo))
+      .then(resp => resp.json())
+      .then(data => {
+        const history = (data && data.history) || [];
+        if (!history.length) {
+          $historyInfo.text(`No treatment history found for Reg No: ${regNo}.`);
+          $historyList.html('<div style="padding:10px;color:#666;">No history records found.</div>');
+          return;
+        }
+
+        const patName = history[0].pat_name || selectedPatient.pat_name || '';
+        $historyInfo.text(`History for ${patName} (Reg No: ${regNo})`);
+
+        let html = '';
+        history.forEach(row => {
+          const date = row.date || '';
+          const treatment = row.treatment || '';
+          const thName = row.therapist_name || '';
+          const thCode = row.therapist_code || '';
+          const room = row.room_no || '';
+          const tRoom = row.t_room || '';
+          html += `
+            <div style="padding:10px 12px;border-bottom:1px solid #eee;font-size:0.9rem;">
+              <div style="display:flex;justify-content:space-between;align-items:center;">
+                <div>
+                  <div style="font-weight:600;color:#333;">${treatment || '—'}</div>
+                  <div style="margin-top:2px;color:#555;">
+                    <span><strong>Date:</strong> ${date || '—'}</span>
+                    &nbsp;|&nbsp;
+                    <span><strong>Therapist:</strong> ${thName || '—'} ${thCode ? '(' + thCode + ')' : ''}</span>
+                  </div>
+                  <div style="margin-top:2px;color:#777;">
+                    <span><strong>Patient Room:</strong> ${room || '—'}</span>
+                    &nbsp;|&nbsp;
+                    <span><strong>Treatment Room:</strong> ${tRoom || '—'}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          `;
+        });
+        $historyList.html(html);
+      })
+      .catch(err => {
+        console.error('Error loading patient history:', err);
+        $historyInfo.text('Error loading history.');
+        $historyList.html('<div style="padding:10px;color:#d9534f;">Error loading patient history.</div>');
+      });
+  }
+
+  $('#view-history-btn').on('click', function () {
+    openPatientHistoryModal();
+  });
+
+  $('#patient-history-close').on('click', function () {
+    $historyModal.hide();
+  });
+
+  // Close history modal when clicking outside the modal content
+  $historyModal.on('click', function (e) {
+    if (e.target === this) {
+      $historyModal.hide();
+    }
   });
 
   // Helper function to convert 24-hour time to 12-hour format

@@ -18,6 +18,7 @@ urlpatterns = [
     path('get-item-details/', views.get_item_details, name='get_item_details'),
     path('search-patients/', views.search_patients_api, name='search_patients'),
     path('get-patient-details/', views.get_patient_details_api, name='get_patient_details'),
+    path('patient-history/', views.patient_history_api, name='patient_history'),
     path('search-therapies/', views.search_therapies_api, name='search_therapies'),
 
 #patient booking view

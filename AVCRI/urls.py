@@ -19,6 +19,7 @@ from django.urls import path, include
 from django.http import JsonResponse
 from django.conf import settings
 from django.conf.urls.static import static
+from Patient import views as patient_views
 
 # Temporary handler for WebSocket notifications endpoint (disabled)
 def ws_notifications_disabled(request):
@@ -27,7 +28,9 @@ def ws_notifications_disabled(request):
 
 urlpatterns = [
     path('admin/', admin.site.urls),
-     path('', include(('Patient.urls', 'patient'), namespace='patient')),
+    # Explicit patient history endpoint for PatientHistory popup
+    path('patient-history/', patient_views.patient_history_api, name='patient_history_root'),
+    path('', include(('Patient.urls', 'patient'), namespace='patient')),
       path('authentication/', include(('authentication.urls', 'authentication'), namespace='authentication')),
       path('therapy/', include('MySql_Data_pull.urls')),
       path("predictor/", include("predictor.urls")),
