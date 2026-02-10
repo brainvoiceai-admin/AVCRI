@@ -368,6 +368,19 @@ function updateTable(status, data) {
                     }).join('')}</div>`
                     : '<span class="muted">Not assigned</span>';
 
+                // Generate therapy name with Change Log button if rescheduled
+                let therapyNameHtml = escapeHtml(item.therapy_name);
+                if (item.is_rescheduled) {
+                    therapyNameHtml = `
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <span>${escapeHtml(item.therapy_name)}</span>
+                            <button class="btn-change-log" data-allocation-id="${item.id}" data-booking-id="${item.booking_id}" data-date="${escapeHtml(scheduleDate)}" title="View Change Log" style="background: #3b82f6; color: white; border: none; padding: 4px 10px; border-radius: 4px; cursor: pointer; font-size: 11px; font-weight: 600; white-space: nowrap;">
+                                📋 Change Log
+                            </button>
+                        </div>
+                    `;
+                }
+
                 const row = document.createElement('tr');
                 if (item.is_rescheduled) {
                     row.classList.add('row-rescheduled');
@@ -379,7 +392,7 @@ function updateTable(status, data) {
                                     <div style="font-size: 12px; color: var(--gray);">${escapeHtml(item.patient_reg_no)}</div>
                                 </button>
                             </td>
-                            <td>${escapeHtml(item.therapy_name)}</td>
+                            <td>${therapyNameHtml}</td>
                             <td>${slotDisplay}</td>
                             <td>${item.date || item.from_date}</td>
                             <td>${escapeHtml(item.room_no || '—')}</td>
@@ -390,6 +403,7 @@ function updateTable(status, data) {
                 therapistTbody.appendChild(row);
             });
         }
+
 
         // Update nurse table
         nurseTbody.innerHTML = '';
@@ -409,6 +423,19 @@ function updateTable(status, data) {
                     ? `<div class="nurse-list">${item.nurses.map(n => `<span class="nurse-badge">${n.name || n.code || n}</span>`).join('')}</div>`
                     : '<span class="muted">Not assigned</span>';
 
+                // Generate therapy name with Change Log button if rescheduled
+                let therapyNameHtml = escapeHtml(item.therapy_name);
+                if (item.is_rescheduled) {
+                    therapyNameHtml = `
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <span>${escapeHtml(item.therapy_name)}</span>
+                            <button class="btn-change-log" data-allocation-id="${item.id}" data-booking-id="${item.booking_id}" data-date="${escapeHtml(scheduleDate)}" title="View Change Log" style="background: #3b82f6; color: white; border: none; padding: 4px 10px; border-radius: 4px; cursor: pointer; font-size: 11px; font-weight: 600; white-space: nowrap;">
+                                📋 Change Log
+                            </button>
+                        </div>
+                    `;
+                }
+
                 const row = document.createElement('tr');
                 if (item.is_rescheduled) {
                     row.classList.add('row-rescheduled');
@@ -420,7 +447,7 @@ function updateTable(status, data) {
                                     <div style="font-size: 12px; color: var(--gray);">${escapeHtml(item.patient_reg_no)}</div>
                                 </button>
                             </td>
-                            <td>${escapeHtml(item.therapy_name)}</td>
+                            <td>${therapyNameHtml}</td>
                             <td>${scheduleDate || '—'}</td>
                             <td>${escapeHtml(item.patient_room_no || '—')}</td>
                             <td>${nursesHtml}</td>
@@ -428,6 +455,7 @@ function updateTable(status, data) {
                 nurseTbody.appendChild(row);
             });
         }
+
 
         return;
     }
@@ -1465,3 +1493,197 @@ function generateTherapyPDF(therapyData, date) {
         alert('Error generating PDF: ' + error.message + '\nPlease check the browser console for details.');
     }
 }
+
+// ====================================================================
+// CHANGE LOG FUNCTIONALITY
+// ====================================================================
+
+// Event delegation for Change Log buttons
+document.addEventListener('click', function (e) {
+    const changeLogBtn = e.target.closest('.btn-change-log');
+    if (changeLogBtn) {
+        const allocationId = changeLogBtn.dataset.allocationId;
+        const bookingId = changeLogBtn.dataset.bookingId;
+        const date = changeLogBtn.dataset.date;
+        showTherapyChangeLog(allocationId, bookingId, date);
+    }
+});
+
+function showTherapyChangeLog(allocationId, bookingId, date) {
+    if (!allocationId) {
+        alert('Missing allocation ID');
+        return;
+    }
+
+    // Build API URL
+    const params = new URLSearchParams();
+    params.append('allocation_id', allocationId);
+    if (bookingId) params.append('booking_id', bookingId);
+    if (date) params.append('date', date);
+
+    const url = `/sheduling/scheduling/api/therapy-change-log/?${params.toString()}`;
+
+    // Show loading state
+    const modalHtml = `
+        <div id="changeLogModal" class="modal" style="display: block;">
+            <div class="modal-content" style="max-width: 800px; width: 90%;">
+                <div class="modal-header">
+                    <h3 class="modal-title">Therapy Change Log</h3>
+                    <span class="close" onclick="closeChangeLogModal()">&times;</span>
+                </div>
+                <div class="modal-body">
+                    <div style="text-align: center; padding: 40px;">
+                        <div class="loading-spinner"></div>
+                        <p>Loading change log...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+
+    // Remove existing modal if any
+    const existingModal = document.getElementById('changeLogModal');
+    if (existingModal) {
+        existingModal.remove();
+    }
+
+    // Add modal to body
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+
+    // Fetch change log data
+    fetch(url)
+        .then(response => {
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+            return response.json();
+        })
+        .then(data => {
+            displayChangeLog(data);
+        })
+        .catch(error => {
+            console.error('Error fetching change log:', error);
+            const modalBody = document.querySelector('#changeLogModal .modal-body');
+            if (modalBody) {
+                modalBody.innerHTML = `
+                    <div style="text-align: center; padding: 40px; color: #ef4444;">
+                        <p style="font-weight: 600; font-size: 18px;">⚠️  Error Loading Change Log</p>
+                        <p>${escapeHtml(error.message)}</p>
+                        <button class="btn btn-secondary" onclick="closeChangeLogModal()" style="margin-top: 16px;">Close</button>
+                    </div>
+                `;
+            }
+        });
+}
+
+function displayChangeLog(data) {
+    const modalBody = document.querySelector('#changeLogModal .modal-body');
+    if (!modalBody) return;
+
+    // Build header info
+    let headerHtml = `
+        <div style="background: #f9fafb; padding: 16px; border-radius: 8px; margin-bottom: 20px;">
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px;">
+                <div>
+                    <div style="font-size: 12px; color: #6b7280; font-weight: 600; text-transform: uppercase; margin-bottom: 4px;">Patient</div>
+                    <div style="font-size: 14px; font-weight: 600; color: #111827;">${escapeHtml(data.patient_name)} (${escapeHtml(data.patient_reg_no)})</div>
+                </div>
+                <div>
+                    <div style="font-size: 12px; color: #6b7280; font-weight: 600; text-transform: uppercase; margin-bottom: 4px;">Therapy</div>
+                    <div style="font-size: 14px; font-weight: 600; color: #111827;">${escapeHtml(data.therapy_name)}</div>
+                </div>
+            </div>
+        </div>
+    `;
+
+    // Check if there are any changes
+    if (!data.change_log || data.change_log.length === 0) {
+        modalBody.innerHTML = headerHtml + `
+            <div style="text-align: center; padding: 40px; color: #6b7280;">
+                <p>📋 No reschedule history found for this therapy.</p>
+                <p style="font-size: 14px; margin-top: 8px;">This therapy was scheduled as per the original entry.</p>
+            </div>
+        `;
+        return;
+    }
+
+    // Build change log table
+    let changeLogHtml = `
+        <div style="overflow-x: auto; margin-top: 20px;">
+            <div style="font-size: 14px; font-weight: 600; color: ##111827; margin-bottom: 12px;">
+                Change History ${data.has_history_records ? '(Audit Records)' : '(Current vs Original)'}
+            </div>
+    `;
+
+    data.change_log.forEach((log, index) => {
+        changeLogHtml += `
+            <div style="border: 1px solid #e5e7eb; border-radius: 8px; padding: 16px; margin-bottom: 16px; background: white;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid #f3f4f6;">
+                    <div>
+                        <span style="font-weight: 600; color: #111827;">Entry #${index + 1}</span>
+                        ${log.date ? `<span style="color: #6b7280; margin-left: 12px;">Date: ${log.date}</span>` : ''}
+                    </div>
+                    <div style="font-size: 12px; color: #6b7280;">
+                        ${log.rescheduled_by ? `By: ${escapeHtml(log.rescheduled_by)}` : ''}
+                        ${log.rescheduled_at ? `<span style="margin-left: 8px;">${new Date(log.rescheduled_at).toLocaleString()}</span>` : ''}
+                    </div>
+                </div>
+                
+                <table style="width: 100%; border-collapse: separate; border-spacing: 0;">
+                    <thead>
+                        <tr style="background: #f9fafb;">
+                            <th style="padding: 10px; text-align: left; font-size: 12px; font-weight: 600; color: #374151; border-bottom: 2px solid #e5e7eb;">Field</th>
+                            <th style="padding: 10px; text-align: left; font-size: 12px; font-weight: 600; color: #374151; border-bottom: 2px solid #e5e7eb;">Before (Original Entry)</th>
+                            <th style="padding: 10px; text-align: left; font-size: 12px; font-weight: 600; color: #374151; border-bottom: 2px solid #e5e7eb;">After (Rescheduled)</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+        `;
+
+        // Add rows for each change
+        log.changes.forEach((change, idx) => {
+            const rowStyle = idx % 2 === 0 ? 'background: white;' : 'background: #f9fafb;';
+            const highlightStyle = change.changed ? 'background: #fef3c7; font-weight: 600;' : '';
+
+            changeLogHtml += `
+                <tr style="${rowStyle}">
+                    <td style="padding: 10px; border-bottom: 1px solid #e5e7eb; font-size: 13px; color: #374151;">
+                        ${escapeHtml(change.field)}
+                    </td>
+                    <td style="padding: 10px; border-bottom: 1px solid #e5e7eb; font-size: 13px; ${highlightStyle}">
+                        ${escapeHtml(change.before)}
+                    </td>
+                    <td style="padding: 10px; border-bottom: 1px solid #e5e7eb; font-size: 13px; ${highlightStyle}">
+                        ${escapeHtml(change.after)}
+                        ${change.changed ? ' <span style="color: #ef4444; font-weight: 700;">●</span>' : ''}
+                    </td>
+                </tr>
+            `;
+        });
+
+        changeLogHtml += `
+                    </tbody>
+                </table>
+            </div>
+        `;
+    });
+
+    changeLogHtml += '</div>';
+
+    modalBody.innerHTML = headerHtml + changeLogHtml;
+}
+
+function closeChangeLogModal() {
+    const modal = document.getElementById('changeLogModal');
+    if (modal) {
+        modal.remove();
+    }
+}
+
+// Close modal on outside click
+window.addEventListener('click', function (e) {
+    const modal = document.getElementById('changeLogModal');
+    if (modal && e.target === modal) {
+        closeChangeLogModal();
+    }
+});

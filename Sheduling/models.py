@@ -398,6 +398,44 @@ class AllocationChange(models.Model):
         return f"Change #{self.pk} for alloc {self.allocation_id} by {self.changed_by}"
 
 
+class BookingRescheduleHistory(models.Model):
+    """
+    Track reschedule history for therapies.
+    Stores before/after values whenever a booking is rescheduled.
+    """
+    booking = models.ForeignKey(Booking, on_delete=models.CASCADE, related_name='reschedule_history')
+    allocation = models.ForeignKey(TherapyAllocation, on_delete=models.CASCADE, related_name='reschedule_history')
+    
+    # Before values (original from Add Therapy page / TherapyAllocation)
+    before_date = models.DateField(null=True, blank=True)
+    before_slot = models.ForeignKey('masters.SlotMaster', null=True, blank=True, on_delete=models.SET_NULL, related_name='reschedule_before_slot')
+    before_room = models.ForeignKey(TreatmentRoom, null=True, blank=True, on_delete=models.SET_NULL, related_name='reschedule_before_room')
+    before_therapists = models.JSONField(default=list, blank=True, help_text="List of therapist codes assigned before reschedule")
+    
+    # After values (current scheduled/rescheduled values)
+    after_date = models.DateField(null=True, blank=True)
+    after_slot = models.ForeignKey('masters.SlotMaster', null=True, blank=True, on_delete=models.SET_NULL, related_name='reschedule_after_slot')
+    after_room = models.ForeignKey(TreatmentRoom, null=True, blank=True, on_delete=models.SET_NULL, related_name='reschedule_after_room')
+    after_therapists = models.JSONField(default=list, blank=True, help_text="List of therapist codes assigned after reschedule")
+    
+    # Metadata
+    rescheduled_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name='reschedules_performed')
+    rescheduled_at = models.DateTimeField(auto_now_add=True)
+    reason = models.TextField(blank=True, help_text="Reason for reschedule if provided")
+    
+    class Meta:
+        ordering = ['-rescheduled_at']
+        indexes = [
+            models.Index(fields=['booking', 'rescheduled_at']),
+            models.Index(fields=['allocation', 'rescheduled_at']),
+        ]
+        verbose_name = 'Booking Reschedule History'
+        verbose_name_plural = 'Booking Reschedule Histories'
+    
+    def __str__(self):
+        return f"Reschedule #{self.pk} for booking {self.booking_id} at {self.rescheduled_at}"
+
+
 # -----------------------------------------------------------------------------
 # Prescription models (similar to therapy)
 # -----------------------------------------------------------------------------
