@@ -1094,10 +1094,10 @@ def therapy_entry(request):
                                     Booking.objects.filter(allocation=allocation, date=d).update(status='scheduled')
                                     BookingItem.objects.filter(booking__allocation=allocation, booking__date=d).update(status='scheduled')
                                 elif failed_tasks:
-                                    # If any failed, mark as failed
+                                    # If any failed, mark as failed and store exact reason for dashboard
                                     reason = failed_tasks[0].get('reason', 'unknown')
                                     print(f"Allocation had failures for date {d}: {reason}")
-                                    Booking.objects.filter(allocation=allocation, date=d).update(status='failed')
+                                    Booking.objects.filter(allocation=allocation, date=d).update(status='failed', failure_reason=(str(reason) or '')[:512])
                                     BookingItem.objects.filter(booking__allocation=allocation, booking__date=d).update(status='failed')
                             else:
                                 reason = None
@@ -1267,20 +1267,20 @@ def therapy_entry(request):
                                             reason = 'allocation_failed'
                                         print(f"Allocation failed for date {d}: {reason}")
                                         date_change_failed_reasons.append({'date': d.isoformat(), 'reason': reason or 'unknown'})
-                                        Booking.objects.filter(allocation=allocation, date=d).update(status='failed')
+                                        Booking.objects.filter(allocation=allocation, date=d).update(status='failed', failure_reason=(str(reason or 'unknown') or '')[:512])
                                         BookingItem.objects.filter(booking__allocation=allocation, booking__date=d).update(status='failed')
                                 elif isinstance(tasks, dict):
                                     reason = tasks.get('error', 'unknown')
                                     print(f"Allocation failed for date {d}: {reason}")
                                     date_change_failed_reasons.append({'date': d.isoformat(), 'reason': reason})
-                                    Booking.objects.filter(allocation=allocation, date=d).update(status='failed')
+                                    Booking.objects.filter(allocation=allocation, date=d).update(status='failed', failure_reason=(str(reason) or '')[:512])
                                     BookingItem.objects.filter(booking__allocation=allocation, booking__date=d).update(status='failed')
                             except Exception as _e:
                                 print(f"Exception running algorithm for date {d}: {_e}")
                                 import traceback
                                 traceback.print_exc()
                                 date_change_failed_reasons.append({'date': d.isoformat(), 'reason': str(_e)})
-                                Booking.objects.filter(allocation=allocation, date=d).update(status='failed')
+                                Booking.objects.filter(allocation=allocation, date=d).update(status='failed', failure_reason=(str(_e) or '')[:512])
                     
                     # Update allocation status if any dates were processed
                     if date_change_success or date_change_failed_reasons:
@@ -1575,7 +1575,7 @@ def therapy_entry(request):
                                     any_failed = True
                                     allocation_bookings = Booking.objects.filter(allocation=alloc, date=d)
                                     draft_count = allocation_bookings.filter(status='draft').count()
-                                    Booking.objects.filter(allocation=alloc, date=d).update(status='failed')
+                                    Booking.objects.filter(allocation=alloc, date=d).update(status='failed', failure_reason=(str(error_msg) or '')[:512])
                                     BookingItem.objects.filter(booking__allocation=alloc, booking__date=d).update(status='failed')
                                     status_counts['draft'] -= draft_count
                                     status_counts['failed'] += draft_count
@@ -1586,7 +1586,7 @@ def therapy_entry(request):
                                 import traceback
                                 print(f"[THERAPY ENTRY] Traceback: {traceback.format_exc()}")
                                 any_failed = True
-                                Booking.objects.filter(allocation=alloc, date=d).update(status='failed')
+                                Booking.objects.filter(allocation=alloc, date=d).update(status='failed', failure_reason=(str(_e) or '')[:512])
                                 BookingItem.objects.filter(booking__allocation=alloc, booking__date=d).update(status='failed')
                                 status_counts['draft'] -= Booking.objects.filter(allocation=alloc, date=d, status='draft').count()
                                 status_counts['failed'] += Booking.objects.filter(allocation=alloc, date=d, status='failed').count()
@@ -1758,7 +1758,7 @@ def therapy_entry(request):
             try:
                 # Try with select_related first, fallback to regular query if it fails
                 try:
-                    qs = ItemMaster.objects.filter(is_active=True).select_related('procured_from').all()
+                    qs = ItemMaster.objects.filter(is_active=True).select_related('procured_from', 'umo').all()
                 except Exception:
                     # If select_related fails (e.g., field doesn't exist yet), use regular query
                     qs = ItemMaster.objects.filter(is_active=True).all()
@@ -1773,11 +1773,14 @@ def therapy_entry(request):
                             procured_from_name = i.procured_from.name if hasattr(i.procured_from, 'name') else str(i.procured_from)
                     except Exception:
                         pass
-                    
+                    # UOM from ItemMaster: umo is FK to UnitNo, use unit_name
+                    item_uom = ''
+                    if getattr(i, 'umo', None) and hasattr(i.umo, 'unit_name'):
+                        item_uom = (i.umo.unit_name or '').strip()
                     results.append({
                         'item_code': getattr(i, 'item_code', ''),
                         'item_name': getattr(i, 'item_name', ''),
-                        'item_uom': getattr(i, 'unit_of_measure', '') or '',
+                        'item_uom': item_uom,
                         'procured_from': procured_from_name
                     })
             except Exception as e:
@@ -2481,11 +2484,9 @@ def prescription_entry_page(request):
         results = []
         if ItemMaster is not None:
             try:
-                # Try with select_related first, fallback to regular query if it fails
                 try:
-                    qs = ItemMaster.objects.filter(is_active=True).select_related('procured_from').all()
+                    qs = ItemMaster.objects.filter(is_active=True).select_related('procured_from', 'umo').all()
                 except Exception:
-                    # If select_related fails (e.g., field doesn't exist yet), use regular query
                     qs = ItemMaster.objects.filter(is_active=True).all()
                 
                 if q:
@@ -2498,18 +2499,19 @@ def prescription_entry_page(request):
                             procured_from_name = i.procured_from.name if hasattr(i.procured_from, 'name') else str(i.procured_from)
                     except Exception:
                         pass
-                    
+                    item_uom = ''
+                    if getattr(i, 'umo', None) and hasattr(i.umo, 'unit_name'):
+                        item_uom = (i.umo.unit_name or '').strip()
                     results.append({
                         'item_code': getattr(i, 'item_code', ''),
                         'item_name': getattr(i, 'item_name', ''),
-                        'item_uom': getattr(i, 'unit_of_measure', '') or '',
+                        'item_uom': item_uom,
                         'procured_from': procured_from_name
                     })
             except Exception as e:
                 print(f"Error in search_items: {e}")
                 import traceback
                 traceback.print_exc()
-                # Return empty results on error rather than failing completely
                 results = []
         else:
             print("ItemMaster model not found - check if masters app is installed")
@@ -3146,11 +3148,9 @@ def prescription_entry_page(request):
         results = []
         if ItemMaster is not None:
             try:
-                # Try with select_related first, fallback to regular query if it fails
                 try:
-                    qs = ItemMaster.objects.filter(is_active=True).select_related('procured_from').all()
+                    qs = ItemMaster.objects.filter(is_active=True).select_related('procured_from', 'umo').all()
                 except Exception:
-                    # If select_related fails (e.g., field doesn't exist yet), use regular query
                     qs = ItemMaster.objects.filter(is_active=True).all()
                 
                 if q:
@@ -3163,11 +3163,13 @@ def prescription_entry_page(request):
                             procured_from_name = i.procured_from.name if hasattr(i.procured_from, 'name') else str(i.procured_from)
                     except Exception:
                         pass
-                    
+                    item_uom = ''
+                    if getattr(i, 'umo', None) and hasattr(i.umo, 'unit_name'):
+                        item_uom = (i.umo.unit_name or '').strip()
                     results.append({
                         'item_code': getattr(i, 'item_code', ''),
                         'item_name': getattr(i, 'item_name', ''),
-                        'item_uom': getattr(i, 'unit_of_measure', '') or '',
+                        'item_uom': item_uom,
                         'procured_from': procured_from_name
                     })
             except Exception as e:
@@ -3886,6 +3888,13 @@ def scheduling_dashboard(request):
         # Filter out therapies with zero therapist requirements
         from reshedule import therapist_requirements
         failed_allocations = [alloc for alloc in failed_allocations if therapist_requirements(alloc).get("total", 1) > 0]
+        # Failed bookings for this date (one row per booking) so template can show exact failure_reason
+        failed_bookings = list(
+            Booking.objects.filter(date=filter_date, status='failed')
+            .select_related('allocation__patient', 'allocation', 'timeslot', 'room')
+            .order_by('allocation_id', 'timeslot_id')
+        )
+        failed_bookings = [b for b in failed_bookings if therapist_requirements(b.allocation).get("total", 1) > 0]
         
         # Scheduled: show allocations that have scheduled bookings for this date
         scheduled_allocations = TherapyAllocation.objects.filter(
@@ -3910,7 +3919,7 @@ def scheduling_dashboard(request):
         # Filter out therapies with zero therapist requirements
         from reshedule import therapist_requirements
         failed_allocations = [alloc for alloc in failed_allocations if therapist_requirements(alloc).get("total", 1) > 0]
-        
+        failed_bookings = []  # No date filter: show allocations only, reason column will show "—"
         scheduled_allocations = TherapyAllocation.objects.filter(
             bookings__status='scheduled'
         ).distinct()
@@ -3992,18 +4001,158 @@ def scheduling_dashboard(request):
         'therapist_bookings': therapist_bookings_list,  # Separate therapist bookings
         'nurse_bookings': nurse_bookings_list,  # Separate nurse bookings
         'failed_allocations': failed_allocations,
+        'failed_bookings': failed_bookings,
         'date_filter': date_filter or '',
         'stats': {
             # For drafts, only use date-based count when user explicitly filtered by date;
             # otherwise show total drafts across all dates.
             'draft_count': draft_bookings.count() if has_query_date and filter_date else draft_allocations.count(),
-            'failed_count': len(failed_allocations) if isinstance(failed_allocations, list) else failed_allocations.count(),
+            'failed_count': len(failed_bookings) if failed_bookings else (len(failed_allocations) if isinstance(failed_allocations, list) else failed_allocations.count()),
             # Scheduled is always date-based (including default "today")
             'scheduled_count': scheduled_bookings.count(),
         }
     }
     
     return render(request, 'dashboards/scheduling/scheduling.html', context)
+
+
+def _parse_date_or_today(date_str, today):
+    """Parse date string; return (date_obj, iso_string). Uses today if missing/invalid."""
+    if date_str:
+        try:
+            d = parse_date(date_str)
+            if d:
+                return d, d.isoformat()
+        except Exception:
+            pass
+    return today, today.isoformat()
+
+
+@scheduling_access_required
+def user_therapy_entry_dashboard(request):
+    """
+    Display therapies entered by the currently logged-in user only.
+    Shows draft, scheduled, and failed therapies with same columns as scheduling dashboard.
+    Each tab has its own date filter: draft_date, failed_date, scheduled_date.
+    """
+    from .models import TherapyAllocation, Booking
+    from django.db.models import Q
+    from django.utils import timezone
+    from reshedule import therapist_requirements
+    from .nurse_allocation import is_nurse_treatment
+
+    today = timezone.now().date()
+
+    # Separate date for each tab; fallback to single 'date' then today
+    single = request.GET.get('date', '')
+    draft_date_str = request.GET.get('draft_date', single)
+    failed_date_str = request.GET.get('failed_date', single)
+    scheduled_date_str = request.GET.get('scheduled_date', single)
+
+    draft_date, draft_date_filter = _parse_date_or_today(draft_date_str, today)
+    failed_date, failed_date_filter = _parse_date_or_today(failed_date_str, today)
+    scheduled_date, scheduled_date_filter = _parse_date_or_today(scheduled_date_str, today)
+
+    current_user = request.user if request.user.is_authenticated else None
+    if not current_user:
+        context = {
+            'draft_allocations': TherapyAllocation.objects.none(),
+            'draft_bookings': [],
+            'scheduled_allocations': TherapyAllocation.objects.none(),
+            'scheduled_bookings': [],
+            'therapist_bookings': [],
+            'nurse_bookings': [],
+            'failed_allocations': [],
+            'failed_bookings': [],
+            'draft_date_filter': draft_date_filter,
+            'failed_date_filter': failed_date_filter,
+            'scheduled_date_filter': scheduled_date_filter,
+            'stats': {'draft_count': 0, 'failed_count': 0, 'scheduled_count': 0},
+        }
+        return render(request, 'dashboards/user_therapy_entry/user_therapy_entry.html', context)
+
+    # ---- Draft: filter by draft_date only ----
+    base_draft = TherapyAllocation.objects.filter(allocated_by=current_user).filter(
+        Q(from_date__lte=draft_date) & Q(to_date__gte=draft_date)
+    )
+    draft_allocations = base_draft.filter(
+        bookings__status='draft'
+    ).distinct().select_related('patient', 'room', 'timeslot', 'allocated_by').prefetch_related('bookings__assignments__therapist')
+
+    booking_draft = Booking.objects.filter(allocation__allocated_by=current_user, date=draft_date, status='draft')
+    draft_bookings = booking_draft.select_related(
+        'allocation__patient', 'allocation', 'timeslot', 'room', 'allocation__allocated_by'
+    ).prefetch_related('assignments__therapist').order_by('-date', '-created_at')
+
+    # ---- Failed: filter by failed_date only ----
+    base_failed = TherapyAllocation.objects.filter(allocated_by=current_user).filter(
+        Q(from_date__lte=failed_date) & Q(to_date__gte=failed_date)
+    )
+    failed_allocations = base_failed.filter(
+        bookings__status='failed'
+    ).distinct().select_related('patient', 'room', 'timeslot', 'allocated_by').prefetch_related('bookings__assignments__therapist')
+    failed_allocations = [a for a in failed_allocations if therapist_requirements(a).get("total", 1) > 0]
+
+    booking_failed = Booking.objects.filter(allocation__allocated_by=current_user, date=failed_date, status='failed')
+    failed_bookings = booking_failed.select_related(
+        'allocation__patient', 'allocation', 'timeslot', 'room', 'allocation__allocated_by'
+    ).prefetch_related('assignments__therapist').order_by('-date', '-created_at')
+
+    # ---- Scheduled: filter by scheduled_date only ----
+    base_scheduled = TherapyAllocation.objects.filter(allocated_by=current_user).filter(
+        Q(from_date__lte=scheduled_date) & Q(to_date__gte=scheduled_date)
+    )
+    scheduled_allocations = base_scheduled.filter(
+        bookings__status='scheduled'
+    ).distinct().select_related('patient', 'room', 'timeslot', 'allocated_by').prefetch_related(
+        'bookings__assignments__therapist',
+        'bookings__timeslot',
+        'bookings__room'
+    )
+
+    booking_scheduled = Booking.objects.filter(allocation__allocated_by=current_user, date=scheduled_date, status='scheduled')
+    scheduled_bookings = booking_scheduled.select_related(
+        'allocation__patient', 'allocation', 'timeslot', 'room', 'allocation__allocated_by'
+    ).prefetch_related(
+        'assignments__therapist',
+        'nurse_assignments__nurse',
+        'room_bookings__room'
+    ).order_by('-date', '-created_at')
+
+    therapist_bookings_list = []
+    nurse_bookings_list = []
+    for booking in scheduled_bookings:
+        is_nurse = is_nurse_treatment(booking.allocation.therapy_code, booking.allocation.therapy_name)
+        therapy_req = therapist_requirements(booking.allocation)
+        if not is_nurse and therapy_req.get("total", 1) == 0:
+            continue
+        if is_nurse:
+            nurse_bookings_list.append(booking)
+        else:
+            therapist_bookings_list.append(booking)
+
+    stats = {
+        'draft_count': draft_bookings.count(),
+        'failed_count': failed_bookings.count(),
+        'scheduled_count': scheduled_bookings.count(),
+    }
+
+    context = {
+        'draft_allocations': draft_allocations,
+        'draft_bookings': draft_bookings,
+        'scheduled_allocations': scheduled_allocations,
+        'scheduled_bookings': scheduled_bookings,
+        'therapist_bookings': therapist_bookings_list,
+        'nurse_bookings': nurse_bookings_list,
+        'failed_allocations': failed_allocations,
+        'failed_bookings': failed_bookings,
+        'draft_date_filter': draft_date_filter,
+        'failed_date_filter': failed_date_filter,
+        'scheduled_date_filter': scheduled_date_filter,
+        'stats': stats,
+        'current_user': current_user,
+    }
+    return render(request, 'dashboards/user_therapy_entry/user_therapy_entry.html', context)
 
 
 @require_http_methods(["GET"])
@@ -4571,7 +4720,7 @@ def get_therapy_data_api(request):
                         elif booking.allocation.room_id and booking.room_id and booking.allocation.room_id != booking.room_id:
                             is_rescheduled = True
 
-                    data.append({
+                    item = {
                         'id': booking.allocation.id,
                         'is_rescheduled': is_rescheduled,
                         'patient_id': booking.allocation.patient.id,
@@ -4600,7 +4749,10 @@ def get_therapy_data_api(request):
                         'dosage': booking.allocation.dosage if hasattr(booking.allocation, 'dosage') else '',
                         'uno': booking.allocation.uno if hasattr(booking.allocation, 'uno') else '',
                         'oil_class': booking.allocation.oil_class or ''
-                    })
+                    }
+                    if status_filter == 'failed':
+                        item['failure_reason'] = getattr(booking, 'failure_reason', None) or ''
+                    data.append(item)
         else:
             # No date filter - return allocations based on Booking status (not allocation status)
             # This ensures we check actual booking objects, matching the dashboard behavior

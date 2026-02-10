@@ -138,7 +138,15 @@ class RoomMaster(models.Model):
         db_table = '[dbo].[Room_Master]'
         app_label = 'MySql_Data_pull'
 
-
+#for dbo.Room_Master
+class doctor_master(models.Model):
+    Doct_Code = models.CharField(max_length=50, primary_key=True)   # Room_Code
+    Doct_Name = models.CharField(max_length=100, null=True, blank=True)
+    Doct_Active = models.CharField(max_length=50, null=True, blank=True)
+    class Meta:
+        managed = False   # Django won’t manage this table
+        db_table = '[dbo].[Doctor_Master_New]'
+        app_label = 'MySql_Data_pull'
 
 from django.db import models
 

@@ -409,18 +409,23 @@ def logout_view(request):
     user = request.user
     logout(request)
     
-    # Log logout (before user is logged out)
-    if user.is_authenticated:
-        log_audit_event(
-            user=user,
-            action='logout',
-            description=f'User {user.username} logged out',
-            status='success',
-            request=request
-        )
+    # Log logout (best-effort; user object is still available here)
+    try:
+        if user and user.is_authenticated:
+            log_audit_event(
+                user=user,
+                action='logout',
+                description=f'User {user.username} logged out',
+                status='success',
+                request=request
+            )
+    except Exception:
+        # Never block logout on audit/logging issues
+        pass
     
-    messages.info(request, 'You have been logged out.')
-    return redirect('patient:home')
+    messages.info(request, 'You have been logged out due to inactivity or manual logout.')
+    # After logout, always send the user back to the login page
+    return redirect('authentication:login')
 
 @login_required
 @role_required(['therapist'])
@@ -654,13 +659,34 @@ def Manage_user(request):
             user_id = request.POST.get('user_id')
             user = get_object_or_404(CustomUser, id=user_id)
             
+            new_username = (request.POST.get('username') or '').strip()
+            new_email = (request.POST.get('email') or '').strip()
+            
+            # Validate username/email uniqueness (exclude current user)
+            username_taken = new_username and CustomUser.objects.filter(username=new_username).exclude(id=user.id).exists()
+            email_taken = new_email and CustomUser.objects.filter(email=new_email).exclude(id=user.id).exists()
+            if username_taken or email_taken:
+                if username_taken and email_taken:
+                    request.session['edit_error_message'] = 'Username and email already exist. Use another.'
+                elif username_taken:
+                    request.session['edit_error_message'] = 'Username already exists. Use another.'
+                else:
+                    request.session['edit_error_message'] = 'Email already exists. Use another.'
+                request.session['edit_error_user_id'] = user_id
+                from django.urls import reverse
+                from urllib.parse import urlencode
+                filter_params = {k: request.GET[k] for k in ('search', 'status', 'role') if request.GET.get(k)}
+                redirect_url = reverse('authentication:Manage_user') + ('?' + urlencode(filter_params) if filter_params else '')
+                return redirect(redirect_url)
+            
             # Store old role to check if it changed
             old_role = user.role
             new_role = request.POST.get('role')
             
+            user.username = new_username
             user.first_name = request.POST.get('first_name')
             user.last_name = request.POST.get('last_name')
-            user.email = request.POST.get('email')
+            user.email = new_email
             user.role = new_role
             mobile = request.POST.get('mobile')
             user.mobile = mobile if mobile else None
@@ -896,10 +922,16 @@ def Manage_user(request):
         
         return JsonResponse(result)
     
+    # Pop edit-modal error from session so it shows in the modal and we reopen that modal
+    edit_error_user_id = request.session.pop('edit_error_user_id', None)
+    edit_error_message = request.session.pop('edit_error_message', None)
+    
     context = {
         'users': users,
         'roles': roles,
         'modules': modules,
+        'edit_error_user_id': edit_error_user_id,
+        'edit_error_message': edit_error_message,
     }
     return render(request, 'dashboards/superadmin/Manage_user.html', context)
 
@@ -1030,6 +1062,42 @@ def Audit_Log(request):
             audit_logs = audit_logs.filter(timestamp__date__lte=date_to_obj.date())
         except ValueError:
             pass
+    
+    # Export CSV if requested (before pagination)
+    export_flag = request.GET.get('export')
+    if export_flag:
+        # Reuse filtered queryset, export all matching rows
+        from django.http import HttpResponse
+        import csv
+        response = HttpResponse(content_type='text/csv')
+        from datetime import datetime
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        response['Content-Disposition'] = f'attachment; filename="audit_log_{timestamp}.csv"'
+        
+        writer = csv.writer(response)
+        writer.writerow(['ID', 'User', 'Role', 'Action', 'Description', 'Object', 'Timestamp', 'IP Address', 'Status'])
+        
+        for log in audit_logs.select_related('user').order_by('timestamp'):
+            user = log.user.username if log.user else 'System'
+            role = log.user.get_role_display() if log.user else ''
+            if log.object_type and log.object_id:
+                object_info = f"{log.object_type} ({log.object_id})"
+            elif log.object_type:
+                object_info = log.object_type
+            else:
+                object_info = ''
+            writer.writerow([
+                log.id,
+                user,
+                role,
+                log.get_action_display(),
+                (log.description or '').replace('\n', ' ').replace('\r', ' '),
+                object_info,
+                timezone.localtime(log.timestamp).strftime('%Y-%m-%d %H:%M:%S'),
+                log.ip_address or '',
+                log.get_status_display(),
+            ])
+        return response
     
     # Pagination
     paginator = Paginator(audit_logs, 50)  # Show 50 logs per page
@@ -1223,6 +1291,64 @@ def Therapy_Audit_Log(request):
             audit_logs = audit_logs.filter(timestamp__date__lte=date_to_obj.date())
         except ValueError:
             pass
+    
+    # Export CSV if requested (before pagination)
+    export_flag = request.GET.get('export')
+    if export_flag:
+        from django.http import HttpResponse
+        import csv
+        response = HttpResponse(content_type='text/csv')
+        from datetime import datetime
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        response['Content-Disposition'] = f'attachment; filename="therapy_audit_log_{timestamp}.csv"'
+        
+        writer = csv.writer(response)
+        writer.writerow(['ID', 'User', 'Role', 'Action', 'Description', 'Therapy Details', 'Timestamp', 'IP Address', 'Status'])
+        
+        for log in audit_logs.select_related('user').order_by('timestamp'):
+            user = log.user.username if log.user else 'System'
+            role = log.user.get_role_display() if log.user else ''
+            # Build therapy details summary from additional_data JSON if present
+            details = ''
+            if log.additional_data:
+                try:
+                    data = log.additional_data
+                    if isinstance(data, str):
+                        import json
+                        data = json.loads(data)
+                    patient = data.get('patient_reg_no') or data.get('patient') or ''
+                    therapy = data.get('therapy_name') or data.get('therapy') or ''
+                    period_from = data.get('from_date') or data.get('cancel_from') or data.get('resume_from') or ''
+                    period_to = data.get('to_date') or data.get('cancel_to') or data.get('resume_to') or ''
+                    extra = []
+                    if data.get('updated_fields'):
+                        extra.append(f"Updated: {', '.join(data.get('updated_fields'))}")
+                    if data.get('remaining_items_count') is not None:
+                        extra.append(f"Remaining items: {data.get('remaining_items_count')}")
+                    parts = []
+                    if patient:
+                        parts.append(f"Patient: {patient}")
+                    if therapy:
+                        parts.append(f"Therapy: {therapy}")
+                    if period_from or period_to:
+                        parts.append(f"Period: {period_from} to {period_to}")
+                    if extra:
+                        parts.append(' | '.join(extra))
+                    details = ' | '.join(parts)
+                except Exception:
+                    details = str(log.additional_data)
+            writer.writerow([
+                log.id,
+                user,
+                role,
+                log.get_action_display(),
+                (log.description or '').replace('\n', ' ').replace('\r', ' '),
+                details,
+                timezone.localtime(log.timestamp).strftime('%Y-%m-%d %H:%M:%S'),
+                log.ip_address or '',
+                log.get_status_display(),
+            ])
+        return response
     
     # Pagination
     paginator = Paginator(audit_logs, 50)  # Show 50 logs per page
@@ -1873,8 +1999,9 @@ def search_patients_by_room(request):
             from datetime import datetime
             today_start = datetime.combine(today, datetime.min.time())
             
+            # Partial match so "ds" finds "ds, nr" or "ds-4"
             treatment_records = Treatment.objects.using('iptherapy_db').filter(
-                Pat_Room_No__iexact=room_query
+                Pat_Room_No__icontains=room_query
             ).filter(
                 Q(Pat_DoD__isnull=True) | Q(Pat_DoD__date__gte=today)
             ).filter(
@@ -1900,18 +2027,17 @@ def search_patients_by_room(request):
         
         # Also search PatientSnapshot table (has room numbers stored directly as CharField)
         snapshot_patients = []
-        snapshot_room_numbers_to_search = [room_query]  # Start with the original query
-        
-        # Check if StayingRoom has a mapping (e.g., "OP-1" -> "76")
+        # Match room by display format like "ds, nr" or "ds-4": partial match on StayingRoom.room_no
+        snapshot_room_numbers_to_search = [room_query]
         try:
-            staying_room = StayingRoom.objects.filter(
-                room_no__iexact=room_query
-            ).first()
-            
-            if staying_room and staying_room.number:
-                # Add the mapped number to search list
-                snapshot_room_numbers_to_search.append(staying_room.number)
-                print(f"[DEBUG] StayingRoom mapping found: {room_query} -> {staying_room.number}")
+            staying_rooms_partial = StayingRoom.objects.filter(
+                room_no__icontains=room_query
+            ).values_list('number', flat=True).distinct()
+            for num in staying_rooms_partial:
+                if num and str(num).strip() and str(num).strip() not in snapshot_room_numbers_to_search:
+                    snapshot_room_numbers_to_search.append(str(num).strip())
+            if staying_rooms_partial:
+                print(f"[DEBUG] StayingRoom partial match '{room_query}' -> numbers: {list(staying_rooms_partial)}")
         except Exception:
             pass
         
@@ -1919,8 +2045,8 @@ def search_patients_by_room(request):
             from Sheduling.models import PatientSnapshot
             from django.db.models import Q
             
-            # Search PatientSnapshot by pat_room_no (can store "CT-16", "OP-1" directly or mapped numbers)
-            snapshot_q = Q()
+            # Search PatientSnapshot: exact match on collected room numbers OR pat_room_no contains query (e.g. "ds" matches "ds, nr")
+            snapshot_q = Q(pat_room_no__icontains=room_query)
             for room_num in snapshot_room_numbers_to_search:
                 snapshot_q |= Q(pat_room_no__iexact=room_num)
             
@@ -2003,36 +2129,47 @@ def search_patients_by_room(request):
             ip_patients_list = []
             room_numbers_to_search = []
             
-            # First, try to find StayingRoom by display format (e.g., "CT-16", "OP-1")
-            # This handles searches like "CT-16", "OP-1", etc.
-            staying_room = StayingRoom.objects.filter(
+            # Match by display format (e.g. "ds", "ds, nr", "ds-4"): partial match on room_no so "ds" finds "ds, nr"
+            staying_rooms_partial = StayingRoom.objects.filter(
+                room_no__icontains=room_query
+            ).values_list('number', flat=True).distinct()
+            for num in staying_rooms_partial:
+                if num is None or not str(num).strip():
+                    continue
+                try:
+                    room_db_number = int(num)
+                    if room_db_number not in room_numbers_to_search:
+                        room_numbers_to_search.append(room_db_number)
+                except (ValueError, TypeError):
+                    pass
+            if staying_rooms_partial:
+                print(f"[DEBUG] StayingRoom partial match '{room_query}' -> numbers: {list(staying_rooms_partial)}")
+            
+            # Exact match on room_no (e.g. user typed "ds, nr" exactly)
+            staying_room_exact = StayingRoom.objects.filter(
                 room_no__iexact=room_query
             ).first()
-            
-            if staying_room:
-                # Found a match in StayingRoom, get the number field (stored in DB)
+            if staying_room_exact and staying_room_exact.number:
                 try:
-                    room_db_number = int(staying_room.number)
-                    room_numbers_to_search.append(room_db_number)
-                    print(f"[DEBUG] Found StayingRoom: {staying_room.room_no} -> number: {staying_room.number}")
+                    room_db_number = int(staying_room_exact.number)
+                    if room_db_number not in room_numbers_to_search:
+                        room_numbers_to_search.append(room_db_number)
                 except (ValueError, TypeError):
                     pass
             
-            # Also try to find by number field directly (in case user searches by the stored number)
+            # Also try by number field (user searches by stored number)
             staying_room_by_number = StayingRoom.objects.filter(
                 number__iexact=room_query
             ).first()
-            
             if staying_room_by_number:
                 try:
                     room_db_number = int(staying_room_by_number.number)
                     if room_db_number not in room_numbers_to_search:
                         room_numbers_to_search.append(room_db_number)
-                    print(f"[DEBUG] Found StayingRoom by number: {staying_room_by_number.number}")
                 except (ValueError, TypeError):
                     pass
             
-            # If it's a pure integer and not found in StayingRoom, search directly
+            # If it's a pure integer and still no matches from StayingRoom, search by that integer
             if room_query_int is not None and not room_numbers_to_search:
                 room_numbers_to_search.append(room_query_int)
             
