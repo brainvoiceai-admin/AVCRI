@@ -561,6 +561,11 @@ def allocate_treatment_room(date, time_slot, last_room=None, therapy_name=None, 
 # -----------------------
 # Slot helpers: return allowed slots (list) for patient type
 # -----------------------
+def _slot_time_value(slot_obj):
+    """Return time (time object) for a slot model. SlotMaster uses slot_time; legacy may use start_time."""
+    return getattr(slot_obj, 'slot_time', None) or getattr(slot_obj, 'start_time', None)
+
+
 def get_allowed_slot_values(patient_type, therapy_category, used_slots=None, therapy_name=None):
     """
     Return ordered list of allowed slot strings "HH:MM" for this patient_type and therapy_category.
@@ -606,9 +611,16 @@ def get_allowed_slot_values(patient_type, therapy_category, used_slots=None, the
             allowed_slots = [s for s in allowed_slots if s != "06:30"]
             print(f"[SLOT RESTRICTION] Lepam treatment detected - excluding 06:30 slot. Allowed slots: {allowed_slots}")
 
-    # remove any used slots (used_slots is list of slot model instances)
+    # remove any used slots (used_slots is list of slot model instances; use slot_time for SlotMaster)
     if used_slots:
-        used_slot_strs = [getattr(s, 'start_time').strftime("%H:%M") for s in used_slots if getattr(s, 'start_time', None)]
+        used_slot_strs = []
+        for s in used_slots:
+            t = _slot_time_value(s)
+            if t:
+                try:
+                    used_slot_strs.append(t.strftime("%H:%M"))
+                except Exception:
+                    pass
         allowed_slots = [s for s in allowed_slots if s not in used_slot_strs]
 
     return allowed_slots 
@@ -1227,20 +1239,24 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
             "therapists": []
         }, False, reason)
 
-    # in-run used slot check
-    if any(getattr(s, 'start_time', None) == getattr(canonical_slot, 'start_time', None) for s in used_slots):
-        reason = "slot_already_used_in_run"
-        return ({
-            "booking_id": booking_id,
-            "allocation_id": allocation.pk,
-            "date": date.isoformat(),
-            "therapy_name": therapy_name,
-            "slot": requested_slot_value,
-            "status": "FAILED",
-            "reason": reason,
-            "room_no": getattr(booking.room, 'room_no', None) if getattr(booking,'room',None) else None,
-            "therapists": []
-        }, False, reason)
+    # in-run used slot check (use slot_time for SlotMaster; avoid matching on None)
+    canonical_time = _slot_time_value(canonical_slot)
+    if canonical_time and used_slots:
+        for s in used_slots:
+            st = _slot_time_value(s)
+            if st and st == canonical_time:
+                reason = "slot_already_used_in_run"
+                return ({
+                    "booking_id": booking_id,
+                    "allocation_id": allocation.pk,
+                    "date": date.isoformat(),
+                    "therapy_name": therapy_name,
+                    "slot": requested_slot_value,
+                    "status": "FAILED",
+                    "reason": reason,
+                    "room_no": getattr(booking.room, 'room_no', None) if getattr(booking,'room',None) else None,
+                    "therapists": []
+                }, False, reason)
 
     # Check for previous therapists (bathing + others) for continuity
     # If ALL previous therapists are available together, assign them as a group
@@ -1793,6 +1809,14 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
             ).exists():
                 can_add = False
                 print(f"[RESCHEDULE PASS2]   Previous bathing therapist already booked at this slot - cannot add")
+            # Check daily session limit (max 6) - avoid adding then failing at create_therapist_booking_safe
+            elif TherapistBooking.objects.filter(
+                therapist=previous_bathing_therapist,
+                date=date,
+                status='BOOKED'
+            ).count() >= 6:
+                can_add = False
+                print(f"[RESCHEDULE PASS2]   Previous bathing therapist at max sessions (6) for this date - cannot add (would fail booking creation)")
             # Check gender match
             elif pat_sex:
                 desired_gender = 'female' if str(pat_sex).strip().lower().startswith('f') else 'male'
