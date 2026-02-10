@@ -19,7 +19,7 @@ from datetime import date
 from MySql_Data_pull.models import Registration, OPMaster, store_Therapy, store_TherapyItem, store_Prescription, store_PrescriptionItem, ItemMaster,Visit
 from masters.models import UnitNo, get_staying_room_display_number
 import json
-from .models import Repeated_Visitors
+from .models import Repeated_Visitors, PatientHistory
 from datetime import date, datetime
 from final_allocation import expand_therapies_for_visit
 
@@ -198,9 +198,39 @@ def get_patient_details_api(request):
         return JsonResponse({'error': 'Patient with this registration number does not exist.'}, status=404)
     
 
+# -----------------------
+# Patient history API (PatientHistory model)
+# -----------------------
+def patient_history_api(request):
+    """
+    Return all treatment history rows from PatientHistory for a given patient reg no.
+    Query param: ?pat_reg_no=XXXXX
+    """
+    pat_reg_no = request.GET.get('pat_reg_no')
+    if not pat_reg_no:
+        return JsonResponse({'error': 'Registration number is required'}, status=400)
 
-
-
+    try:
+        qs = PatientHistory.objects.filter(preg_no=str(pat_reg_no)).order_by('-date', '-id')
+        history = []
+        for row in qs:
+            history.append({
+                "id": row.id,
+                "preg_no": row.preg_no,
+                "pat_name": row.pat_name or "",
+                "date": row.date.isoformat() if row.date else None,
+                "treatment": row.treatment or "",
+                "therapist_name": row.therapist_name or "",
+                "therapist_code": row.therapist_code or "",
+                "room_no": row.room_no or "",
+                "t_room": row.t_room or "",
+            })
+        return JsonResponse({"history": history})
+    except Exception as e:
+        print(f"[ERROR] patient_history_api failed for {pat_reg_no}: {e}")
+        import traceback
+        traceback.print_exc()
+        return JsonResponse({'error': 'Error fetching patient history.'}, status=500)
 
 # Step 2: Therapy Entry
 import json
