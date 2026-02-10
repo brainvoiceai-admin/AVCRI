@@ -19,6 +19,11 @@ __pycache__/
 *.pyc
 venv/
 env/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
 .venv/
 
 # --- IDE & Editor Config ---
