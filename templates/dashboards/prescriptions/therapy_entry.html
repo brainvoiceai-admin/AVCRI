@@ -243,6 +243,9 @@
               </tbody>
             </table>
           </div>
+          <p class="small-muted" style="margin-top:12px;padding:0 16px 16px;font-style:italic;">
+            <i class="fas fa-info-circle"></i> Here only current session details are shown. To see past session details, click <strong>Status</strong>.
+          </p>
         </div>
       </div>
     </div>
@@ -303,6 +306,7 @@
         <div id="status-header-row" style="display:flex;gap:8px;font-weight:700;padding:12px;border-bottom:1px solid var(--border-light);background:#f8f9fa;">
           <div style="width:140px">Date</div>
           <div style="width:120px">Slot</div>
+          <div style="width:200px">Treatment name</div>
           <div style="width:200px">Treatment Room</div>
           <div style="width:150px">Patient Room</div>
           <div style="width:200px" id="staff-header">Therapist</div>
@@ -319,7 +323,7 @@
   </div>
 
 
-    <script src="{% static 'js/updated_dash_therapy_entry.js' %}"></script>
+    <script src="{% static 'js/updated_dash_therapy_entry.js' %}?v=3"></script>
     <script src="{% static 'js/dashboards_nav.js' %}"></script>
 </body>
 </html>
