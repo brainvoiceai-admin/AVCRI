@@ -27,6 +27,8 @@ urlpatterns = [
     path('prescription/api/send-final-prescription/', prescription_views.send_final_prescription_api, name='send_final_prescription_api'),
     path('prescription/api/change-log/', prescription_views.get_change_log_api, name='get_change_log_api'),
     path('prescription/api/update-status/', prescription_views.update_prescription_status_api, name='update_prescription_status_api'),
+    path('prescription/api/previous-history/', prescription_views.get_previous_prescriptions_api, name='get_previous_prescriptions_api'),
+    path('prescription/api/download-history/', prescription_views.download_prescription_history_api, name='download_prescription_history_api'),
     
     # Procurement Dashboard URLs
     path('procurement/', procurement_views.procurement_dashboard, name='procurement_dashboard'),

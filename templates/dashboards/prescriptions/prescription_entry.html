@@ -2,6 +2,7 @@
 <!doctype html>
 {%load static%}
 <html lang="en">
+
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
@@ -12,15 +13,16 @@
   <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 
-  
-    <link rel="stylesheet" href="{% static 'css/updated_dash_prescription_entry.css' %}">
-    <link rel="stylesheet" href="{% static 'css/dashboards_nav.css' %}">
+
+  <link rel="stylesheet" href="{% static 'css/updated_dash_prescription_entry.css' %}">
+  <link rel="stylesheet" href="{% static 'css/dashboards_nav.css' %}">
 </head>
+
 <body>
   <div class="app-container">
     <!-- Include your existing navigation -->
     {% include 'dashboards/nav.html' %}
-    
+
     <div class="main-content">
       <!-- Top Navigation Bar with Patient Search -->
       <div class="top-navbar">
@@ -28,29 +30,33 @@
           <i class="fas fa-prescription-bottle-alt"></i>
           <h1>Prescription Manager</h1>
         </div>
-        
+
         <div class="patient-search-section">
           <div class="patient-search-container">
             <!-- Search Method Tabs -->
-            <div class="search-tabs" style="display: flex; gap: 8px; margin-bottom: 12px; border-bottom: 2px solid var(--border-light);">
-              <button class="search-tab-btn active" data-tab="name-reg" style="padding: 8px 16px; border: none; background: none; cursor: pointer; border-bottom: 2px solid transparent; color: var(--text-medium); font-weight: 500; transition: all 0.3s;">
+            <div class="search-tabs"
+              style="display: flex; gap: 8px; margin-bottom: 12px; border-bottom: 2px solid var(--border-light);">
+              <button class="search-tab-btn active" data-tab="name-reg"
+                style="padding: 8px 16px; border: none; background: none; cursor: pointer; border-bottom: 2px solid transparent; color: var(--text-medium); font-weight: 500; transition: all 0.3s;">
                 <i class="fas fa-user me-1"></i> Name/Reg No
               </button>
-              <button class="search-tab-btn" data-tab="room" style="padding: 8px 16px; border: none; background: none; cursor: pointer; border-bottom: 2px solid transparent; color: var(--text-medium); font-weight: 500; transition: all 0.3s;">
+              <button class="search-tab-btn" data-tab="room"
+                style="padding: 8px 16px; border: none; background: none; cursor: pointer; border-bottom: 2px solid transparent; color: var(--text-medium); font-weight: 500; transition: all 0.3s;">
                 <i class="fas fa-bed me-1"></i> Room Number
               </button>
             </div>
-            
+
             <!-- Name/Reg No Search Tab -->
             <div id="name-reg-search-tab" class="search-tab-content">
               <div class="search-input-group">
-                <input type="text" id="header-patient-select" placeholder="Search patient by name or registration number...">
+                <input type="text" id="header-patient-select"
+                  placeholder="Search patient by name or registration number...">
                 <button id="clear-patient-btn" class="btn btn-outline">
                   <i class="fas fa-times"></i> Clear
                 </button>
               </div>
             </div>
-            
+
             <!-- Room Number Search Tab -->
             <div id="room-search-tab" class="search-tab-content" style="display: none;">
               <div class="search-input-group" style="display: flex; gap: 8px;">
@@ -63,18 +69,19 @@
                 </button>
               </div>
             </div>
-            
+
             <div id="search-results"></div>
           </div>
         </div>
-        
+
         <div class="nav-actions">
+
           <button id="export-json" class="btn btn-outline">
             <i class="fas fa-file-export"></i> Export
           </button>
         </div>
       </div>
-      
+
       <!-- Patient Info Bar -->
       <div class="patient-info-bar">
         <div class="patient-details">
@@ -90,7 +97,7 @@
             </div>
           </div>
         </div>
-        
+
         <div class="patient-status">
           <div class="status-badge status-vip" id="hdr-pat-vip-badge" style="display: none;">
             <i class="fas fa-crown"></i> VIP
@@ -100,7 +107,7 @@
           </div>
         </div>
       </div>
-      
+
       <!-- Main Content Area -->
       <div class="content-area">
         <!-- Prescription Form Card -->
@@ -111,11 +118,11 @@
               <span id="form-title">Create New Prescription</span>
             </div>
           </div>
-          
+
           <h4 style="margin: 0 0 12px; color: var(--text-dark);">
             <i class="fas fa-pills"></i> Medication Items
           </h4>
-          
+
           <div class="item-groups-container">
             <div class="form-row">
               <div class="form-group">
@@ -124,7 +131,8 @@
               </div>
               <div class="form-group">
                 <label for="item-builder-ingredients">Ingredients</label>
-                <input type="text" id="item-builder-ingredients" class="form-control" placeholder="Enter ingredients (comma-separated or free text)" style="width:100%;">
+                <input type="text" id="item-builder-ingredients" class="form-control"
+                  placeholder="Enter ingredients (comma-separated or free text)" style="width:100%;">
               </div>
               <div class="form-group small">
                 <label for="item-builder-dosage">Dosage</label>
@@ -138,15 +146,21 @@
               </div>
               <div class="form-group small">
                 <label for="item-builder-time">Time</label>
-                <select id="item-builder-time"><option value="">Select Time</option></select>
+                <select id="item-builder-time">
+                  <option value="">Select Time</option>
+                </select>
               </div>
               <div class="form-group small">
                 <label for="item-builder-oil-class">Oil Class</label>
-                <select id="item-builder-oil-class"><option value="">-- Select --</option></select>
+                <select id="item-builder-oil-class">
+                  <option value="">-- Select --</option>
+                </select>
               </div>
               <div class="form-group small">
                 <label for="item-builder-procured-from">Procured From</label>
-                <select id="item-builder-procured-from"><option value="">-- Select Source --</option></select>
+                <select id="item-builder-procured-from">
+                  <option value="">-- Select Source --</option>
+                </select>
               </div>
               <div style="display:flex;align-items:flex-end;">
                 <button id="add-item-group-btn" class="btn">
@@ -167,7 +181,9 @@
           <div class="form-row" style="margin-top: 24px;">
             <div class="form-group small">
               <label for="scope-select">External/Internal</label>
-              <select id="scope-select"><option value="">-- Select --</option></select>
+              <select id="scope-select">
+                <option value="">-- Select --</option>
+              </select>
             </div>
           </div>
 
@@ -187,6 +203,9 @@
           </div>
 
           <div class="form-actions">
+            <button id="past-history-btn" class="btn btn-outline">
+              <i class="fas fa-history"></i> Past History
+            </button>
             <button id="allocate-prescription-btn" class="btn btn-success">
               <i class="fas fa-save"></i> Save Prescription
             </button>
@@ -207,7 +226,7 @@
               <span>Allocated Prescriptions</span>
             </div>
           </div>
-          
+
           <div class="table-container">
             <table>
               <thead>
@@ -252,7 +271,8 @@
         <div class="form-group"><label for="cancel-from">Cancel From</label><input type="date" id="cancel-from" /></div>
         <div class="form-group"><label for="cancel-to">Cancel To</label><input type="date" id="cancel-to" /></div>
       </div>
-      <div style="margin-top:16px;"><label>Reason for cancellation</label><textarea id="cancel-reason" placeholder="Enter reason for cancellation..." rows="3" style="resize:vertical"></textarea></div>
+      <div style="margin-top:16px;"><label>Reason for cancellation</label><textarea id="cancel-reason"
+          placeholder="Enter reason for cancellation..." rows="3" style="resize:vertical"></textarea></div>
       <div class="modal-footer">
         <button id="cancel-modal-close" class="btn btn-outline">Close</button>
         <button id="cancel-submit" class="btn btn-danger">Submit Cancellation Request</button>
@@ -273,10 +293,52 @@
       </div>
     </div>
   </div>
+  </div>
+
+  <!-- Prescription History Modal -->
+  <div id="history-modal-backdrop" class="modal-backdrop">
+    <div class="modal" role="dialog" aria-modal="true"
+      style="max-width: 900px; max-height: 90vh; display: flex; flex-direction: column;">
+      <div class="modal-header"
+        style="display: flex; justify-content: space-between; align-items: center; padding-bottom: 16px; border-bottom: 1px solid #eee;">
+        <div>
+          <h3><i class="fas fa-history"></i> Prescription History</h3>
+          <div id="history-patient-name" style="color: var(--text-medium); margin-top: 4px;"></div>
+        </div>
+        <div class="history-actions" style="display: flex; gap: 8px;">
+          <button id="download-history-pdf" class="btn btn-outline btn-sm">
+            <i class="fas fa-file-pdf"></i> PDF
+          </button>
+          <button id="download-history-excel" class="btn btn-outline btn-sm">
+            <i class="fas fa-file-excel"></i> Excel
+          </button>
+          <button id="history-modal-close" class="btn btn-outline btn-sm">
+            <i class="fas fa-times"></i>
+          </button>
+        </div>
+      </div>
+
+      <div class="modal-body" style="flex: 1; overflow-y: auto; padding-top: 16px;">
+        <div id="history-content-loader" style="display: none; text-align: center; padding: 20px;">
+          <i class="fas fa-spinner fa-spin fa-2x"></i>
+          <p>Loading history...</p>
+        </div>
+        <div id="history-content-empty" style="display: none; text-align: center; padding: 20px; color: #666;">
+          <i class="fas fa-file-medical-alt fa-3x" style="opacity: 0.3; margin-bottom: 10px;"></i>
+          <p>No previous prescription history found for this patient.</p>
+        </div>
+        <div id="history-list" class="history-list">
+          <!-- History items will be injected here -->
+        </div>
+      </div>
+    </div>
+  </div>
 
 
-    <script src="{% static 'js/updated_dash_prescription_entry.js' %}"></script>
-    <script src="{% static 'js/dashboards_nav.js' %}"></script>
+  <script src="{% static 'js/updated_dash_prescription_entry.js' %}"></script>
+  <script src="{% static 'js/dashboards_nav.js' %}"></script>
 </body>
+
 </html>
+
 </html>
