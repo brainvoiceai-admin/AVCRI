@@ -2416,12 +2416,6 @@ $(function () {
                 <td style="padding: 8px 15px; border-bottom: 1px solid #eee;">${esc(item.uom) || '-'}</td>
                 <td style="padding: 8px 15px; border-bottom: 1px solid #eee;">${esc(item.usage) || '-'}</td>
                 <td style="padding: 8px 15px; border-bottom: 1px solid #eee;">${esc(item.int_ext) || '-'}</td>
-                <td style="padding: 8px 15px; border-bottom: 1px solid #eee; font-size: 0.85em; color: #555;">
-                    ${item.start_date ? formatDate(item.start_date) : '-'}
-                </td>
-                 <td style="padding: 8px 15px; border-bottom: 1px solid #eee; font-size: 0.85em; color: #555;">
-                    ${item.end_date ? formatDate(item.end_date) : '-'}
-                </td>
             </tr>
           `).join('');
 
@@ -2429,7 +2423,6 @@ $(function () {
             <div class="history-group" style="margin-bottom: 20px; border: 1px solid #ddd; border-radius: 4px; overflow: hidden; background: white;">
                 <div class="history-date-header" style="background: #f8f9fa; padding: 10px 15px; font-weight: bold; border-bottom: 1px solid #ddd; color: var(--primary); display: flex; justify-content: space-between; align-items: center;">
                     <span><i class="fas fa-calendar-alt"></i> ${date}</span>
-                    ${group.dod ? `<span style="font-size: 0.9em; color: #dc3545;">Expected DOD: ${formatDate(group.dod)}</span>` : ''}
                 </div>
                 <table class="table" style="width: 100%; border-collapse: collapse;">
                     <thead style="background: #fff; border-bottom: 1px solid #eee;">
@@ -2439,8 +2432,6 @@ $(function () {
                              <th style="text-align: left; padding: 8px 15px; color: #666; font-size: 0.9em;">UOM</th>
                             <th style="text-align: left; padding: 8px 15px; color: #666; font-size: 0.9em;">Usage</th>
                             <th style="text-align: left; padding: 8px 15px; color: #666; font-size: 0.9em;">Ext/Int</th>
-                            <th style="text-align: left; padding: 8px 15px; color: #666; font-size: 0.9em;">Start</th>
-                            <th style="text-align: left; padding: 8px 15px; color: #666; font-size: 0.9em;">End</th>
                         </tr>
                     </thead>
                     <tbody>
