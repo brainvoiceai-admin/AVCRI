@@ -69,6 +69,33 @@ $(function () {
   const $historyList = $('#patient-history-list');
   const $historyInfo = $('#patient-history-info');
 
+  // --- Confirmation Modal Logic ---
+  const $confirmModal = $('#confirmation-modal-backdrop');
+  const $confirmTitle = $('#confirmation-modal-title');
+  const $confirmMessage = $('#confirmation-modal-message');
+  const $confirmBtn = $('#confirmation-modal-confirm');
+  const $confirmCancel = $('#confirmation-modal-cancel');
+  let onConfirmAction = null;
+
+  function showConfirm(title, message, btnText, callback) {
+    $confirmTitle.text(title);
+    $confirmMessage.html(message.replace(/\n/g, '<br>'));
+    $confirmBtn.text(btnText);
+    onConfirmAction = callback;
+    $confirmModal.show();
+  }
+
+  $confirmCancel.on('click', function () {
+    $confirmModal.hide();
+    onConfirmAction = null;
+  });
+
+  $confirmBtn.on('click', function () {
+    if (onConfirmAction) onConfirmAction();
+    $confirmModal.hide();
+    onConfirmAction = null;
+  });
+
   // --- state ---
   let itemGroups = [];
   let addedTherapies = [];
@@ -726,6 +753,27 @@ $(function () {
     }
   });
 
+  // Intercept Select2 Unselect (Item Removal from Group Builder)
+  $itemBuilder.on('select2:unselecting', function (e) {
+    e.preventDefault();
+    const data = (e.params.args && e.params.args.data) || e.params.data;
+    const itemId = data.id;
+    showConfirm(
+      "Confirm Removal",
+      "Are you sure you want to remove this medicine from the group?\nThis action cannot be undone.",
+      "Yes, Remove",
+      function () {
+        // Manually remove item
+        let currentInfo = $itemBuilder.val() || [];
+        if (!Array.isArray(currentInfo)) currentInfo = [currentInfo];
+        const newValue = currentInfo.filter(x => x !== itemId);
+        $itemBuilder.val(newValue).trigger('change');
+        // Manually trigger update logic
+        setTimeout(updateUnitFromSelectedItems, 0);
+      }
+    );
+  });
+
   // Autofill unit from Item Master UOM when therapy item(s) are selected
   function updateUnitFromSelectedItems() {
     const selected = $itemBuilder.select2('data') || [];
@@ -839,10 +887,18 @@ $(function () {
     });
   }
 
-  $itemGroupsList.on('click', '.remove-group', function () {
+  $itemGroupsList.on('click', '.remove-group', function (e) {
+    e.preventDefault();
     const id = $(this).data('id');
-    itemGroups = itemGroups.filter(g => g.id !== id);
-    renderItemGroups();
+    showConfirm(
+      "Confirm Group Removal",
+      "Are you sure you want to remove this entire group and all its medicines?\nThis action cannot be undone.",
+      "Yes, Remove Group",
+      function () {
+        itemGroups = itemGroups.filter(g => g.id !== id);
+        renderItemGroups();
+      }
+    );
   });
 
   $itemGroupsList.on('click', '.edit-group', function () {

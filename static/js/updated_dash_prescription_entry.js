@@ -144,6 +144,33 @@ $(function () {
   const $resumeModal = $('#resume-modal-backdrop');
   const $resumeCloseBtn = $('#resume-modal-close'), $resumeModalInfo = $('#resume-modal-info');
 
+  // --- Confirmation Modal Logic ---
+  const $confirmModal = $('#confirmation-modal-backdrop');
+  const $confirmTitle = $('#confirmation-modal-title');
+  const $confirmMessage = $('#confirmation-modal-message');
+  const $confirmBtn = $('#confirmation-modal-confirm');
+  const $confirmCancel = $('#confirmation-modal-cancel');
+  let onConfirmAction = null;
+
+  function showConfirm(title, message, btnText, callback) {
+    $confirmTitle.text(title);
+    $confirmMessage.html(message.replace(/\n/g, '<br>'));
+    $confirmBtn.text(btnText);
+    onConfirmAction = callback;
+    $confirmModal.show();
+  }
+
+  $confirmCancel.on('click', function () {
+    $confirmModal.hide();
+    onConfirmAction = null;
+  });
+
+  $confirmBtn.on('click', function () {
+    if (onConfirmAction) onConfirmAction();
+    $confirmModal.hide();
+    onConfirmAction = null;
+  });
+
   // Set today's date as default for From Date field
   if (!$fromDate.val()) {
     const today = new Date().toISOString().split('T')[0];
@@ -682,6 +709,30 @@ $(function () {
     }
   });
 
+  // Intercept Select2 Unselect (Item Removal from Group Builder)
+  $itemBuilder.on('select2:unselecting', function (e) {
+    e.preventDefault();
+    const data = (e.params.args && e.params.args.data) || e.params.data;
+    const itemId = data.id;
+    showConfirm(
+      "Confirm Removal",
+      "Are you sure you want to remove this medicine from the group?\nThis action cannot be undone.",
+      "Yes, Remove",
+      function () {
+        // Manually remove item
+        let currentInfo = $itemBuilder.val() || [];
+        if (!Array.isArray(currentInfo)) currentInfo = [currentInfo];
+        const newValue = currentInfo.filter(x => x !== itemId);
+        $itemBuilder.val(newValue).trigger('change');
+        // Manually trigger update logic specific to prescription
+        setTimeout(function () {
+          updateProcuredFromField();
+          updateUOMField();
+        }, 100);
+      }
+    );
+  });
+
   // Function to check and auto-fill procured_from based on selected items
   function updateProcuredFromField() {
     const selected = $itemBuilder.select2('data') || [];
@@ -969,15 +1020,23 @@ $(function () {
     });
   }
 
-  $itemGroupsList.on('click', '.remove-group', function () {
+  $itemGroupsList.on('click', '.remove-group', function (e) {
+    e.preventDefault();
     const id = $(this).data('id');
-    itemGroups = itemGroups.filter(g => g.id !== id);
-    // Clear editing group ID if the removed group was being edited
-    if (editingGroupId === id) {
-      editingGroupId = null;
-      editingGroupIndex = null;
-    }
-    renderItemGroups();
+    showConfirm(
+      "Confirm Group Removal",
+      "Are you sure you want to remove this entire group and all its medicines?\nThis action cannot be undone.",
+      "Yes, Remove Group",
+      function () {
+        itemGroups = itemGroups.filter(g => g.id !== id);
+        // Clear editing group ID if the removed group was being edited
+        if (editingGroupId === id) {
+          editingGroupId = null;
+          editingGroupIndex = null;
+        }
+        renderItemGroups();
+      }
+    );
   });
 
   $itemGroupsList.on('click', '.edit-group', function () {

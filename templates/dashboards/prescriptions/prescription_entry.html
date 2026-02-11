@@ -262,6 +262,19 @@
     </div>
   </div>
 
+  <!-- Confirmation Modal -->
+  <div id="confirmation-modal-backdrop" class="modal-backdrop" style="display:none;">
+    <div class="modal" role="dialog" aria-modal="true"
+      style="max-width: 400px; text-align: center; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); margin: 0;">
+      <h3 id="confirmation-modal-title" style="margin-bottom: 10px;">Confirm Action</h3>
+      <p id="confirmation-modal-message" style="margin-bottom: 20px; color: var(--text-medium);">Are you sure?</p>
+      <div class="modal-footer" style="justify-content: center; gap: 10px;">
+        <button id="confirmation-modal-cancel" class="btn btn-outline" style="min-width: 100px;">Cancel</button>
+        <button id="confirmation-modal-confirm" class="btn btn-danger" style="min-width: 100px;">Yes, Remove</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Cancellation Modal -->
   <div id="cancel-modal-backdrop" class="modal-backdrop">
     <div class="modal" role="dialog" aria-modal="true">
