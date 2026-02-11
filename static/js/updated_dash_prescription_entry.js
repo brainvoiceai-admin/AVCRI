@@ -430,10 +430,10 @@ $(function () {
     // Determine correct registration number based on patient type
     // For IP patients: use pat_reg_no (not pat_op_reg_no)
     // For OP patients: use pat_op_reg_no if available, otherwise pat_reg_no
-    const patientType = patient.patient_type || 
+    const patientType = patient.patient_type ||
       (patient.pat_reg_no && patient.pat_reg_no.toString().replace(/\D/g, '').length === 5 ? 'OP' : 'IP');
-    const patientRegNo = patientType === 'IP' 
-      ? patient.pat_reg_no 
+    const patientRegNo = patientType === 'IP'
+      ? patient.pat_reg_no
       : (patient.pat_op_reg_no || patient.pat_reg_no);
 
     $('#header-patient-select').val(patientRegNo);
@@ -736,7 +736,7 @@ $(function () {
   // Listen for item selection changes
   $itemBuilder.on('select2:select select2:unselect', function () {
     // Small delay to ensure select2 data is updated
-    setTimeout(function() {
+    setTimeout(function () {
       updateProcuredFromField();
       updateUOMField();
     }, 100);
@@ -747,8 +747,8 @@ $(function () {
     const selected = $itemBuilder.select2('data') || [];
 
     if (selected.length === 0) {
-        $('#item-builder-uno').val('').trigger('change');
-        return;
+      $('#item-builder-uno').val('').trigger('change');
+      return;
     }
 
     // Get UOM values from selected items using cached data
@@ -756,44 +756,44 @@ $(function () {
     let missingData = false;
 
     selected.forEach(item => {
-        const itemData = itemDataCache[item.id];
-        if (itemData && typeof itemData.item_uom !== 'undefined') {
-            // Treat empty string as a valid UOM (it might be "No UOM") or should we ignore it?
-            // Requirement: "Evaluate... ALL medicines have SAME UOM".
-            // If one has "ml" and one has "", they are different.
-            // If both have "", they are same.
-            uomValues.push(itemData.item_uom || '');
-        } else {
-            missingData = true;
-        }
+      const itemData = itemDataCache[item.id];
+      if (itemData && typeof itemData.item_uom !== 'undefined') {
+        // Treat empty string as a valid UOM (it might be "No UOM") or should we ignore it?
+        // Requirement: "Evaluate... ALL medicines have SAME UOM".
+        // If one has "ml" and one has "", they are different.
+        // If both have "", they are same.
+        uomValues.push(itemData.item_uom || '');
+      } else {
+        missingData = true;
+      }
     });
 
     if (missingData) {
-        // If we allow auto-fetch here it would be better, but for now fallback to empty
-        $('#item-builder-uno').val('').trigger('change');
-        return;
+      // If we allow auto-fetch here it would be better, but for now fallback to empty
+      $('#item-builder-uno').val('').trigger('change');
+      return;
     }
 
     // Check if all items have the same UOM
     if (uomValues.length > 0) {
-        const firstUOM = uomValues[0];
-        const allSame = uomValues.every(u => u === firstUOM);
+      const firstUOM = uomValues[0];
+      const allSame = uomValues.every(u => u === firstUOM);
 
-        if (allSame && firstUOM) {
-            // Auto-populate
-            const $uomSelect = $('#item-builder-uno');
-            // Check if option exists, if not add it
-            if ($uomSelect.find(`option[value="${firstUOM}"]`).length === 0) {
-                $uomSelect.append(new Option(firstUOM, firstUOM));
-            }
-            $uomSelect.val(firstUOM).trigger('change');
-        } else if (allSame && !firstUOM) {
-            // All specify NO UOM.
-             $('#item-builder-uno').val('').trigger('change');
-        } else {
-            // Different UOMs
-            $('#item-builder-uno').val('').trigger('change');
+      if (allSame && firstUOM) {
+        // Auto-populate
+        const $uomSelect = $('#item-builder-uno');
+        // Check if option exists, if not add it
+        if ($uomSelect.find(`option[value="${firstUOM}"]`).length === 0) {
+          $uomSelect.append(new Option(firstUOM, firstUOM));
         }
+        $uomSelect.val(firstUOM).trigger('change');
+      } else if (allSame && !firstUOM) {
+        // All specify NO UOM.
+        $('#item-builder-uno').val('').trigger('change');
+      } else {
+        // Different UOMs
+        $('#item-builder-uno').val('').trigger('change');
+      }
     }
   }
 
@@ -992,91 +992,91 @@ $(function () {
 
     // Fetch details for all items in the group to populate cache (UOM, procured_from)
     const promises = (g.items || []).map(it => {
-        if (it.item_code && !itemDataCache[it.item_code]) {
-            return ajax({ action: 'search_items', q: it.item_code }).then(data => {
-                if (data && Array.isArray(data)) {
-                     const match = data.find(x => x.item_code === it.item_code) || data[0];
-                     if (match) {
-                         itemDataCache[it.item_code] = match;
-                     }
-                }
-            }).catch(err => console.error('Error fetching item details:', err));
-        }
-        return Promise.resolve();
+      if (it.item_code && !itemDataCache[it.item_code]) {
+        return ajax({ action: 'search_items', q: it.item_code }).then(data => {
+          if (data && Array.isArray(data)) {
+            const match = data.find(x => x.item_code === it.item_code) || data[0];
+            if (match) {
+              itemDataCache[it.item_code] = match;
+            }
+          }
+        }).catch(err => console.error('Error fetching item details:', err));
+      }
+      return Promise.resolve();
     });
 
     Promise.all(promises).then(() => {
-        // Restore button state
-        $btn.html(originalText).prop('disabled', false);
+      // Restore button state
+      $btn.html(originalText).prop('disabled', false);
 
-        // Set the editing group ID so duplicate checking excludes this group
-        editingGroupId = id;
+      // Set the editing group ID so duplicate checking excludes this group
+      editingGroupId = id;
 
-        // Completely clear Select2 - remove all options and values
-        $itemBuilder.empty(); // Remove all option elements
-        $itemBuilder.val(null).trigger('change'); // Clear selection
+      // Completely clear Select2 - remove all options and values
+      $itemBuilder.empty(); // Remove all option elements
+      $itemBuilder.val(null).trigger('change'); // Clear selection
 
-        // Add the group's items as new options
-        g.items.forEach(it => {
-            const opt = new Option(it.item_name, it.item_code, true, true);
-            $itemBuilder.append(opt);
-        });
-        
-        // Trigger change to update Select2 display
-        $itemBuilder.trigger('change');
-        
-        // Manually trigger UOM and Procured From updates since 'change' might not trigger our custom handlers depending on binding
-        // And we want to ensure fields are populated based on the now-cached data
-        updateProcuredFromField();
-        updateUOMField();
+      // Add the group's items as new options
+      g.items.forEach(it => {
+        const opt = new Option(it.item_name, it.item_code, true, true);
+        $itemBuilder.append(opt);
+      });
 
-        // If the group had explicit saved values, override the auto-filled ones
-        // This is important: if user manually changed UOM/Procured but it was valid auto-fill, we should respect saved?
-        // Requirement: "user edits an existing prescription... Existing medicines must be evaluated... UOM must auto-select ONLY if all... share same UOM"
-        // This suggests re-evaluation is preferred on edit opening.
-        // However, if the saved group had a specific UOM (maybe manually selected when auto-select wasn't applicable, OR manually changed), 
-        // strictly speaking, we should load what was saved.
-        // BUT, if the user adds/removes items, auto-logic kicks in.
-        // Let's set the saved values LAST, so they override auto-fill if present.
-        
-        if (g.dosage) $('#item-builder-dosage').val(g.dosage);
-        if (g.time) $('#item-builder-time').val(g.time);
-        if (g.uno) $('#item-builder-uno').val(g.uno).trigger('change');
-        if (g.oil_class) $itemBuilderOilClass.val(g.oil_class).trigger('change');
-        if (g.procured_from) $itemBuilderProcuredFrom.val(g.procured_from).trigger('change');
-        
-        // Handle ingredients - now a free text field
-        const ingredientInput = $('#item-builder-ingredients');
-        if (g.ingredients && Array.isArray(g.ingredients) && g.ingredients.length > 0) {
-            // Extract ingredient names from array and join them
-            const ingredientText = g.ingredients.map(ing => ing.ingredient_name || ing.text || '').filter(Boolean).join(', ');
-            ingredientInput.val(ingredientText);
-        } else if (typeof g.ingredients === 'string') {
-            // Handle case where ingredients is stored as a string
-            ingredientInput.val(g.ingredients);
-        } else {
-            ingredientInput.val('');
-        }
+      // Trigger change to update Select2 display
+      $itemBuilder.trigger('change');
 
-        // Debug logging
-        console.log('=== Edit Group Debug ===');
-        console.log('Editing group ID:', id);
-        console.log('Group items:', g.items.map(i => `${i.item_name} (${i.item_code})`));
-        console.log('itemGroups count before removal:', itemGroups.length);
+      // Manually trigger UOM and Procured From updates since 'change' might not trigger our custom handlers depending on binding
+      // And we want to ensure fields are populated based on the now-cached data
+      updateProcuredFromField();
+      updateUOMField();
 
-        // Store the original index of this group so we can restore it to the same position
-        const originalIndex = itemGroups.findIndex(x => x.id === id);
-        editingGroupIndex = originalIndex; // Track the position
+      // If the group had explicit saved values, override the auto-filled ones
+      // This is important: if user manually changed UOM/Procured but it was valid auto-fill, we should respect saved?
+      // Requirement: "user edits an existing prescription... Existing medicines must be evaluated... UOM must auto-select ONLY if all... share same UOM"
+      // This suggests re-evaluation is preferred on edit opening.
+      // However, if the saved group had a specific UOM (maybe manually selected when auto-select wasn't applicable, OR manually changed), 
+      // strictly speaking, we should load what was saved.
+      // BUT, if the user adds/removes items, auto-logic kicks in.
+      // Let's set the saved values LAST, so they override auto-fill if present.
 
-        // Remove the group from the list (it will be re-added at the same position when user clicks "Add Group")
-        itemGroups = itemGroups.filter(x => x.id !== id);
+      if (g.dosage) $('#item-builder-dosage').val(g.dosage);
+      if (g.time) $('#item-builder-time').val(g.time);
+      if (g.uno) $('#item-builder-uno').val(g.uno).trigger('change');
+      if (g.oil_class) $itemBuilderOilClass.val(g.oil_class).trigger('change');
+      if (g.procured_from) $itemBuilderProcuredFrom.val(g.procured_from).trigger('change');
 
-        console.log('itemGroups count after removal:', itemGroups.length);
-        console.log('Original group index:', originalIndex);
-        console.log('Remaining item codes:', Array.from(getAllSelectedItemCodes()));
-        console.log('========================');
+      // Handle ingredients - now a free text field
+      const ingredientInput = $('#item-builder-ingredients');
+      if (g.ingredients && Array.isArray(g.ingredients) && g.ingredients.length > 0) {
+        // Extract ingredient names from array and join them
+        const ingredientText = g.ingredients.map(ing => ing.ingredient_name || ing.text || '').filter(Boolean).join(', ');
+        ingredientInput.val(ingredientText);
+      } else if (typeof g.ingredients === 'string') {
+        // Handle case where ingredients is stored as a string
+        ingredientInput.val(g.ingredients);
+      } else {
+        ingredientInput.val('');
+      }
 
-        renderItemGroups();
+      // Debug logging
+      console.log('=== Edit Group Debug ===');
+      console.log('Editing group ID:', id);
+      console.log('Group items:', g.items.map(i => `${i.item_name} (${i.item_code})`));
+      console.log('itemGroups count before removal:', itemGroups.length);
+
+      // Store the original index of this group so we can restore it to the same position
+      const originalIndex = itemGroups.findIndex(x => x.id === id);
+      editingGroupIndex = originalIndex; // Track the position
+
+      // Remove the group from the list (it will be re-added at the same position when user clicks "Add Group")
+      itemGroups = itemGroups.filter(x => x.id !== id);
+
+      console.log('itemGroups count after removal:', itemGroups.length);
+      console.log('Original group index:', originalIndex);
+      console.log('Remaining item codes:', Array.from(getAllSelectedItemCodes()));
+      console.log('========================');
+
+      renderItemGroups();
     });
   });
 
@@ -1139,10 +1139,10 @@ $(function () {
     // Determine correct registration number based on patient type
     // For IP patients: use pat_reg_no (not pat_op_reg_no)
     // For OP patients: use pat_op_reg_no if available, otherwise pat_reg_no
-    const patientType = selectedPatient.patient_type || 
+    const patientType = selectedPatient.patient_type ||
       (selectedPatient.pat_reg_no && selectedPatient.pat_reg_no.toString().replace(/\D/g, '').length === 5 ? 'OP' : 'IP');
-    const patientRegNo = patientType === 'IP' 
-      ? selectedPatient.pat_reg_no 
+    const patientRegNo = patientType === 'IP'
+      ? selectedPatient.pat_reg_no
       : (selectedPatient.pat_op_reg_no || selectedPatient.pat_reg_no);
 
     // Save directly to server as draft
@@ -1196,10 +1196,10 @@ $(function () {
         // Use the same registration number format that was used to save
         if (selectedPatient) {
           // Use correct registration number based on patient type
-          const patientType = selectedPatient.patient_type || 
+          const patientType = selectedPatient.patient_type ||
             (selectedPatient.pat_reg_no && selectedPatient.pat_reg_no.toString().replace(/\D/g, '').length === 5 ? 'OP' : 'IP');
-          const patientRegNo = patientType === 'IP' 
-            ? selectedPatient.pat_reg_no 
+          const patientRegNo = patientType === 'IP'
+            ? selectedPatient.pat_reg_no
             : (selectedPatient.pat_op_reg_no || selectedPatient.pat_reg_no);
           // Small delay to ensure server has processed the save
           setTimeout(() => {
@@ -1662,11 +1662,11 @@ $(function () {
           // Reload from server to get updated data, but preserve last_action
           if (selectedPatient && p.allocation_id) {
             // Use correct registration number based on patient type
-          const patientType = selectedPatient.patient_type || 
-            (selectedPatient.pat_reg_no && selectedPatient.pat_reg_no.toString().replace(/\D/g, '').length === 5 ? 'OP' : 'IP');
-          const patientRegNo = patientType === 'IP' 
-            ? selectedPatient.pat_reg_no 
-            : (selectedPatient.pat_op_reg_no || selectedPatient.pat_reg_no);
+            const patientType = selectedPatient.patient_type ||
+              (selectedPatient.pat_reg_no && selectedPatient.pat_reg_no.toString().replace(/\D/g, '').length === 5 ? 'OP' : 'IP');
+            const patientRegNo = patientType === 'IP'
+              ? selectedPatient.pat_reg_no
+              : (selectedPatient.pat_op_reg_no || selectedPatient.pat_reg_no);
             if (patientRegNo) {
               ajax({ action: 'patient_prescriptions', patient_reg_no: patientRegNo }).then(list => {
                 if (list && Array.isArray(list)) {
@@ -1942,11 +1942,11 @@ $(function () {
           // Then reload from server to get merged cancellation dates (in background)
           if (p.allocation_id && selectedPatient) {
             // Use correct registration number based on patient type
-          const patientType = selectedPatient.patient_type || 
-            (selectedPatient.pat_reg_no && selectedPatient.pat_reg_no.toString().replace(/\D/g, '').length === 5 ? 'OP' : 'IP');
-          const patientRegNo = patientType === 'IP' 
-            ? selectedPatient.pat_reg_no 
-            : (selectedPatient.pat_op_reg_no || selectedPatient.pat_reg_no);
+            const patientType = selectedPatient.patient_type ||
+              (selectedPatient.pat_reg_no && selectedPatient.pat_reg_no.toString().replace(/\D/g, '').length === 5 ? 'OP' : 'IP');
+            const patientRegNo = patientType === 'IP'
+              ? selectedPatient.pat_reg_no
+              : (selectedPatient.pat_op_reg_no || selectedPatient.pat_reg_no);
             if (patientRegNo) {
               setTimeout(() => {
                 ajax({ action: 'patient_prescriptions', patient_reg_no: patientRegNo }).then(list => {
@@ -2355,6 +2355,123 @@ $(function () {
   // Clear form button
   $('#clear-form').on('click', function () {
     resetFormState();
+  });
+
+  // --- Past History Feature ---
+  const $historyModal = $('#history-modal-backdrop');
+
+  $('#past-history-btn').on('click', function () {
+    if (!selectedPatient) {
+      alert('Please select a patient first.');
+      return;
+    }
+
+    // Open modal
+    $historyModal.addClass('show');
+    $historyModal.css('display', 'flex'); // Ensure flex display for modal
+    $('#history-patient-name').text((selectedPatient.pat_name || 'Unknown') + ' (' + (selectedPatient.pat_reg_no || selectedPatient.pat_op_reg_no) + ')');
+
+    // Load data
+    loadPrescriptionHistory();
+  });
+
+  $('#history-modal-close').on('click', function () {
+    $historyModal.removeClass('show');
+    $historyModal.hide();
+  });
+
+  function loadPrescriptionHistory() {
+    const regNo = selectedPatient.pat_reg_no || selectedPatient.pat_op_reg_no;
+
+    $('#history-content-loader').show();
+    $('#history-content-empty').hide();
+    $('#history-list').empty();
+
+    fetch(`/sheduling/prescription/api/previous-history/?registration_no=${encodeURIComponent(regNo)}`)
+      .then(r => r.json())
+      .then(data => {
+        $('#history-content-loader').hide();
+
+        if (!data.success || !data.data || data.data.length === 0) {
+          $('#history-content-empty').show();
+          return;
+        }
+
+        renderHistoryList(data.data);
+      })
+      .catch(err => {
+        $('#history-content-loader').hide();
+        $('#history-list').html('<div style="color:red;padding:20px;text-align:center">Error loading history. Please try again.</div>');
+        console.error(err);
+      });
+  }
+
+  function renderHistoryList(historyData) {
+    const html = historyData.map(group => {
+      const date = formatDate(group.date);
+      const itemsHtml = group.items.map(item => `
+            <tr>
+                <td style="padding: 8px 15px; border-bottom: 1px solid #eee;">${esc(item.item_name)}</td>
+                <td style="padding: 8px 15px; border-bottom: 1px solid #eee;">${esc(item.dosage) || '-'}</td>
+                <td style="padding: 8px 15px; border-bottom: 1px solid #eee;">${esc(item.uom) || '-'}</td>
+                <td style="padding: 8px 15px; border-bottom: 1px solid #eee;">${esc(item.usage) || '-'}</td>
+                <td style="padding: 8px 15px; border-bottom: 1px solid #eee;">${esc(item.int_ext) || '-'}</td>
+                <td style="padding: 8px 15px; border-bottom: 1px solid #eee; font-size: 0.85em; color: #555;">
+                    ${item.start_date ? formatDate(item.start_date) : '-'}
+                </td>
+                 <td style="padding: 8px 15px; border-bottom: 1px solid #eee; font-size: 0.85em; color: #555;">
+                    ${item.end_date ? formatDate(item.end_date) : '-'}
+                </td>
+            </tr>
+          `).join('');
+
+      return `
+            <div class="history-group" style="margin-bottom: 20px; border: 1px solid #ddd; border-radius: 4px; overflow: hidden; background: white;">
+                <div class="history-date-header" style="background: #f8f9fa; padding: 10px 15px; font-weight: bold; border-bottom: 1px solid #ddd; color: var(--primary); display: flex; justify-content: space-between; align-items: center;">
+                    <span><i class="fas fa-calendar-alt"></i> ${date}</span>
+                    ${group.dod ? `<span style="font-size: 0.9em; color: #dc3545;">Expected DOD: ${formatDate(group.dod)}</span>` : ''}
+                </div>
+                <table class="table" style="width: 100%; border-collapse: collapse;">
+                    <thead style="background: #fff; border-bottom: 1px solid #eee;">
+                        <tr>
+                            <th style="text-align: left; padding: 8px 15px; color: #666; font-size: 0.9em;">Medicine</th>
+                            <th style="text-align: left; padding: 8px 15px; color: #666; font-size: 0.9em;">Dosage</th>
+                             <th style="text-align: left; padding: 8px 15px; color: #666; font-size: 0.9em;">UOM</th>
+                            <th style="text-align: left; padding: 8px 15px; color: #666; font-size: 0.9em;">Usage</th>
+                            <th style="text-align: left; padding: 8px 15px; color: #666; font-size: 0.9em;">Ext/Int</th>
+                            <th style="text-align: left; padding: 8px 15px; color: #666; font-size: 0.9em;">Start</th>
+                            <th style="text-align: left; padding: 8px 15px; color: #666; font-size: 0.9em;">End</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${itemsHtml}
+                    </tbody>
+                </table>
+            </div>
+          `;
+    }).join('');
+
+    $('#history-list').html(html);
+  }
+
+  function triggerDownload(url) {
+    const frame = document.createElement('iframe');
+    frame.style.display = 'none';
+    frame.src = url;
+    document.body.appendChild(frame);
+    setTimeout(() => frame.remove(), 1000 * 60); // Clean up after 1 min
+  }
+
+  $('#download-history-pdf').on('click', function () {
+    if (!selectedPatient) return;
+    const regNo = selectedPatient.pat_reg_no || selectedPatient.pat_op_reg_no;
+    triggerDownload(`/sheduling/prescription/api/download-history/?registration_no=${encodeURIComponent(regNo)}&format=pdf`);
+  });
+
+  $('#download-history-excel').on('click', function () {
+    if (!selectedPatient) return;
+    const regNo = selectedPatient.pat_reg_no || selectedPatient.pat_op_reg_no;
+    triggerDownload(`/sheduling/prescription/api/download-history/?registration_no=${encodeURIComponent(regNo)}&format=excel`);
   });
 
   // expose for debug

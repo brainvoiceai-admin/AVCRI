@@ -1758,9 +1758,6 @@ def search_patients(request):
                             if len(ip_patients_list) >= 5:
                                 break
                     
-                    # Removed fallback without status filter - always check status='Y' for active patients only
-                    # If no active patients found, ip_patients_list will remain empty
-                    
                     print(f"[DEBUG] Initial load - Found {len(ip_patients_list)} IP patients")
                 except Exception as e:
                     print(f"[DEBUG] Error in IP query: {e}")
@@ -1784,8 +1781,6 @@ def search_patients(request):
                         digits_only = ''.join(ch for ch in reg_no_str if ch.isdigit())
                         if len(digits_only) != 5:  # Not OP (5 digits)
                             ip_patients_list.append(p)
-                    
-                    # Removed fallback without status filter - always check status='Y' for active patients only
                     
                     print(f"[DEBUG] Query search - Found {len(ip_patients_list)} IP patients for query: '{query}'")
                 except Exception as e:
