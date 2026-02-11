@@ -1621,7 +1621,6 @@ def get_previous_prescriptions_api(request):
                 grouped_history[date_str] = {
                     'date': date_str,
                     'doctor_code': row.get('Pres_Doct_Code'),
-                    'dod': row.get('Exp_DOD'),
                     'items': []
                 }
             
@@ -2170,7 +2169,6 @@ def download_prescription_history_api(request):
             if date_str not in grouped_history:
                 grouped_history[date_str] = {
                     'date': date_str,
-                    'dod': row.get('Exp_DOD'),
                     'items': []
                 }
             item_code_str = str(row.get('Pres_Item_Code')).strip()
@@ -2199,13 +2197,11 @@ def download_prescription_history_api(request):
             ws.append(["Registration No:", str(reg_no)])
             ws.append([])
             
-            headers = ["Date", "Medicine Name", "Dosage", "UOM", "Usage", "Ext/Int", "Start Date", "End Date"]
+            headers = ["Date", "Medicine Name", "Dosage", "UOM", "Usage", "Ext/Int"]
             ws.append(headers)
             
             for entry in history_list:
                 date_val = entry['date']
-                if entry.get('dod'):
-                     date_val += f" (DOD: {entry['dod']})"
                 for item in entry['items']:
                     ws.append([
                         date_val,
@@ -2213,9 +2209,7 @@ def download_prescription_history_api(request):
                         item['dosage'],
                         item['uom'],
                         item['usage'],
-                        item['int_ext'],
-                        item.get('start_date', ''),
-                        item.get('end_date', '')
+                        item['int_ext']
                     ])
                     
             for col in ws.columns:
@@ -2258,24 +2252,19 @@ def download_prescription_history_api(request):
                  elements.append(Paragraph("No history found.", styles['Normal']))
             else:
                 for entry in history_list:
-                    if entry.get('dod'):
-                        elements.append(Paragraph(f"<b>Date: {entry['date']} | DOD: {entry['dod']}</b>", styles['Heading3']))
-                    else:
-                        elements.append(Paragraph(f"<b>Date: {entry['date']}</b>", styles['Heading3']))
+                    elements.append(Paragraph(f"<b>Date: {entry['date']}</b>", styles['Heading3']))
                     
-                    table_data = [["Medicine Name", "Dosage", "UOM", "Usage", "Ext/Int", "Start", "End"]]
+                    table_data = [["Medicine Name", "Dosage", "UOM", "Usage", "Ext/Int"]]
                     for item in entry['items']:
                         table_data.append([
                             item['item_name'],
                             item['dosage'],
                             item['uom'],
                             item['usage'],
-                            item['int_ext'],
-                            str(item.get('start_date') or ''),
-                            str(item.get('end_date') or '')
+                            item['int_ext']
                         ])
                     
-                    t = Table(table_data, colWidths=[2.0*inch, 0.8*inch, 0.6*inch, 0.8*inch, 0.8*inch, 0.8*inch, 0.8*inch])
+                    t = Table(table_data, colWidths=[2.5*inch, 1*inch, 0.8*inch, 1.2*inch, 0.8*inch])
                     t.setStyle(TableStyle([
                         ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
                         ('TEXTCOLOR', (0, 0), (-1, 0), colors.black),
