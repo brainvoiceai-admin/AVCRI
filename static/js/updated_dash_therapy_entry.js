@@ -1299,9 +1299,10 @@ $(function () {
         const statusText = ({ scheduled: 'Scheduled', draft: 'Draft', pending: 'Pending', cancel_requested: 'Cancel Requested', cancelled: 'Cancelled', completed: 'Completed' })[b.status] || b.status;
         const $row = $(`
           <div class="status-date-row" data-id="${b.id}">
-            <div style="display:flex;gap:12px;align-items:center;min-width:910px;">
+            <div style="display:flex;gap:8px;align-items:center;min-width:1110px;">
               <div style="width:140px"><strong>${b.date}</strong></div>
               <div style="width:120px">${esc(format12Hour(b.slot || ''))}</div>
+              <div style="width:200px">${esc(t.therapy_name || '—')}</div>
               <div style="width:200px">${esc(b.room || '—')}</div>
               <div style="width:150px">${esc(b.patient_room_no || '—')}</div>
               <div style="width:200px">${esc(b.therapist || '—')}</div>
@@ -1337,52 +1338,78 @@ $(function () {
 
       $statusModalInfo.html(`
         <strong>Therapy: ${esc(data.therapy_name)}</strong> — ${data.from_date} → ${data.to_date}<br/>
-        <small style="color:#6c757d;margin-top:4px;display:block;">${summaryParts.length > 0 ? summaryParts.join(', ') : 'Status: ' + (data.overall_status || 'Unknown')}</small>
+        <small style="color:#6c757d;margin-top:4px;display:block;">
+          ${summaryParts.length > 0 ? summaryParts.join(', ') : 'Status: ' + (data.overall_status || 'Unknown')}
+          &nbsp;|&nbsp; <em>Edits apply from today onwards; past sessions remain unchanged.</em>
+        </small>
       `);
       $statusDatesList.empty();
 
-      // Group bookings by status for better visibility
-      const bookingsByStatus = {};
-      (data.bookings || []).forEach(b => {
-        const displayStatus = b.display_status || b.status || 'draft';
-        if (!bookingsByStatus[displayStatus]) {
-          bookingsByStatus[displayStatus] = [];
-        }
-        bookingsByStatus[displayStatus].push(b);
-      });
+      const allBookings = (data.bookings || []).slice().sort((a, b) => a.date.localeCompare(b.date));
+      const todayStr = new Date().toISOString().slice(0, 10);
+      const pastBookings = allBookings.filter(b => b.date < todayStr);
+      const futureBookings = allBookings.filter(b => b.date >= todayStr);
 
-      // Show status sections
-      const statusOrder = ['allocated', 'failed', 'draft', 'cancelled'];
-      statusOrder.forEach(status => {
-        if (bookingsByStatus[status] && bookingsByStatus[status].length > 0) {
-          const statusLabel = status.charAt(0).toUpperCase() + status.slice(1);
-          const $section = $(`<div class="status-section"><h4>${statusLabel} Dates (${bookingsByStatus[status].length})</h4></div>`);
-          $statusDatesList.append($section);
+      const currentTherapyName = (data.therapy_name || '').trim();
 
-          bookingsByStatus[status].forEach(b => {
-            const pillClass = ({ scheduled: 'status-scheduled', allocated: 'status-scheduled', draft: 'status-draft', pending: 'status-draft', failed: 'status-cancelled', cancel_requested: 'status-cancelreq', cancelled: 'status-cancelled', completed: 'status-completed' })[b.status] || 'status-scheduled';
-            const statusText = ({ scheduled: 'Scheduled', allocated: 'Allocated', draft: 'Draft', failed: 'Failed', pending: 'Pending', cancel_requested: 'Cancel Requested', cancelled: 'Cancelled', completed: 'Completed' })[b.display_status || b.status] || b.status;
+      function renderSection(title, bookingsArr) {
+        if (!bookingsArr.length) return;
 
-            // Show nurses for nurse treatments, therapists for regular treatments
-            const staffNames = isNurseTreatment
-              ? formatStaffNames(b.nurses || [], false)
-              : formatStaffNames(b.therapists || [], true);
+        const $section = $(`
+          <div class="status-section">
+            <h4>${title} (${bookingsArr.length})</h4>
+          </div>
+        `);
+        $statusDatesList.append($section);
 
-            const $row = $(`
-              <div class="status-date-row" data-id="${b.booking_id}">
-                <div style="display:flex;gap:12px;align-items:center;min-width:910px;">
-                  <div style="width:140px"><strong>${b.date}</strong></div>
-                  <div style="width:120px">${esc(format12Hour(b.slot || ''))}</div>
-                  <div style="width:200px">${esc(b.room || '—')}</div>
-                  <div style="width:150px">${esc(b.patient_room_no || '—')}</div>
-                  <div style="width:200px">${esc(staffNames)}</div>
-                  <div style="width:140px"><span class="status-pill ${pillClass}">${statusText}</span></div>
-                </div>
-              </div>`);
-            $statusDatesList.append($row);
-          });
-        }
-      });
+        bookingsArr.forEach(b => {
+          const pillClass = ({
+            scheduled: 'status-scheduled',
+            allocated: 'status-scheduled',
+            draft: 'status-draft',
+            pending: 'status-draft',
+            failed: 'status-cancelled',
+            cancel_requested: 'status-cancelreq',
+            cancelled: 'status-cancelled',
+            completed: 'status-completed'
+          })[b.status] || 'status-scheduled';
+
+          const statusText = ({
+            scheduled: 'Scheduled',
+            allocated: 'Allocated',
+            draft: 'Draft',
+            failed: 'Failed',
+            pending: 'Pending',
+            cancel_requested: 'Cancel Requested',
+            cancelled: 'Cancelled',
+            completed: 'Completed'
+          })[b.display_status || b.status] || b.status;
+
+          const staffNames = isNurseTreatment
+            ? formatStaffNames((b.nurses || []), false)
+            : formatStaffNames((b.therapists || []), true);
+
+          const treatmentName = (b.therapy_name_snapshot || '').trim() || currentTherapyName || '—';
+
+          const $row = $(`
+            <div class="status-date-row" data-id="${b.booking_id}">
+              <div style="display:flex;gap:8px;align-items:center;min-width:1110px;">
+                <div style="width:140px"><strong>${b.date}</strong></div>
+                <div style="width:120px">${esc(format12Hour(b.slot || ''))}</div>
+                <div style="width:200px">${esc(treatmentName)}</div>
+                <div style="width:200px">${esc(b.room || '—')}</div>
+                <div style="width:150px">${esc(b.patient_room_no || '—')}</div>
+                <div style="width:200px">${esc(staffNames)}</div>
+                <div style="width:140px"><span class="status-pill ${pillClass}">${statusText}</span></div>
+              </div>
+            </div>`);
+          $statusDatesList.append($row);
+        });
+      }
+
+      // First show past sessions (unchanged), then upcoming (affected by edits).
+      renderSection('Past sessions (unchanged)', pastBookings);
+      renderSection('Upcoming sessions (affected by edits)', futureBookings);
 
       $statusModal.show();
     }).catch(() => { alert('Could not load allocation status'); });
@@ -1646,9 +1673,18 @@ $(function () {
     const savedSlotValue = t.slot || '';
     const normalizedSavedSlot = normalizeSlotTime(savedSlotValue);
 
-    // Set therapy first
-    const opt = new Option(t.therapy_name, t.therapy_code, true, true);
-    $therapySelect.append(opt).val(t.therapy_code);
+    // Set therapy first.
+    // Prefer existing option text from master list (so renamed therapies show current name).
+    let $existingOpt = $therapySelect.find(`option[value="${t.therapy_code}"]`);
+    if (!$existingOpt.length && t.therapy_code) {
+      // Fallback: create an option if none exists (e.g. legacy allocation)
+      const opt = new Option(t.therapy_name, t.therapy_code, true, true);
+      $therapySelect.append(opt);
+      $existingOpt = $therapySelect.find(`option[value="${t.therapy_code}"]`);
+    }
+    if (t.therapy_code) {
+      $therapySelect.val(t.therapy_code);
+    }
     $therapySelect.prop('disabled', false);
 
     // Store the slot value to restore after slot repopulation

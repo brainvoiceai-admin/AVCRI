@@ -791,6 +791,8 @@ def therapy_entry(request):
 
                 # Update therapy details
                 therapy_name_changed = False
+                items_changed = False
+                old_items_groups = allocation.items_groups or []
                 if 'therapy_name' in payload:
                     new_name = payload['therapy_name']
                     if allocation.therapy_name != new_name:
@@ -798,6 +800,13 @@ def therapy_entry(request):
                     allocation.therapy_name = payload['therapy_name']
                 if 'items_groups' in payload:
                     allocation.items_groups = payload['items_groups']
+                    # Detect if items actually changed (used to regenerate BookingItems for future dates)
+                    try:
+                        if (payload['items_groups'] or []) != (old_items_groups or []):
+                            items_changed = True
+                    except Exception:
+                        # Fallback: assume changed if payload key present
+                        items_changed = True
                 if 'oil_class' in payload:
                     allocation.oil_class = payload['oil_class']
                 if 'usage' in payload:
@@ -830,10 +839,14 @@ def therapy_entry(request):
                     allocation.days = (allocation.to_date - allocation.from_date).days + 1
 
                 # Delete bookings outside the new date range if dates changed
+                # IMPORTANT: Only touch bookings from today onwards; keep past sessions unchanged.
                 if dates_changed:
-                    # Get bookings that will be deleted
+                    from django.utils import timezone as _tz
+                    today = _tz.now().date()
+                    # Get future bookings that will be deleted
                     bookings_to_delete = Booking.objects.filter(
-                        allocation=allocation
+                        allocation=allocation,
+                        date__gte=today
                     ).exclude(
                         date__gte=allocation.from_date,
                         date__lte=allocation.to_date
@@ -915,68 +928,61 @@ def therapy_entry(request):
                 date_change_success = False
                 date_change_failed_reasons = []
 
-                # Process re-allocation for dates where name/slot changed
-                if (name_changed or slot_changed) and FinalScheduleRun and expand_therapies_for_visit:
-                    # Process ALL dates in the NEW date range (not just old range)
-                    for d in daterange(allocation.from_date, allocation.to_date):
-                        # If final schedule not run for this date: keep draft and skip immediate allocation
+                # Process re-allocation for dates where name/slot/items changed
+                if (name_changed or slot_changed or items_changed) and FinalScheduleRun and expand_therapies_for_visit:
+                    # Process ONLY today and future dates in the NEW date range.
+                    # Past sessions must remain as they were.
+                    from django.utils import timezone as _tz2
+                    today_for_edit = _tz2.now().date()
+                    start_date_for_realloc = allocation.from_date if allocation.from_date >= today_for_edit else today_for_edit
+
+                    for d in daterange(start_date_for_realloc, allocation.to_date):
+                        # Only run allocation for dates where FinalScheduleRun exists.
+                        # If final schedule has not run for this date, keep as draft (no room/therapist allocation).
                         if not FinalScheduleRun.objects.filter(run_date=d).exists():
                             try:
                                 day_bookings = Booking.objects.filter(allocation=allocation, date=d)
-                                # release therapist assignments for those bookings
                                 BookingAssignment.objects.filter(booking__in=day_bookings).update(status='released')
-                                # cancel external TherapistBooking/RoomBooking to free them up
                                 from Patient.models import TherapistBooking as TB, RoomBooking as RB
                                 day_timeslot = allocation.timeslot
                                 if day_timeslot:
-                                    # Cancel TherapistBooking
                                     TB.objects.filter(
-                                        visit=allocation,
-                                        date=d,
-                                        time_slot=day_timeslot,
+                                        visit=allocation, date=d, time_slot=day_timeslot,
                                         status__in=['BOOKED','scheduled']
                                     ).update(status='CANCELLED')
                                     TB.objects.filter(
-                                        date=d,
-                                        time_slot=day_timeslot,
-                                        patient_id=allocation.patient.id,
-                                        status__in=['BOOKED','scheduled'],
-                                        visit__isnull=True
+                                        date=d, time_slot=day_timeslot, patient_id=allocation.patient.id,
+                                        visit__isnull=True, status__in=['BOOKED','scheduled']
                                     ).update(status='CANCELLED')
-                                    # Cancel RoomBooking
                                     RB.objects.filter(
-                                        therapy=allocation,
-                                        date=d,
-                                        time_slot=day_timeslot,
+                                        therapy=allocation, date=d, time_slot=day_timeslot,
                                         status__in=['BOOKED','scheduled']
                                     ).update(status='CANCELLED')
-                                    for booking in day_bookings:
+                                    for b in day_bookings:
                                         RB.objects.filter(
-                                            visit=booking,
-                                            date=d,
-                                            time_slot=day_timeslot,
+                                            visit=b, date=d, time_slot=day_timeslot,
                                             status__in=['BOOKED','scheduled']
                                         ).update(status='CANCELLED')
                                     RB.objects.filter(
-                                        date=d,
-                                        time_slot=day_timeslot,
-                                        patient_id=allocation.patient.id,
-                                        status__in=['BOOKED','scheduled'],
-                                        therapy__isnull=True,
-                                        visit__isnull=True
+                                        date=d, time_slot=day_timeslot, patient_id=allocation.patient.id,
+                                        therapy__isnull=True, visit__isnull=True,
+                                        status__in=['BOOKED','scheduled']
                                     ).update(status='CANCELLED')
                                 else:
                                     TB.objects.filter(visit=allocation, date=d, status__in=['BOOKED','scheduled']).update(status='CANCELLED')
                                     RB.objects.filter(therapy=allocation, date=d, status__in=['BOOKED','scheduled']).update(status='CANCELLED')
-                                # put bookings back to draft, clear room and update to new timeslot
-                                day_bookings.update(status='draft', timeslot=allocation.timeslot, room=None)
+                                # Update to draft with new therapy name; do NOT run allocation
+                                day_bookings.update(
+                                    status='draft', timeslot=allocation.timeslot, room=None,
+                                    snapshot_therapy_name=(allocation.therapy_name or '')[:255]
+                                )
                                 BookingItem.objects.filter(booking__in=day_bookings).update(status='draft')
                             except Exception as e:
                                 print(f"Error updating draft bookings for date {d}: {e}")
                                 pass
                             continue
 
-                        # Release previous assignments/resources for this date and create fresh bookings
+                        # FinalScheduleRun exists for this date: delete old bookings, create fresh, run algorithm
                         try:
                             day_bookings = Booking.objects.filter(allocation=allocation, date=d)
                             # release therapist assignments for those bookings
@@ -1057,7 +1063,8 @@ def therapy_entry(request):
                                 date=d,
                                 timeslot=allocation.timeslot,
                                 room=None,
-                                status='draft'
+                                status='draft',
+                                snapshot_therapy_name=(allocation.therapy_name or '')[:255]
                             )
                             
                             # Create BookingItems from updated allocation.items_groups
@@ -1082,7 +1089,7 @@ def therapy_entry(request):
 
                         # Attempt re-allocation for this date with fresh bookings
                         try:
-                            print(f"Running algorithm for allocation {allocation.id}, date {d} (name/slot changed, FinalScheduleRun exists)")
+                            print(f"Running algorithm for allocation {allocation.id}, date {d} (FinalScheduleRun exists)")
                             tasks = expand_therapies_for_visit(allocation.id, d.strftime('%Y-%m-%d'), create_bookings=True)
                             print(f"Algorithm returned: {tasks}")
                             # Only consider successful if ALL tasks are BOOKED (no FAILED tasks)
@@ -1116,16 +1123,21 @@ def therapy_entry(request):
                         allocation.status = 'failed'
                     allocation.save(update_fields=['status'])
 
-                # Create draft bookings for any dates in the new range that don't have bookings
+                # Create draft bookings for any dates in the new range that don't have bookings (today+ only; do not create past with new items)
                 if dates_changed or (name_changed or slot_changed):
+                    from django.utils import timezone as _tz_fill
+                    _today_fill = _tz_fill.now().date()
                     for d in daterange(allocation.from_date, allocation.to_date):
+                        if d < _today_fill:
+                            continue
                         if not Booking.objects.filter(allocation=allocation, date=d).exists():
                             booking = Booking.objects.create(
                                 allocation=allocation, 
                                 date=d, 
                                 timeslot=allocation.timeslot, 
                                 room=None, 
-                                status='draft'
+                                status='draft',
+                                snapshot_therapy_name=(allocation.therapy_name or '')[:255]
                             )
                             # Create BookingItems from allocation.items_groups
                             items_groups = allocation.items_groups or []
@@ -1143,8 +1155,13 @@ def therapy_entry(request):
                                     )
                 
                 # Auto-schedule new dates if FinalScheduleRun exists for them (even if name/slot didn't change)
+                # Only touch today and future; leave past bookings/items unchanged.
                 if dates_changed and FinalScheduleRun and expand_therapies_for_visit:
+                    from django.utils import timezone as _tz_auto
+                    _today_auto = _tz_auto.now().date()
                     for d in daterange(allocation.from_date, allocation.to_date):
+                        if d < _today_auto:
+                            continue
                         # Check if Final Schedule has already run for this date
                         if FinalScheduleRun.objects.filter(run_date=d).exists():
                             # Check if booking exists (create if it doesn't)
@@ -1156,7 +1173,8 @@ def therapy_entry(request):
                                     date=d,
                                     timeslot=allocation.timeslot,
                                     room=None,
-                                    status='draft'
+                                    status='draft',
+                                    snapshot_therapy_name=(allocation.therapy_name or '')[:255]
                                 )
                                 # Create BookingItems from allocation.items_groups
                                 items_groups = allocation.items_groups or []
@@ -1216,7 +1234,8 @@ def therapy_entry(request):
                                 date=d,
                                 timeslot=allocation.timeslot,
                                 room=None,
-                                status='draft'
+                                status='draft',
+                                snapshot_therapy_name=(allocation.therapy_name or '')[:255]
                             )
                             
                             # Create BookingItems from updated allocation.items_groups
@@ -1484,7 +1503,7 @@ def therapy_entry(request):
                         single_date = fdate + timedelta(days=i)
                         # Initially set all as draft
                         booking_status = 'draft'
-                        b = Booking.objects.create(allocation=alloc, date=single_date, timeslot=timeslot_obj, room=room_obj, status=booking_status)
+                        b = Booking.objects.create(allocation=alloc, date=single_date, timeslot=timeslot_obj, room=room_obj, status=booking_status, snapshot_therapy_name=(alloc.therapy_name or '')[:255])
                         created_items = []
                         for grp in payload.get('items_groups', []):
                             grp_dosage = grp.get('dosage','')
@@ -1858,6 +1877,9 @@ def therapy_entry(request):
         out = {
             'allocation_id': alloc.pk,
             'therapy_name': alloc.therapy_name,
+            'ext_int': getattr(alloc, 'ext_int', '') or '',
+            'usage': getattr(alloc, 'usage', '') or '',
+            'procured_from': getattr(alloc, 'procured_from', '') or '',
             'from_date': alloc.from_date.isoformat(),
             'to_date': alloc.to_date.isoformat(),
             'overall_status': alloc.status,
@@ -1878,12 +1900,6 @@ def therapy_entry(request):
             elif booking_status in status_counts:
                 status_counts[booking_status] += 1
             
-            items = []
-            try:
-                for it in b.items.all():
-                    items.append({'id': it.pk, 'item_code': it.item_code, 'item_name': it.item_name, 'status': it.status})
-            except Exception:
-                items = []
             therapists = []
             try:
                 # Pre-fetch all TherapistBooking records to avoid N+1 queries
@@ -2023,6 +2039,7 @@ def therapy_entry(request):
             display_status = 'allocated' if booking_status == 'scheduled' else booking_status
             out['date_status_map'][b.date.isoformat()] = display_status
             
+            therapy_name_snapshot = (getattr(b, 'snapshot_therapy_name', None) or '').strip()
             out['bookings'].append({
                 'booking_id': b.pk,
                 'date': b.date.isoformat(),
@@ -2034,7 +2051,7 @@ def therapy_entry(request):
                 'is_nurse_treatment': is_nurse_treatment_flag,
                 'status': booking_status,
                 'display_status': display_status,
-                'items': items
+                'therapy_name_snapshot': therapy_name_snapshot
             })
         
         # Add is_nurse_treatment flag to the main response
@@ -3702,7 +3719,8 @@ def allocate_therapy(request):
                     date=d,
                     timeslot=timeslot,
                     room=room,
-                    status=initial_status
+                    status=initial_status,
+                    snapshot_therapy_name=(allocation.therapy_name or '')[:255]
                 )
 
                 # create items for this booking
@@ -4994,7 +5012,8 @@ def reschedule_therapy_api(request):
                     date=target_date,
                     timeslot=allocation.timeslot,
                     room=allocation.room,
-                    status='draft'
+                    status='draft',
+                    snapshot_therapy_name=(allocation.therapy_name or '')[:255]
                 )
             elif booking.status != 'failed':
                 # If booking exists but is not failed, we can still reschedule it
@@ -5131,7 +5150,8 @@ def reschedule_all_failed_api(request):
                         date=filter_date,
                         timeslot=allocation.timeslot,
                         room=allocation.room,
-                        status='draft'
+                        status='draft',
+                        snapshot_therapy_name=(allocation.therapy_name or '')[:255]
                     )
                     print(f"  Created new booking for allocation {allocation.id}")
 
@@ -5447,6 +5467,7 @@ def therapy_bulk_excel(request):
                         room=None,
                         status='draft',
                         therapist_note='',
+                        snapshot_therapy_name=(alloc.therapy_name or '')[:255]
                     )
                     created_bookings += 1
                     
