@@ -252,6 +252,65 @@ const dateInput = document.getElementById('date-filter');
             });
         }
 
+        // Export to Excel
+        const exportExcelBtn = document.getElementById('export-distribution-excel');
+        if (exportExcelBtn) {
+            exportExcelBtn.addEventListener('click', function () {
+                const table = document.querySelector('#table-wrapper table');
+                if (!table) {
+                    alert('No therapist distribution data to export. Please load data first.');
+                    return;
+                }
+
+                const headerRow = table.querySelector('thead tr');
+                if (!headerRow) {
+                    alert('No header row found.');
+                    return;
+                }
+
+                const rows = [];
+                const headers = Array.from(headerRow.querySelectorAll('th')).map(th =>
+                    (th.innerText || '').trim()
+                );
+                rows.push(headers);
+
+                const bodyRows = table.querySelectorAll('tbody tr');
+                bodyRows.forEach(tr => {
+                    const cells = Array.from(tr.querySelectorAll('td')).map(td =>
+                        (td.innerText || '').trim()
+                    );
+                    if (cells.length > 0 && !tr.querySelector('.empty-state')) {
+                        rows.push(cells);
+                    }
+                });
+
+                if (rows.length <= 1) {
+                    alert('No therapist distribution data to export. Please select a date and load data first.');
+                    return;
+                }
+
+                const wb = XLSX.utils.book_new();
+                const ws = XLSX.utils.aoa_to_sheet(rows);
+                XLSX.utils.book_append_sheet(wb, ws, 'Therapist Distribution');
+
+                const dateVal = dateInput.value ? dateInput.value.replace(/-/g, '') : new Date().toISOString().split('T')[0].replace(/-/g, '');
+                XLSX.writeFile(wb, `Therapist_Distribution_${dateVal}.xlsx`);
+            });
+        }
+
+        // Export to PDF - full page print (includes stats, table, graphs)
+        const exportPdfBtn = document.getElementById('export-distribution-pdf');
+        if (exportPdfBtn) {
+            exportPdfBtn.addEventListener('click', function () {
+                const dateVal = dateInput.value || new Date().toISOString().split('T')[0];
+                const printDateSpan = document.getElementById('print-date-span');
+                if (printDateSpan) printDateSpan.textContent = dateVal;
+
+                // Use browser print - user can choose "Save as PDF" to get full page with graphs
+                window.print();
+            });
+        }
+
         // Chart instances for treatment scheduling
         let treatmentCountsChart = null;
         let therapistRequirementsChart = null;
