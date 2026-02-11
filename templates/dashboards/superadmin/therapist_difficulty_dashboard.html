@@ -18,6 +18,7 @@
             <header>
                 <h1>Therapist Difficulty Dashboard</h1>
                 <p>Track how therapy difficulty levels are distributed among therapists for a specific date.</p>
+                <div class="print-only-info" id="print-only-info">Report for date: <span id="print-date-span"></span></div>
             </header>
 
             <div class="filters">
@@ -45,6 +46,14 @@
                 </div>
                 <button class="btn btn-primary" id="refresh-btn">
                     🔄 Refresh Data
+                </button>
+                <button class="btn btn-primary" id="export-distribution-excel" title="Export Therapist Distribution to Excel"
+                    style="background: #10b981; color: white; font-weight: 600; padding: 8px 16px; display: inline-flex; align-items: center; gap: 6px;">
+                    <span style="font-size: 16px;">📊</span> Export Excel
+                </button>
+                <button class="btn btn-primary" id="export-distribution-pdf" title="Print full page (use Save as PDF in print dialog)"
+                    style="background: #2ed573; color: white; font-weight: 600; padding: 8px 16px; display: inline-flex; align-items: center; gap: 6px;">
+                    <span style="font-size: 16px;">🖨️</span> Export PDF
                 </button>
             </div>
 
@@ -143,7 +152,9 @@
 
     
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script src="{% static 'js/dashboards_superadmin_therapist_difficulty_dashboard.js' %}?v=5"></script>
+    <!-- SheetJS for Excel export -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="{% static 'js/dashboards_superadmin_therapist_difficulty_dashboard.js' %}?v=6"></script>
     <script src="{% static 'js/dashboards_nav.js' %}"></script>
 </body>
 </html>
