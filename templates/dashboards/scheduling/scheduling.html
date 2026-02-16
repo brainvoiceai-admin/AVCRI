@@ -847,9 +847,9 @@
                         ),
                     ];
 
-                    // Build body and per-therapist data for date cells (one colour per therapist, like the page)
-                    const body = [];
-                    const cellTherapistData = [];  // rowIdx -> [ colIdx -> [{ name, status, is_bathing }, ...] ]
+                    // Build grouped body and per-therapist data per patient
+                    // This avoids mixing different patients' rows across page breaks in the PDF
+                    const groupedByPatient = {}; // patientId -> { body: [], therapistData: [] }
 
                     function cellText(cell) {
                         if (!cell || cell.status === 'empty' || !cell.therapists || cell.therapists.length === 0) return '—';
@@ -861,6 +861,10 @@
                     }
 
                     data.rows.forEach(row => {
+                        const patientId = row.patient && row.patient.id ? row.patient.id : `P_${Math.random()}`;
+                        if (!groupedByPatient[patientId]) {
+                            groupedByPatient[patientId] = { body: [], therapistData: [] };
+                        }
                         const rowData = [
                             (row.patient.name || '') + (row.patient.reg_no ? '\n' + row.patient.reg_no : ''),
                             row.therapy_name || '',
@@ -874,8 +878,8 @@
                             rowTherapists.push(therapistList(cell));
                         });
 
-                        body.push(rowData);
-                        cellTherapistData.push(rowTherapists);
+                        groupedByPatient[patientId].body.push(rowData);
+                        groupedByPatient[patientId].therapistData.push(rowTherapists);
                     });
 
                     const padding = 4;
@@ -893,58 +897,79 @@
                     const margin = 20;
                     const tableWidth = pageWidth - 2 * margin;
 
-                    doc.autoTable({
-                        head,
-                        body,
-                        tableWidth: tableWidth,
-                        margin: { left: margin, right: margin },
-                        styles: {
-                            fontSize: fontSize,
-                            cellPadding: { top: padding, right: padding, bottom: paddingBottom, left: padding },
-                            overflow: 'linebreak'
-                        },
-                        headStyles: { fillColor: [37, 99, 235] },
-                        startY: 40,
-                        columnStyles: {
-                            0: { cellWidth: 52 },   // Patient - fixed so date cols get space
-                            1: { cellWidth: 42 },   // Therapy
-                            2: { cellWidth: 36 },   // Slot
-                        },
-                        didDrawCell: function (cellData) {
-                            const section = cellData.section;
-                            if (section !== 'body') return;
-                            const ri = cellData.row?.index;
-                            const ci = cellData.column?.index;
-                            if (ri == null || ci == null || ci < 3) return;
-                            const therapists = cellTherapistData[ri] && cellTherapistData[ri][ci];
-                            if (!therapists || therapists.length === 0) return;
+                    // Render one table per patient group so that page breaks
+                    // never mix/overlap different patients' name/therapy rows.
+                    let isFirstTable = true;
+                    Object.keys(groupedByPatient).forEach(patientId => {
+                        const group = groupedByPatient[patientId];
+                        if (!group.body.length) return;
 
-                            const cell = cellData.cell;
-                            const docRef = cellData.doc;
-                            const x = cell.x + padding;
-                            let y = cell.y + padding + fontSize;
-                            const maxTextWidth = Math.max(20, cell.width - 2 * padding);
+                        const groupBody = group.body;
+                        const groupTherapistData = group.therapistData;
 
-                            docRef.setFillColor(255, 255, 255);
-                            docRef.rect(cell.x + 1, cell.y + 1, cell.width - 2, cell.height - 2, 'F');
-                            docRef.setFontSize(fontSize);
+                        const startY = isFirstTable
+                            ? 40
+                            : (doc.lastAutoTable && doc.lastAutoTable.finalY + 16) || 40;
 
-                            therapists.forEach(function (t) {
-                                const displayName = (t.is_bathing ? '* ' : '') + t.name;
-                                const color = textColorByStatus[t.status] || textColorByStatus.gray;
-                                docRef.setTextColor(color[0], color[1], color[2]);
-                                const lines = docRef.splitTextToSize(displayName, maxTextWidth);
-                                if (Array.isArray(lines)) {
-                                    lines.forEach(function (line) {
-                                        docRef.text(line, x, y);
+                        doc.autoTable({
+                            head,
+                            body: groupBody,
+                            tableWidth: tableWidth,
+                            margin: { left: margin, right: margin },
+                            // Try to keep each row on a single page;
+                            // if a row is taller than a page, it may still split,
+                            // but it will never mix with a different patient's rows.
+                            rowPageBreak: 'avoid',
+                            styles: {
+                                fontSize: fontSize,
+                                cellPadding: { top: padding, right: padding, bottom: paddingBottom, left: padding },
+                                overflow: 'linebreak'
+                            },
+                            headStyles: { fillColor: [37, 99, 235] },
+                            startY: startY,
+                            columnStyles: {
+                                0: { cellWidth: 52 },   // Patient - fixed so date cols get space
+                                1: { cellWidth: 42 },   // Therapy
+                                2: { cellWidth: 36 },   // Slot
+                            },
+                            didDrawCell: function (cellData) {
+                                const section = cellData.section;
+                                if (section !== 'body') return;
+                                const ri = cellData.row?.index;
+                                const ci = cellData.column?.index;
+                                if (ri == null || ci == null || ci < 3) return;
+                                const therapists = groupTherapistData[ri] && groupTherapistData[ri][ci];
+                                if (!therapists || therapists.length === 0) return;
+
+                                const cell = cellData.cell;
+                                const docRef = cellData.doc;
+                                const x = cell.x + padding;
+                                let y = cell.y + padding + fontSize;
+                                const maxTextWidth = Math.max(20, cell.width - 2 * padding);
+
+                                docRef.setFillColor(255, 255, 255);
+                                docRef.rect(cell.x + 1, cell.y + 1, cell.width - 2, cell.height - 2, 'F');
+                                docRef.setFontSize(fontSize);
+
+                                therapists.forEach(function (t) {
+                                    const displayName = (t.is_bathing ? '* ' : '') + t.name;
+                                    const color = textColorByStatus[t.status] || textColorByStatus.gray;
+                                    docRef.setTextColor(color[0], color[1], color[2]);
+                                    const lines = docRef.splitTextToSize(displayName, maxTextWidth);
+                                    if (Array.isArray(lines)) {
+                                        lines.forEach(function (line) {
+                                            docRef.text(line, x, y);
+                                            y += lineHeight;
+                                        });
+                                    } else {
+                                        docRef.text(displayName, x, y);
                                         y += lineHeight;
-                                    });
-                                } else {
-                                    docRef.text(displayName, x, y);
-                                    y += lineHeight;
-                                }
-                            });
-                        },
+                                    }
+                                });
+                            },
+                        });
+
+                        isFirstTable = false;
                     });
 
                     const from = document.getElementById('cont-from')?.value || '';
