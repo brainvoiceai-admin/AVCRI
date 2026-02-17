@@ -117,7 +117,7 @@ body {
 }
 
 .search-tab-content {
-  /* Tab content styling */
+  padding: 10px 0;
 }
 
 .search-input-group {
@@ -438,9 +438,9 @@ tr:hover {
 }
 
 .status-draft {
-  background: #f8f9fa;
-  color: #6c757d;
-  border: 1px solid #dee2e6;
+  background: #fff3cd;
+  color: #856404;
+  border: 1px solid #ffeaa7;
 }
 
 .status-cancelreq {
@@ -462,9 +462,9 @@ tr:hover {
 }
 
 .status-mixed {
-  background: #fff9e6;
-  color: #856404;
-  border: 1px solid #ffeaa7;
+  background: #e7f3ff;
+  color: #004085;
+  border: 1px solid #b8daff;
 }
 
 /* Status + action badges */
@@ -487,47 +487,155 @@ tr:hover {
 /* Row color legend (today only):
        Added   -> Blue
        Updated -> Yellow
-       Resumed -> Green
+       Resumed -> Purple
        Cancelled -> Red
     */
 .action-added {
-  background: #e8f1ff;
-  color: #0d3c8c;
-  border-color: #cddcff;
+  background: #1e40af !important;
+  color: #ffffff !important;
+  border-color: #1a3a8a;
 }
 
 .action-updated {
-  background: #fff9e6;
-  color: #856404;
-  border-color: #ffeaa7;
+  background: #d97706 !important;
+  color: #ffffff !important;
+  border-color: #b45309;
 }
 
 .action-resumed {
-  background: #e8f5e9;
-  color: #2e7d32;
-  border-color: #a5d6a7;
+  background: #7c3aed !important;
+  color: #ffffff !important;
+  border-color: #6d28d9;
 }
 
 .action-cancelled {
-  background: #ffe6e6;
-  color: #a1191f;
-  border-color: #ffc2c2;
+  background: #dc2626 !important;
+  color: #ffffff !important;
+  border-color: #b91c1c;
 }
 
 tr.action-added {
-  background: #f4f7ff;
+  background: #ebf5ff !important;
+  color: #1f2937 !important;
+}
+
+tr.action-added td {
+  color: #1f2937 !important;
+}
+
+tr.action-added td:nth-child(2) {
+  font-weight: 700;
+  color: #1e40af !important;
+}
+
+tr.action-added .med-details-text,
+tr.action-added .med-group-details,
+tr.action-added .patient-meta span,
+tr.action-added .small-muted,
+tr.action-added .tag {
+  color: #374151 !important;
+}
+
+tr.action-added .tag {
+  font-weight: 600;
+  color: #1e40af !important;
+}
+
+tr.action-added td:first-child {
+  border-left: 5px solid #1d4ed8 !important;
 }
 
 tr.action-updated {
-  background: #fffbe5;
+  background: #fff8e1 !important;
+  color: #1f2937 !important;
+}
+
+tr.action-updated td {
+  color: #1f2937 !important;
+}
+
+tr.action-updated td:nth-child(2) {
+  font-weight: 700;
+  color: #b45309 !important;
+}
+
+tr.action-updated .med-details-text,
+tr.action-updated .med-group-details,
+tr.action-updated .patient-meta span,
+tr.action-updated .small-muted,
+tr.action-updated .tag {
+  color: #374151 !important;
+}
+
+tr.action-updated .tag {
+  font-weight: 600;
+  color: #b45309 !important;
+}
+
+tr.action-updated td:first-child {
+  border-left: 5px solid #d97706 !important;
 }
 
 tr.action-resumed {
-  background: #e8f5e9 !important;
+  background: #f0fdf4 !important;
+  color: #1f2937 !important;
+}
+
+tr.action-resumed td {
+  color: #1f2937 !important;
+}
+
+tr.action-resumed td:nth-child(2) {
+  font-weight: 700;
+  color: #15803d !important;
+}
+
+tr.action-resumed .med-details-text,
+tr.action-resumed .med-group-details,
+tr.action-resumed .patient-meta span,
+tr.action-resumed .small-muted,
+tr.action-resumed .tag {
+  color: #374151 !important;
+}
+
+tr.action-resumed .tag {
+  font-weight: 600;
+  color: #15803d !important;
+}
+
+tr.action-resumed td:first-child {
+  border-left: 5px solid #16a34a !important;
 }
 
 tr.action-cancelled {
-  background: #fff5f5;
+  background: #ffebee !important;
+  color: #1f2937 !important;
+}
+
+tr.action-cancelled td {
+  color: #1f2937 !important;
+}
+
+tr.action-cancelled td:nth-child(2) {
+  font-weight: 700;
+  color: #b91c1c !important;
+}
+
+tr.action-cancelled .med-details-text,
+tr.action-cancelled .med-group-details,
+tr.action-cancelled .patient-meta span,
+tr.action-cancelled .small-muted,
+tr.action-cancelled .tag {
+  color: #374151 !important;
+}
+
+tr.action-cancelled .tag {
+  font-weight: 600;
+  color: #b91c1c !important;
+}
+
+tr.action-cancelled td:first-child {
+  border-left: 5px solid #dc2626 !important;
 }
 
 /* Action Buttons */

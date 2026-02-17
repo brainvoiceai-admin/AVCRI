@@ -1,14 +1,14 @@
-$(function(){
+$(function () {
   // --- config/fallbacks ---
   const API_URL = window.location.pathname;
-  const FALLBACK_PROCURED = [{name:'IP Pharmacy'},{name:'Kashaya room'}];
+  const FALLBACK_PROCURED = [{ name: 'IP Pharmacy' }, { name: 'Kashaya room' }];
 
   // --- helpers ---
-  function ajax(params){
+  function ajax(params) {
     const url = API_URL + '?' + $.param(params);
     return fetch(url).then(r => { if (!r.ok) throw new Error('Network'); return r.json(); });
   }
-  function esc(s){ return String(s||''); }
+  function esc(s) { return String(s || ''); }
   // Format date as DD/MM/YYYY
   function formatDate(dateStr) {
     if (!dateStr) return '';
@@ -23,8 +23,8 @@ $(function(){
       return dateStr; // Return original if error
     }
   }
-  
-  function getDateRange(from, to){ const out=[]; let cur=new Date(from+'T00:00:00'), end=new Date(to+'T00:00:00'); while(cur<=end){ out.push(cur.toISOString().slice(0,10)); cur.setDate(cur.getDate()+1);} return out; }
+
+  function getDateRange(from, to) { const out = []; let cur = new Date(from + 'T00:00:00'), end = new Date(to + 'T00:00:00'); while (cur <= end) { out.push(cur.toISOString().slice(0, 10)); cur.setDate(cur.getDate() + 1); } return out; }
   function getCookie(name) { let v = document.cookie.match('(^|;)\\s*' + name + '\\s*=\\s*([^;]+)'); return v ? v.pop() : ''; }
 
   // Load UnitNo options from master table
@@ -54,34 +54,43 @@ $(function(){
   const $scopeSelect = $('#scope-select');
   const $commonUsageSelect = $('#common-usage-select');
   let usageSelectionOrder = []; // Track selection order for usage field
-  
+
+  // Flag to prevent reordering during unselect operations
+  let isUnselecting = false;
+
   // Function to reorder selected tags in the DOM to match selection order (global function)
   function reorderUsageTags() {
+    // Don't reorder if we're in the middle of an unselect operation
+    if (isUnselecting) return;
+
     // Use requestAnimationFrame for smoother updates
     requestAnimationFrame(() => {
       setTimeout(() => {
+        // Double-check flag after timeout
+        if (isUnselecting) return;
+
         const $select2Container = $commonUsageSelect.next('.select2-container');
         if (!$select2Container.length) return;
-        
+
         const $choicesContainer = $select2Container.find('.select2-selection__rendered');
         if (!$choicesContainer.length) return;
-        
+
         const $tags = $choicesContainer.find('.select2-selection__choice');
         if ($tags.length === 0) return;
-        
+
         const currentValues = $commonUsageSelect.val() || [];
         const orderedValues = usageSelectionOrder.filter(val => currentValues.indexOf(val) !== -1);
-        
+
         // If no reordering needed, return early
         if (orderedValues.length <= 1) return;
-        
+
         // Create a map of value to DOM element by matching text content
         const tagMap = {};
-        $tags.each(function() {
+        $tags.each(function () {
           const $tag = $(this);
           // Get the text content (removing the X button text)
           const tagText = $tag.clone().find('.select2-selection__choice__remove').remove().end().text().trim();
-          
+
           // Find matching value by comparing with option text
           for (let i = 0; i < orderedValues.length; i++) {
             const val = orderedValues[i];
@@ -93,13 +102,31 @@ $(function(){
             }
           }
         });
-        
+
         // Reorder tags based on selection order by moving them in DOM
         // Only reorder if we have all tags mapped correctly
         if (Object.keys(tagMap).length === orderedValues.length) {
           orderedValues.forEach(val => {
             if (tagMap[val]) {
-              tagMap[val].detach().appendTo($choicesContainer);
+              // Use a more gentle approach that preserves event handlers
+              const $tag = tagMap[val];
+              if ($tag.parent()[0] !== $choicesContainer[0]) {
+                $tag.appendTo($choicesContainer);
+              } else {
+                // If already in the right container, just move to correct position
+                const currentIndex = $tag.index();
+                const targetIndex = orderedValues.indexOf(val);
+                if (currentIndex !== targetIndex) {
+                  if (targetIndex === 0) {
+                    $tag.prependTo($choicesContainer);
+                  } else {
+                    const $prevTag = tagMap[orderedValues[targetIndex - 1]];
+                    if ($prevTag && $prevTag.length) {
+                      $tag.insertAfter($prevTag);
+                    }
+                  }
+                }
+              }
             }
           });
         }
@@ -117,6 +144,33 @@ $(function(){
   const $resumeModal = $('#resume-modal-backdrop');
   const $resumeCloseBtn = $('#resume-modal-close'), $resumeModalInfo = $('#resume-modal-info');
 
+  // --- Confirmation Modal Logic ---
+  const $confirmModal = $('#confirmation-modal-backdrop');
+  const $confirmTitle = $('#confirmation-modal-title');
+  const $confirmMessage = $('#confirmation-modal-message');
+  const $confirmBtn = $('#confirmation-modal-confirm');
+  const $confirmCancel = $('#confirmation-modal-cancel');
+  let onConfirmAction = null;
+
+  function showConfirm(title, message, btnText, callback) {
+    $confirmTitle.text(title);
+    $confirmMessage.html(message.replace(/\n/g, '<br>'));
+    $confirmBtn.text(btnText);
+    onConfirmAction = callback;
+    $confirmModal.show();
+  }
+
+  $confirmCancel.on('click', function () {
+    $confirmModal.hide();
+    onConfirmAction = null;
+  });
+
+  $confirmBtn.on('click', function () {
+    if (onConfirmAction) onConfirmAction();
+    $confirmModal.hide();
+    onConfirmAction = null;
+  });
+
   // Set today's date as default for From Date field
   if (!$fromDate.val()) {
     const today = new Date().toISOString().split('T')[0];
@@ -130,15 +184,46 @@ $(function(){
   let cancelingPrescriptionIndex = null;
   let resumingPrescriptionIndex = null;
   let selectedPatient = null;
+  let prescriptionActionById = {};
+
+  // Track the last action performed so rows can be color-coded
+  function rememberPrescriptionAction(id, action) {
+    if (!id) return;
+    // Store with string key to ensure matching
+    const key = String(id);
+    prescriptionActionById[key] = action;
+  }
+  function decoratePrescriptionList(list) {
+    return (list || []).map(p => {
+      // Try multiple key formats to match what we stored
+      const key1 = p.allocation_id ? String(p.allocation_id) : null;
+      const key2 = p.id ? String(p.id) : null;
+      const remembered = (key1 && prescriptionActionById[key1]) ||
+        (key2 && prescriptionActionById[key2]) || '';
+
+      const s = String(p.status || '').trim().toLowerCase();
+      const hasCancellations = p.cancelled_date_from && p.cancelled_date_to && p.cancelled_date_from !== 'null';
+
+      let derived = '';
+      if (s === 'cancelled' || hasCancellations) {
+        derived = 'cancelled';
+      } else {
+        derived = 'added'; // DEFAULT = Blue
+      }
+
+      const action = remembered || derived;
+      return { ...p, last_action: action };
+    });
+  }
 
   // Patient search with auto-fill functionality
   let searchTimeout;
   let initialPatientsLoaded = false;
-  
+
   // Tab switching functionality
-  $('.search-tab-btn').on('click', function() {
+  $('.search-tab-btn').on('click', function () {
     const tab = $(this).data('tab');
-    
+
     // Update active tab
     $('.search-tab-btn').removeClass('active').css({
       'border-bottom-color': 'transparent',
@@ -148,7 +233,7 @@ $(function(){
       'border-bottom-color': 'var(--primary)',
       'color': 'var(--primary)'
     });
-    
+
     // Show/hide tab content
     $('.search-tab-content').hide();
     if (tab === 'name-reg') {
@@ -160,9 +245,9 @@ $(function(){
       $('#search-results').hide();
     }
   });
-  
+
   // Show 10 active patients when search box is focused/clicked (Name/Reg No search)
-  $('#header-patient-select').on('focus', function() {
+  $('#header-patient-select').on('focus', function () {
     const query = $(this).val().trim();
     // If search box is empty, show 10 active patients
     if (query.length === 0 && !initialPatientsLoaded) {
@@ -170,12 +255,12 @@ $(function(){
       initialPatientsLoaded = true;
     }
   });
-  
-  $('#header-patient-select').on('input', function() {
+
+  $('#header-patient-select').on('input', function () {
     const query = $(this).val().trim();
-    
+
     clearTimeout(searchTimeout);
-    
+
     // If query is cleared, show initial 10 again
     if (query.length === 0) {
       if (initialPatientsLoaded) {
@@ -185,16 +270,16 @@ $(function(){
       }
       return;
     }
-    
+
     // Filter as user types (no minimum character restriction)
     searchTimeout = setTimeout(() => {
       searchPatients(query, false); // false = filtered search
       initialPatientsLoaded = false; // Reset flag when filtering
     }, 300);
   });
-  
+
   // Room number search functionality
-  $('#search-room-btn').on('click', function() {
+  $('#search-room-btn').on('click', function () {
     const roomNumber = $('#header-room-search').val().trim();
     if (!roomNumber) {
       alert('Please enter a room number');
@@ -202,25 +287,25 @@ $(function(){
     }
     searchPatientsByRoom(roomNumber);
   });
-  
+
   // Allow Enter key to trigger room search
-  $('#header-room-search').on('keypress', function(e) {
+  $('#header-room-search').on('keypress', function (e) {
     if (e.which === 13) {
       e.preventDefault();
       $('#search-room-btn').click();
     }
   });
-  
+
   // Clear room search
-  $('#clear-room-btn').on('click', function() {
+  $('#clear-room-btn').on('click', function () {
     $('#header-room-search').val('');
     $('#search-results').hide();
   });
-  
+
   // Function to search patients by room number
   function searchPatientsByRoom(roomNumber) {
     $('#search-results').html('<div style="padding:10px;color:#666;">Searching...</div>').show();
-    
+
     fetch('/authentication/api/search-patients-by-room/?room=' + encodeURIComponent(roomNumber))
       .then(response => response.json())
       .then(data => {
@@ -236,10 +321,10 @@ $(function(){
   function searchPatients(query, isInitialLoad = false) {
     // isInitialLoad: true = show 10 active patients, false = filter based on query
     // For initial load, pass empty query with a flag
-    const url = isInitialLoad 
+    const url = isInitialLoad
       ? '/authentication/api/search-patients/?q=&initial=true'
       : '/authentication/api/search-patients/?q=' + encodeURIComponent(query);
-    
+
     fetch(url)
       .then(response => response.json())
       .then(data => {
@@ -268,7 +353,7 @@ $(function(){
       const patName = patient.pat_name || patient.patient_name;
       const patientType = patient.patient_type || (patient.source === 'IP' ? 'IP' : 'OP');
       const roomNo = patient.room_number || patient.pat_room_no || null;
-      
+
       const resultItem = $(`
         <div style="padding:10px;border-bottom:1px solid #eee;cursor:pointer;" class="search-result-item" data-reg-no="${regNo}">
           <div style="display:flex;justify-content:space-between;align-items:center;">
@@ -291,13 +376,13 @@ $(function(){
   }
 
   // Handle patient selection
-  $(document).on('click', '.search-result-item', function() {
+  $(document).on('click', '.search-result-item', function () {
     const regNo = $(this).data('reg-no');
     loadPatientDetails(regNo);
   });
 
   // Hide search results when clicking outside
-  $(document).on('click', function(e) {
+  $(document).on('click', function (e) {
     if (!$(e.target).closest('#header-patient-select, #header-room-search, #search-results, #search-room-btn').length) {
       $('#search-results').hide();
     }
@@ -327,32 +412,32 @@ $(function(){
       $('#patient-avatar').text('?').css('background', '#6c757d');
       return;
     }
-    
+
     const name = patient.pat_name || '';
     const initials = name.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2);
     $('#patient-avatar').text(initials || '?');
-    
+
     // Set VIP status badge
     if (patient.vip_status && patient.vip_status.toLowerCase() === 'yes') {
       $('#hdr-pat-vip-badge').show();
     } else {
       $('#hdr-pat-vip-badge').hide();
     }
-    
+
     // Set IP/OP status badge
     if (patient.patient_type === 'IP') {
       $('#hdr-pat-ip-badge').show();
     } else {
       $('#hdr-pat-ip-badge').hide();
     }
-    
+
     // Update patient info fields with bold/highlighted styling
     const regNo = patient.pat_reg_no || patient.pat_op_reg_no || '—';
     const room = patient.pat_room_no || '—';
     const age = patient.pat_age || '—';
     const gender = patient.pat_sex || '—';
     const type = patient.patient_type || '—';
-    
+
     $('#hdr-pat-reg').html(`<strong style="font-weight: bold; color: var(--primary);">${regNo}</strong>`);
     $('#hdr-pat-room').html(`<strong style="font-weight: bold; color: var(--primary);">${room}</strong>`);
     $('#hdr-pat-age').html(`<strong style="font-weight: bold; color: var(--primary);">${age}</strong>`);
@@ -367,23 +452,35 @@ $(function(){
     editPrescriptionIndex = null;
     cancelingPrescriptionIndex = null;
     resumingPrescriptionIndex = null;
-    
+    editingGroupId = null; // Clear editing group ID
+    editingGroupIndex = null; // Clear editing group index
+    // Clear remembered actions when switching patients to avoid stale data
+    prescriptionActionById = {};
+
     // Reset form state
     resetFormState();
-    
-    $('#header-patient-select').val(patient.pat_op_reg_no || patient.pat_reg_no);
+
+    // Determine correct registration number based on patient type
+    // For IP patients: use pat_reg_no (not pat_op_reg_no)
+    // For OP patients: use pat_op_reg_no if available, otherwise pat_reg_no
+    const patientType = patient.patient_type ||
+      (patient.pat_reg_no && patient.pat_reg_no.toString().replace(/\D/g, '').length === 5 ? 'OP' : 'IP');
+    const patientRegNo = patientType === 'IP'
+      ? patient.pat_reg_no
+      : (patient.pat_op_reg_no || patient.pat_reg_no);
+
+    $('#header-patient-select').val(patientRegNo);
     // Make patient name bold/highlighted
     $('#hdr-pat-name').html(`<strong style="font-weight: bold; color: var(--primary);">${patient.pat_name || 'Unknown'}</strong>`);
     updatePatientAvatar(patient);
-    
+
     // Load patient prescriptions
-    const patientRegNo = patient.pat_op_reg_no || patient.pat_reg_no;
-    ajax({action:'patient_prescriptions', patient_reg_no: patientRegNo}).then(list => {
-      addedPrescriptions = list || [];
+    ajax({ action: 'patient_prescriptions', patient_reg_no: patientRegNo }).then(list => {
+      addedPrescriptions = decoratePrescriptionList(list || []);
       renderAll();
-    }).catch(()=>{ 
+    }).catch(() => {
       addedPrescriptions = [];
-      renderAll(); 
+      renderAll();
     });
   }
 
@@ -405,34 +502,34 @@ $(function(){
   }
 
   // Clear button event handler
-  $('#clear-patient-btn').on('click', function() {
+  $('#clear-patient-btn').on('click', function () {
     clearPatientSelection();
     $('#search-results').hide();
   });
 
   // populate masters with fallback
-  function populateMasters(){
-    ajax({action:'masters', type:'procured'}).then(list => { 
-      $procuredSelect.empty().append('<option value="">-- Select Source --</option>'); 
+  function populateMasters() {
+    ajax({ action: 'masters', type: 'procured' }).then(list => {
+      $procuredSelect.empty().append('<option value="">-- Select Source --</option>');
       $itemBuilderProcuredFrom.empty().append('<option value="">-- Select Source --</option>');
-      (list||FALLBACK_PROCURED).forEach(p => {
+      (list || FALLBACK_PROCURED).forEach(p => {
         $procuredSelect.append(new Option(p.name, p.name));
         $itemBuilderProcuredFrom.append(new Option(p.name, p.name));
       });
-    }).catch(()=>{ 
-      $procuredSelect.empty().append('<option value="">-- Select Source --</option>'); 
+    }).catch(() => {
+      $procuredSelect.empty().append('<option value="">-- Select Source --</option>');
       $itemBuilderProcuredFrom.empty().append('<option value="">-- Select Source --</option>');
       FALLBACK_PROCURED.forEach(p => {
         $procuredSelect.append(new Option(p.name, p.name));
         $itemBuilderProcuredFrom.append(new Option(p.name, p.name));
       });
     });
-    ajax({action:'masters', type:'prescriptionscope'}).then(list => { $scopeSelect.empty().append('<option value="">-- Select --</option>'); (list||[]).forEach(x => $scopeSelect.append(new Option(x.name, x.name))); }).catch(()=>{ $scopeSelect.empty().append('<option value="">-- Select --</option>'); });
-    ajax({action:'masters', type:'prescriptionusage'}).then(list => { 
-      const $u=$commonUsageSelect; 
-      $u.empty(); 
+    ajax({ action: 'masters', type: 'prescriptionscope' }).then(list => { $scopeSelect.empty().append('<option value="">-- Select --</option>'); (list || []).forEach(x => $scopeSelect.append(new Option(x.name, x.name))); }).catch(() => { $scopeSelect.empty().append('<option value="">-- Select --</option>'); });
+    ajax({ action: 'masters', type: 'prescriptionusage' }).then(list => {
+      const $u = $commonUsageSelect;
+      $u.empty();
       usageSelectionOrder = []; // Reset selection order
-      (list||[]).forEach(x => $u.append(new Option(x.name, x.name))); 
+      (list || []).forEach(x => $u.append(new Option(x.name, x.name)));
       // Initialize Select2 for multiselect
       if (!$u.hasClass('select2-hidden-accessible')) {
         $u.select2({
@@ -442,64 +539,85 @@ $(function(){
           closeOnSelect: false
         });
       }
-      
+
       // Track selection order and reorder display immediately
-      $u.on('select2:select', function(e) {
+      $u.on('select2:select', function (e) {
         const selectedValue = e.params.data.id;
         if (usageSelectionOrder.indexOf(selectedValue) === -1) {
           usageSelectionOrder.push(selectedValue);
         }
-        // Reorder tags immediately and multiple times to ensure it sticks
-        // Select2 may re-render, so we need to catch it multiple times
-        reorderUsageTags();
-        setTimeout(reorderUsageTags, 10);
-        setTimeout(reorderUsageTags, 50);
-        setTimeout(reorderUsageTags, 150);
+        // Reorder tags after Select2 has rendered the new tag
+        // Use a single delayed call to avoid race conditions
+        setTimeout(() => {
+          if (!isUnselecting) {
+            reorderUsageTags();
+          }
+        }, 100);
       });
-      
-      $u.on('select2:unselect', function(e) {
+
+      $u.on('select2:unselect', function (e) {
+        // Set flag to prevent reordering during unselect
+        isUnselecting = true;
+
         const unselectedValue = e.params.data.id;
         const index = usageSelectionOrder.indexOf(unselectedValue);
         if (index > -1) {
           usageSelectionOrder.splice(index, 1);
         }
-        // Reorder remaining tags
-        reorderUsageTags();
-        setTimeout(reorderUsageTags, 10);
-        setTimeout(reorderUsageTags, 50);
+
+        // Clear flag after a short delay to allow Select2 to complete the unselect
+        setTimeout(() => {
+          isUnselecting = false;
+          // Reorder remaining tags after unselect is complete
+          reorderUsageTags();
+        }, 100);
       });
-      
+
       // Also reorder when values are set programmatically (like when loading for edit)
-      $u.on('change', function() {
-        reorderUsageTags();
-        setTimeout(reorderUsageTags, 100);
+      $u.on('change', function () {
+        if (!isUnselecting) {
+          setTimeout(() => {
+            if (!isUnselecting) {
+              reorderUsageTags();
+            }
+          }, 100);
+        }
       });
-      
-      // Reorder after Select2 opens/closes to ensure correct order
-      $u.on('select2:open', function() {
-        setTimeout(reorderUsageTags, 10);
+
+      // Reorder after Select2 closes to ensure correct order (but not on open to avoid interference)
+      $u.on('select2:close', function () {
+        if (!isUnselecting) {
+          setTimeout(() => {
+            if (!isUnselecting) {
+              reorderUsageTags();
+            }
+          }, 50);
+        }
       });
-      
-      $u.on('select2:close', function() {
-        setTimeout(reorderUsageTags, 10);
-      });
-      
+
       // Use MutationObserver to watch for DOM changes and reorder automatically
+      // But be careful not to interfere with Select2's native unselect behavior
       setTimeout(() => {
         const $select2Container = $u.next('.select2-container');
         if ($select2Container.length) {
           const $choicesContainer = $select2Container.find('.select2-selection__rendered');
           if ($choicesContainer.length && $choicesContainer[0]) {
-            const observer = new MutationObserver(function(mutations) {
-              // Only reorder if tags were added/removed
-              const hasChanges = mutations.some(m => 
-                m.addedNodes.length > 0 || m.removedNodes.length > 0
-              );
-              if (hasChanges) {
-                reorderUsageTags();
+            const observer = new MutationObserver(function (mutations) {
+              // Don't reorder if we're in the middle of an unselect operation
+              if (isUnselecting) return;
+
+              // Only reorder if tags were added (not removed, as removal is handled by select2:unselect)
+              const hasAdditions = mutations.some(m => m.addedNodes.length > 0);
+              if (hasAdditions) {
+                // Use a small delay to ensure Select2 has finished its operations
+                setTimeout(() => {
+                  if (!isUnselecting) {
+                    reorderUsageTags();
+                  }
+                }, 50);
               }
             });
-            
+
             observer.observe($choicesContainer[0], {
               childList: true,
               subtree: true
@@ -507,71 +625,68 @@ $(function(){
           }
         }
       }, 500);
-    }).catch(()=>{});
-    ajax({action:'masters', type:'prescriptiontime'}).then(list => { const $t=$('#item-builder-time'); $t.empty().append('<option value="">Select Time</option>'); (list||[]).forEach(x => $t.append(new Option(x.name, x.name))); }).catch(()=>{});
+    }).catch(() => { });
+    ajax({ action: 'masters', type: 'prescriptiontime' }).then(list => { const $t = $('#item-builder-time'); $t.empty().append('<option value="">Select Time</option>'); (list || []).forEach(x => $t.append(new Option(x.name, x.name))); }).catch(() => { });
     // Populate Oil Class in item builder section
-    ajax({action:'masters', type:'oil'}).then(list => { $itemBuilderOilClass.empty().append('<option value="">-- Select --</option>'); (list||[]).forEach(o => $itemBuilderOilClass.append(new Option(o.name, o.name))); }).catch(()=>{ $itemBuilderOilClass.empty().append('<option value="">-- Select --</option>'); });
-    
-    // Populate ingredients
-    ajax({action:'masters', type:'ingredient'}).then(list => {
-      const $ing = $('#item-builder-ingredients');
-      if ($ing.length) {
-        // Clear any existing options
-        $ing.empty();
-        
-        // Add options from API response
-        (list || []).forEach(i => {
-          const text = i.ingredient_name || i.ingredient_code || 'N/A';
-          $ing.append(new Option(text, i.id, false, false));
-        });
-        
-        // Initialize Select2 for multiselect
-        if (!$ing.hasClass('select2-hidden-accessible')) {
-          $ing.select2({
-            placeholder: 'Select Ingredients (multiple)',
-            allowClear: true,
-            multiple: true,
-            width: '100%'
-          });
-        }
-      }
-    }).catch(() => {
-      // Initialize empty select2 if API fails
-      const $ing = $('#item-builder-ingredients');
-      if ($ing.length && !$ing.hasClass('select2-hidden-accessible')) {
-        $ing.select2({
-          placeholder: 'Select Ingredients (multiple)',
-          allowClear: true,
-          multiple: true,
-          width: '100%'
-        });
-      }
-    });
+    ajax({ action: 'masters', type: 'oil' }).then(list => { $itemBuilderOilClass.empty().append('<option value="">-- Select --</option>'); (list || []).forEach(o => $itemBuilderOilClass.append(new Option(o.name, o.name))); }).catch(() => { $itemBuilderOilClass.empty().append('<option value="">-- Select --</option>'); });
+
+    // Ingredients field is now a free text input - no need to populate from API
   }
   populateMasters();
 
   // Store item data for procured_from checking
   const itemDataCache = {};
-  
+
+  // Track which group is being edited (if any)
+  let editingGroupId = null;
+  let editingGroupIndex = null; // Track the position of the group being edited
+
+  // Function to get all currently selected item codes across all groups
+  // Optionally exclude a specific group (for edit mode)
+  function getAllSelectedItemCodes(excludeGroupId = null) {
+    const allItemCodes = new Set();
+    itemGroups.forEach(group => {
+      // Skip the group being edited
+      if (excludeGroupId && group.id === excludeGroupId) {
+        return;
+      }
+      if (group.items && Array.isArray(group.items)) {
+        group.items.forEach(item => {
+          if (item.item_code) {
+            allItemCodes.add(item.item_code);
+          }
+        });
+      }
+    });
+    return allItemCodes;
+  }
+
+  // Function to check if an item is already selected in any group
+  // Optionally exclude a specific group (for edit mode)
+  function isItemAlreadySelected(itemCode, excludeGroupId = null) {
+    const selectedCodes = getAllSelectedItemCodes(excludeGroupId);
+    return selectedCodes.has(itemCode);
+  }
+
   // init select2s
   $itemBuilder.select2({
-    placeholder:'Search or type items (multi)',
+    placeholder: 'Search or type items (multi)',
     minimumInputLength: 0,
     tags: true,
     tokenSeparators: [','],
     ajax: {
-      url: function() {
+      url: function () {
         return API_URL;
       },
       dataType: 'json',
       delay: 250,
-      data: function(params) {
+      data: function (params) {
         return {
           action: 'search_items',
           q: params.term || ''
         };
       },
-      processResults: function(data) {
+      processResults: function (data) {
         console.log('Select2 processResults called with data:', data);
         // Cache item data including procured_from
         if (data && Array.isArray(data)) {
@@ -580,10 +695,12 @@ $(function(){
               itemDataCache[item.item_code] = item;
             }
           });
-          // Format for Select2
-          const formattedResults = data.map(i => ({ 
-            id: i.item_code, 
-            text: i.item_name || i.item_code 
+
+          // Format for Select2 - NO global duplicate checking
+          // Items can be added to multiple groups
+          const formattedResults = data.map(i => ({
+            id: i.item_code,
+            text: i.item_name || i.item_code
           }));
           console.log('Formatted results:', formattedResults);
           return { results: formattedResults };
@@ -591,18 +708,41 @@ $(function(){
         return { results: [] };
       },
       cache: true
+    },
+    // Prevent Select2 from sorting - maintain selection order
+    sorter: function (data) {
+      return data; // Return data as-is, don't sort
     }
   });
-  
+
+  // Intercept Select2 Unselect (Item Removal from Group Builder)
+  $itemBuilder.on('select2:unselecting', function (e) {
+    // Removal of single item should NOT show confirmation popup
+    const data = (e.params.args && e.params.args.data) || e.params.data;
+    const itemId = data.id;
+
+    // Manually remove item immediately
+    let currentInfo = $itemBuilder.val() || [];
+    if (!Array.isArray(currentInfo)) currentInfo = [currentInfo];
+    const newValue = currentInfo.filter(x => x !== itemId);
+    $itemBuilder.val(newValue).trigger('change');
+
+    // Manually trigger update logic specific to prescription
+    setTimeout(function () {
+      updateProcuredFromField();
+      updateUOMField();
+    }, 100);
+  });
+
   // Function to check and auto-fill procured_from based on selected items
   function updateProcuredFromField() {
     const selected = $itemBuilder.select2('data') || [];
-    
+
     if (selected.length === 0) {
       $itemBuilderProcuredFrom.val('').trigger('change');
       return;
     }
-    
+
     // Get procured_from values from selected items using cached data
     const procuredFromValues = [];
     selected.forEach(item => {
@@ -614,15 +754,15 @@ $(function(){
         procuredFromValues.push(null);
       }
     });
-    
+
     // Filter out null/empty values
     const validProcuredFromValues = procuredFromValues.filter(v => v && v.trim() !== '');
-    
+
     // Check if all items have the same procured_from
     if (validProcuredFromValues.length > 0 && validProcuredFromValues.length === selected.length) {
       // All selected items have procured_from values
       const uniqueValues = [...new Set(validProcuredFromValues)];
-      
+
       if (uniqueValues.length === 1) {
         // All items have the same procured_from - auto-fill
         const procuredFromName = uniqueValues[0];
@@ -644,68 +784,199 @@ $(function(){
       $itemBuilderProcuredFrom.val('').trigger('change');
     }
   }
-  
+
   // Listen for item selection changes
-  $itemBuilder.on('select2:select select2:unselect', function() {
+  $itemBuilder.on('select2:select select2:unselect', function () {
     // Small delay to ensure select2 data is updated
-    setTimeout(updateProcuredFromField, 100);
+    setTimeout(function () {
+      updateProcuredFromField();
+      updateUOMField();
+    }, 100);
   });
 
+  // Function to check and auto-fill UOM based on selected items
+  function updateUOMField() {
+    const selected = $itemBuilder.select2('data') || [];
+
+    if (selected.length === 0) {
+      $('#item-builder-uno').val('').trigger('change');
+      return;
+    }
+
+    // Get UOM values from selected items using cached data
+    const uomValues = [];
+    let missingData = false;
+
+    selected.forEach(item => {
+      const itemData = itemDataCache[item.id];
+      if (itemData && typeof itemData.item_uom !== 'undefined') {
+        // Treat empty string as a valid UOM (it might be "No UOM") or should we ignore it?
+        // Requirement: "Evaluate... ALL medicines have SAME UOM".
+        // If one has "ml" and one has "", they are different.
+        // If both have "", they are same.
+        uomValues.push(itemData.item_uom || '');
+      } else {
+        missingData = true;
+      }
+    });
+
+    if (missingData) {
+      // If we allow auto-fetch here it would be better, but for now fallback to empty
+      $('#item-builder-uno').val('').trigger('change');
+      return;
+    }
+
+    // Check if all items have the same UOM
+    if (uomValues.length > 0) {
+      const firstUOM = uomValues[0];
+      const allSame = uomValues.every(u => u === firstUOM);
+
+      if (allSame && firstUOM) {
+        // Auto-populate
+        const $uomSelect = $('#item-builder-uno');
+        // Check if option exists, if not add it
+        if ($uomSelect.find(`option[value="${firstUOM}"]`).length === 0) {
+          $uomSelect.append(new Option(firstUOM, firstUOM));
+        }
+        $uomSelect.val(firstUOM).trigger('change');
+      } else if (allSame && !firstUOM) {
+        // All specify NO UOM.
+        $('#item-builder-uno').val('').trigger('change');
+      } else {
+        // Different UOMs
+        $('#item-builder-uno').val('').trigger('change');
+      }
+    }
+  }
+
   // Add Group
-  $('#add-item-group-btn').on('click', function(){
+  let isAddingGroup = false; // Prevent double-click
+
+  $('#add-item-group-btn').on('click', function () {
+    // Prevent double-click
+    if (isAddingGroup) {
+      console.warn('Add Group already in progress, ignoring duplicate click');
+      return;
+    }
+    isAddingGroup = true;
+
     const selected = $itemBuilder.select2('data') || [];
     const dosage = $('#item-builder-dosage').val().trim();
     const time = $('#item-builder-time').val().trim();
     const uno = $('#item-builder-uno').val().trim();
     const oilClass = $itemBuilderOilClass.val() || '';
     const procuredFrom = $itemBuilderProcuredFrom.val() || '';
-    const ingredientSelect = $('#item-builder-ingredients');
-    const ingredientData = ingredientSelect.select2('data') || [];
-    const ingredients = ingredientData.map(i => ({ id: i.id, ingredient_name: i.text || i.id }));
-    const ingredientIds = ingredientData.map(i => i.id);
-    
+    // Ingredients is now a free text field
+    const ingredientInput = $('#item-builder-ingredients');
+    const ingredientsText = (ingredientInput.val() || '').trim();
+    // Store as text string and also as array for backward compatibility
+    const ingredients = ingredientsText ? [{ ingredient_name: ingredientsText }] : [];
+    const ingredientIds = []; // No IDs for free text
+
     // Validate mandatory fields
     if (!selected || selected.length === 0) {
       alert('Please select at least one medication');
       $itemBuilder.focus();
+      isAddingGroup = false; // Reset flag
       return;
     }
-    
+
+    // Check for duplicate items WITHIN the current selection only
+    // NOT across all groups - same medicine can exist in different groups
+    const selectedItemCodes = new Set();
+    const duplicatesInSelection = [];
+
+    selected.forEach(item => {
+      if (selectedItemCodes.has(item.id)) {
+        duplicatesInSelection.push(item.text || item.id);
+      } else {
+        selectedItemCodes.add(item.id);
+      }
+    });
+
+    if (duplicatesInSelection.length > 0) {
+      alert(`The following item(s) are selected multiple times in this group:\n\n${duplicatesInSelection.join('\n')}\n\nEach item can only be added once per group. Please remove the duplicate(s) from your selection.`);
+      isAddingGroup = false; // Reset flag
+      return;
+    }
+
     const items = selected.length > 0 ? selected.map(s => ({ item_code: s.id, item_name: s.text || s.id })) : [];
-    const grp = { id: Math.random().toString(36).slice(2,9), items, dosage, time, uno, oil_class: oilClass, procured_from: procuredFrom, ingredients, ingredient_ids: ingredientIds };
-    itemGroups.push(grp);
+
+    // Debug logging
+    console.log('=== Add Group Debug ===');
+    console.log('Items to add:', items.map(i => `${i.item_name} (${i.item_code})`));
+    console.log('Current itemGroups count:', itemGroups.length);
+    console.log('All existing item codes:', Array.from(getAllSelectedItemCodes()));
+    console.log('editingGroupId:', editingGroupId);
+    console.log('editingGroupIndex:', editingGroupIndex);
+
+    const grp = { id: Math.random().toString(36).slice(2, 9), items, dosage, time, uno, oil_class: oilClass, procured_from: procuredFrom, ingredients, ingredient_ids: ingredientIds };
+
+    // If editing a group, insert at the original position; otherwise, add to the end
+    if (editingGroupIndex !== null && editingGroupIndex >= 0) {
+      itemGroups.splice(editingGroupIndex, 0, grp); // Insert at original position
+      console.log(`Inserted group at position ${editingGroupIndex}`);
+    } else {
+      itemGroups.push(grp); // Add to end
+      console.log('Added group to end');
+    }
+
+    console.log('After adding - itemGroups count:', itemGroups.length);
+    console.log('New group ID:', grp.id);
+    console.log('=======================');
+
+    // Clear editing group ID and index after adding
+    editingGroupId = null;
+    editingGroupIndex = null;
+
     $itemBuilder.val(null).trigger('change');
     $('#item-builder-dosage').val('');
     $('#item-builder-time').val('');
     $('#item-builder-uno').val('');
     $itemBuilderOilClass.val('');
     $itemBuilderProcuredFrom.val('');
-    ingredientSelect.val(null).trigger('change');
+    ingredientInput.val(''); // Clear text input
     renderItemGroups();
+
+    // Reset flag after a short delay to allow for UI updates
+    setTimeout(() => {
+      isAddingGroup = false;
+    }, 300);
   });
 
-  function renderItemGroups(){
+  function renderItemGroups() {
     $itemGroupsList.empty();
-    if (!itemGroups.length){ 
+    if (!itemGroups.length) {
       $itemGroupsList.html(`
         <div class="empty-state" style="padding:20px;">
           <i class="fas fa-pills"></i>
           <p>No medication groups added yet</p>
         </div>
-      `); 
-      return; 
+      `);
+      return;
     }
-    
+
     // Show each group separately with edit/remove buttons, but in the same format as final display
-    itemGroups.forEach((g,i) => {
+    itemGroups.forEach((g, i) => {
       const itemNames = (g.items || []).map(it => esc(it.item_name)).join(', ');
-      const ingredientsDisplay = (g.ingredients && g.ingredients.length > 0) 
-        ? g.ingredients.map(ing => esc(ing.ingredient_name)).join(', ')
-        : '—';
+      // Handle ingredients - can be array of objects, array of strings, or a single string
+      let ingredientsDisplay = '—';
+      if (g.ingredients) {
+        if (Array.isArray(g.ingredients) && g.ingredients.length > 0) {
+          // Array format (old or new)
+          ingredientsDisplay = g.ingredients.map(ing => {
+            if (typeof ing === 'string') return esc(ing);
+            return esc(ing.ingredient_name || ing.text || '');
+          }).filter(Boolean).join(', ');
+        } else if (typeof g.ingredients === 'string' && g.ingredients.trim()) {
+          // String format (new free text)
+          ingredientsDisplay = esc(g.ingredients);
+        }
+      }
       const timeDisplay = g.time ? esc(g.time) : '—';
       const oilClassDisplay = g.oil_class ? esc(g.oil_class) : '—';
       const procuredFromDisplay = g.procured_from ? esc(g.procured_from) : '—';
-      const dosageDisplay = (g.dosage && g.uno) 
+      const dosageDisplay = (g.dosage && g.uno)
         ? `${esc(g.dosage)} (${esc(g.uno)})`
         : (g.dosage ? esc(g.dosage) : '—') + (g.uno ? ` (${esc(g.uno)})` : '');
 
@@ -727,12 +998,12 @@ $(function(){
         parts.push(`Oil Class: ${oilClassDisplay}`);
       }
       const groupDisplay = parts.join(', ');
-      
+
       // Add separator if not the first group
       if (i > 0) {
         $itemGroupsList.append(`<div style="text-align:center;margin:8px 0;font-weight:bold;color:var(--text-medium);">+</div>`);
       }
-      
+
       const $div = $(`
         <div style="padding:12px;border:1px solid var(--border-light);border-radius:8px;display:flex;justify-content:space-between;align-items:center;background:white;">
           <div style="flex:1;font-size:0.95em;">${groupDisplay}</div>
@@ -750,85 +1021,172 @@ $(function(){
     });
   }
 
-  $itemGroupsList.on('click', '.remove-group', function(){ 
-    const id = $(this).data('id'); 
-    itemGroups = itemGroups.filter(g=>g.id!==id); 
-    renderItemGroups(); 
+  $itemGroupsList.on('click', '.remove-group', function (e) {
+    e.preventDefault();
+    const id = $(this).data('id');
+    showConfirm(
+      "Confirm Group Removal",
+      "Are you sure you want to remove this entire group and all its medicines?\nThis action cannot be undone.",
+      "Yes, Remove Group",
+      function () {
+        itemGroups = itemGroups.filter(g => g.id !== id);
+        // Clear editing group ID if the removed group was being edited
+        if (editingGroupId === id) {
+          editingGroupId = null;
+          editingGroupIndex = null;
+        }
+        renderItemGroups();
+      }
+    );
   });
-  
-  $itemGroupsList.on('click', '.edit-group', function(){ 
-    const id = $(this).data('id'); 
-    const g = itemGroups.find(x=>x.id===id); 
-    if(!g) return; 
-    $itemBuilder.val(null).trigger('change'); 
-    g.items.forEach(it=>{ 
-      const opt = new Option(it.item_name, it.item_code, true, true); 
-      $itemBuilder.append(opt); 
-    }); 
-    $itemBuilder.trigger('change'); 
-    $('#item-builder-dosage').val(g.dosage||''); 
-    $('#item-builder-time').val(g.time||''); 
-    $('#item-builder-uno').val(g.uno||'');
-    $itemBuilderOilClass.val(g.oil_class||''); 
-    $itemBuilderProcuredFrom.val(g.procured_from||''); 
-    // Handle ingredients
-    const ingredientSelect = $('#item-builder-ingredients');
-    if (g.ingredient_ids && Array.isArray(g.ingredient_ids) && g.ingredient_ids.length > 0) {
-      ingredientSelect.val(g.ingredient_ids).trigger('change');
-    } else {
-      ingredientSelect.val(null).trigger('change');
-    }
-    itemGroups = itemGroups.filter(x=>x.id!==id); 
-    renderItemGroups(); 
+
+  $itemGroupsList.on('click', '.edit-group', function () {
+    const id = $(this).data('id');
+    const g = itemGroups.find(x => x.id === id);
+    if (!g) return;
+
+    // Show loading indicator on button
+    const $btn = $(this);
+    const originalText = $btn.html();
+    $btn.html('<i class="fas fa-spinner fa-spin"></i> Loading...').prop('disabled', true);
+
+    // Fetch details for all items in the group to populate cache (UOM, procured_from)
+    const promises = (g.items || []).map(it => {
+      if (it.item_code && !itemDataCache[it.item_code]) {
+        return ajax({ action: 'search_items', q: it.item_code }).then(data => {
+          if (data && Array.isArray(data)) {
+            const match = data.find(x => x.item_code === it.item_code) || data[0];
+            if (match) {
+              itemDataCache[it.item_code] = match;
+            }
+          }
+        }).catch(err => console.error('Error fetching item details:', err));
+      }
+      return Promise.resolve();
+    });
+
+    Promise.all(promises).then(() => {
+      // Restore button state
+      $btn.html(originalText).prop('disabled', false);
+
+      // Set the editing group ID so duplicate checking excludes this group
+      editingGroupId = id;
+
+      // Completely clear Select2 - remove all options and values
+      $itemBuilder.empty(); // Remove all option elements
+      $itemBuilder.val(null).trigger('change'); // Clear selection
+
+      // Add the group's items as new options
+      g.items.forEach(it => {
+        const opt = new Option(it.item_name, it.item_code, true, true);
+        $itemBuilder.append(opt);
+      });
+
+      // Trigger change to update Select2 display
+      $itemBuilder.trigger('change');
+
+      // Manually trigger UOM and Procured From updates since 'change' might not trigger our custom handlers depending on binding
+      // And we want to ensure fields are populated based on the now-cached data
+      updateProcuredFromField();
+      updateUOMField();
+
+      // If the group had explicit saved values, override the auto-filled ones
+      // This is important: if user manually changed UOM/Procured but it was valid auto-fill, we should respect saved?
+      // Requirement: "user edits an existing prescription... Existing medicines must be evaluated... UOM must auto-select ONLY if all... share same UOM"
+      // This suggests re-evaluation is preferred on edit opening.
+      // However, if the saved group had a specific UOM (maybe manually selected when auto-select wasn't applicable, OR manually changed), 
+      // strictly speaking, we should load what was saved.
+      // BUT, if the user adds/removes items, auto-logic kicks in.
+      // Let's set the saved values LAST, so they override auto-fill if present.
+
+      if (g.dosage) $('#item-builder-dosage').val(g.dosage);
+      if (g.time) $('#item-builder-time').val(g.time);
+      if (g.uno) $('#item-builder-uno').val(g.uno).trigger('change');
+      if (g.oil_class) $itemBuilderOilClass.val(g.oil_class).trigger('change');
+      if (g.procured_from) $itemBuilderProcuredFrom.val(g.procured_from).trigger('change');
+
+      // Handle ingredients - now a free text field
+      const ingredientInput = $('#item-builder-ingredients');
+      if (g.ingredients && Array.isArray(g.ingredients) && g.ingredients.length > 0) {
+        // Extract ingredient names from array and join them
+        const ingredientText = g.ingredients.map(ing => ing.ingredient_name || ing.text || '').filter(Boolean).join(', ');
+        ingredientInput.val(ingredientText);
+      } else if (typeof g.ingredients === 'string') {
+        // Handle case where ingredients is stored as a string
+        ingredientInput.val(g.ingredients);
+      } else {
+        ingredientInput.val('');
+      }
+
+      // Debug logging
+      console.log('=== Edit Group Debug ===');
+      console.log('Editing group ID:', id);
+      console.log('Group items:', g.items.map(i => `${i.item_name} (${i.item_code})`));
+      console.log('itemGroups count before removal:', itemGroups.length);
+
+      // Store the original index of this group so we can restore it to the same position
+      const originalIndex = itemGroups.findIndex(x => x.id === id);
+      editingGroupIndex = originalIndex; // Track the position
+
+      // Remove the group from the list (it will be re-added at the same position when user clicks "Add Group")
+      itemGroups = itemGroups.filter(x => x.id !== id);
+
+      console.log('itemGroups count after removal:', itemGroups.length);
+      console.log('Original group index:', originalIndex);
+      console.log('Remaining item codes:', Array.from(getAllSelectedItemCodes()));
+      console.log('========================');
+
+      renderItemGroups();
+    });
   });
 
   // days calc
-  function calcDays(){ 
-    const f = $fromDate.val(), t = $toDate.val(); 
-    if(!f||!t){ 
-      $daysInput.val(''); 
-      return; 
-    } 
-    const fd=new Date(f), td=new Date(t); 
-    if(fd<=td) 
-      $daysInput.val(Math.ceil((td.getTime()-fd.getTime())/(1000*60*60*24))+1); 
-    else 
-      $daysInput.val(''); 
+  function calcDays() {
+    const f = $fromDate.val(), t = $toDate.val();
+    if (!f || !t) {
+      $daysInput.val('');
+      return;
+    }
+    const fd = new Date(f), td = new Date(t);
+    if (fd <= td)
+      $daysInput.val(Math.ceil((td.getTime() - fd.getTime()) / (1000 * 60 * 60 * 24)) + 1);
+    else
+      $daysInput.val('');
   }
-  $fromDate.on('change', calcDays); 
+  $fromDate.on('change', calcDays);
   $toDate.on('change', calcDays);
 
   // add prescription directly to server as draft
-  $allocateBtn.on('click', function(){
+  $allocateBtn.on('click', function () {
     if (!selectedPatient) {
       alert('Please select a patient first');
       return;
     }
-    
-    if (!itemGroups.length){ alert('Add at least one item group'); return; }
+
+    if (!itemGroups.length) { alert('Add at least one item group'); return; }
     const from = $fromDate.val(), to = $toDate.val();
-    if (!from || !to){ alert('Please set From and To dates'); return; }
-    if (from > to){ alert('From must be <= To'); return; }
+    if (!from || !to) { alert('Please set From and To dates'); return; }
+    if (from > to) { alert('From must be <= To'); return; }
 
     // Get common usage in selection order
     const selectedValues = $commonUsageSelect.val() || [];
     // Maintain selection order instead of alphabetical
     const commonUsageValues = usageSelectionOrder.filter(val => selectedValues.indexOf(val) !== -1);
     const commonUsage = commonUsageValues.join(', ');
-    
+
     // Prepare prescription data
     const prescriptionData = {
       from_date: from,
       to_date: to,
       days: Math.ceil((new Date(to).getTime() - new Date(from).getTime()) / (1000 * 60 * 60 * 24)) + 1,
       // procured_from is now stored per group in items_groups, not globally
-      scope: $scopeSelect.val()||'',
+      scope: $scopeSelect.val() || '',
       usage: commonUsage,
       usage_array: commonUsageValues,
-      items_groups: itemGroups.map(g => ({ 
-        items: g.items, 
-        dosage: g.dosage, 
-        time: g.time, 
+      items_groups: itemGroups.map(g => ({
+        items: g.items,
+        dosage: g.dosage,
+        time: g.time,
         uno: g.uno,
         oil_class: g.oil_class || '',
         procured_from: g.procured_from || '',
@@ -838,9 +1196,18 @@ $(function(){
       notes: ''
     };
 
+    // Determine correct registration number based on patient type
+    // For IP patients: use pat_reg_no (not pat_op_reg_no)
+    // For OP patients: use pat_op_reg_no if available, otherwise pat_reg_no
+    const patientType = selectedPatient.patient_type ||
+      (selectedPatient.pat_reg_no && selectedPatient.pat_reg_no.toString().replace(/\D/g, '').length === 5 ? 'OP' : 'IP');
+    const patientRegNo = patientType === 'IP'
+      ? selectedPatient.pat_reg_no
+      : (selectedPatient.pat_op_reg_no || selectedPatient.pat_reg_no);
+
     // Save directly to server as draft
     const payload = {
-      patient_reg_no: selectedPatient.pat_op_reg_no || selectedPatient.pat_reg_no,
+      patient_reg_no: patientRegNo,
       patient_name: selectedPatient.pat_name,
       patient_age: selectedPatient.pat_age || '',
       patient_sex: selectedPatient.pat_sex || '',
@@ -848,13 +1215,13 @@ $(function(){
       pat_ref_id: selectedPatient.pat_ref_id || '',
       ...prescriptionData
     };
-    
+
     // Show loading state
     $allocateBtn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin"></i> Saving...');
-    
+
     fetch(API_URL + '?action=allocate', {
-      method:'POST',
-      headers: {'Content-Type':'application/json', 'X-Requested-With':'XMLHttpRequest'},
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
       body: JSON.stringify(payload)
     }).then(response => {
       if (!response.ok) {
@@ -867,27 +1234,38 @@ $(function(){
       return response.json();
     }).then(j => {
       if (j.allocation_id || j.status === 'ok') {
+        // Remember this as 'added' action before reloading
+        const newAllocationId = j.allocation_id;
+        if (newAllocationId) {
+          rememberPrescriptionAction(newAllocationId, 'added');
+        }
+
         // Reset form first
-        itemGroups = []; 
+        itemGroups = [];
         renderItemGroups();
         const today = new Date().toISOString().split('T')[0];
-        $fromDate.val(today); 
-        $toDate.val(''); 
-        $daysInput.val(''); 
+        $fromDate.val(today);
+        $toDate.val('');
+        $daysInput.val('');
         // procured_from is now per group, not global - no need to clear global field 
-        $scopeSelect.val(''); 
+        $scopeSelect.val('');
         $commonUsageSelect.val(null).trigger('change');
         usageSelectionOrder = []; // Reset selection order
-        
+
         // Reload patient prescriptions from server to get accurate status counts
         // Use the same registration number format that was used to save
         if (selectedPatient) {
-          const patientRegNo = selectedPatient.pat_op_reg_no || selectedPatient.pat_reg_no;
+          // Use correct registration number based on patient type
+          const patientType = selectedPatient.patient_type ||
+            (selectedPatient.pat_reg_no && selectedPatient.pat_reg_no.toString().replace(/\D/g, '').length === 5 ? 'OP' : 'IP');
+          const patientRegNo = patientType === 'IP'
+            ? selectedPatient.pat_reg_no
+            : (selectedPatient.pat_op_reg_no || selectedPatient.pat_reg_no);
           // Small delay to ensure server has processed the save
           setTimeout(() => {
-            ajax({action:'patient_prescriptions', patient_reg_no: patientRegNo}).then(list => {
+            ajax({ action: 'patient_prescriptions', patient_reg_no: patientRegNo }).then(list => {
               if (list && Array.isArray(list)) {
-                addedPrescriptions = list;
+                addedPrescriptions = decoratePrescriptionList(list);
                 renderAll();
                 alert('Prescription saved to server as Draft.');
               } else {
@@ -921,10 +1299,38 @@ $(function(){
     });
   });
 
+  // Decide row color for today's prescription status (Added/Updated/Resumed/Cancelled for today only)
+  function getTodayPrescriptionColorClass(p) {
+    if (!p) return '';
+    // Priority 1: Session Action
+    const lastAction = String(p.last_action || '').toLowerCase().trim();
+    if (lastAction && lastAction !== '' && lastAction !== 'null' && lastAction !== 'undefined') {
+      return 'action-' + lastAction;
+    }
+
+    // Priority 2: Status-based derivation
+    const s = String(p.status || '').trim().toLowerCase();
+    const hasCancellations = p.cancelled_date_from && p.cancelled_date_to && p.cancelled_date_from !== 'null';
+    if (s === 'cancelled' || hasCancellations) return 'action-cancelled';
+
+    return 'action-added';
+  }
+
+  function buildActionBadge(actionClass) {
+    const labelMap = {
+      'action-added': 'Added (today)',
+      'action-updated': 'Updated (today)',
+      'action-resumed': 'Resumed (today)',
+      'action-cancelled': 'Cancelled (today)'
+    };
+    if (!actionClass || !labelMap[actionClass]) return '';
+    return `<span class="action-pill ${actionClass}">${labelMap[actionClass]}</span>`;
+  }
+
   // render prescriptions table
-  function renderPrescriptions(){
+  function renderPrescriptions() {
     $prescriptionsTableBody.empty();
-    if (!addedPrescriptions.length){ 
+    if (!addedPrescriptions.length) {
       $prescriptionsTableBody.append(`
         <tr>
           <td colspan="9">
@@ -935,10 +1341,10 @@ $(function(){
             </div>
           </td>
         </tr>
-      `); 
-      return; 
+      `);
+      return;
     }
-    addedPrescriptions.forEach((p,i) => {
+    addedPrescriptions.forEach((p, i) => {
       // Get common usage from prescription level (shown in its own column)
       let commonUsageDisplay = '';
       if (p.usage) {
@@ -946,7 +1352,7 @@ $(function(){
       } else if (Array.isArray(p.usage_array) && p.usage_array.length > 0) {
         commonUsageDisplay = esc(p.usage_array.join(', '));
       }
-      
+
       // Build clearer, per‑group blocks:
       //   Line 1: item names (highlighted)
       //   Line 2: Dosage / Time / Ext-Int / Ingredients
@@ -966,10 +1372,18 @@ $(function(){
           doseDisplay = unoRaw;
         }
 
-        // Ingredients
-        const ingredientsDisplay = (g.ingredients && g.ingredients.length > 0)
-          ? g.ingredients.map(ing => esc(ing.ingredient_name || ing.text || '')).join(', ')
-          : '';
+        // Ingredients - handle both array and string formats
+        let ingredientsDisplay = '';
+        if (g.ingredients) {
+          if (Array.isArray(g.ingredients) && g.ingredients.length > 0) {
+            ingredientsDisplay = g.ingredients.map(ing => {
+              if (typeof ing === 'string') return esc(ing);
+              return esc(ing.ingredient_name || ing.text || '');
+            }).filter(Boolean).join(', ');
+          } else if (typeof g.ingredients === 'string' && g.ingredients.trim()) {
+            ingredientsDisplay = esc(g.ingredients);
+          }
+        }
 
         const time = g.time ? esc(g.time) : '';
         const extInt = g.internal_external ? esc(g.internal_external) : '';
@@ -995,15 +1409,15 @@ $(function(){
           </div>
         `;
       }).join('');
-      
+
       // Status logic - show counts if available, format: "2 Draft / 3 Active"
       let statusHtml = '';
       let statusClass = 'status-active';
-      
+
       // Build status display with counts - format: "2 Draft / 3 Active / 1 Scheduled"
       const statusSummary = p.status_summary || {};
       const statusParts = [];
-      
+
       // Order: Draft, Active, Scheduled, Dispatched, Failed, Cancelled
       if (statusSummary.draft) {
         statusParts.push(`${statusSummary.draft} Draft`);
@@ -1023,7 +1437,7 @@ $(function(){
       if (statusSummary.cancelled) {
         statusParts.push(`${statusSummary.cancelled} Cancelled`);
       }
-      
+
       // If we have detailed counts, show them with slashes
       if (statusParts.length > 0) {
         statusHtml = `<span class="status-pill status-mixed">${statusParts.join(' / ')}</span>`;
@@ -1047,13 +1461,15 @@ $(function(){
           statusClass = 'status-draft';
         }
       }
-      
+
       // Get unique procured_from values from all groups for display
       const procuredFromValues = [...new Set((p.items_groups || []).map(g => g.procured_from).filter(pf => pf))];
       const procuredFromDisplay = procuredFromValues.length > 0 ? procuredFromValues.join(', ') : '—';
-      
-      const row = `<tr class="${statusClass}">
-        <td>${i+1}</td>
+
+      const actionClass = getTodayPrescriptionColorClass(p);
+
+      const row = `<tr class="${statusClass} ${actionClass}">
+        <td>${i + 1}</td>
         <td>${esc(p.prescription_name || 'Prescription')}</td>
         <td>${esc(procuredFromDisplay)}</td>
         <td>${esc(p.scope || '')}</td>
@@ -1063,7 +1479,7 @@ $(function(){
         </td>
         <td>${formatDate(p.from_date)}</td>
         <td>${formatDate(p.to_date)}</td>
-        <td>${esc(p.days||'')}</td>
+        <td>${esc(p.days || '')}</td>
         <td>${statusHtml}</td>
         <td>
           <button class="edit-prescription action-btn btn btn-outline" data-i="${i}">
@@ -1073,37 +1489,37 @@ $(function(){
             <i class="fas fa-sync-alt"></i> Update
           </button>
           ${(() => {
-            // Check for cancelled dates - handle null, undefined, and string 'null'
-            const hasCancelledDates = p.cancelled_date_from && 
-                                     p.cancelled_date_to && 
-                                     p.cancelled_date_from !== 'null' && 
-                                     p.cancelled_date_to !== 'null' &&
-                                     p.cancelled_date_from !== null &&
-                                     p.cancelled_date_to !== null;
-            const hasDateRange = p.from_date && p.to_date;
-            let buttons = '';
-            // Show resume button if there are cancelled dates
-            if (hasCancelledDates) {
-              buttons += `<button class="resume-prescription action-btn btn btn-success" data-i="${i}">
+          // Check for cancelled dates - handle null, undefined, and string 'null'
+          const hasCancelledDates = p.cancelled_date_from &&
+            p.cancelled_date_to &&
+            p.cancelled_date_from !== 'null' &&
+            p.cancelled_date_to !== 'null' &&
+            p.cancelled_date_from !== null &&
+            p.cancelled_date_to !== null;
+          const hasDateRange = p.from_date && p.to_date;
+          let buttons = '';
+          // Show resume button if there are cancelled dates
+          if (hasCancelledDates) {
+            buttons += `<button class="resume-prescription action-btn btn btn-success" data-i="${i}">
                 <i class="fas fa-play-circle"></i> Resume
               </button>`;
-            }
-            // Show cancel button if there's a date range (can always cancel, will merge with existing)
-            if (hasDateRange) {
-              buttons += `<button class="cancel-prescription action-btn btn" data-i="${i}" style="background:var(--warning);">
+          }
+          // Show cancel button if there's a date range (can always cancel, will merge with existing)
+          if (hasDateRange) {
+            buttons += `<button class="cancel-prescription action-btn btn" data-i="${i}" style="background:var(--warning);">
                 <i class="fas fa-ban"></i> Cancel
               </button>`;
-            }
-            return buttons;
-          })()}
+          }
+          return buttons;
+        })()}
         </td>
       </tr>`;
       $prescriptionsTableBody.append(row);
     });
   }
 
-  function renderAll(){ renderItemGroups(); renderPrescriptions(); }
-  
+  function renderAll() { renderItemGroups(); renderPrescriptions(); }
+
   // Helper function to format date as DD/MM/YYYY
   function formatDate(dateStr) {
     if (!dateStr) return '';
@@ -1116,17 +1532,17 @@ $(function(){
   }
 
   // Edit prescription
-  $prescriptionsTableBody.on('click', '.edit-prescription', function(){ const i=$(this).data('i'); loadPrescriptionForEdit(i); });
-  function loadPrescriptionForEdit(index){
-    const p = addedPrescriptions[index]; if(!p) return;
+  $prescriptionsTableBody.on('click', '.edit-prescription', function () { const i = $(this).data('i'); loadPrescriptionForEdit(i); });
+  function loadPrescriptionForEdit(index) {
+    const p = addedPrescriptions[index]; if (!p) return;
     editPrescriptionIndex = index;
     $('#form-title').text('Edit Prescription');
-    $fromDate.val(p.from_date||'');
-    $toDate.val(p.to_date||'');
-    $daysInput.val(p.days||'');
+    $fromDate.val(p.from_date || '');
+    $toDate.val(p.to_date || '');
+    $daysInput.val(p.days || '');
     // procured_from is now per group, not global - no need to set global field
-    $scopeSelect.val(p.scope||'');
-    
+    $scopeSelect.val(p.scope || '');
+
     // Load common usage and restore selection order
     usageSelectionOrder = []; // Reset selection order
     if (p.usage_array && Array.isArray(p.usage_array)) {
@@ -1144,54 +1560,77 @@ $(function(){
       usageSelectionOrder = [];
       $commonUsageSelect.val(null).trigger('change');
     }
-    
-    itemGroups = (p.items_groups||[]).map(g=>({ 
-      id: Math.random().toString(36).slice(2,9), 
-      items: g.items||[], 
-      dosage: g.dosage||'', 
-      time: g.time||'', 
-      uno: g.uno||'',
-      oil_class: g.oil_class || '',
-      procured_from: g.procured_from || '',
-      ingredient_ids: g.ingredient_ids || [],
-      ingredients: g.ingredients || []
-    }));
+
+    // Load item groups and deduplicate items WITHIN each group only
+    // Same medicine can exist in different groups
+    const loadedGroups = [];
+
+    (p.items_groups || []).forEach(g => {
+      // Deduplicate items within THIS group only
+      const seenInGroup = new Set();
+      const uniqueItems = (g.items || []).filter(item => {
+        if (!item.item_code) return true; // Keep items without codes (shouldn't happen)
+        if (seenInGroup.has(item.item_code)) {
+          console.warn(`Duplicate item within group detected and removed: ${item.item_name} (${item.item_code})`);
+          return false; // Skip this duplicate item within the group
+        }
+        seenInGroup.add(item.item_code);
+        return true; // Keep this unique item within the group
+      });
+
+      // Only add the group if it has items after deduplication
+      if (uniqueItems.length > 0) {
+        loadedGroups.push({
+          id: Math.random().toString(36).slice(2, 9),
+          items: uniqueItems,
+          dosage: g.dosage || '',
+          time: g.time || '',
+          uno: g.uno || '',
+          oil_class: g.oil_class || '',
+          procured_from: g.procured_from || '',
+          ingredient_ids: g.ingredient_ids || [],
+          ingredients: g.ingredients || []
+        });
+      }
+    });
+
+    itemGroups = loadedGroups;
     renderItemGroups();
-    $allocateBtn.hide(); $updateBtn.show(); window.scrollTo({top:0, behavior:'smooth'});
+    $allocateBtn.hide(); $updateBtn.show(); window.scrollTo({ top: 0, behavior: 'smooth' });
   }
-  $updateBtn.on('click', function(){
+  $updateBtn.on('click', function () {
     if (editPrescriptionIndex === null) { alert('No prescription in edit mode'); return; }
-    const p = addedPrescriptions[editPrescriptionIndex]; if(!p) return;
-    
+    const p = addedPrescriptions[editPrescriptionIndex]; if (!p) return;
+
     // Get common usage in selection order
     const selectedValues = $commonUsageSelect.val() || [];
     // Maintain selection order instead of alphabetical
     const commonUsageValues = usageSelectionOrder.filter(val => selectedValues.indexOf(val) !== -1);
     const commonUsage = commonUsageValues.join(', ');
-    
+
     // Get dates and days from form
     const fromDate = $fromDate.val() || '';
     const toDate = $toDate.val() || '';
     const days = parseInt($daysInput.val()) || 0;
-    
+
     // Update local data
-    p.scope = $scopeSelect.val()||'';
+    p.scope = $scopeSelect.val() || '';
     p.usage = commonUsage;
     p.usage_array = commonUsageValues;
     p.from_date = fromDate;
     p.to_date = toDate;
     p.days = days;
-    p.items_groups = itemGroups.map(g=>({
+    p.items_groups = itemGroups.map(g => ({
       ingredient_ids: g.ingredient_ids || [],
       ingredients: g.ingredients || [],
-      items: g.items, 
-      dosage: g.dosage, 
+      items: g.items,
+      dosage: g.dosage,
       time: g.time,
-      procured_from: g.procured_from || '', 
+      procured_from: g.procured_from || '',
       uno: g.uno,
       oil_class: g.oil_class || ''
     }));
-    
+
     // Send update to server if prescription has allocation_id
     if (p.allocation_id) {
       const updatePayload = {
@@ -1206,10 +1645,10 @@ $(function(){
         days: p.days,
         notes: p.notes || ''
       };
-      
+
       fetch(API_URL + '?action=update_prescription', {
-        method:'POST',
-        headers: {'Content-Type':'application/json'},
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updatePayload)
       }).then(response => {
         if (!response.ok) {
@@ -1222,26 +1661,127 @@ $(function(){
         return response.json();
       }).then(j => {
         if (j.status === 'ok') {
-          alert('Prescription updated successfully on server.');
-          resetFormState(); 
+          // Check if today is cancelled or resumed BEFORE marking as updated
+          const today = new Date().toISOString().slice(0, 10);
+          const todayIsCancelled = p.cancelled_date_from && p.cancelled_date_to &&
+            p.cancelled_date_from !== 'null' && p.cancelled_date_to !== 'null' &&
+            today >= p.cancelled_date_from && today <= p.cancelled_date_to;
+          const todayIsResumed = p.resumed_at && p.resumed_at.slice(0, 10) === today;
+
+          // Priority: Cancelled > Resumed > Updated
+          if (todayIsCancelled) {
+            // Today is cancelled - keep RED color
+            p.last_action = 'cancelled';
+            rememberPrescriptionAction(p.allocation_id || p.id, 'cancelled');
+          } else if (todayIsResumed) {
+            // Today is resumed - keep GREEN color
+            p.last_action = 'resumed';
+            rememberPrescriptionAction(p.allocation_id || p.id, 'resumed');
+          } else {
+            // Today is not cancelled/resumed - mark as updated (YELLOW)
+            p.last_action = 'updated';
+            rememberPrescriptionAction(p.allocation_id || p.id, 'updated');
+          }
+
+          // Render immediately to show correct color
           renderAll();
+          alert('Prescription updated successfully on server.');
+          resetFormState();
+
+          // Reload from server to get updated data, but preserve last_action
+          if (selectedPatient && p.allocation_id) {
+            // Use correct registration number based on patient type
+            const patientType = selectedPatient.patient_type ||
+              (selectedPatient.pat_reg_no && selectedPatient.pat_reg_no.toString().replace(/\D/g, '').length === 5 ? 'OP' : 'IP');
+            const patientRegNo = patientType === 'IP'
+              ? selectedPatient.pat_reg_no
+              : (selectedPatient.pat_op_reg_no || selectedPatient.pat_reg_no);
+            if (patientRegNo) {
+              ajax({ action: 'patient_prescriptions', patient_reg_no: patientRegNo }).then(list => {
+                if (list && Array.isArray(list)) {
+                  // Use decoratePrescriptionList to preserve remembered actions
+                  const decoratedList = decoratePrescriptionList(list);
+                  // Find and update the specific prescription to preserve the reference
+                  const updatedPrescription = decoratedList.find(pr => pr.allocation_id === p.allocation_id);
+                  if (updatedPrescription) {
+                    // Update all fields from server, but preserve last_action
+                    Object.assign(p, updatedPrescription);
+                    // Ensure last_action is preserved (decoratePrescriptionList should have set it)
+                    const rememberedAction = prescriptionActionById[String(p.allocation_id || p.id || '')];
+                    if (rememberedAction) {
+                      p.last_action = rememberedAction;
+                    }
+                  } else {
+                    // If not found, replace entire array
+                    addedPrescriptions = decoratedList;
+                  }
+                  renderAll();
+                } else {
+                  renderAll();
+                }
+              }).catch(() => {
+                // If reload fails, use local values (already rendered above)
+                renderAll();
+              });
+            } else {
+              renderAll();
+            }
+          } else {
+            renderAll();
+          }
         } else {
           alert('Failed to update prescription: ' + (j.error || JSON.stringify(j)));
+          renderAll();
         }
       }).catch(e => {
         alert('Network error: ' + (e.message || 'Prescription updated locally only.'));
-        resetFormState(); 
+        // Check if today is cancelled or resumed before marking as updated
+        const today = new Date().toISOString().slice(0, 10);
+        const todayIsCancelled = p.cancelled_date_from && p.cancelled_date_to &&
+          p.cancelled_date_from !== 'null' && p.cancelled_date_to !== 'null' &&
+          today >= p.cancelled_date_from && today <= p.cancelled_date_to;
+        const todayIsResumed = p.resumed_at && p.resumed_at.slice(0, 10) === today;
+
+        if (todayIsCancelled) {
+          p.last_action = 'cancelled';
+          rememberPrescriptionAction(p.allocation_id || p.id, 'cancelled');
+        } else if (todayIsResumed) {
+          p.last_action = 'resumed';
+          rememberPrescriptionAction(p.allocation_id || p.id, 'resumed');
+        } else {
+          p.last_action = 'updated';
+          rememberPrescriptionAction(p.allocation_id || p.id, 'updated');
+        }
+        resetFormState();
         renderAll();
       });
     } else {
       // Update local data only (for unsaved prescriptions)
-      alert('Prescription updated locally.');
-      resetFormState(); 
+      // Check if today is cancelled or resumed before marking as updated
+      const today = new Date().toISOString().slice(0, 10);
+      const todayIsCancelled = p.cancelled_date_from && p.cancelled_date_to &&
+        p.cancelled_date_from !== 'null' && p.cancelled_date_to !== 'null' &&
+        today >= p.cancelled_date_from && today <= p.cancelled_date_to;
+      const todayIsResumed = p.resumed_at && p.resumed_at.slice(0, 10) === today;
+
+      if (todayIsCancelled) {
+        p.last_action = 'cancelled';
+        rememberPrescriptionAction(p.allocation_id || p.id, 'cancelled');
+      } else if (todayIsResumed) {
+        p.last_action = 'resumed';
+        rememberPrescriptionAction(p.allocation_id || p.id, 'resumed');
+      } else {
+        p.last_action = 'updated';
+        rememberPrescriptionAction(p.allocation_id || p.id, 'updated');
+      }
+      resetFormState();
+      // Render immediately to show correct color
       renderAll();
+      alert('Prescription updated locally.');
     }
   });
 
-  function resetFormState(){
+  function resetFormState() {
     editPrescriptionIndex = null; $('#form-title').text('Create New Prescription');
     const today = new Date().toISOString().split('T')[0];
     $fromDate.val(today); $toDate.val(''); $daysInput.val('');
@@ -1249,33 +1789,36 @@ $(function(){
     $scopeSelect.val('');
     $commonUsageSelect.val(null).trigger('change');
     usageSelectionOrder = []; // Reset selection order
-    itemGroups = []; renderItemGroups();
+    itemGroups = [];
+    editingGroupId = null; // Clear editing group ID
+    editingGroupIndex = null; // Clear editing group index
+    renderItemGroups();
     $allocateBtn.show(); $updateBtn.hide();
   }
 
   // Cancel prescription
-  $prescriptionsTableBody.on('click', '.cancel-prescription', function(){ const i=$(this).data('i'); openCancelModal(i); });
-  function openCancelModal(index){
-    cancelingPrescriptionIndex = index; 
-    const p = addedPrescriptions[index]; 
-    if(!p) return;
-    
-    let infoText = `Prescription: ${p.prescription_name} — Allowed cancel range: ${formatDate(p.from_date)||'—'} → ${formatDate(p.to_date)||'—'}`;
-    
+  $prescriptionsTableBody.on('click', '.cancel-prescription', function () { const i = $(this).data('i'); openCancelModal(i); });
+  function openCancelModal(index) {
+    cancelingPrescriptionIndex = index;
+    const p = addedPrescriptions[index];
+    if (!p) return;
+
+    let infoText = `Prescription: ${p.prescription_name} — Allowed cancel range: ${formatDate(p.from_date) || '—'} → ${formatDate(p.to_date) || '—'}`;
+
     // Set initial info text (will be updated with cancelled dates if available)
     $('#cancel-modal-info').html(infoText.replace(/\n/g, '<br>'));
-    
+
     // Fetch PrescriptionScheduling statuses to show individual cancelled dates (not just the range)
-    if (p.allocation_id && p.cancelled_date_from && p.cancelled_date_to && 
-        p.cancelled_date_from !== 'null' && p.cancelled_date_to !== 'null') {
+    if (p.allocation_id && p.cancelled_date_from && p.cancelled_date_to &&
+      p.cancelled_date_from !== 'null' && p.cancelled_date_to !== 'null') {
       // Get all dates in the cancelled range
       const cancelledRangeDates = getDateRange(p.cancelled_date_from, p.cancelled_date_to);
       // Filter out dates that have been resumed (from resumed_dates array)
       const resumedDates = p.resumed_dates && Array.isArray(p.resumed_dates) ? new Set(p.resumed_dates) : new Set();
       const actuallyCancelledDates = cancelledRangeDates.filter(date => !resumedDates.has(date));
-      
+
       // Update info text with individual cancelled dates
-      let updatedInfoText = `Prescription: ${p.prescription_name} — Allowed cancel range: ${formatDate(p.from_date)||'—'} → ${formatDate(p.to_date)||'—'}`;
+      let updatedInfoText = `Prescription: ${p.prescription_name} — Allowed cancel range: ${formatDate(p.from_date) || '—'} → ${formatDate(p.to_date) || '—'}`;
       if (actuallyCancelledDates.length > 0) {
         // Show individual cancelled dates
         const datesList = actuallyCancelledDates.map(d => formatDate(d)).join(', ');
@@ -1283,12 +1826,12 @@ $(function(){
       }
       $('#cancel-modal-info').html(updatedInfoText);
     }
-    
+
     // ALWAYS reset and set the date inputs to the current prescription's date range
     // Clear any previous values first
     $cancelFrom.val('');
     $cancelTo.val('');
-    
+
     // Set min/max based on prescription date range
     if (p.from_date) {
       $cancelFrom.attr('min', p.from_date);
@@ -1297,7 +1840,7 @@ $(function(){
       $cancelFrom.removeAttr('min');
       $cancelFrom.removeAttr('max');
     }
-    
+
     if (p.to_date) {
       $cancelTo.attr('max', p.to_date);
       $cancelTo.attr('min', p.from_date || p.to_date);
@@ -1305,40 +1848,40 @@ $(function(){
       $cancelTo.removeAttr('max');
       $cancelTo.removeAttr('min');
     }
-    
+
     // ALWAYS set default values to the current prescription's date range (not previous values)
     if (p.from_date && p.to_date) {
       $cancelFrom.val(p.from_date);
       $cancelTo.val(p.to_date);
     }
-    
+
     $cancelReason.val('');
     $cancelModal.show();
   }
 
-  $cancelCloseBtn.on('click', function(){ $cancelModal.hide(); cancelingPrescriptionIndex=null; });
+  $cancelCloseBtn.on('click', function () { $cancelModal.hide(); cancelingPrescriptionIndex = null; });
 
-  $cancelSubmitBtn.on('click', function(){
+  $cancelSubmitBtn.on('click', function () {
     if (cancelingPrescriptionIndex === null) return;
     const p = addedPrescriptions[cancelingPrescriptionIndex];
     if (!p) return;
     const cfrom = $cancelFrom.val(), cto = $cancelTo.val(), reason = $cancelReason.val().trim();
-    if (!cfrom || !cto){ alert('Pick both Cancel From and Cancel To'); return; }
-    if (cfrom > cto){ alert('Cancel From must be <= Cancel To'); return; }
-    if (p.from_date && cfrom < p.from_date){ alert('Cancel From < prescription start'); return; }
-    if (p.to_date && cto > p.to_date){ alert('Cancel To > prescription end'); return; }
-    if (!reason){ alert('Cancellation reason is mandatory'); return; }
-    
+    if (!cfrom || !cto) { alert('Pick both Cancel From and Cancel To'); return; }
+    if (cfrom > cto) { alert('Cancel From must be <= Cancel To'); return; }
+    if (p.from_date && cfrom < p.from_date) { alert('Cancel From < prescription start'); return; }
+    if (p.to_date && cto > p.to_date) { alert('Cancel To > prescription end'); return; }
+    if (!reason) { alert('Cancellation reason is mandatory'); return; }
+
     // IMMEDIATELY update local data BEFORE server call - EXACTLY like therapy entry
     // Calculate how many days are being cancelled
     const cancelledDates = getDateRange(cfrom, cto);
     const cancelledDaysCount = cancelledDates.length;
-    
+
     // Update status_summary optimistically to reflect the cancellation
     if (!p.status_summary) {
       p.status_summary = {};
     }
-    
+
     // Calculate how many days were already cancelled in the new range
     let alreadyCancelledInRange = 0;
     if (p.cancelled_date_from && p.cancelled_date_to) {
@@ -1347,20 +1890,20 @@ $(function(){
       // Count dates that are in both ranges (already cancelled)
       alreadyCancelledInRange = newCancelledDates.filter(d => existingCancelledDates.includes(d)).length;
     }
-    
+
     // Calculate how many new days are being cancelled (not already cancelled)
     const newlyCancelledDays = cancelledDaysCount - alreadyCancelledInRange;
-    
+
     // Update cancelled count (add newly cancelled days)
     if (newlyCancelledDays > 0) {
       p.status_summary.cancelled = (p.status_summary.cancelled || 0) + newlyCancelledDays;
-      
+
       // Decrease draft/active counts for newly cancelled days
       // We need to estimate how many were draft vs active
       // For simplicity, we'll decrease draft first, then active
       const currentDraft = p.status_summary.draft || 0;
       const currentActive = p.status_summary.active || 0;
-      
+
       if (currentDraft >= newlyCancelledDays) {
         p.status_summary.draft = currentDraft - newlyCancelledDays;
         if (p.status_summary.draft === 0) {
@@ -1385,7 +1928,7 @@ $(function(){
         }
       }
     }
-    
+
     if (!p.cancelled_date_from || cfrom < p.cancelled_date_from) {
       p.cancelled_date_from = cfrom;
     }
@@ -1394,44 +1937,72 @@ $(function(){
     }
     p.status = 'cancelled';
     p.cancellation_reason = reason;
-    
+
+    // Set last_action to 'cancelled' immediately (ignore today's date check)
+    p.last_action = 'cancelled';
+    rememberPrescriptionAction(p.allocation_id || p.id, 'cancelled');
+
     // IMMEDIATELY update UI - don't wait for server - EXACTLY like therapy entry
     $cancelModal.hide();
     renderAll();
     setTimeout(() => {
       alert('Prescription cancelled successfully.');
     }, 100);
-    
+
     if (p.allocation_id) {
       // Server-side cancellation (happens in background)
       fetch(API_URL + '?action=cancel_prescription', {
-        method:'POST',
-        headers: {'Content-Type':'application/json'},
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ allocation_id: p.allocation_id, cancel_from: cfrom, cancel_to: cto, reason: reason })
       }).then(r => r.json()).then(j => {
         if (j.status === 'ok') {
           // UI already updated above, alert already shown, server sync will happen in background
-          
+
           // Then reload from server to get merged cancellation dates (in background)
           if (p.allocation_id && selectedPatient) {
-            const patientRegNo = selectedPatient.pat_op_reg_no || selectedPatient.pat_reg_no;
+            // Use correct registration number based on patient type
+            const patientType = selectedPatient.patient_type ||
+              (selectedPatient.pat_reg_no && selectedPatient.pat_reg_no.toString().replace(/\D/g, '').length === 5 ? 'OP' : 'IP');
+            const patientRegNo = patientType === 'IP'
+              ? selectedPatient.pat_reg_no
+              : (selectedPatient.pat_op_reg_no || selectedPatient.pat_reg_no);
             if (patientRegNo) {
               setTimeout(() => {
-                ajax({action:'patient_prescriptions', patient_reg_no: patientRegNo}).then(list => {
+                ajax({ action: 'patient_prescriptions', patient_reg_no: patientRegNo }).then(list => {
                   if (list && Array.isArray(list)) {
                     const updated = list.find(pr => pr.allocation_id === p.allocation_id);
                     if (updated) {
+                      // Get the remembered action before updating
+                      const rememberedAction = prescriptionActionById[p.allocation_id || p.id];
+
                       // Update all fields from server response
                       Object.assign(p, updated);
+
                       // Explicitly set cancelled dates (handle null/undefined/string 'null')
                       p.cancelled_date_from = (updated.cancelled_date_from && updated.cancelled_date_from !== 'null') ? updated.cancelled_date_from : null;
                       p.cancelled_date_to = (updated.cancelled_date_to && updated.cancelled_date_to !== 'null') ? updated.cancelled_date_to : null;
                       p.cancellation_reason = updated.cancellation_reason || '';
                       p.status = updated.status || p.status;
+
                       // Update status_summary if available
                       if (updated.status_summary) {
                         p.status_summary = updated.status_summary;
                       }
+
+                      const today = new Date().toISOString().slice(0, 10);
+                      const hasCancellations = p.cancelled_date_from && p.cancelled_date_to &&
+                        p.cancelled_date_from !== 'null' && p.cancelled_date_to !== 'null';
+
+                      // If there are cancellations, override any previous action with 'cancelled'
+                      if (hasCancellations) {
+                        p.last_action = 'cancelled';
+                        rememberPrescriptionAction(p.allocation_id || p.id, 'cancelled');
+                      } else if (rememberedAction && rememberedAction !== 'cancelled') {
+                        // Restore the remembered action (updated/resumed/added)
+                        p.last_action = rememberedAction;
+                      }
+
                       // Update UI again with server data
                       renderAll();
                     }
@@ -1446,7 +2017,7 @@ $(function(){
         } else {
           alert('Failed: ' + JSON.stringify(j));
         }
-      }).catch(()=>alert('Network error'));
+      }).catch(() => alert('Network error'));
     } else {
       // Local cancellation - already updated above, just show message
       // (alert already shown above)
@@ -1457,15 +2028,15 @@ $(function(){
   function getDateRange(fromDate, toDate) {
     const dates = [];
     if (!fromDate || !toDate) return dates;
-    
+
     // Parse dates directly without timezone conversion
     const startParts = fromDate.split('-');
     const endParts = toDate.split('-');
     if (startParts.length !== 3 || endParts.length !== 3) return dates;
-    
+
     const start = new Date(parseInt(startParts[0]), parseInt(startParts[1]) - 1, parseInt(startParts[2]));
     const end = new Date(parseInt(endParts[0]), parseInt(endParts[1]) - 1, parseInt(endParts[2]));
-    
+
     const current = new Date(start);
     while (current <= end) {
       // Format as YYYY-MM-DD without timezone conversion
@@ -1479,50 +2050,50 @@ $(function(){
   }
 
   // Resume prescription
-  $prescriptionsTableBody.on('click', '.resume-prescription', function(){ const i=$(this).data('i'); openResumeModal(i); });
-  
-  function openResumeModal(index){
-    resumingPrescriptionIndex = index; 
-    const p = addedPrescriptions[index]; 
-    if(!p) return;
-    
+  $prescriptionsTableBody.on('click', '.resume-prescription', function () { const i = $(this).data('i'); openResumeModal(i); });
+
+  function openResumeModal(index) {
+    resumingPrescriptionIndex = index;
+    const p = addedPrescriptions[index];
+    if (!p) return;
+
     // Get fresh data from the prescription object (ensure we have latest cancelled dates)
     const cancelledFrom = p.cancelled_date_from;
     const cancelledTo = p.cancelled_date_to;
-    
+
     $('#resume-modal-info').html(`<strong>Prescription:</strong> ${p.prescription_name || 'N/A'}<br/><strong>Cancelled Range:</strong> ${formatDate(cancelledFrom) || '—'} → ${formatDate(cancelledTo) || '—'}`);
-    
+
     const $datesList = $('#resume-dates-list');
     $datesList.empty();
     $datesList.html('<p style="color: #666; padding: 16px; text-align: center;">Loading cancelled dates...</p>');
     $resumeModal.show();
-    
+
     // Check if cancelled dates exist and are valid
     if (!cancelledFrom || !cancelledTo || cancelledFrom === 'null' || cancelledTo === 'null') {
       $datesList.html('<p style="color: #666; padding: 16px; text-align: center;">No cancelled dates found.</p>');
       return;
     }
-    
+
     const cancelledDates = getDateRange(cancelledFrom, cancelledTo);
-    
+
     if (cancelledDates.length === 0) {
       $datesList.html('<p style="color: #666; padding: 16px; text-align: center;">No cancelled dates found.</p>');
       return;
     }
-    
+
     // If we have an allocation_id, use resumed_dates to show only dates that are still cancelled
     if (p.allocation_id) {
       // Get set of already resumed dates for this prescription
       const resumedDates = p.resumed_dates && Array.isArray(p.resumed_dates) ? new Set(p.resumed_dates) : new Set();
-      
+
       // Filter to show only dates that are still cancelled (not in resumed_dates)
       const stillCancelledDates = cancelledDates.filter(date => !resumedDates.has(date));
-      
+
       if (stillCancelledDates.length === 0) {
         $datesList.html('<p style="color: #666; padding: 16px; text-align: center;">No cancelled dates found (all dates have been resumed).</p>');
         return;
       }
-      
+
       $datesList.empty();
       stillCancelledDates.forEach(date => {
         const $dateItem = $(`
@@ -1557,39 +2128,39 @@ $(function(){
       });
     }
   }
-  
+
   // Handle individual date resume
-  $(document).on('click', '.resume-date-btn', function(e){
+  $(document).on('click', '.resume-date-btn', function (e) {
     e.preventDefault();
     e.stopPropagation();
-    
+
     const date = $(this).data('date');
     console.log('Resume button clicked, date:', date, 'resumingPrescriptionIndex:', resumingPrescriptionIndex);
-    
+
     if (!date || resumingPrescriptionIndex === null) {
-      console.log('Missing date or resumingPrescriptionIndex:', {date, resumingPrescriptionIndex});
+      console.log('Missing date or resumingPrescriptionIndex:', { date, resumingPrescriptionIndex });
       return;
     }
-    
+
     const prescription = addedPrescriptions[resumingPrescriptionIndex];
     if (!prescription) {
       console.log('Prescription not found at index:', resumingPrescriptionIndex);
       return;
     }
-    
+
     console.log('Prescription found:', prescription);
     console.log('Cancelled dates:', prescription.cancelled_date_from, prescription.cancelled_date_to);
-    
+
     if (!confirm(`Are you sure you want to resume prescription for ${formatDate(date)}?`)) {
       return;
     }
-    
+
     // IMMEDIATELY remove the button from the modal (optimistic UI update)
     // This provides instant feedback to the user
     const $clickedButton = $(this);
     const $dateItem = $clickedButton.closest('div[style*="display: flex"]');
-    
-    $dateItem.fadeOut(200, function() {
+
+    $dateItem.fadeOut(200, function () {
       $(this).remove();
       // If no dates left, show message
       const $datesList = $('#resume-dates-list');
@@ -1597,13 +2168,17 @@ $(function(){
         $datesList.html('<p style="color: #666; padding: 16px; text-align: center;">No cancelled dates remaining.</p>');
       }
     });
-    
+
     // IMMEDIATELY update local data BEFORE server call
     // Update status_summary optimistically to reflect the resume action
     if (!prescription.status_summary) {
       prescription.status_summary = {};
     }
-    
+
+    // Mark as resumed for color coding FIRST, before rendering
+    prescription.last_action = 'resumed';
+    rememberPrescriptionAction(prescription.allocation_id || prescription.id, 'resumed');
+
     // Decrease cancelled count and increase draft count optimistically
     if (prescription.status_summary.cancelled && prescription.status_summary.cancelled > 0) {
       prescription.status_summary.cancelled = (prescription.status_summary.cancelled || 0) - 1;
@@ -1613,7 +2188,7 @@ $(function(){
     }
     // Increase draft count (the resumed prescription will be draft)
     prescription.status_summary.draft = (prescription.status_summary.draft || 0) + 1;
-    
+
     // For middle dates, we don't update cancelled_date_from/to optimistically
     // We wait for server response to get the correct updated range
     if (prescription.cancelled_date_from === date && prescription.cancelled_date_to === date) {
@@ -1642,16 +2217,16 @@ $(function(){
       // But we've already removed the button from the modal, so UI is updated
       renderAll();
     }
-    
+
     setTimeout(() => {
       alert('Prescription resumed successfully for ' + formatDate(date) + '.');
     }, 100);
-    
+
     if (prescription.allocation_id) {
       // Server-side resume (happens in background)
       fetch(API_URL + '?action=resume_prescription', {
-        method:'POST',
-        headers: {'Content-Type':'application/json'},
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ allocation_id: prescription.allocation_id, resume_date: date })
       }).then(r => {
         console.log('Server response status:', r.status);
@@ -1666,18 +2241,44 @@ $(function(){
         console.log('Server response:', j);
         if (j.status === 'ok') {
           // UI already updated above, alert already shown, server sync will happen in background
-          
+
           // Then reload from server to get accurate updated cancelled dates and status_summary (in background)
           if (selectedPatient && prescription.allocation_id) {
             const patientRegNo = prescription.patient_reg_no || selectedPatient.pat_reg_no || selectedPatient.pat_op_reg_no;
             if (patientRegNo) {
               setTimeout(() => {
-                ajax({action:'patient_prescriptions', patient_reg_no: patientRegNo}).then(list => {
+                ajax({ action: 'patient_prescriptions', patient_reg_no: patientRegNo }).then(list => {
                   if (list && Array.isArray(list)) {
-                    const updated = list.find(pr => pr.allocation_id === prescription.allocation_id);
+                    // Use decoratePrescriptionList to properly preserve remembered actions
+                    const decoratedList = decoratePrescriptionList(list);
+                    const updated = decoratedList.find(pr => pr.allocation_id === prescription.allocation_id);
                     if (updated) {
+                      // Preserve last_action before updating - use string keys to match storage
+                      const key1 = prescription.allocation_id ? String(prescription.allocation_id) : null;
+                      const key2 = prescription.id ? String(prescription.id) : null;
+                      const rememberedAction = (key1 && prescriptionActionById[key1]) ||
+                        (key2 && prescriptionActionById[key2]) || '';
                       // Update all fields from server response
                       Object.assign(prescription, updated);
+                      // Restore last_action if it was remembered (always restore to preserve resumed/updated state)
+                      // This is critical - we must restore the remembered action to preserve color coding
+                      // The rememberedAction should already be 'resumed' since we set it before server call
+                      if (rememberedAction) {
+                        prescription.last_action = rememberedAction;
+                        // Also update the stored action to ensure it persists
+                        if (key1) {
+                          rememberPrescriptionAction(key1, rememberedAction);
+                        }
+                      } else {
+                        // If no remembered action but we just resumed, ensure it's set
+                        // This handles edge cases where the action wasn't remembered properly
+                        prescription.last_action = 'resumed';
+                        if (key1) {
+                          rememberPrescriptionAction(key1, 'resumed');
+                        }
+                      }
+                      // Re-render to show updated color immediately
+                      renderAll();
                       // Explicitly set cancelled dates (handle null/undefined/string 'null')
                       prescription.cancelled_date_from = (updated.cancelled_date_from && updated.cancelled_date_from !== 'null') ? updated.cancelled_date_from : null;
                       prescription.cancelled_date_to = (updated.cancelled_date_to && updated.cancelled_date_to !== 'null') ? updated.cancelled_date_to : null;
@@ -1689,19 +2290,19 @@ $(function(){
                       }
                       // Update UI again with server data
                       renderAll();
-                      
+
                       // For middle dates, don't reload modal automatically - button already removed optimistically
                       // Only reload if it's not a middle date (start/end dates update the range, so we need to reload)
                       // Check if this was a middle date resume
                       const wasMiddleDate = prescription.cancelled_date_from !== date && prescription.cancelled_date_to !== date;
-                      
+
                       if (!wasMiddleDate) {
                         // Start or end date - reload modal to show updated range
                         setTimeout(() => {
                           if ($resumeModal.is(':visible') && resumingPrescriptionIndex !== null) {
                             const currentPrescription = addedPrescriptions[resumingPrescriptionIndex];
-                            if (currentPrescription && currentPrescription.cancelled_date_from && currentPrescription.cancelled_date_to && 
-                                currentPrescription.cancelled_date_from !== 'null' && currentPrescription.cancelled_date_to !== 'null') {
+                            if (currentPrescription && currentPrescription.cancelled_date_from && currentPrescription.cancelled_date_to &&
+                              currentPrescription.cancelled_date_from !== 'null' && currentPrescription.cancelled_date_to !== 'null') {
                               // Reload modal with updated dates
                               openResumeModal(resumingPrescriptionIndex);
                             } else {
@@ -1723,7 +2324,7 @@ $(function(){
                     if ($resumeModal.is(':visible') && resumingPrescriptionIndex !== null) {
                       const currentPrescription = addedPrescriptions[resumingPrescriptionIndex];
                       if (currentPrescription && currentPrescription.cancelled_date_from && currentPrescription.cancelled_date_to &&
-                          currentPrescription.cancelled_date_from !== 'null' && currentPrescription.cancelled_date_to !== 'null') {
+                        currentPrescription.cancelled_date_from !== 'null' && currentPrescription.cancelled_date_to !== 'null') {
                         // Reload modal with current data
                         openResumeModal(resumingPrescriptionIndex);
                       } else {
@@ -1750,16 +2351,16 @@ $(function(){
       // (alert already shown above)
     }
   });
-  
-  $resumeCloseBtn.on('click', function(){ $resumeModal.hide(); resumingPrescriptionIndex = null; });
+
+  $resumeCloseBtn.on('click', function () { $resumeModal.hide(); resumingPrescriptionIndex = null; });
 
   // export JSON
-  $('#export-json').on('click', function(){
+  $('#export-json').on('click', function () {
     const patient = $patientSelect.val() || '';
     const payload = { patient_reg_no: patient, prescriptions: addedPrescriptions };
-    const blob = new Blob([JSON.stringify(payload,null,2)], {type:'application/json'});
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
-    const a=document.createElement('a'); a.href=url; a.download=(patient?patient+'-':'prescriptions-')+(new Date().toISOString().slice(0,10))+'.json'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+    const a = document.createElement('a'); a.href = url; a.download = (patient ? patient + '-' : 'prescriptions-') + (new Date().toISOString().slice(0, 10)) + '.json'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
   });
 
   // initial render
@@ -1769,8 +2370,116 @@ $(function(){
   loadUnitNumbers();
 
   // Clear form button
-  $('#clear-form').on('click', function(){
+  $('#clear-form').on('click', function () {
     resetFormState();
+  });
+
+  // --- Past History Feature ---
+  const $historyModal = $('#history-modal-backdrop');
+
+  $('#past-history-btn').on('click', function () {
+    if (!selectedPatient) {
+      alert('Please select a patient first.');
+      return;
+    }
+
+    // Open modal
+    $historyModal.addClass('show');
+    $historyModal.css('display', 'flex'); // Ensure flex display for modal
+    $('#history-patient-name').text((selectedPatient.pat_name || 'Unknown') + ' (' + (selectedPatient.pat_reg_no || selectedPatient.pat_op_reg_no) + ')');
+
+    // Load data
+    loadPrescriptionHistory();
+  });
+
+  $('#history-modal-close').on('click', function () {
+    $historyModal.removeClass('show');
+    $historyModal.hide();
+  });
+
+  function loadPrescriptionHistory() {
+    const regNo = selectedPatient.pat_reg_no || selectedPatient.pat_op_reg_no;
+
+    $('#history-content-loader').show();
+    $('#history-content-empty').hide();
+    $('#history-list').empty();
+
+    fetch(`/sheduling/prescription/api/previous-history/?registration_no=${encodeURIComponent(regNo)}`)
+      .then(r => r.json())
+      .then(data => {
+        $('#history-content-loader').hide();
+
+        if (!data.success || !data.data || data.data.length === 0) {
+          $('#history-content-empty').show();
+          return;
+        }
+
+        renderHistoryList(data.data);
+      })
+      .catch(err => {
+        $('#history-content-loader').hide();
+        $('#history-list').html('<div style="color:red;padding:20px;text-align:center">Error loading history. Please try again.</div>');
+        console.error(err);
+      });
+  }
+
+  function renderHistoryList(historyData) {
+    const html = historyData.map(group => {
+      const date = formatDate(group.date);
+      const itemsHtml = group.items.map(item => `
+            <tr>
+                <td style="padding: 8px 15px; border-bottom: 1px solid #eee;">${esc(item.item_name)}</td>
+                <td style="padding: 8px 15px; border-bottom: 1px solid #eee;">${esc(item.dosage) || '-'}</td>
+                <td style="padding: 8px 15px; border-bottom: 1px solid #eee;">${esc(item.uom) || '-'}</td>
+                <td style="padding: 8px 15px; border-bottom: 1px solid #eee;">${esc(item.usage) || '-'}</td>
+                <td style="padding: 8px 15px; border-bottom: 1px solid #eee;">${esc(item.int_ext) || '-'}</td>
+            </tr>
+          `).join('');
+
+      return `
+            <div class="history-group" style="margin-bottom: 20px; border: 1px solid #ddd; border-radius: 4px; overflow: hidden; background: white;">
+                <div class="history-date-header" style="background: #f8f9fa; padding: 10px 15px; font-weight: bold; border-bottom: 1px solid #ddd; color: var(--primary); display: flex; justify-content: space-between; align-items: center;">
+                    <span><i class="fas fa-calendar-alt"></i> ${date}</span>
+                </div>
+                <table class="table" style="width: 100%; border-collapse: collapse;">
+                    <thead style="background: #fff; border-bottom: 1px solid #eee;">
+                        <tr>
+                            <th style="text-align: left; padding: 8px 15px; color: #666; font-size: 0.9em;">Medicine</th>
+                            <th style="text-align: left; padding: 8px 15px; color: #666; font-size: 0.9em;">Dosage</th>
+                             <th style="text-align: left; padding: 8px 15px; color: #666; font-size: 0.9em;">UOM</th>
+                            <th style="text-align: left; padding: 8px 15px; color: #666; font-size: 0.9em;">Usage</th>
+                            <th style="text-align: left; padding: 8px 15px; color: #666; font-size: 0.9em;">Ext/Int</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${itemsHtml}
+                    </tbody>
+                </table>
+            </div>
+          `;
+    }).join('');
+
+    $('#history-list').html(html);
+  }
+
+  function triggerDownload(url) {
+    const frame = document.createElement('iframe');
+    frame.style.display = 'none';
+    frame.src = url;
+    document.body.appendChild(frame);
+    setTimeout(() => frame.remove(), 1000 * 60); // Clean up after 1 min
+  }
+
+  $('#download-history-pdf').on('click', function () {
+    if (!selectedPatient) return;
+    const regNo = selectedPatient.pat_reg_no || selectedPatient.pat_op_reg_no;
+    triggerDownload(`/sheduling/prescription/api/download-history/?registration_no=${encodeURIComponent(regNo)}&format=pdf`);
+  });
+
+  $('#download-history-excel').on('click', function () {
+    if (!selectedPatient) return;
+    const regNo = selectedPatient.pat_reg_no || selectedPatient.pat_op_reg_no;
+    triggerDownload(`/sheduling/prescription/api/download-history/?registration_no=${encodeURIComponent(regNo)}&format=excel`);
   });
 
   // expose for debug

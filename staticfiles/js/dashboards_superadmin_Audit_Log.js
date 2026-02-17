@@ -1,7 +1,14 @@
 function exportLogs() {
       // Get current filter parameters
       const params = new URLSearchParams(window.location.search);
-      const exportUrl = '{% url "authentication:Audit_Log" %}?' + params.toString() + '&export=1';
+      const base = window.AUDIT_LOG_EXPORT_BASE || '/authentication/Audit_Log/dashboard/';
+      let exportUrl = base;
+      const query = params.toString();
+      if (query) {
+        exportUrl += '?' + query + '&export=1';
+      } else {
+        exportUrl += '?export=1';
+      }
       window.open(exportUrl, '_blank');
     }
 
@@ -32,7 +39,8 @@ function exportLogs() {
       urlParams.delete('page');
       
       // Build API URL
-      const apiUrl = '{% url "authentication:audit_log_api" %}?' + urlParams.toString();
+      const apiBase = window.AUDIT_LOG_API_URL || '/authentication/api/audit-log/';
+      const apiUrl = apiBase + (urlParams.toString() ? ('?' + urlParams.toString()) : '');
       
       // Fetch all audit logs from API
       fetch(apiUrl)

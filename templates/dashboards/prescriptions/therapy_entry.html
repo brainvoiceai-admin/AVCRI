@@ -14,7 +14,7 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 
 
-  <link rel="stylesheet" href="{% static 'css/updated_dash_therapy_entry.css' %}">
+  <link rel="stylesheet" href="{% static 'css/updated_dash_therapy_entry.css' %}?v=2.4">
   <link rel="stylesheet" href="{% static 'css/dashboards_nav.css' %}">
 </head>
 
@@ -260,8 +260,33 @@
               </tbody>
             </table>
           </div>
-          <p class="small-muted" style="margin-top:12px;padding:0 16px 16px;font-style:italic;">
-            <i class="fas fa-info-circle"></i> Here only current session details are shown. To see past session details,
+          <div class="table-legend"
+            style="padding: 16px; border-top: 1px solid var(--border-light); display: flex; gap: 24px; flex-wrap: wrap; background: #fafafa;">
+            <div style="display: flex; align-items: center; gap: 8px; font-size: 0.85rem; color: var(--text-medium);">
+              <span
+                style="width: 14px; height: 14px; border-radius: 3px; background: #2563eb; border: 1.5px solid #333;"></span>
+              <strong>Active / New</strong>
+            </div>
+            <div style="display: flex; align-items: center; gap: 8px; font-size: 0.85rem; color: var(--text-medium);">
+              <span
+                style="width: 14px; height: 14px; border-radius: 3px; background: #d97706; border: 1.5px solid #333;"></span>
+              <strong>Updated Today</strong>
+            </div>
+            <div style="display: flex; align-items: center; gap: 8px; font-size: 0.85rem; color: var(--text-medium);">
+              <span
+                style="width: 14px; height: 14px; border-radius: 3px; background: #16a34a; border: 1.5px solid #333;"></span>
+              <strong>Resumed</strong>
+            </div>
+            <div style="display: flex; align-items: center; gap: 8px; font-size: 0.85rem; color: var(--text-medium);">
+              <span
+                style="width: 14px; height: 14px; border-radius: 3px; background: #dc2626; border: 1.5px solid #333;"></span>
+              <strong>Cancelled / Failed</strong>
+            </div>
+          </div>
+
+          <p class="small-muted" style="margin-top:0;padding:12px 16px 16px;font-style:italic;">
+            <i class="fas fa-info-circle"></i> Here only current session details are shown. To see past session
+            details,
             click <strong>Status</strong>.
           </p>
         </div>
@@ -288,7 +313,8 @@
       <h3><i class="fas fa-ban"></i> Request Cancellation (Date Range)</h3>
       <div id="cancel-modal-info" class="small-muted" style="margin-top: 8px;"></div>
       <div style="margin-top:16px;" class="form-row">
-        <div class="form-group"><label for="cancel-from">Cancel From</label><input type="date" id="cancel-from" /></div>
+        <div class="form-group"><label for="cancel-from">Cancel From</label><input type="date" id="cancel-from" />
+        </div>
         <div class="form-group"><label for="cancel-to">Cancel To</label><input type="date" id="cancel-to" /></div>
       </div>
       <div style="margin-top:16px;"><label>Reason for cancellation</label><textarea id="cancel-reason"
@@ -356,7 +382,7 @@
   </div>
 
 
-  <script src="{% static 'js/updated_dash_therapy_entry.js' %}?v=3"></script>
+  <script src="{% static 'js/updated_dash_therapy_entry.js' %}?v=4.0"></script>
   <script src="{% static 'js/dashboards_nav.js' %}"></script>
 </body>
 
