@@ -438,17 +438,46 @@ def therapy_entry(request):
                 )
                 cancelled_count = cancelled_bookings.count()
                 cancelled_bookings.update(status='cancelled')
+
                 # Release therapist assignments and free Patient booking resources
                 try:
                     # mark assignments as released
                     BookingAssignment.objects.filter(booking__in=cancelled_bookings).update(status='released')
                 except Exception:
                     pass
+
                 try:
                     # also free underlying Patient TherapistBooking/RoomBooking
+                    # Be explicit about links to this allocation AND fall back to patient_id
                     from Patient.models import TherapistBooking as TB, RoomBooking as RB
-                    TB.objects.filter(date__gte=parse_date(cancel_from), date__lte=parse_date(cancel_to), patient_id=allocation.patient.id).update(status='CANCELLED')
-                    RB.objects.filter(date__gte=parse_date(cancel_from), date__lte=parse_date(cancel_to), patient_id=allocation.patient.id).update(status='CANCELLED')
+
+                    # 1) Cancel therapist bookings linked to this allocation (preferred, most accurate)
+                    TB.objects.filter(
+                        visit=allocation,
+                        date__gte=parse_date(cancel_from),
+                        date__lte=parse_date(cancel_to),
+                    ).update(status='CANCELLED')
+
+                    # 2) Also cancel therapist bookings for this patient (safety net for rows without visit FK)
+                    TB.objects.filter(
+                        patient_id=allocation.patient.id,
+                        date__gte=parse_date(cancel_from),
+                        date__lte=parse_date(cancel_to),
+                    ).update(status='CANCELLED')
+
+                    # 3) Cancel room bookings linked to this allocation
+                    RB.objects.filter(
+                        therapy=allocation,
+                        date__gte=parse_date(cancel_from),
+                        date__lte=parse_date(cancel_to),
+                    ).update(status='CANCELLED')
+
+                    # 4) Also cancel orphaned room bookings for this patient (no explicit therapy/visit)
+                    RB.objects.filter(
+                        patient_id=allocation.patient.id,
+                        date__gte=parse_date(cancel_from),
+                        date__lte=parse_date(cancel_to),
+                    ).update(status='CANCELLED')
                 except Exception:
                     pass
                 
