@@ -200,13 +200,19 @@ $(function () {
       const key2 = p.id ? String(p.id) : null;
       const remembered = (key1 && prescriptionActionById[key1]) ||
         (key2 && prescriptionActionById[key2]) || '';
-      // Only use derived from server if it's 'cancelled' (server knows cancellation state)
-      // Otherwise, ignore server's last_action and use remembered
-      const derived = (p.status === 'cancelled' ? 'cancelled' : '') ||
-        (p.last_action === 'cancelled' ? 'cancelled' : '');
-      // Priority: remembered > derived (only cancelled)
-      let finalAction = remembered || derived;
-      return { ...p, last_action: finalAction };
+
+      const s = String(p.status || '').trim().toLowerCase();
+      const hasCancellations = p.cancelled_date_from && p.cancelled_date_to && p.cancelled_date_from !== 'null';
+
+      let derived = '';
+      if (s === 'cancelled' || hasCancellations) {
+        derived = 'cancelled';
+      } else {
+        derived = 'added'; // DEFAULT = Blue
+      }
+
+      const action = remembered || derived;
+      return { ...p, last_action: action };
     });
   }
 
@@ -711,26 +717,21 @@ $(function () {
 
   // Intercept Select2 Unselect (Item Removal from Group Builder)
   $itemBuilder.on('select2:unselecting', function (e) {
-    e.preventDefault();
+    // Removal of single item should NOT show confirmation popup
     const data = (e.params.args && e.params.args.data) || e.params.data;
     const itemId = data.id;
-    showConfirm(
-      "Confirm Removal",
-      "Are you sure you want to remove this medicine from the group?\nThis action cannot be undone.",
-      "Yes, Remove",
-      function () {
-        // Manually remove item
-        let currentInfo = $itemBuilder.val() || [];
-        if (!Array.isArray(currentInfo)) currentInfo = [currentInfo];
-        const newValue = currentInfo.filter(x => x !== itemId);
-        $itemBuilder.val(newValue).trigger('change');
-        // Manually trigger update logic specific to prescription
-        setTimeout(function () {
-          updateProcuredFromField();
-          updateUOMField();
-        }, 100);
-      }
-    );
+
+    // Manually remove item immediately
+    let currentInfo = $itemBuilder.val() || [];
+    if (!Array.isArray(currentInfo)) currentInfo = [currentInfo];
+    const newValue = currentInfo.filter(x => x !== itemId);
+    $itemBuilder.val(newValue).trigger('change');
+
+    // Manually trigger update logic specific to prescription
+    setTimeout(function () {
+      updateProcuredFromField();
+      updateUOMField();
+    }, 100);
   });
 
   // Function to check and auto-fill procured_from based on selected items
@@ -1301,49 +1302,18 @@ $(function () {
   // Decide row color for today's prescription status (Added/Updated/Resumed/Cancelled for today only)
   function getTodayPrescriptionColorClass(p) {
     if (!p) return '';
-    const today = new Date().toISOString().slice(0, 10);
-
-    const inMainRange =
-      p.from_date && p.to_date &&
-      today >= String(p.from_date) && today <= String(p.to_date);
-
-    if (!inMainRange) {
-      return '';
-    }
-
-    // Get the last action - this is the CURRENT state set by user actions
+    // Priority 1: Session Action
     const lastAction = String(p.last_action || '').toLowerCase().trim();
-
-    // PRIORITY 1: If last_action is explicitly set, it ALWAYS wins
-    // This ensures Cancel → Resume → Cancel works correctly
-    if (lastAction === 'cancelled') return 'action-cancelled';
-    if (lastAction === 'resumed') return 'action-resumed';
-    if (lastAction === 'updated') return 'action-updated';
-    if (lastAction === 'added') return 'action-added';
-
-    // PRIORITY 2: Fall back to checking if today is in cancelled range
-    const inCancelledRange =
-      p.cancelled_date_from && p.cancelled_date_to &&
-      p.cancelled_date_from !== 'null' && p.cancelled_date_to !== 'null' &&
-      today >= String(p.cancelled_date_from) && today <= String(p.cancelled_date_to);
-
-    if (inCancelledRange) {
-      return 'action-cancelled';
+    if (lastAction && lastAction !== '' && lastAction !== 'null' && lastAction !== 'undefined') {
+      return 'action-' + lastAction;
     }
 
-    // PRIORITY 3: Check timestamps from server for "today" actions (only if no last_action)
-    const isTodayResumed = p.resumed_at && p.resumed_at.slice(0, 10) === today;
-    const isTodayCancelled = p.cancelled_at && p.cancelled_at.slice(0, 10) === today;
-    const isTodayUpdated = p.updated_at && p.updated_at.slice(0, 10) === today &&
-      p.updated_at !== p.created_at;
-    const isTodayAdded = p.created_at && p.created_at.slice(0, 10) === today;
+    // Priority 2: Status-based derivation
+    const s = String(p.status || '').trim().toLowerCase();
+    const hasCancellations = p.cancelled_date_from && p.cancelled_date_to && p.cancelled_date_from !== 'null';
+    if (s === 'cancelled' || hasCancellations) return 'action-cancelled';
 
-    if (isTodayResumed) return 'action-resumed';
-    if (isTodayCancelled) return 'action-cancelled';
-    if (isTodayUpdated) return 'action-updated';
-    if (isTodayAdded) return 'action-added';
-
-    return '';
+    return 'action-added';
   }
 
   function buildActionBadge(actionClass) {
@@ -1968,18 +1938,9 @@ $(function () {
     p.status = 'cancelled';
     p.cancellation_reason = reason;
 
-    // Only set last_action to 'cancelled' if TODAY is in the cancelled range
-    // This ensures cancelling future dates doesn't turn the row red
-    const today = new Date().toISOString().slice(0, 10);
-    const todayIsCancelled = today >= cfrom && today <= cto;
-
-    if (todayIsCancelled) {
-      // Today is cancelled - turn row RED
-      p.last_action = 'cancelled';
-      rememberPrescriptionAction(p.allocation_id || p.id, 'cancelled');
-    }
-    // If today is NOT cancelled, don't change last_action
-    // This preserves the previous color (green/yellow/blue)
+    // Set last_action to 'cancelled' immediately (ignore today's date check)
+    p.last_action = 'cancelled';
+    rememberPrescriptionAction(p.allocation_id || p.id, 'cancelled');
 
     // IMMEDIATELY update UI - don't wait for server - EXACTLY like therapy entry
     $cancelModal.hide();
@@ -2029,19 +1990,16 @@ $(function () {
                         p.status_summary = updated.status_summary;
                       }
 
-                      // Check if today is in the cancelled range
                       const today = new Date().toISOString().slice(0, 10);
-                      const todayIsCancelled = p.cancelled_date_from && p.cancelled_date_to &&
-                        p.cancelled_date_from !== 'null' && p.cancelled_date_to !== 'null' &&
-                        today >= p.cancelled_date_from && today <= p.cancelled_date_to;
+                      const hasCancellations = p.cancelled_date_from && p.cancelled_date_to &&
+                        p.cancelled_date_from !== 'null' && p.cancelled_date_to !== 'null';
 
-                      // If today is cancelled, override any previous action with 'cancelled'
-                      if (todayIsCancelled) {
+                      // If there are cancellations, override any previous action with 'cancelled'
+                      if (hasCancellations) {
                         p.last_action = 'cancelled';
                         rememberPrescriptionAction(p.allocation_id || p.id, 'cancelled');
                       } else if (rememberedAction && rememberedAction !== 'cancelled') {
-                        // If today is NOT cancelled, restore the remembered action (updated/resumed/added)
-                        // but only if it's not 'cancelled' (we just cancelled, so don't restore old cancelled state)
+                        // Restore the remembered action (updated/resumed/added)
                         p.last_action = rememberedAction;
                       }
 
