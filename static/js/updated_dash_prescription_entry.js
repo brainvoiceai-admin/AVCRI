@@ -2415,32 +2415,42 @@ $(function () {
           return;
         }
 
-        renderHistoryList(resp.data, resp.previous_doa);
+        renderHistoryList(resp.data, resp.previous_doa, resp.doctor_name);
       })
       .catch(err => {
         $('#history-content-loader').hide();
-        $('#history-list').html('<div style="color:red;padding:20px;text-align:center">Error loading history. Please try again.</div>');
-        console.error(err);
+        const errMsg = err.message || 'Unknown error';
+        $('#history-list').html(`<div style="color:red;padding:20px;text-align:center">Error loading history: ${errMsg}. Please try again.</div>`);
+        console.error('History API error:', err);
       });
   }
 
-  function renderHistoryList(historyData, previousDoa) {
+  function renderHistoryList(historyData, previousDoa, doctorName) {
     const doaHtml = previousDoa ? `
-      <div style="background: #f1f5f9; padding: 10px 15px; border-radius: 6px; margin-bottom: 25px; border-left: 4px solid #3b82f6; display: inline-block;">
-        <span style="font-size: 0.85em; color: #64748b; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 700;">PREVIOUS DOA:</span>
-        <span style="font-size: 1em; color: #1e293b; font-weight: 800; margin-left: 8px;">${previousDoa}</span>
+      <div style="background: #f1f5f9; padding: 10px 15px; border-radius: 6px; margin-bottom: 25px; border-left: 4px solid #3b82f6; display: flex; align-items: center; gap: 20px; flex-wrap: wrap;">
+        <div style="display: flex; align-items: center;">
+          <span style="font-size: 0.85em; color: #64748b; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 700;">PREVIOUS DOA:</span>
+          <span style="font-size: 1em; color: #1e293b; font-weight: 800; margin-left: 8px;">${previousDoa}</span>
+        </div>
+        <div style="height: 15px; width: 1px; background: #cbd5e1;"></div>
+        <div style="display: flex; align-items: center;">
+          <span style="font-size: 0.85em; color: #64748b; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 700;">DOCTOR:</span>
+          <span style="font-size: 1em; color: #1e293b; font-weight: 800; margin-left: 8px;">${esc(doctorName) || 'N/A'}</span>
+        </div>
       </div>
     ` : '';
 
     const html = historyData.map((dateGroup, dateIdx) => {
       const date = formatDate(dateGroup.date);
 
-      // Inside each date, we might have multiple prescriptions.
-      // The user wants ascending order (already handled by backend now, but we verify here)
-      const presHtml = dateGroup.prescriptions.map((pres, presIdx) => {
-        // Requirement: Usage and Ext/Int must be common for session all row
+      // Collect ALL rows from all prescriptions for this date into a single list of rows
+      const allRows = [];
+      dateGroup.prescriptions.forEach((pres) => {
         const allItems = pres.items;
-        // Group items by seq1 (to join them with +)
+        if (!allItems || allItems.length === 0) return;
+
+        // Sort items by seq1 to ensure order (1,1 before 1,2)
+        // Group by seq1
         const seq1Groups = {};
         allItems.forEach(it => {
           const s1 = it.seq1 || 0;
@@ -2448,97 +2458,78 @@ $(function () {
           seq1Groups[s1].push(it);
         });
 
-        const sortedSeq1 = Object.keys(seq1Groups).sort((a, b) => a - b);
+        const sortedSeq1List = Object.keys(seq1Groups).sort((a, b) => Number(a) - Number(b));
 
-        // Combine medicine names with ingredients
-        const medNames = sortedSeq1.map(s1 => {
-          const groupItems = seq1Groups[s1];
-          const names = groupItems.map(it => {
-            let n = `<b>${esc(it.item_name)}</b>`;
-            if (it.ingred) n += `<span style="font-size: 0.8em; color: #888; font-style: italic;"> (${esc(it.ingred)})</span>`;
-            return n;
-          }).join(' + ');
-          return `<div style="margin: 4px 0;">${names}</div>`;
-        }).join('<div style="margin: 4px 0; border-top: 1px dashed #f1f5f9; height: 1px;"></div>');
+        const medCombined = sortedSeq1List.map(s1 => {
+          const g = seq1Groups[s1];
+          const names = g.map(it => esc(it.item_name)).join(' + ');
+          const firstIt = g[0];
+          const dosage = (esc(firstIt.dosage) || '').trim();
+          const uom = (esc(firstIt.uom) || '').trim();
 
-        // Combine dosages
-        const medDosages = sortedSeq1.map(s1 => {
-          const groupItems = seq1Groups[s1];
-          const dosageList = groupItems.map(it => {
-            return `${esc(it.dosage) || '-'} ${esc(it.uom) || ''}`.trim() || '-';
+          let res = `<b>[${names}]</b>`;
+          if (dosage) res += ` ${dosage}`;
+          if (uom) res += ` ${uom}`;
+
+          const allIngreds = g.map(it => it.ingred).filter(ig => {
+            const val = esc(ig).trim();
+            return val !== '' && val !== '-';
           });
-
-          // If all dosages are the same, show only one
-          const uniqueDosages = [...new Set(dosageList)];
-          const displayDosage = uniqueDosages.length === 1 ? uniqueDosages[0] : uniqueDosages.join(' ');
-
-          return `<div style="margin: 4px 0;">${displayDosage}</div>`;
-        }).join('<div style="margin: 4px 0; border-top: 1px dashed #f1f5f9; height: 1px;"></div>');
-
-        // Find common Usage and Ext/Int (take first non-empty)
-        let commonUsage = '-';
-        let commonExtInt = '-';
-        for (const it of allItems) {
-          if (it.usage && it.usage.trim() !== '-' && it.usage.trim() !== '') {
-            commonUsage = it.usage;
-            break;
+          if (allIngreds.length > 0) {
+            const uniqueIngreds = [...new Set(allIngreds)].join(', ');
+            res += `<span style="font-size: 0.8em; color: #888; font-style: italic;"> (${esc(uniqueIngreds)})</span>`;
           }
-        }
-        for (const it of allItems) {
-          if (it.int_ext && it.int_ext.trim() !== '-' && it.int_ext.trim() !== '') {
-            commonExtInt = it.int_ext;
-            break;
-          }
-        }
+          return res;
+        }).join(' + ');
 
-        const extIntLower = (commonExtInt || '').toLowerCase();
+        // Usage & Ext/Int from first item in this prescription session
+        const firstIt = allItems[0];
+        const usage = (esc(firstIt.usage).trim() !== '-' && esc(firstIt.usage).trim() !== '') ? firstIt.usage : '-';
+        const extInt = (esc(firstIt.int_ext).trim() !== '-' && esc(firstIt.int_ext).trim() !== '') ? firstIt.int_ext : '-';
+
+        const extIntLower = (extInt || '').toLowerCase();
         const badgeClass = extIntLower.includes('ext') ? 'bg-info' : (extIntLower.includes('int') ? 'bg-primary' : 'bg-secondary');
 
-        return `
-          <div class="prescription-group-box" style="margin-bottom: 25px; background: #fff; border: 1px solid #edf2f7; border-radius: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.04); overflow: hidden;">
-            <div style="background: #f8fafc; padding: 10px 15px; border-bottom: 1px solid #edf2f7; display: flex; justify-content: space-between; align-items: center;">
-                <span style="font-weight: 800; color: #475569; font-size: 0.85em; text-transform: uppercase; letter-spacing: 0.05em;">
-                  Medicine ${presIdx + 1}
-                </span>
-               <span style="font-weight: 600; color: #1e293b; font-size: 0.8em; display: flex; align-items: center; background: #fff; padding: 4px 12px; border-radius: 20px; border: 1px solid #e2e8f0;">
-                 <i class="fas fa-user-md" style="margin-right: 8px; color: #3b82f6;"></i> ${esc(pres.doctor_name) || 'Unknown Doctor'}
-               </span>
-            </div>
-            <div style="overflow-x: auto;">
-              <table style="width: 100%; border-collapse: collapse;">
-                <thead style="background: #ffffff;">
-                  <tr>
-                    <th style="padding: 12px 15px; text-align: left; color: #94a3b8; font-size: 0.72em; text-transform: uppercase; letter-spacing: 0.08em; border-bottom: 2px solid #f8fafc; width: 45%;">Medicine</th>
-                    <th style="padding: 12px 15px; text-align: center; color: #94a3b8; font-size: 0.72em; text-transform: uppercase; letter-spacing: 0.08em; border-bottom: 2px solid #f8fafc; width: 25%;">Dosage</th>
-                    <th style="padding: 12px 15px; text-align: center; color: #94a3b8; font-size: 0.72em; text-transform: uppercase; letter-spacing: 0.08em; border-bottom: 2px solid #f8fafc; width: 15%;">Usage</th>
-                    <th style="padding: 12px 15px; text-align: center; color: #94a3b8; font-size: 0.72em; text-transform: uppercase; letter-spacing: 0.08em; border-bottom: 2px solid #f8fafc; width: 15%;">Ext/Int</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr>
-                    <td style="padding: 15px; border-bottom: 1px solid #f1f5f9; vertical-align: middle;">
-                      <div style="color: #334155; line-height: 1.5;">${medNames}</div>
-                    </td>
-                    <td style="padding: 15px; border-bottom: 1px solid #f1f5f9; text-align: center; color: #334155; font-weight: 700; vertical-align: middle;">${medDosages}</td>
-                    <td style="padding: 15px; border-bottom: 1px solid #f1f5f9; text-align: center; color: #475569; font-weight: 600; vertical-align: middle;">${esc(commonUsage)}</td>
-                    <td style="padding: 15px; border-bottom: 1px solid #f1f5f9; text-align: center; vertical-align: middle;">
-                      <span class="badge ${badgeClass}" style="font-size: 10px; padding: 5px 10px; border-radius: 6px; text-transform: uppercase; font-weight: 700;">${esc(commonExtInt)}</span>
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
+        allRows.push(`
+          <tr>
+            <td style="padding: 12px 15px; border-bottom: 1px solid #edf2f7; vertical-align: middle;">
+              <div style="color: #334155; line-height: 1.6;">${medCombined}</div>
+            </td>
+            <td style="padding: 12px 15px; border-bottom: 1px solid #edf2f7; text-align: center; color: #475569; font-weight: 600; vertical-align: middle;">${esc(usage)}</td>
+            <td style="padding: 12px 15px; border-bottom: 1px solid #edf2f7; text-align: center; vertical-align: middle;">
+              <span class="badge ${badgeClass}" style="font-size: 10px; padding: 5px 10px; border-radius: 6px; text-transform: uppercase; font-weight: 700;">${esc(extInt)}</span>
+            </td>
+          </tr>
+        `);
+      });
+
+      const tableHtml = `
+        <div style="background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.02); overflow: hidden; margin-bottom: 15px;">
+          <div style="overflow-x: auto;">
+            <table style="width: 100%; border-collapse: collapse;">
+              <thead style="background: #f0f9f1;">
+                <tr>
+                  <th style="padding: 12px 15px; text-align: left; color: #4a5568; font-size: 0.75em; text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 2px solid #e2e8f0; width: 60%;">Medicine</th>
+                  <th style="padding: 12px 15px; text-align: center; color: #4a5568; font-size: 0.75em; text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 2px solid #e2e8f0; width: 25%;">Usage</th>
+                  <th style="padding: 12px 15px; text-align: center; color: #4a5568; font-size: 0.75em; text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 2px solid #e2e8f0; width: 15%;">Ext/Int</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${allRows.join('')}
+              </tbody>
+            </table>
           </div>
-        `;
-      }).join('');
+        </div>
+      `;
 
       return `
-        <div class="history-date-section" style="margin-bottom: 35px; border-left: 4px solid #e2e8f0; padding-left: 20px;">
-          <div style="display: flex; align-items: baseline; margin-bottom: 15px;">
-            <h3 style="font-size: 1.25em; font-weight: 850; color: #1e293b; margin: 0;">${date}</h3>
-            <span style="margin-left: 12px; font-size: 0.8em; color: #94a3b8; font-weight: 600;">(${dateGroup.prescriptions.length} Medicines)</span>
+        <div class="history-date-section" style="margin-bottom: 35px; border-left: 4px solid #48bb78; padding-left: 20px;">
+          <div style="display: flex; align-items: center; margin-bottom: 15px; padding: 6px 12px; background: #f0f9f1; border-radius: 6px; display: inline-flex;">
+            <i class="fas fa-calendar-alt" style="margin-right: 8px; color: #48bb78; font-size: 0.9em;"></i>
+            <span style="font-size: 1.1em; font-weight: 850; color: #1e293b;">${date}</span>
+            <span style="margin-left: 12px; font-size: 0.8em; color: #64748b; font-weight: 600;">(${dateGroup.prescriptions.reduce((acc, p) => acc + p.items.length, 0)} Items)</span>
           </div>
-          ${presHtml}
+          ${tableHtml}
           ${dateIdx < historyData.length - 1 ? '<hr style="border: 0; border-top: 1px dashed #e2e8f0; margin: 30px 0 20px -20px;">' : ''}
         </div>
       `;

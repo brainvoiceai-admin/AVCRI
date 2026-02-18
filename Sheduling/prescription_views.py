@@ -1021,90 +1021,84 @@ def get_previous_prescriptions_api(request):
             # Query the correct table: [dbo].[Prescription]
             # Columns: Rdate, Pat_Reg_No, Pres_Item_Code, etc.
             # Using SELECT * for simplicity to catch all potential columns, then processing in Python
+            # Try iptherapy_db first as it typically has more historical data
             query = """
                 SELECT *
                 FROM [dbo].[Prescription] 
                 WHERE Pat_Reg_No = %s 
                 ORDER BY Rdate DESC
             """
+            # Fallback to Prescribtion table if Prescription fails (some databases use different spelling)
+            fallback_query = """
+                SELECT *
+                FROM [dbo].[Prescribtion] 
+                WHERE Pat_Reg_No = %s 
+                ORDER BY Rdate DESC
+            """
             debug_info['query'] = query
             try:
                 cursor.execute(query, [reg_no_int])
-                if cursor.description:
-                    columns = [col[0] for col in cursor.description]
-                    # Create case-insensitive map for easier access
-                    col_map = {col.lower(): index for index, col in enumerate(columns)}
-                    
-                    raw_rows = cursor.fetchall()
-                    
-                    # Convert raw rows to dict
-                    history_rows = []
-                    for row in raw_rows:
-                        row_dict = {}
-                        # Map known columns
-                        # Date
-                        ctx_idx = col_map.get('rdate')
-                        if ctx_idx is not None: row_dict['Pres_Date'] = row[ctx_idx]
-                        
-                        # Item Code
-                        ctx_idx = col_map.get('pres_item_code')
-                        if ctx_idx is not None: row_dict['Pres_Item_Code'] = row[ctx_idx]
-                        
-                        # Dosage
-                        ctx_idx = col_map.get('pres_item_dosage')
-                        if ctx_idx is not None: row_dict['Pres_Item_Dosage'] = row[ctx_idx]
-                        
-                        # UOM
-                        ctx_idx = col_map.get('pres_item_uom')
-                        if ctx_idx is not None: row_dict['Pres_Item_Uom'] = row[ctx_idx]
-                        
-                        # Usage
-                        ctx_idx = col_map.get('pres_item_usage')
-                        if ctx_idx is not None: row_dict['Pres_Item_Usage'] = row[ctx_idx]
-                        
-                        # Seq (Prescription Number)
-                        ctx_idx = col_map.get('pres_item_seq')
-                        if ctx_idx is not None: row_dict['Pres_Item_Seq'] = row[ctx_idx]
-                        
-                        # Seq1 (Group Number)
-                        ctx_idx = col_map.get('pres_item_seq1')
-                        if ctx_idx is not None: row_dict['Pres_Item_Seq1'] = row[ctx_idx]
-                        
-                        # Ingred
-                        ctx_idx = col_map.get('ingred')
-                        if ctx_idx is not None: row_dict['Ingred'] = row[ctx_idx]
-                        
-                        # Days (might be pres_days or pres_item_days or pres_time_period)
-                        ctx_idx = col_map.get('pres_days') or col_map.get('pres_item_days') or col_map.get('pres_time_period')
-                        if ctx_idx is not None: row_dict['Pres_Days'] = row[ctx_idx]
-                        
-                        # Doctor
-                        ctx_idx = col_map.get('pres_doc_code') or col_map.get('pres_doct_code')
-                        if ctx_idx is not None: 
-                            val = row[ctx_idx]
-                            row_dict['Pres_Doct_Code'] = str(val).strip() if (val is not None and str(val).strip() != '0') else ''
+            except:
+                debug_info['primary_query_failed'] = True
+                cursor.execute(fallback_query, [reg_no_int])
 
-                        # Int/Ext
-                        ctx_idx = col_map.get('pres_int_ext')
-                        if ctx_idx is not None: row_dict['Pres_Int_Ext'] = row[ctx_idx]
+            if cursor.description:
+                columns = [col[0] for col in cursor.description]
+                col_map = {col.lower(): index for index, col in enumerate(columns)}
+                raw_rows = cursor.fetchall()
+            else:
+                raw_rows = []
+                col_map = {}
 
-                        # Start/End/DOD
-                        ctx_idx = col_map.get('pres_from')
-                        if ctx_idx is not None: row_dict['Pres_From'] = row[ctx_idx]
-                        
-                        ctx_idx = col_map.get('pres_to')
-                        if ctx_idx is not None: row_dict['Pres_To'] = row[ctx_idx]
-                        
-                        # DOA (Date of Admission) - Used for filtering current vs past
-                        ctx_idx = col_map.get('doa')
-                        if ctx_idx is not None: row_dict['DOA'] = row[ctx_idx]
+            history_rows = []
+            for row in raw_rows:
+                row_dict = {}
+                # Map known columns
+                ctx_idx = col_map.get('rdate')
+                if ctx_idx is not None: row_dict['Pres_Date'] = row[ctx_idx]
+                
+                ctx_idx = col_map.get('pres_item_code')
+                if ctx_idx is not None: row_dict['Pres_Item_Code'] = row[ctx_idx]
+                
+                ctx_idx = col_map.get('pres_item_dosage')
+                if ctx_idx is not None: row_dict['Pres_Item_Dosage'] = row[ctx_idx]
+                
+                ctx_idx = col_map.get('pres_item_uom')
+                if ctx_idx is not None: row_dict['Pres_Item_Uom'] = row[ctx_idx]
+                
+                ctx_idx = col_map.get('pres_item_usage')
+                if ctx_idx is not None: row_dict['Pres_Item_Usage'] = row[ctx_idx]
+                
+                ctx_idx = col_map.get('pres_item_seq')
+                if ctx_idx is not None: row_dict['Pres_Item_Seq'] = row[ctx_idx]
+                
+                ctx_idx = col_map.get('pres_item_seq1')
+                if ctx_idx is not None: row_dict['Pres_Item_Seq1'] = row[ctx_idx]
+                
+                ctx_idx = col_map.get('ingred')
+                if ctx_idx is not None: row_dict['Ingred'] = row[ctx_idx]
+                
+                ctx_idx = col_map.get('pres_days') or col_map.get('pres_item_days') or col_map.get('pres_time_period')
+                if ctx_idx is not None: row_dict['Pres_Days'] = row[ctx_idx]
+                
+                ctx_idx = col_map.get('pres_doc_code') or col_map.get('pres_doct_code')
+                if ctx_idx is not None: 
+                    val = row[ctx_idx]
+                    row_dict['Pres_Doct_Code'] = str(val).strip() if (val is not None and str(val).strip() != '0') else ''
 
-                        history_rows.append(row_dict)
-                        
-                else:
-                        history_rows = []
-            except Exception as e:
-                debug_info['query_error'] = str(e)
+                ctx_idx = col_map.get('pres_int_ext')
+                if ctx_idx is not None: row_dict['Pres_Int_Ext'] = row[ctx_idx]
+
+                ctx_idx = col_map.get('pres_from')
+                if ctx_idx is not None: row_dict['Pres_From'] = row[ctx_idx]
+                
+                ctx_idx = col_map.get('pres_to')
+                if ctx_idx is not None: row_dict['Pres_To'] = row[ctx_idx]
+                
+                ctx_idx = col_map.get('doa')
+                if ctx_idx is not None: row_dict['DOA'] = row[ctx_idx]
+
+                history_rows.append(row_dict)
 
         # Requirement: Show only the latest PAST admission (exclude current)
         latest_past_doa_val = None
@@ -1236,7 +1230,8 @@ def get_previous_prescriptions_api(request):
                     'prescriptions': {} # pres_item_seq -> { seq, doctor, items: [] }
                 }
             
-            seq = row.get('Pres_Item_Seq', 0)
+            seq_val = row.get('Pres_Item_Seq')
+            seq = int(seq_val) if (seq_val is not None and str(seq_val).isdigit()) else 0
             if seq not in grouped_history[date_str]['prescriptions']:
                 d_code = row.get('Pres_Doct_Code', '')
                 d_name = doctor_map.get(d_code)
@@ -1262,7 +1257,7 @@ def get_previous_prescriptions_api(request):
                 'dosage': row.get('Pres_Item_Dosage') or '',
                 'uom': row.get('Pres_Item_Uom') or '',
                 'usage': row.get('Pres_Item_Usage') or '',
-                'seq1': row.get('Pres_Item_Seq1', 0),
+                'seq1': int(row.get('Pres_Item_Seq1', 0) or 0),
                 'ingred': row.get('Ingred') or '',
                 'duration': row.get('Pres_Days') or '', 
                 'int_ext': row.get('Pres_Int_Ext') or '',
@@ -1297,6 +1292,7 @@ def get_previous_prescriptions_api(request):
             'success': True,
             'data': history_list,
             'previous_doa': doa_display,
+            'doctor_name': patient_doctor_name or "N/A",
             'count': len(history_list),
             'debug': debug_info
         })
@@ -1304,7 +1300,13 @@ def get_previous_prescriptions_api(request):
     except Exception as e:
         import traceback
         error_details = traceback.format_exc()
-        return JsonResponse({'error': str(e), 'traceback': error_details}, status=500)
+        # Return 500 with JSON to help debug
+        return JsonResponse({
+            'success': False,
+            'error': str(e),
+            'traceback': error_details,
+            'debug_info': debug_info
+        }, status=500)
 
 
 @csrf_exempt
@@ -1367,7 +1369,16 @@ def download_prescription_history_api(request):
                 WHERE Pat_Reg_No = %s 
                 ORDER BY Rdate DESC
             """
-            cursor.execute(query, [reg_no_int])
+            fallback_query = """
+                SELECT *
+                FROM [dbo].[Prescribtion] 
+                WHERE Pat_Reg_No = %s 
+                ORDER BY Rdate DESC
+            """
+            try:
+                cursor.execute(query, [reg_no_int])
+            except:
+                cursor.execute(fallback_query, [reg_no_int])
             
             if cursor.description:
                 columns = [col[0] for col in cursor.description]
@@ -1526,7 +1537,8 @@ def download_prescription_history_api(request):
                     'prescriptions': {} # seq -> { seq, items }
                 }
             
-            seq = row.get('Pres_Item_Seq', 0)
+            seq_val = row.get('Pres_Item_Seq')
+            seq = int(seq_val) if (seq_val is not None and str(seq_val).isdigit()) else 0
             if seq not in grouped_history[date_str]['prescriptions']:
                 d_code = str(row.get('Pres_Doct_Code', '')).strip()
                 # If Pres_Docs_Code is empty, try fallback to the record level code (mapped earlier)
@@ -1552,7 +1564,7 @@ def download_prescription_history_api(request):
                 'dosage': row.get('Pres_Item_Dosage') or '',
                 'uom': row.get('Pres_Item_Uom') or '',
                 'usage': row.get('Pres_Item_Usage') or '',
-                'seq1': row.get('Pres_Item_Seq1', 0),
+                'seq1': int(row.get('Pres_Item_Seq1', 0) or 0),
                 'ingred': row.get('Ingred') or '',
                 'duration': row.get('Pres_Days') or '', 
                 'int_ext': row.get('Pres_Int_Ext') or '',
@@ -1579,15 +1591,15 @@ def download_prescription_history_api(request):
             
             ws.append(["Patient Name:", patient_name])
             ws.append(["Previous Admission (DOA):", str(doa_display)])
+            ws.append(["Doctor In-Charge:", str(patient_doctor_name or "N/A")])
             ws.append([])
             
-            headers = ["Date", "Medicine No", "Medicine Name", "Dosage", "Usage", "Ext/Int", "Doctor"]
+            headers = ["Date", "Medicine", "Usage", "Ext/Int"]
             ws.append(headers)
             
             for entry in history_list:
                 date_val = entry['date']
-                for idx, pres in enumerate(entry['prescriptions']):
-                    # Combine ALL items in the session for ONE row as requested
+                for pres in entry['prescriptions']:
                     items = pres['items']
                     if not items: continue
                     
@@ -1598,44 +1610,28 @@ def download_prescription_history_api(request):
                         if s1 not in seq1_map: seq1_map[s1] = []
                         seq1_map[s1].append(it)
                     
-                    sorted_s1 = sorted(seq1_map.keys())
-                    med_rows = []
-                    dos_rows = []
-                    for s1 in sorted_s1:
-                         g_items = seq1_map[s1]
-                         med_rows.append(" + ".join([it['item_name'] for it in g_items]))
-                         
-                         # Dosage de-duplication
-                         dos_list = [f"{it['dosage']} {it['uom']}".strip() or "-" for it in g_items]
-                         unique_dos = list(dict.fromkeys(dos_list)) # Keep order, unique
-                         if len(unique_dos) == 1:
-                             dos_rows.append(unique_dos[0])
-                         else:
-                             dos_rows.append(" ".join(unique_dos))
+                    sorted_s1_list = sorted(seq1_map.keys())
                     
-                    med_str = "\n".join(med_rows)
-                    dos_str = "\n".join(dos_rows)
+                    group_texts = []
+                    for s1 in sorted_s1_list:
+                        g_items = seq1_map[s1]
+                        names = " + ".join([it['item_name'] for it in g_items])
+                        first_it = g_items[0]
+                        dosage = str(first_it.get('dosage') or '').strip()
+                        uom = str(first_it.get('uom') or '').strip()
+                        
+                        g_str = f"[{names}]"
+                        if dosage: g_str += f" {dosage}"
+                        if uom: g_str += f" {uom}"
+                        group_texts.append(g_str)
                     
-                    # Find common Usage and Ext/Int
-                    common_usage = "-"
-                    common_ext_int = "-"
-                    for it in items:
-                        if it.get('usage') and str(it['usage']).strip() not in ['', '-']:
-                            common_usage = it['usage']
-                            break
-                    for it in items:
-                        if it.get('int_ext') and str(it['int_ext']).strip() not in ['', '-']:
-                            common_ext_int = it['int_ext']
-                            break
-                    
+                    combined_med = " + ".join(group_texts)
+                    first_it = items[0]
                     ws.append([
                         date_val,
-                        f"Medicine {idx + 1}",
-                        med_str,
-                        dos_str,
-                        common_usage,
-                        common_ext_int,
-                        pres['doctor_name']
+                        combined_med,
+                        first_it.get('usage') or "-",
+                        first_it.get('int_ext') or "-"
                     ])
                     
             for col in ws.columns:
@@ -1672,720 +1668,99 @@ def download_prescription_history_api(request):
             
             elements.append(Paragraph(f"<b>Patient Name:</b> {patient_name}", styles['Normal']))
             elements.append(Paragraph(f"<b>Registration No:</b> {reg_no}", styles['Normal']))
-            elements.append(Spacer(1, 12))
+            if doa_display:
+                elements.append(Paragraph(f"<b>Previous DOA:</b> {doa_display}", styles['Normal']))
+            if patient_doctor_name:
+                elements.append(Paragraph(f"<b>Doctor In-Charge:</b> {patient_doctor_name}", styles['Normal']))
+            elements.append(Spacer(1, 15))
             
             if not history_list:
                  elements.append(Paragraph("No history found.", styles['Normal']))
             else:
-                # Latest DOA at top
-                if doa_display:
-                    elements.append(Paragraph(f"<b>PREVIOUS DOA: {doa_display}</b>", styles['Normal']))
-                    elements.append(Spacer(1, 15))
 
                 for entry in history_list:
-                    # Date Header
-                    elements.append(Paragraph(f"Date: {entry['date']}", styles['Heading2']))
+                    # Move date label ABOVE each section
+                    elements.append(Paragraph(f"<b>Date: {entry['date']}</b>", styles['Normal']))
+                    elements.append(Spacer(1, 10))
                     
-                    for idx, pres in enumerate(entry['prescriptions']):
-                        elements.append(Paragraph(f"Medicine {idx + 1} (Doctor: {pres['doctor_name'] or 'N/A'})", styles['Heading3']))
-                        
+                    table_data = [["Medicine", "Usage", "Ext/Int"]]
+                    
+                    for pres in entry['prescriptions']:
                         items = pres['items']
                         if not items: continue
 
-                        # Group items by seq1
+                        # Group by seq1
                         seq1_map = {}
                         for it in items:
                             s1 = it.get('seq1', 0)
                             if s1 not in seq1_map: seq1_map[s1] = []
                             seq1_map[s1].append(it)
                         
-                        sorted_s1 = sorted(seq1_map.keys())
-                        med_rows = []
-                        dos_rows = []
-                        for s1 in sorted_s1:
-                             g_items = seq1_map[s1]
-                             
-                             # med row for this s1
-                             med_names_sub = []
-                             for it in g_items:
-                                 mn = f"<b>{it['item_name']}</b>"
-                                 if it.get('ingred'): mn += f" <font size=8 color=grey>({it['ingred']})</font>"
-                                 med_names_sub.append(mn)
-                             med_rows.append(" + ".join(med_names_sub))
-                             
-                             # Dosage de-duplication
-                             dos_list = [f"{it['dosage']} {it['uom']}".strip() or "-" for it in g_items]
-                             unique_dos = list(dict.fromkeys(dos_list))
-                             if len(unique_dos) == 1:
-                                 dos_rows.append(unique_dos[0])
-                             else:
-                                 dos_rows.append(" ".join(unique_dos))
+                        sorted_s1_list = sorted(seq1_map.keys())
                         
-                        med_str = " <br/><hr color=lightgrey/> ".join(med_rows)
-                        dos_str = " <br/><hr color=lightgrey/> ".join(dos_rows)
+                        med_group_paras = []
+                        for s1 in sorted_s1_list:
+                            g_items = seq1_map[s1]
+                            names = " + ".join([it['item_name'] for it in g_items])
+                            
+                            first_it = g_items[0]
+                            dosage = str(first_it.get('dosage') or '').strip()
+                            uom = str(first_it.get('uom') or '').strip()
+                            
+                            m_text = f"<b>[{names}]</b>"
+                            if dosage: m_text += f" {dosage}"
+                            if uom: m_text += f" {uom}"
+                            
+                            # Add ingredients if exists
+                            all_ingreds = [it.get('ingred') for it in g_items if it.get('ingred') and it.get('ingred').strip() not in ['', '-']]
+                            if all_ingreds:
+                                m_text += f" <font size=8 color=grey>({', '.join(list(dict.fromkeys(all_ingreds)))})</font>"
+                            
+                            med_group_paras.append(m_text)
                         
-                        # Find common Usage and Ext/Int
-                        common_usage = "-"
-                        common_ext_int = "-"
-                        for it in items:
-                            if it.get('usage') and str(it['usage']).strip() not in ['', '-']:
-                                common_usage = it['usage']
-                                break
-                        for it in items:
-                            if it.get('int_ext') and str(it['int_ext']).strip() not in ['', '-']:
-                                common_ext_int = it['int_ext']
-                                break
+                        # Use styles['Normal'] and adjust font size for table cells
+                        cell_style = styles['Normal']
+                        cell_style.fontSize = 8
+                        cell_style.leading = 10
                         
-                        table_data = [
-                            ["Medicine", "Dosage", "Usage", "Ext/Int"],
-                            [
-                                Paragraph(med_str, styles['Normal']),
-                                Paragraph(dos_str, styles['Normal']),
-                                common_usage,
-                                common_ext_int
-                            ]
-                        ]
+                        med_names_para = Paragraph(" + ".join(med_group_paras), cell_style)
                         
-                        if len(table_data) > 1:
-                            t = Table(table_data, colWidths=[3.2*inch, 1.5*inch, 1.0*inch, 0.7*inch])
-                            t.setStyle(TableStyle([
-                                ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
-                                ('TEXTCOLOR', (0, 0), (-1, 0), colors.black),
-                                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-                                ('ALIGN', (1, 0), (-1, 0), 'CENTER'),
-                                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                                ('BOTTOMPADDING', (0, 0), (-1, 0), 6),
-                                ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
-                                ('FONTSIZE', (0, 0), (-1, -1), 9),
-                                ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-                            ]))
-                            elements.append(t)
-                        elements.append(Spacer(1, 15))
-                    elements.append(Spacer(1, 10))
-            
-            doc.build(elements)
-            pdf = buffer.getvalue()
-            buffer.close()
-            
-            response = HttpResponse(content_type='application/pdf')
-            response['Content-Disposition'] = f'attachment; filename="prescription_history_{reg_no}.pdf"'
-            response.write(pdf)
-            return response
-            
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        return HttpResponse(f"Error generating download: {str(e)}", status=500)
-    """
-    API to download previous prescription history as PDF or Excel.
-    Uses raw cursor to avoid issues with legacy table Primary Keys.
-    """
-    try:
-        from MySql_Data_pull.models import ItemMaster, Registration
-        from django.db import connections
-        
-        patient_id = request.GET.get('patient_id')
-        reg_no_param = request.GET.get('registration_no')
-        download_format = request.GET.get('format', 'pdf').lower()
-        
-        # Determine registration number
-        reg_no = None
-        patient_name = "Unknown"
-        
-        if reg_no_param:
-            reg_no = reg_no_param
-        elif patient_id:
-            try:
-                from .models import PatientSnapshot
-                patient = PatientSnapshot.objects.get(pk=patient_id)
-                reg_no = patient.pat_reg_no
-                patient_name = patient.pat_name
-            except Exception:
-                pass
-        
-        if not reg_no:
-            return HttpResponse("Could not determine registration number", status=400)
+                        # Usage & Ext/Int from first in group
+                        first_it = items[0]
+                        usage_text = first_it.get('usage') or "-"
+                        ext_int_text = first_it.get('int_ext') or "-"
+                        
+                        # Wrap usage in Paragraph to prevent overlapping
+                        usage_para = Paragraph(usage_text, cell_style)
+                        ext_int_para = Paragraph(ext_int_text, cell_style)
 
-        # Clean reg_no
-        try:
-            reg_no_int = int(''.join(filter(str.isdigit, str(reg_no))))
-        except ValueError:
-            return HttpResponse("Invalid registration number format", status=400)
-
-        # Get patient name if only reg_no provided
-        if patient_name == "Unknown":
-             try:
-                reg_pat = Registration.objects.using('therapy_db').filter(pat_reg_no=reg_no_int).first()
-                if reg_pat:
-                    patient_name = reg_pat.pat_name
-             except:
-                 pass
-            
-        # Fetch prescriptions using raw cursor
-        history_rows = []
-        with connections['therapy_db'].cursor() as cursor:
-            # Select necessary columns from correct table
-            query = """
-                SELECT 
-                    Pres_Date, Pres_Item_Code, Pres_Item_Dosage, Pres_Item_Uom, 
-                    Pres_Item_Usage, Pres_Days, Pres_Doct_Code
-                FROM [dbo].[Prescribtion] 
-                WHERE Pres_Reg_No = %s 
-                ORDER BY Pres_Date DESC
-            """
-            cursor.execute(query, [reg_no_int])
-            columns = [col[0] for col in cursor.description]
-            history_rows = [
-                dict(zip(columns, row))
-                for row in cursor.fetchall()
-            ]
-        
-        item_codes = set()
-        for row in history_rows:
-            if row.get('Pres_Item_Code'):
-                item_codes.add(str(row['Pres_Item_Code']))
-                
-        item_map = {}
-        if item_codes:
-            items = ItemMaster.objects.using('therapy_db').filter(item_code__in=list(item_codes))
-            for item in items:
-                item_map[str(item.item_code).strip()] = item.item_name
-                
-        grouped_history = {}
-        for row in history_rows:
-            rdate = row.get('Pres_Date')
-            if not rdate:
-                continue
-
-            # handle datetime object or string
-            if isinstance(rdate, str):
-                 try:
-                     date_str = rdate.split(' ')[0]
-                 except:
-                     date_str = str(rdate)
-            else:
-                date_str = rdate.strftime('%Y-%m-%d')
-
-            if date_str not in grouped_history:
-                grouped_history[date_str] = {
-                    'date': date_str,
-                    'items': []
-                }
-            item_code_str = str(row.get('Pres_Item_Code')).strip()
-            item_name = item_map.get(item_code_str, f"Item {item_code_str}")
-            grouped_history[date_str]['items'].append({
-                'item_name': item_name,
-                'dosage': row.get('Pres_Item_Dosage') or '',
-                'uom': row.get('Pres_Item_Uom') or '',
-                'usage': row.get('Pres_Item_Usage') or '',
-                'duration': row.get('Pres_Days') or '', 
-                'int_ext': '' 
-            })
-            
-        history_list = list(grouped_history.values())
-        history_list.sort(key=lambda x: x['date'], reverse=True)
-
-        if download_format == 'excel':
-            import openpyxl
-            # Generate Excel
-            wb = openpyxl.Workbook()
-            ws = wb.active
-            ws.title = "Prescription History"
-            
-            # Header
-            ws.append(["Patient Name:", patient_name])
-            ws.append(["Registration No:", str(reg_no)])
-            ws.append([])
-            
-            # Column Headers
-            headers = ["Date", "Medicine Name", "Dosage", "UOM", "Usage", "Ext/Int"]
-            ws.append(headers)
-            
-            # Data
-            for entry in history_list:
-                date_val = entry['date']
-                for item in entry['items']:
-                    ws.append([
-                        date_val,
-                        item['item_name'],
-                        item['dosage'],
-                        item['uom'],
-                        item['usage'],
-                        item['int_ext']
-                    ])
-            
-            # Auto-adjust column width (simple approx)
-            for col in ws.columns:
-                max_length = 0
-                column = col[0].column_letter
-                for cell in col:
-                    try:
-                        if len(str(cell.value)) > max_length:
-                            max_length = len(str(cell.value))
-                    except:
-                        pass
-                adjusted_width = (max_length + 2)
-                ws.column_dimensions[column].width = adjusted_width
-                
-            response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-            response['Content-Disposition'] = f'attachment; filename="prescription_history_{reg_no}.xlsx"'
-            wb.save(response)
-            return response
-            
-        else:
-            from reportlab.lib import colors
-            from reportlab.lib.pagesizes import letter
-            from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
-            from reportlab.lib.styles import getSampleStyleSheet
-            from reportlab.lib.units import inch
-            import io
-            
-            # Generate PDF
-            buffer = io.BytesIO()
-            doc = SimpleDocTemplate(buffer, pagesize=letter)
-            elements = []
-            styles = getSampleStyleSheet()
-            
-            # Title
-            title_style = styles['Heading1']
-            title_style.alignment = 1 # Center
-            elements.append(Paragraph("Prescription History", title_style))
-            elements.append(Spacer(1, 12))
-            
-            # Patient Info
-            elements.append(Paragraph(f"<b>Patient Name:</b> {patient_name}", styles['Normal']))
-            elements.append(Paragraph(f"<b>Registration No:</b> {reg_no}", styles['Normal']))
-            elements.append(Spacer(1, 12))
-            
-            if not history_list:
-                 elements.append(Paragraph("No history found.", styles['Normal']))
-            else:
-                for entry in history_list:
-                    # Date Header
-                    elements.append(Paragraph(f"<b>Date: {entry['date']}</b>", styles['Heading3']))
-                    
-                    # Table for items
-                    table_data = [["Medicine Name", "Dosage", "UOM", "Usage", "Ext/Int"]]
-                    for item in entry['items']:
                         table_data.append([
-                            item['item_name'],
-                            item['dosage'],
-                            item['uom'],
-                            item['usage'],
-                            item['int_ext']
+                            med_names_para,
+                            usage_para,
+                            ext_int_para
                         ])
                     
-                    t = Table(table_data, colWidths=[2.5*inch, 1*inch, 0.8*inch, 1.2*inch, 0.8*inch])
-                    t.setStyle(TableStyle([
-                        ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
-                        ('TEXTCOLOR', (0, 0), (-1, 0), colors.black),
-                        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-                        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                        ('BOTTOMPADDING', (0, 0), (-1, 0), 6),
-                        ('GRID', (0, 0), (-1, -1), 1, colors.black),
-                        ('FONTSIZE', (0, 0), (-1, -1), 9),
-                    ]))
-                    elements.append(t)
-                    elements.append(Spacer(1, 12))
-            
-            doc.build(elements)
-            pdf = buffer.getvalue()
-            buffer.close()
-            
-            response = HttpResponse(content_type='application/pdf')
-            response['Content-Disposition'] = f'attachment; filename="prescription_history_{reg_no}.pdf"'
-            response.write(pdf)
-            return response
-            
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        return HttpResponse(f"Error generating download: {str(e)}", status=500)
-        
-        # Determine registration number
-        reg_no = None
-        patient_name = "Unknown"
-        
-        if reg_no_param:
-            reg_no = reg_no_param
-        elif patient_id:
-            try:
-                from .models import PatientSnapshot
-                patient = PatientSnapshot.objects.get(pk=patient_id)
-                reg_no = patient.pat_reg_no
-                patient_name = patient.pat_name
-            except Exception:
-                pass
-        
-        if not reg_no:
-            return HttpResponse("Could not determine registration number", status=400)
-
-        # Clean reg_no
-        try:
-            reg_no_int = int(''.join(filter(str.isdigit, str(reg_no))))
-        except ValueError:
-            return HttpResponse("Invalid registration number format", status=400)
-
-        # Get patient name if only reg_no provided
-        if patient_name == "Unknown":
-             try:
-                reg_pat = Registration.objects.using('therapy_db').filter(pat_reg_no=reg_no_int).first()
-                if reg_pat:
-                    patient_name = reg_pat.pat_name
-             except:
-                 pass
-            
-        # Fetch prescriptions using raw cursor
-        history_rows = []
-        with connections['therapy_db'].cursor() as cursor:
-            # Select necessary columns
-            query = """
-                SELECT 
-                    Rdate, Pres_Item_Code, Pres_Item_Dosage, Pres_Item_Uom, 
-                    Pres_Item_Usage, Pres_Int_Ext, Pres_Time_Period, Pres_Doc_Code
-                FROM [dbo].[Prescription] 
-                WHERE Pat_Reg_No = %s 
-                ORDER BY Rdate DESC
-            """
-            cursor.execute(query, [reg_no_int])
-            columns = [col[0] for col in cursor.description]
-            history_rows = [
-                dict(zip(columns, row))
-                for row in cursor.fetchall()
-            ]
-        
-        item_codes = set()
-        for row in history_rows:
-            if row.get('Pres_Item_Code'):
-                item_codes.add(str(row['Pres_Item_Code']))
-                
-        item_map = {}
-        if item_codes:
-            items = ItemMaster.objects.using('therapy_db').filter(item_code__in=list(item_codes))
-            for item in items:
-                item_map[str(item.item_code).strip()] = item.item_name
-                
-        grouped_history = {}
-        for row in history_rows:
-            rdate = row.get('Rdate')
-            if not rdate:
-                continue
-
-            # handle datetime object or string
-            if isinstance(rdate, str):
-                 try:
-                     date_str = rdate.split(' ')[0]
-                 except:
-                     date_str = str(rdate)
-            else:
-                date_str = rdate.strftime('%Y-%m-%d')
-
-            if date_str not in grouped_history:
-                grouped_history[date_str] = {
-                    'date': date_str,
-                    'items': []
-                }
-            item_code_str = str(row.get('Pres_Item_Code')).strip()
-            item_name = item_map.get(item_code_str, f"Item {item_code_str}")
-            grouped_history[date_str]['items'].append({
-                'item_name': item_name,
-                'dosage': row.get('Pres_Item_Dosage') or '',
-                'uom': row.get('Pres_Item_Uom') or '',
-                'usage': row.get('Pres_Item_Usage') or '',
-                'duration': row.get('Pres_Time_Period') or '', 
-                'int_ext': row.get('Pres_Int_Ext') or ''
-            })
-            
-        history_list = list(grouped_history.values())
-        history_list.sort(key=lambda x: x['date'], reverse=True)
-
-        if download_format == 'excel':
-            # Generate Excel
-            wb = openpyxl.Workbook()
-            ws = wb.active
-            ws.title = "Prescription History"
-            
-            # Header
-            ws.append(["Patient Name:", patient_name])
-            ws.append(["Registration No:", str(reg_no)])
-            ws.append([])
-            
-            # Column Headers
-            headers = ["Date", "Medicine Name", "Dosage", "UOM", "Usage", "Ext/Int"]
-            ws.append(headers)
-            
-            # Data
-            for entry in history_list:
-                date_val = entry['date']
-                for item in entry['items']:
-                    ws.append([
-                        date_val,
-                        item['item_name'],
-                        item['dosage'],
-                        item['uom'],
-                        item['usage'],
-                        item['int_ext']
-                    ])
-            
-            # Auto-adjust column width (simple approx)
-            for col in ws.columns:
-                max_length = 0
-                column = col[0].column_letter
-                for cell in col:
-                    try:
-                        if len(str(cell.value)) > max_length:
-                            max_length = len(str(cell.value))
-                    except:
-                        pass
-                adjusted_width = (max_length + 2)
-                ws.column_dimensions[column].width = adjusted_width
-                
-            response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-            response['Content-Disposition'] = f'attachment; filename="prescription_history_{reg_no}.xlsx"'
-            wb.save(response)
-            return response
-            
-        else:
-            # Generate PDF
-            buffer = io.BytesIO()
-            doc = SimpleDocTemplate(buffer, pagesize=letter)
-            elements = []
-            styles = getSampleStyleSheet()
-            
-            # Title
-            title_style = styles['Heading1']
-            title_style.alignment = 1 # Center
-            elements.append(Paragraph("Prescription History", title_style))
-            elements.append(Spacer(1, 12))
-            
-            # Patient Info
-            elements.append(Paragraph(f"<b>Patient Name:</b> {patient_name}", styles['Normal']))
-            elements.append(Paragraph(f"<b>Registration No:</b> {reg_no}", styles['Normal']))
-            elements.append(Spacer(1, 12))
-            
-            if not history_list:
-                 elements.append(Paragraph("No history found.", styles['Normal']))
-            else:
-                for entry in history_list:
-                    # Date Header
-                    elements.append(Paragraph(f"<b>Date: {entry['date']}</b>", styles['Heading3']))
-                    
-                    # Table for items
-                    table_data = [["Medicine Name", "Dosage", "UOM", "Usage", "Ext/Int"]]
-                    for item in entry['items']:
-                        table_data.append([
-                            item['item_name'],
-                            item['dosage'],
-                            item['uom'],
-                            item['usage'],
-                            item['int_ext']
-                        ])
-                    
-                    t = Table(table_data, colWidths=[2.5*inch, 1*inch, 0.8*inch, 1.2*inch, 0.8*inch])
-                    t.setStyle(TableStyle([
-                        ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
-                        ('TEXTCOLOR', (0, 0), (-1, 0), colors.black),
-                        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-                        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                        ('BOTTOMPADDING', (0, 0), (-1, 0), 6),
-                        ('GRID', (0, 0), (-1, -1), 1, colors.black),
-                        ('FONTSIZE', (0, 0), (-1, -1), 9),
-                    ]))
-                    elements.append(t)
-                    elements.append(Spacer(1, 12))
-            
-            doc.build(elements)
-            pdf = buffer.getvalue()
-            buffer.close()
-            
-            response = HttpResponse(content_type='application/pdf')
-            response['Content-Disposition'] = f'attachment; filename="prescription_history_{reg_no}.pdf"'
-            response.write(pdf)
-            return response
-            
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        return HttpResponse(f"Error generating download: {str(e)}", status=500)
-    """
-    API to download previous prescription history as PDF or Excel.
-    """
-    try:
-        from MySql_Data_pull.models import Prescription, ItemMaster
-        from MySql_Data_pull.models import Prescription as SqlPrescription
-        
-        patient_id = request.GET.get('patient_id')
-        reg_no_param = request.GET.get('registration_no')
-        download_format = request.GET.get('format', 'pdf').lower()
-        
-        # Determine registration number
-        reg_no = None
-        patient_name = "Unknown"
-        
-        if reg_no_param:
-            reg_no = reg_no_param
-        elif patient_id:
-            try:
-                from .models import PatientSnapshot
-                patient = PatientSnapshot.objects.get(pk=patient_id)
-                reg_no = patient.pat_reg_no
-                patient_name = patient.pat_name
-            except Exception:
-                pass
-        
-        if not reg_no:
-            return HttpResponse("Could not determine registration number", status=400)
-
-        # Get patient name if only reg_no provided
-        if patient_name == "Unknown":
-             try:
-                from MySql_Data_pull.models import Registration
-                reg_no_int = int(''.join(filter(str.isdigit, str(reg_no))))
-                reg_pat = Registration.objects.using('therapy_db').filter(pat_reg_no=reg_no_int).first()
-                if reg_pat:
-                    patient_name = reg_pat.pat_name
-             except:
-                 pass
-
-        # Fetch data similar to API
-        try:
-            reg_no_int = int(''.join(filter(str.isdigit, str(reg_no))))
-        except ValueError:
-            return HttpResponse("Invalid registration number format", status=400)
-            
-        prescriptions_qs = SqlPrescription.objects.using('therapy_db').filter(
-            pat_reg_no=reg_no_int
-        ).order_by('-rdate', '-rtime')
-        
-        item_codes = set()
-        for p in prescriptions_qs:
-            if p.pres_item_code:
-                item_codes.add(str(p.pres_item_code))
-                
-        item_map = {}
-        if item_codes:
-            items = ItemMaster.objects.using('therapy_db').filter(item_code__in=list(item_codes))
-            for item in items:
-                item_map[str(item.item_code).strip()] = item.item_name
-                
-        grouped_history = {}
-        for p in prescriptions_qs:
-            if not p.rdate:
-                continue
-            date_str = p.rdate.strftime('%Y-%m-%d')
-            if date_str not in grouped_history:
-                grouped_history[date_str] = {
-                    'date': date_str,
-                    'items': []
-                }
-            item_code_str = str(p.pres_item_code).strip()
-            item_name = item_map.get(item_code_str, f"Item {item_code_str}")
-            grouped_history[date_str]['items'].append({
-                'item_name': item_name,
-                'dosage': p.pres_item_dosage or '',
-                'uom': p.pres_item_uom or '',
-                'usage': p.pres_item_usage or '',
-                'days': getattr(p, 'no_of_days', '') or '', # Check if it exists
-                'int_ext': p.pres_int_ext or ''
-            })
-            
-        history_list = list(grouped_history.values())
-        history_list.sort(key=lambda x: x['date'], reverse=True)
-
-        if download_format == 'excel':
-            # Generate Excel
-            wb = openpyxl.Workbook()
-            ws = wb.active
-            ws.title = "Prescription History"
-            
-            # Header
-            ws.append(["Patient Name:", patient_name])
-            ws.append(["Registration No:", str(reg_no)])
-            ws.append([])
-            
-            # Column Headers
-            headers = ["Date", "Medicine Name", "Dosage", "UOM", "Usage", "Ext/Int"]
-            ws.append(headers)
-            
-            # Data
-            for entry in history_list:
-                date_val = entry['date']
-                for item in entry['items']:
-                    ws.append([
-                        date_val,
-                        item['item_name'],
-                        item['dosage'],
-                        item['uom'],
-                        item['usage'],
-                        item['int_ext']
-                    ])
-            
-            # Auto-adjust column width (simple approx)
-            for col in ws.columns:
-                max_length = 0
-                column = col[0].column_letter
-                for cell in col:
-                    try:
-                        if len(str(cell.value)) > max_length:
-                            max_length = len(str(cell.value))
-                    except:
-                        pass
-                adjusted_width = (max_length + 2)
-                ws.column_dimensions[column].width = adjusted_width
-                
-            response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-            response['Content-Disposition'] = f'attachment; filename="prescription_history_{reg_no}.xlsx"'
-            wb.save(response)
-            return response
-            
-        else:
-            # Generate PDF
-            buffer = io.BytesIO()
-            doc = SimpleDocTemplate(buffer, pagesize=letter)
-            elements = []
-            styles = getSampleStyleSheet()
-            
-            # Title
-            title_style = styles['Heading1']
-            title_style.alignment = 1 # Center
-            elements.append(Paragraph("Prescription History", title_style))
-            elements.append(Spacer(1, 12))
-            
-            # Patient Info
-            elements.append(Paragraph(f"<b>Patient Name:</b> {patient_name}", styles['Normal']))
-            elements.append(Paragraph(f"<b>Registration No:</b> {reg_no}", styles['Normal']))
-            elements.append(Spacer(1, 12))
-            
-            if not history_list:
-                 elements.append(Paragraph("No history found.", styles['Normal']))
-            else:
-                for entry in history_list:
-                    # Date Header
-                    elements.append(Paragraph(f"<b>Date: {entry['date']}</b>", styles['Heading3']))
-                    
-                    # Table for items
-                    table_data = [["Medicine Name", "Dosage", "UOM", "Usage", "Ext/Int"]]
-                    for item in entry['items']:
-                        table_data.append([
-                            item['item_name'],
-                            item['dosage'],
-                            item['uom'],
-                            item['usage'],
-                            item['int_ext']
-                        ])
-                    
-                    t = Table(table_data, colWidths=[2.5*inch, 1*inch, 0.8*inch, 1.2*inch, 0.8*inch])
-                    t.setStyle(TableStyle([
-                        ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
-                        ('TEXTCOLOR', (0, 0), (-1, 0), colors.black),
-                        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-                        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                        ('BOTTOMPADDING', (0, 0), (-1, 0), 6),
-                        ('GRID', (0, 0), (-1, -1), 1, colors.black),
-                        ('FONTSIZE', (0, 0), (-1, -1), 9),
-                    ]))
-                    elements.append(t)
-                    elements.append(Spacer(1, 12))
+                    if len(table_data) > 1:
+                        # Slightly adjusted widths for better distribution
+                        # Total width: 4.5 + 1.2 + 0.8 = 6.5 inch (fits well on letter with 1 inch margins)
+                        t = Table(table_data, colWidths=[4.5*inch, 1.2*inch, 0.8*inch])
+                        t.setStyle(TableStyle([
+                            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#f0f9f1')),
+                            ('TEXTCOLOR', (0, 0), (-1, 0), colors.black),
+                            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                            ('ALIGN', (1, 0), (-1, -1), 'LEFT'),  # Centered usage often causes issues with wrapping
+                            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                            ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
+                            ('TOPPADDING', (1, 0), (-1, -1), 10),
+                            ('BOTTOMPADDING', (1, 0), (-1, -1), 10),
+                            ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+                            ('FONTSIZE', (0, 0), (-1, -1), 8),
+                            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                            ('LEFTPADDING', (0, 0), (-1, -1), 8),
+                            ('RIGHTPADDING', (0, 0), (-1, -1), 8),
+                        ]))
+                        elements.append(t)
+                        elements.append(Spacer(1, 20))
             
             doc.build(elements)
             pdf = buffer.getvalue()
