@@ -172,6 +172,8 @@ AUTH_PASSWORD_VALIDATORS = [
 LANGUAGE_CODE = 'en-us'
 
 TIME_ZONE = 'UTC'
+# Timezone for audit log report display (HTML, CSV, PDF). Use local timezone so timestamps show correct time.
+AUDIT_LOG_DISPLAY_TIMEZONE = os.getenv('AUDIT_LOG_DISPLAY_TIMEZONE', 'Asia/Kolkata')
 
 USE_I18N = True
 
