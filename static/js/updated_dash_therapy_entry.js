@@ -14,18 +14,31 @@ $(function () {
   function esc(s) { return String(s || ''); }
   function getDateRange(from, to) { const out = []; let cur = new Date(from + 'T00:00:00'), end = new Date(to + 'T00:00:00'); while (cur <= end) { out.push(cur.toISOString().slice(0, 10)); cur.setDate(cur.getDate() + 1); } return out; }
   function getCookie(name) { let v = document.cookie.match('(^|;)\\s*' + name + '\\s*=\\s*([^;]+)'); return v ? v.pop() : ''; }
-  function parseUsageInput(raw) {
-    if (!raw) return [];
-    return raw
-      .split(/[\n,]+/)
-      .map(u => (u || '').trim())
-      .filter(Boolean);
+  function toYYYYMMDD(d) {
+    if (!d) return '';
+    const s = String(d).trim();
+    // Support YYYY-MM-DD, YYYY/MM/DD, DD-MM-YYYY, DD/MM/YYYY
+    const ymd = s.match(/^(\d{4})[/-](\d{1,2})[/-](\d{1,2})/);
+    if (ymd) return `${ymd[1]}-${String(ymd[2]).padStart(2, '0')}-${String(ymd[3]).padStart(2, '0')}`;
+    const dmy = s.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})/);
+    if (dmy) return `${dmy[3]}-${String(dmy[2]).padStart(2, '0')}-${String(dmy[1]).padStart(2, '0')}`;
+    // Handle ISO strings with time
+    if (s.includes('T')) return s.split('T')[0];
+    if (s.length >= 10 && s.includes('-')) return s.slice(0, 10);
+    return s;
   }
-  function buildUsageTextFromData(data) {
-    if (!data) return '';
-    if (typeof data === 'string') return data;
-    if (Array.isArray(data)) return data.join(', ');
-    return '';
+
+  function parseUsageInput(s) {
+    if (!s) return [];
+    if (Array.isArray(s)) return s;
+    const str = String(s);
+    return str.split(',').map(u => u.trim()).filter(Boolean);
+  }
+
+  function buildUsageTextFromData(u) {
+    if (!u) return '';
+    if (Array.isArray(u)) return u.join(', ');
+    return String(u);
   }
 
   // Load UnitNo options from master table
@@ -118,21 +131,25 @@ $(function () {
   }
   function decorateTherapyList(list) {
     return (list || []).map(t => {
-      // Try multiple key formats to match what we stored
       const key1 = t.allocation_id ? String(t.allocation_id) : null;
       const key2 = t.id ? String(t.id) : null;
       const key3 = t.therapy_code ? String(t.therapy_code) : null;
       const remembered = (key1 && therapyActionById[key1]) ||
         (key2 && therapyActionById[key2]) ||
         (key3 && therapyActionById[key3]) || '';
-      // Only use derived from server if it's 'cancelled' (server knows cancellation state)
-      // Otherwise, ignore server's last_action and use remembered or default to 'added'
-      const derived = (t.status === 'cancelled' ? 'cancelled' : '') ||
-        (t.last_action === 'cancelled' ? 'cancelled' : '');
-      // Priority: remembered > derived (only cancelled) > default to 'added' for new therapies
-      // If no remembered action and not cancelled, ALWAYS default to 'added' (blue)
-      let finalAction = remembered || derived;
-      return { ...t, last_action: finalAction };
+
+      const s = String(t.status || '').trim().toLowerCase();
+      const hasCancellations = t.cancelled_date_from && t.cancelled_date_to && t.cancelled_date_from !== 'null';
+
+      let derived = '';
+      if (s === 'cancelled' || s === 'failed' || hasCancellations) {
+        derived = 'cancelled';
+      } else {
+        derived = 'added'; // DEFAULT = Blue
+      }
+
+      const action = remembered || derived;
+      return { ...t, last_action: action };
     });
   }
 
@@ -442,7 +459,7 @@ $(function () {
 
     // Load patient therapies - this will refresh the entire therapy list
     // Use pat_reg_no consistently (or pat_op_reg_no if pat_reg_no doesn't exist)
-    const patientRegNo = patient.pat_reg_no || patient.pat_op_reg_no;
+    const patientRegNo = selectedPatient.pat_reg_no || selectedPatient.pat_op_reg_no;
     ajax({ action: 'patient_therapies', patient_reg_no: patientRegNo }).then(list => {
       // Completely replace therapies list with new patient's data
       addedTherapies = decorateTherapyList(list);
@@ -755,23 +772,18 @@ $(function () {
 
   // Intercept Select2 Unselect (Item Removal from Group Builder)
   $itemBuilder.on('select2:unselecting', function (e) {
-    e.preventDefault();
+    // Removal of single item should NOT show confirmation popup
     const data = (e.params.args && e.params.args.data) || e.params.data;
     const itemId = data.id;
-    showConfirm(
-      "Confirm Removal",
-      "Are you sure you want to remove this medicine from the group?\nThis action cannot be undone.",
-      "Yes, Remove",
-      function () {
-        // Manually remove item
-        let currentInfo = $itemBuilder.val() || [];
-        if (!Array.isArray(currentInfo)) currentInfo = [currentInfo];
-        const newValue = currentInfo.filter(x => x !== itemId);
-        $itemBuilder.val(newValue).trigger('change');
-        // Manually trigger update logic
-        setTimeout(updateUnitFromSelectedItems, 0);
-      }
-    );
+
+    // Manually remove item immediately
+    let currentInfo = $itemBuilder.val() || [];
+    if (!Array.isArray(currentInfo)) currentInfo = [currentInfo];
+    const newValue = currentInfo.filter(x => x !== itemId);
+    $itemBuilder.val(newValue).trigger('change');
+
+    // Manually trigger update logic
+    setTimeout(updateUnitFromSelectedItems, 0);
   });
 
   // Autofill unit from Item Master UOM when therapy item(s) are selected
@@ -1124,57 +1136,23 @@ $(function () {
   });
 
   // Build color class for today's status:
-  // - Added  -> blue
   // - Updated -> yellow
   // - Resumed -> green
   // - Cancelled -> red (only if fully cancelled today)
   function getTodayTherapyColorClass(t) {
     if (!t) return '';
-    const today = new Date().toISOString().slice(0, 10);
-
-    // Treat a therapy as "cancelled for today" only if today's date lies entirely
-    // inside its cancelled range, and the main range covers today.
-    const inMainRange =
-      t.from_date && t.to_date &&
-      today >= String(t.from_date) && today <= String(t.to_date);
-
-    if (!inMainRange) {
-      return '';
+    // Priority 1: Session Action
+    const action = String(t.last_action || '').toLowerCase().trim();
+    if (action && action !== '' && action !== 'null' && action !== 'undefined') {
+      return 'action-' + action;
     }
 
-    // Get the last action - this is the CURRENT state set by user actions
-    const lastAction = String(t.last_action || '').toLowerCase().trim();
+    // Priority 2: Status-based derivation
+    const s = String(t.status || '').trim().toLowerCase();
+    const hasCancellations = t.cancelled_date_from && t.cancelled_date_to && t.cancelled_date_from !== 'null';
+    if (s === 'cancelled' || s === 'failed' || hasCancellations) return 'action-cancelled';
 
-    // PRIORITY 1: If last_action is explicitly set, it ALWAYS wins
-    // This ensures Cancel → Resume → Cancel works correctly
-    if (lastAction === 'cancelled') return 'action-cancelled';
-    if (lastAction === 'resumed') return 'action-resumed';
-    if (lastAction === 'updated') return 'action-updated';
-    if (lastAction === 'added') return 'action-added';
-
-    // PRIORITY 2: Fall back to checking if today is in cancelled range
-    const inCancelledRange =
-      t.cancelled_date_from && t.cancelled_date_to &&
-      t.cancelled_date_from !== 'null' && t.cancelled_date_to !== 'null' &&
-      today >= String(t.cancelled_date_from) && today <= String(t.cancelled_date_to);
-
-    if (inCancelledRange) {
-      return 'action-cancelled';
-    }
-
-    // PRIORITY 3: Check timestamps from server for "today" actions (only if no last_action)
-    const isTodayResumed = t.resumed_at && t.resumed_at.slice(0, 10) === today;
-    const isTodayCancelled = t.cancelled_at && t.cancelled_at.slice(0, 10) === today;
-    const isTodayUpdated = t.updated_at && t.updated_at.slice(0, 10) === today &&
-      t.updated_at !== t.created_at;
-    const isTodayAdded = t.created_at && t.created_at.slice(0, 10) === today;
-
-    if (isTodayResumed) return 'action-resumed';
-    if (isTodayCancelled) return 'action-cancelled';
-    if (isTodayUpdated) return 'action-updated';
-    if (isTodayAdded) return 'action-added';
-
-    return '';
+    return 'action-added';
   }
 
   // render therapies table
@@ -1289,7 +1267,7 @@ $(function () {
       }
 
       const rowActionClass = getTodayTherapyColorClass(t);
-      const row = `<tr class="${statusClass} ${rowActionClass}">
+      const row = `<tr class="${rowActionClass}">
         <td>${i + 1}</td>
         <td>${esc(t.therapy_name)}</td>
         <td>${therapyUsageDisplay !== '—' ? esc(therapyUsageDisplay) : '—'}</td>
@@ -1629,18 +1607,9 @@ $(function () {
     t.status = 'cancelled';
     t.cancellation_reason = reason;
 
-    // Only set last_action to 'cancelled' if TODAY is in the cancelled range
-    // This ensures cancelling future dates doesn't turn the row red
-    const today = new Date().toISOString().slice(0, 10);
-    const todayIsCancelled = today >= cfrom && today <= cto;
-
-    if (todayIsCancelled) {
-      // Today is cancelled - turn row RED
-      t.last_action = 'cancelled';
-      rememberTherapyAction(t.allocation_id || t.therapy_code || t.id, 'cancelled');
-    }
-    // If today is NOT cancelled, don't change last_action
-    // This preserves the previous color (green/yellow/blue)
+    // Set last_action to 'cancelled' immediately (ignore today's date check)
+    t.last_action = 'cancelled';
+    rememberTherapyAction(t.allocation_id || t.therapy_code || t.id, 'cancelled');
 
     // IMMEDIATELY update UI - don't wait for server - EXACTLY like prescription entry
     $cancelModal.hide();
