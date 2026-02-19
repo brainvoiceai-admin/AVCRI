@@ -1,4 +1,5 @@
 $(function () {
+  console.log('Prescription Entry JS v4.6 - DOA label updated');
   // --- config/fallbacks ---
   const API_URL = window.location.pathname;
   const FALLBACK_PROCURED = [{ name: 'IP Pharmacy' }, { name: 'Kashaya room' }];
@@ -200,13 +201,19 @@ $(function () {
       const key2 = p.id ? String(p.id) : null;
       const remembered = (key1 && prescriptionActionById[key1]) ||
         (key2 && prescriptionActionById[key2]) || '';
-      // Only use derived from server if it's 'cancelled' (server knows cancellation state)
-      // Otherwise, ignore server's last_action and use remembered
-      const derived = (p.status === 'cancelled' ? 'cancelled' : '') ||
-        (p.last_action === 'cancelled' ? 'cancelled' : '');
-      // Priority: remembered > derived (only cancelled)
-      let finalAction = remembered || derived;
-      return { ...p, last_action: finalAction };
+
+      const s = String(p.status || '').trim().toLowerCase();
+      const hasCancellations = p.cancelled_date_from && p.cancelled_date_to && p.cancelled_date_from !== 'null';
+
+      let derived = '';
+      if (s === 'cancelled' || hasCancellations) {
+        derived = 'cancelled';
+      } else {
+        derived = 'added'; // DEFAULT = Blue
+      }
+
+      const action = remembered || derived;
+      return { ...p, last_action: action };
     });
   }
 
@@ -711,26 +718,21 @@ $(function () {
 
   // Intercept Select2 Unselect (Item Removal from Group Builder)
   $itemBuilder.on('select2:unselecting', function (e) {
-    e.preventDefault();
+    // Removal of single item should NOT show confirmation popup
     const data = (e.params.args && e.params.args.data) || e.params.data;
     const itemId = data.id;
-    showConfirm(
-      "Confirm Removal",
-      "Are you sure you want to remove this medicine from the group?\nThis action cannot be undone.",
-      "Yes, Remove",
-      function () {
-        // Manually remove item
-        let currentInfo = $itemBuilder.val() || [];
-        if (!Array.isArray(currentInfo)) currentInfo = [currentInfo];
-        const newValue = currentInfo.filter(x => x !== itemId);
-        $itemBuilder.val(newValue).trigger('change');
-        // Manually trigger update logic specific to prescription
-        setTimeout(function () {
-          updateProcuredFromField();
-          updateUOMField();
-        }, 100);
-      }
-    );
+
+    // Manually remove item immediately
+    let currentInfo = $itemBuilder.val() || [];
+    if (!Array.isArray(currentInfo)) currentInfo = [currentInfo];
+    const newValue = currentInfo.filter(x => x !== itemId);
+    $itemBuilder.val(newValue).trigger('change');
+
+    // Manually trigger update logic specific to prescription
+    setTimeout(function () {
+      updateProcuredFromField();
+      updateUOMField();
+    }, 100);
   });
 
   // Function to check and auto-fill procured_from based on selected items
@@ -1301,49 +1303,18 @@ $(function () {
   // Decide row color for today's prescription status (Added/Updated/Resumed/Cancelled for today only)
   function getTodayPrescriptionColorClass(p) {
     if (!p) return '';
-    const today = new Date().toISOString().slice(0, 10);
-
-    const inMainRange =
-      p.from_date && p.to_date &&
-      today >= String(p.from_date) && today <= String(p.to_date);
-
-    if (!inMainRange) {
-      return '';
-    }
-
-    // Get the last action - this is the CURRENT state set by user actions
+    // Priority 1: Session Action
     const lastAction = String(p.last_action || '').toLowerCase().trim();
-
-    // PRIORITY 1: If last_action is explicitly set, it ALWAYS wins
-    // This ensures Cancel → Resume → Cancel works correctly
-    if (lastAction === 'cancelled') return 'action-cancelled';
-    if (lastAction === 'resumed') return 'action-resumed';
-    if (lastAction === 'updated') return 'action-updated';
-    if (lastAction === 'added') return 'action-added';
-
-    // PRIORITY 2: Fall back to checking if today is in cancelled range
-    const inCancelledRange =
-      p.cancelled_date_from && p.cancelled_date_to &&
-      p.cancelled_date_from !== 'null' && p.cancelled_date_to !== 'null' &&
-      today >= String(p.cancelled_date_from) && today <= String(p.cancelled_date_to);
-
-    if (inCancelledRange) {
-      return 'action-cancelled';
+    if (lastAction && lastAction !== '' && lastAction !== 'null' && lastAction !== 'undefined') {
+      return 'action-' + lastAction;
     }
 
-    // PRIORITY 3: Check timestamps from server for "today" actions (only if no last_action)
-    const isTodayResumed = p.resumed_at && p.resumed_at.slice(0, 10) === today;
-    const isTodayCancelled = p.cancelled_at && p.cancelled_at.slice(0, 10) === today;
-    const isTodayUpdated = p.updated_at && p.updated_at.slice(0, 10) === today &&
-      p.updated_at !== p.created_at;
-    const isTodayAdded = p.created_at && p.created_at.slice(0, 10) === today;
+    // Priority 2: Status-based derivation
+    const s = String(p.status || '').trim().toLowerCase();
+    const hasCancellations = p.cancelled_date_from && p.cancelled_date_to && p.cancelled_date_from !== 'null';
+    if (s === 'cancelled' || hasCancellations) return 'action-cancelled';
 
-    if (isTodayResumed) return 'action-resumed';
-    if (isTodayCancelled) return 'action-cancelled';
-    if (isTodayUpdated) return 'action-updated';
-    if (isTodayAdded) return 'action-added';
-
-    return '';
+    return 'action-added';
   }
 
   function buildActionBadge(actionClass) {
@@ -1968,18 +1939,9 @@ $(function () {
     p.status = 'cancelled';
     p.cancellation_reason = reason;
 
-    // Only set last_action to 'cancelled' if TODAY is in the cancelled range
-    // This ensures cancelling future dates doesn't turn the row red
-    const today = new Date().toISOString().slice(0, 10);
-    const todayIsCancelled = today >= cfrom && today <= cto;
-
-    if (todayIsCancelled) {
-      // Today is cancelled - turn row RED
-      p.last_action = 'cancelled';
-      rememberPrescriptionAction(p.allocation_id || p.id, 'cancelled');
-    }
-    // If today is NOT cancelled, don't change last_action
-    // This preserves the previous color (green/yellow/blue)
+    // Set last_action to 'cancelled' immediately (ignore today's date check)
+    p.last_action = 'cancelled';
+    rememberPrescriptionAction(p.allocation_id || p.id, 'cancelled');
 
     // IMMEDIATELY update UI - don't wait for server - EXACTLY like therapy entry
     $cancelModal.hide();
@@ -2029,19 +1991,16 @@ $(function () {
                         p.status_summary = updated.status_summary;
                       }
 
-                      // Check if today is in the cancelled range
                       const today = new Date().toISOString().slice(0, 10);
-                      const todayIsCancelled = p.cancelled_date_from && p.cancelled_date_to &&
-                        p.cancelled_date_from !== 'null' && p.cancelled_date_to !== 'null' &&
-                        today >= p.cancelled_date_from && today <= p.cancelled_date_to;
+                      const hasCancellations = p.cancelled_date_from && p.cancelled_date_to &&
+                        p.cancelled_date_from !== 'null' && p.cancelled_date_to !== 'null';
 
-                      // If today is cancelled, override any previous action with 'cancelled'
-                      if (todayIsCancelled) {
+                      // If there are cancellations, override any previous action with 'cancelled'
+                      if (hasCancellations) {
                         p.last_action = 'cancelled';
                         rememberPrescriptionAction(p.allocation_id || p.id, 'cancelled');
                       } else if (rememberedAction && rememberedAction !== 'cancelled') {
-                        // If today is NOT cancelled, restore the remembered action (updated/resumed/added)
-                        // but only if it's not 'cancelled' (we just cancelled, so don't restore old cancelled state)
+                        // Restore the remembered action (updated/resumed/added)
                         p.last_action = rememberedAction;
                       }
 
@@ -2448,60 +2407,135 @@ $(function () {
 
     fetch(`/sheduling/prescription/api/previous-history/?registration_no=${encodeURIComponent(regNo)}`)
       .then(r => r.json())
-      .then(data => {
+      .then(resp => {
         $('#history-content-loader').hide();
 
-        if (!data.success || !data.data || data.data.length === 0) {
+        if (!resp.success || !resp.data || resp.data.length === 0) {
           $('#history-content-empty').show();
           return;
         }
 
-        renderHistoryList(data.data);
+        renderHistoryList(resp.data, resp.previous_doa, resp.doctor_name);
       })
       .catch(err => {
         $('#history-content-loader').hide();
-        $('#history-list').html('<div style="color:red;padding:20px;text-align:center">Error loading history. Please try again.</div>');
-        console.error(err);
+        const errMsg = err.message || 'Unknown error';
+        $('#history-list').html(`<div style="color:red;padding:20px;text-align:center">Error loading history: ${errMsg}. Please try again.</div>`);
+        console.error('History API error:', err);
       });
   }
 
-  function renderHistoryList(historyData) {
-    const html = historyData.map(group => {
-      const date = formatDate(group.date);
-      const itemsHtml = group.items.map(item => `
-            <tr>
-                <td style="padding: 8px 15px; border-bottom: 1px solid #eee;">${esc(item.item_name)}</td>
-                <td style="padding: 8px 15px; border-bottom: 1px solid #eee;">${esc(item.dosage) || '-'}</td>
-                <td style="padding: 8px 15px; border-bottom: 1px solid #eee;">${esc(item.uom) || '-'}</td>
-                <td style="padding: 8px 15px; border-bottom: 1px solid #eee;">${esc(item.usage) || '-'}</td>
-                <td style="padding: 8px 15px; border-bottom: 1px solid #eee;">${esc(item.int_ext) || '-'}</td>
-            </tr>
-          `).join('');
+  function renderHistoryList(historyData, previousDoa, doctorName) {
+    const doaHtml = previousDoa ? `
+      <div style="background: #f1f5f9; padding: 10px 15px; border-radius: 6px; margin-bottom: 25px; border-left: 4px solid #3b82f6; display: flex; align-items: center; gap: 20px; flex-wrap: wrap;">
+        <div style="display: flex; align-items: center;">
+          <span style="font-size: 0.85em; color: #64748b; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 700;">PREVIOUS DOA:</span>
+          <span style="font-size: 1em; color: #1e293b; font-weight: 800; margin-left: 8px;">${previousDoa}</span>
+        </div>
+        <div style="height: 15px; width: 1px; background: #cbd5e1;"></div>
+        <div style="display: flex; align-items: center;">
+          <span style="font-size: 0.85em; color: #64748b; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 700;">DOCTOR:</span>
+          <span style="font-size: 1em; color: #1e293b; font-weight: 800; margin-left: 8px;">${esc(doctorName) || 'N/A'}</span>
+        </div>
+      </div>
+    ` : '';
+
+    const html = historyData.map((dateGroup, dateIdx) => {
+      const date = formatDate(dateGroup.date);
+
+      // Collect ALL rows from all prescriptions for this date into a single list of rows
+      const allRows = [];
+      dateGroup.prescriptions.forEach((pres) => {
+        const allItems = pres.items;
+        if (!allItems || allItems.length === 0) return;
+
+        // Sort items by seq1 to ensure order (1,1 before 1,2)
+        // Group by seq1
+        const seq1Groups = {};
+        allItems.forEach(it => {
+          const s1 = it.seq1 || 0;
+          if (!seq1Groups[s1]) seq1Groups[s1] = [];
+          seq1Groups[s1].push(it);
+        });
+
+        const sortedSeq1List = Object.keys(seq1Groups).sort((a, b) => Number(a) - Number(b));
+
+        const medCombined = sortedSeq1List.map(s1 => {
+          const g = seq1Groups[s1];
+          const names = g.map(it => esc(it.item_name)).join(' + ');
+          const firstIt = g[0];
+          const dosage = (esc(firstIt.dosage) || '').trim();
+          const uom = (esc(firstIt.uom) || '').trim();
+
+          let res = `<b>[${names}]</b>`;
+          if (dosage) res += ` ${dosage}`;
+          if (uom) res += ` ${uom}`;
+
+          const allIngreds = g.map(it => it.ingred).filter(ig => {
+            const val = esc(ig).trim();
+            return val !== '' && val !== '-';
+          });
+          if (allIngreds.length > 0) {
+            const uniqueIngreds = [...new Set(allIngreds)].join(', ');
+            res += `<span style="font-size: 0.8em; color: #888; font-style: italic;"> (${esc(uniqueIngreds)})</span>`;
+          }
+          return res;
+        }).join(' + ');
+
+        // Usage & Ext/Int from first item in this prescription session
+        const firstIt = allItems[0];
+        const usage = (esc(firstIt.usage).trim() !== '-' && esc(firstIt.usage).trim() !== '') ? firstIt.usage : '-';
+        const extInt = (esc(firstIt.int_ext).trim() !== '-' && esc(firstIt.int_ext).trim() !== '') ? firstIt.int_ext : '-';
+
+        const extIntLower = (extInt || '').toLowerCase();
+        const badgeClass = extIntLower.includes('ext') ? 'bg-info' : (extIntLower.includes('int') ? 'bg-primary' : 'bg-secondary');
+
+        allRows.push(`
+          <tr>
+            <td style="padding: 12px 15px; border-bottom: 1px solid #edf2f7; vertical-align: middle;">
+              <div style="color: #334155; line-height: 1.6;">${medCombined}</div>
+            </td>
+            <td style="padding: 12px 15px; border-bottom: 1px solid #edf2f7; text-align: center; color: #475569; font-weight: 600; vertical-align: middle;">${esc(usage)}</td>
+            <td style="padding: 12px 15px; border-bottom: 1px solid #edf2f7; text-align: center; vertical-align: middle;">
+              <span class="badge ${badgeClass}" style="font-size: 10px; padding: 5px 10px; border-radius: 6px; text-transform: uppercase; font-weight: 700;">${esc(extInt)}</span>
+            </td>
+          </tr>
+        `);
+      });
+
+      const tableHtml = `
+        <div style="background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.02); overflow: hidden; margin-bottom: 15px;">
+          <div style="overflow-x: auto;">
+            <table style="width: 100%; border-collapse: collapse;">
+              <thead style="background: #f0f9f1;">
+                <tr>
+                  <th style="padding: 12px 15px; text-align: left; color: #4a5568; font-size: 0.75em; text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 2px solid #e2e8f0; width: 60%;">Medicine</th>
+                  <th style="padding: 12px 15px; text-align: center; color: #4a5568; font-size: 0.75em; text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 2px solid #e2e8f0; width: 25%;">Usage</th>
+                  <th style="padding: 12px 15px; text-align: center; color: #4a5568; font-size: 0.75em; text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 2px solid #e2e8f0; width: 15%;">Ext/Int</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${allRows.join('')}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      `;
 
       return `
-            <div class="history-group" style="margin-bottom: 20px; border: 1px solid #ddd; border-radius: 4px; overflow: hidden; background: white;">
-                <div class="history-date-header" style="background: #f8f9fa; padding: 10px 15px; font-weight: bold; border-bottom: 1px solid #ddd; color: var(--primary); display: flex; justify-content: space-between; align-items: center;">
-                    <span><i class="fas fa-calendar-alt"></i> ${date}</span>
-                </div>
-                <table class="table" style="width: 100%; border-collapse: collapse;">
-                    <thead style="background: #fff; border-bottom: 1px solid #eee;">
-                        <tr>
-                            <th style="text-align: left; padding: 8px 15px; color: #666; font-size: 0.9em;">Medicine</th>
-                            <th style="text-align: left; padding: 8px 15px; color: #666; font-size: 0.9em;">Dosage</th>
-                             <th style="text-align: left; padding: 8px 15px; color: #666; font-size: 0.9em;">UOM</th>
-                            <th style="text-align: left; padding: 8px 15px; color: #666; font-size: 0.9em;">Usage</th>
-                            <th style="text-align: left; padding: 8px 15px; color: #666; font-size: 0.9em;">Ext/Int</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${itemsHtml}
-                    </tbody>
-                </table>
-            </div>
-          `;
+        <div class="history-date-section" style="margin-bottom: 35px; border-left: 4px solid #48bb78; padding-left: 20px;">
+          <div style="display: flex; align-items: center; margin-bottom: 15px; padding: 6px 12px; background: #f0f9f1; border-radius: 6px; display: inline-flex;">
+            <i class="fas fa-calendar-alt" style="margin-right: 8px; color: #48bb78; font-size: 0.9em;"></i>
+            <span style="font-size: 1.1em; font-weight: 850; color: #1e293b;">${date}</span>
+            <span style="margin-left: 12px; font-size: 0.8em; color: #64748b; font-weight: 600;">(${dateGroup.prescriptions.reduce((acc, p) => acc + p.items.length, 0)} Items)</span>
+          </div>
+          ${tableHtml}
+          ${dateIdx < historyData.length - 1 ? '<hr style="border: 0; border-top: 1px dashed #e2e8f0; margin: 30px 0 20px -20px;">' : ''}
+        </div>
+      `;
     }).join('');
 
-    $('#history-list').html(html);
+    $('#history-list').html(doaHtml + (html || '<div class="empty-state" style="text-align:center; padding: 60px 20px; color: #94a3b8;"><i class="fas fa-notes-medical fa-4x" style="margin-bottom: 20px; opacity: 0.3;"></i><h3>No Prescription History Found</h3><p>Records will appear here once the patient has received prescriptions.</p></div>'));
   }
 
   function triggerDownload(url) {

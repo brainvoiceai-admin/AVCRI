@@ -1,8 +1,0 @@
-/* CSS to push the content past the sidebar included by dashboards/nav.html */
-        .main-content {
-            padding-left: 275px; 
-        }
-        .table-responsive {
-            max-height: 600px;
-            overflow-y: auto;
-        }

@@ -14,7 +14,7 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 
 
-  <link rel="stylesheet" href="{% static 'css/updated_dash_prescription_entry.css' %}">
+  <link rel="stylesheet" href="{% static 'css/updated_dash_prescription_entry.css' %}?v=3.5">
   <link rel="stylesheet" href="{% static 'css/dashboards_nav.css' %}">
 </head>
 
@@ -257,6 +257,29 @@
               </tbody>
             </table>
           </div>
+          <div class="table-legend"
+            style="padding: 16px; border-top: 1px solid var(--border-light); display: flex; gap: 24px; flex-wrap: wrap; background: #fafafa;">
+            <div style="display: flex; align-items: center; gap: 8px; font-size: 0.85rem; color: var(--text-medium);">
+              <span
+                style="width: 14px; height: 14px; border-radius: 3px; background: #2563eb; border: 1.5px solid #333;"></span>
+              <strong>Active / New</strong>
+            </div>
+            <div style="display: flex; align-items: center; gap: 8px; font-size: 0.85rem; color: var(--text-medium);">
+              <span
+                style="width: 14px; height: 14px; border-radius: 3px; background: #d97706; border: 1.5px solid #333;"></span>
+              <strong>Updated Today</strong>
+            </div>
+            <div style="display: flex; align-items: center; gap: 8px; font-size: 0.85rem; color: var(--text-medium);">
+              <span
+                style="width: 14px; height: 14px; border-radius: 3px; background: #16a34a; border: 1.5px solid #333;"></span>
+              <strong>Resumed</strong>
+            </div>
+            <div style="display: flex; align-items: center; gap: 8px; font-size: 0.85rem; color: var(--text-medium);">
+              <span
+                style="width: 14px; height: 14px; border-radius: 3px; background: #dc2626; border: 1.5px solid #333;"></span>
+              <strong>Cancelled</strong>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -348,7 +371,7 @@
   </div>
 
 
-  <script src="{% static 'js/updated_dash_prescription_entry.js' %}"></script>
+  <script src="{% static 'js/updated_dash_prescription_entry.js' %}?v=11.3"></script>
   <script src="{% static 'js/dashboards_nav.js' %}"></script>
 </body>
 
