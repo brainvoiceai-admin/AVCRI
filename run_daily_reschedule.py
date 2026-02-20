@@ -16,8 +16,8 @@ import time
 from datetime import datetime, date
 
 # ========== CONFIGURE TIME HERE (24-hour format) ==========
-RUN_HOUR = 12   # 2 PM
-RUN_MINUTE = 20  # 2:02 PM
+RUN_HOUR = 5   # 2 PM
+RUN_MINUTE = 30  # 2:02 PM
 # ==========================================================
 
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
