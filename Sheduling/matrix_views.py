@@ -30,98 +30,50 @@ def continuity_matrix_api(request):
             
         exclude_leave = (exclude_leave_str.lower() == 'true')
         
-        # === ENHANCED DEBUG: Check RAJALAKSHMY BEFORE filter ===
-        print(f"\n{'='*80}")
-        print(f"[DEBUG] RAJALAKSHMY INVESTIGATION - BEFORE STATUS FILTER")
-        print(f"{'='*80}")
+        # 1. Fetch Schedule Data
+        # Strategy: Use Booking model (per-date) as the source of truth for validity.
+        # TherapyAllocation.status can be 'failed' even when some individual Booking dates are 'scheduled'.
+        # So we build a set of valid (allocation_id, date) tuples from Booking records that are NOT failed/cancelled.
+        # Then we only include TherapistBooking rows matching those valid pairs.
+        from Sheduling.models import Booking
+        valid_bookings_qs = Booking.objects.filter(
+            date__range=[from_date, to_date]
+        ).exclude(
+            status__icontains='cancel'
+        ).exclude(
+            status__icontains='fail'
+        ).values_list('allocation_id', 'date')
         
-        # Get ALL bookings for patient_id 423 (RAJALAKSHMY) before any filter
-        rajalakshmy_id = 423
-        all_rajalakshmy = TherapistBooking.objects.filter(
-            date__range=[from_date, to_date],
-            patient_id=rajalakshmy_id
-        )
-        print(f"[DEBUG] Total RAJALAKSHMY bookings (patient_id={rajalakshmy_id}): {all_rajalakshmy.count()}")
+        # Build a fast lookup set: {(allocation_id, date), ...}
+        valid_pairs = set((alloc_id, d) for alloc_id, d in valid_bookings_qs)
         
-        for b in all_rajalakshmy:
-            print(f"\n  Booking ID: {b.id}")
-            print(f"  patient_id: {b.patient_id}")
-            if b.visit and b.visit.patient:
-                print(f"  visit.patient.id: {b.visit.patient.id}")
-                print(f"  visit.patient.pat_name: {b.visit.patient.pat_name}")
-            else:
-                print(f"  visit.patient: NULL/N/A")
-            print(f"  Date: {b.date}")
-            print(f"  Therapy: {b.therapy_name}")
-            print(f"  Status: [{b.status}]")
-            print(f"  Status length: {len(b.status)}")
-            print(f"  Status repr: {repr(b.status)}")
-            print(f"  Status bytes: {b.status.encode('utf-8')}")
-            print(f"  Status stripped: [{b.status.strip()}]")
-            print(f"  'cancel' in status.lower(): {'cancel' in b.status.lower()}")
-            print(f"  'CANCEL' in status: {'CANCEL' in b.status}")
-            print(f"  'CANCELLED' in status: {'CANCELLED' in b.status}")
-            print(f"  Should be excluded: {'cancel' in b.status.lower()}")
-        
-        print(f"\n{'='*80}\n")
-        # === END ENHANCED DEBUG ===
-        
-        # 1. Fetch Schedule Data (TherapistBooking is the source of truth for assignments)
-        # Using 'visit__patient' to get patient details
-        # CRITICAL: Explicitly exclude both spellings of CANCELLED/CANCELED to prevent cancelled treatments from appearing in matrix
+        # Fetch all TherapistBookings in range (excluding self-cancelled/failed)
         bookings = TherapistBooking.objects.filter(
             date__range=[from_date, to_date]
         ).exclude(
-            status__icontains='cancel'  # Exclude both CANCELLED and CANCELED (any case variation)
+            status__icontains='cancel'
+        ).exclude(
+            status__icontains='fail'
         ).select_related('therapist', 'visit__patient', 'time_slot').order_by('date')
         
-        # === DEBUG: Check RAJALAKSHMY AFTER filter ===
-        rajalakshmy_after = bookings.filter(patient_id=rajalakshmy_id)
-        print(f"[DEBUG] RAJALAKSHMY bookings AFTER status filter: {rajalakshmy_after.count()}")
-        if rajalakshmy_after.exists():
-            print(f"⚠️⚠️⚠️ FILTER DID NOT WORK! ⚠️⚠️⚠️")
-            print(f"These bookings passed the filter:")
-            for b in rajalakshmy_after:
-                print(f"  ID: {b.id}, Date: {b.date}, Status: [{b.status}]")
-        else:
-            print(f"✅ Filter worked correctly - no RAJALAKSHMY bookings after filter")
-        print(f"{'='*80}\n")
-        
-        # DEBUG: Log what we're fetching
-        print(f"[CONTINUITY MATRIX] Date range: {from_date} to {to_date}")
-        print(f"[CONTINUITY MATRIX] Total bookings after filter: {bookings.count()}")
-        
-        # Check for RAJALAKSHMY specifically
-        rajalakshmy_bookings = bookings.filter(visit__patient__pat_name__icontains='RAJALAK')
-        if rajalakshmy_bookings.exists():
-            print(f"\n⚠️⚠️⚠️ RAJALAKSHMY BOOKINGS FOUND IN MATRIX! ⚠️⚠️⚠️")
-            print(f"Total RAJALAKSHMY bookings: {rajalakshmy_bookings.count()}")
-            for b in rajalakshmy_bookings[:5]:  # Show first 5
-                print(f"  Patient ID: {b.patient_id}")
-                print(f"  Patient Name: {b.visit.patient.pat_name if b.visit and b.visit.patient else 'N/A'}")
-                print(f"  Date: {b.date}")
-                print(f"  Therapy: {b.therapy_name}")
-                print(f"  Status: [{b.status}] (type: {type(b.status).__name__}, len: {len(b.status)})")
-                print(f"  Status bytes: {b.status.encode('utf-8')}")
-                print(f"  Contains 'cancel': {'cancel' in b.status.lower()}")
-                print(f"  ---")
-            print(f"⚠️⚠️⚠️ END RAJALAKSHMY DEBUG ⚠️⚠️⚠️\n")
-        
-        
         # 2. Build Caches
-        # (A) Patient Info Cache
-        patient_info = {} # pat_id -> {name, reg_no}
+        patient_info = {}  # pat_key -> {name, reg_no}
         
-        # (B) Schedule Map: pat_id -> therapy_name -> slot -> date_str -> { 'therapists': {therapist_id: {name, is_bathing}} }
-        # Changed structure to include slot level, so different slots create different rows
+        # Schedule Map: pat_key -> therapy_name -> slot_key -> date_str -> { 'therapists': {therapist_id: {...}} }
         schedule_map = defaultdict(lambda: defaultdict(lambda: defaultdict(lambda: defaultdict(lambda: {'therapists': {}}))))
         
-        # (C) Leave Cache
-        leave_cache = defaultdict(set) # date -> {therapist_ids}
+        # Track slot_id for each slot_key to use in historical queries
+        slot_id_map = {}  # slot_key -> time_slot_id
+
+        # Map from pat_key used in schedule_map -> actual patient_id field value in TherapistBooking
+        # We need this because the historical queries also use patient_id
+        pat_key_to_booking_patient_id = {}  # pat_key -> patient_id value used in TherapistBooking
         
-        # helper to check leave
+        # Leave Cache
+        leave_cache = defaultdict(set)  # date -> {therapist_master_ids}
+        
         def populate_leave_cache(f_date, t_date):
-            # Emergency
+            # Emergency leaves
             e_leaves = EmergencyLeave.objects.filter(from_date__lte=t_date, to_date__gte=f_date)
             for l in e_leaves:
                 s = max(l.from_date, f_date)
@@ -132,7 +84,7 @@ def continuity_matrix_api(request):
                         leave_cache[curr].add(l.therapist_id)
                     curr += timedelta(days=1)
                     
-            # Weekly
+            # Weekly leaves
             weekly = TherapistLeaveMaster.objects.all().values('therapist_id', 'leave_day')
             dow_map = defaultdict(set)
             for w in weekly:
@@ -150,45 +102,69 @@ def continuity_matrix_api(request):
         # 3. Process Bookings to Map
         for b in bookings:
             d_str = b.date.strftime('%Y-%m-%d')
+
+            # Skip TherapistBooking rows where the per-date Booking is failed/cancelled.
+            # This handles cases where TherapyAllocation has partial failures (some dates failed,
+            # some scheduled) — we only show dates with a valid scheduled Booking.
+            if b.visit_id is not None and (b.visit_id, b.date) not in valid_pairs:
+                continue
             
-            pat_id = b.patient_id
-            if not pat_id: continue
+            # Determine patient key for grouping:
+            # Use visit.patient.id (PatientSnapshot.id) as a stable key if available,
+            # otherwise fall back to b.patient_id (the raw BigIntegerField)
+            pat_snapshot_id = None
+            if b.visit and b.visit.patient:
+                pat_snapshot_id = b.visit.patient.id
+            
+            # Use PatientSnapshot.id as key if available (stable), else raw patient_id
+            pat_key = pat_snapshot_id if pat_snapshot_id is not None else b.patient_id
+            
+            if pat_key is None:
+                continue
+            
+            # Store the raw patient_id used in TherapistBooking for historical queries
+            # Both fields (patient_id and visit->patient.id) may differ; we need patient_id for queries
+            if pat_key not in pat_key_to_booking_patient_id:
+                if b.patient_id is not None:
+                    pat_key_to_booking_patient_id[pat_key] = b.patient_id
+                else:
+                    pat_key_to_booking_patient_id[pat_key] = None
             
             # Capture Patient Info
-            if pat_id not in patient_info:
+            if pat_key not in patient_info:
                 if b.visit and b.visit.patient:
-                    patient_info[pat_id] = {
-                        'id': pat_id,
-                        'name': b.visit.patient.pat_name,
-                        'reg_no': b.visit.patient.pat_reg_no
+                    patient_info[pat_key] = {
+                        'id': pat_key,
+                        'name': b.visit.patient.pat_name or f"ID {pat_key}",
+                        'reg_no': b.visit.patient.pat_reg_no or str(pat_key)
                     }
-                else:
+                elif b.patient_id:
                     try:
-                        s = PatientSnapshot.objects.filter(id=pat_id).first()
+                        s = PatientSnapshot.objects.filter(id=b.patient_id).first()
                         if s:
-                            patient_info[pat_id] = {'id': pat_id, 'name': s.pat_name, 'reg_no': s.pat_reg_no}
+                            patient_info[pat_key] = {'id': pat_key, 'name': s.pat_name or f"ID {pat_key}", 'reg_no': s.pat_reg_no or str(pat_key)}
                         else:
-                            patient_info[pat_id] = {'id': pat_id, 'name': f"ID {pat_id}", 'reg_no': str(pat_id)} 
+                            patient_info[pat_key] = {'id': pat_key, 'name': f"ID {pat_key}", 'reg_no': str(pat_key)}
                     except:
-                        patient_info[pat_id] = {'id': pat_id, 'name': f"ID {pat_id}", 'reg_no': str(pat_id)}
+                        patient_info[pat_key] = {'id': pat_key, 'name': f"ID {pat_key}", 'reg_no': str(pat_key)}
+                else:
+                    patient_info[pat_key] = {'id': pat_key, 'name': f"ID {pat_key}", 'reg_no': str(pat_key)}
 
             t_id = b.therapist.id
-            t_name = b.therapy_name if b.therapy_name else "General"
+            # Normalize therapy name to prevent fragmentation
+            t_name = b.therapy_name.strip() if b.therapy_name else "General"
             
             # Get slot information
             slot_key = "No Slot"
             if b.time_slot:
-                # Format slot time in 12-hour format like "6:00 AM"
                 slot_time = b.time_slot.slot_time if hasattr(b.time_slot, 'slot_time') else str(b.time_slot)
                 try:
                     from datetime import datetime
-                    # Try to parse and format the time
                     if isinstance(slot_time, str):
-                        # Handle various time formats
                         for fmt in ['%H:%M:%S', '%H:%M', '%I:%M %p', '%I:%M:%S %p']:
                             try:
                                 time_obj = datetime.strptime(slot_time, fmt).time()
-                                slot_key = time_obj.strftime('%I:%M %p')  # Format as "06:00 AM"
+                                slot_key = time_obj.strftime('%I:%M %p')
                                 break
                             except:
                                 continue
@@ -198,9 +174,12 @@ def continuity_matrix_api(request):
                         slot_key = slot_time.strftime('%I:%M %p') if hasattr(slot_time, 'strftime') else str(slot_time)
                 except:
                     slot_key = str(slot_time)
+                
+                # Store slot_id mapping for this key
+                slot_id_map[slot_key] = b.time_slot_id
             
-            # Store therapist info grouped by slot
-            schedule_map[pat_id][t_name][slot_key][d_str]['therapists'][t_id] = {
+            # Store therapist info grouped by pat_key -> therapy -> slot -> date -> therapists
+            schedule_map[pat_key][t_name][slot_key][d_str]['therapists'][t_id] = {
                 'id': t_id,
                 'name': b.therapist.therapist_name,
                 'is_bathing': b.is_bathing
@@ -208,84 +187,115 @@ def continuity_matrix_api(request):
             
         # 4. Construct Matrix Rows
         rows = []
-        
-        # Generate complete date list for columns
         date_cols = []
         curr = from_date
         while curr <= to_date:
             date_cols.append(curr.strftime('%Y-%m-%d'))
             curr += timedelta(days=1)
             
-        # Process each patient
-        for pat_id, therapies_data in schedule_map.items():
-            for t_name, slots_data in therapies_data.items():
-                # Create a separate row for each slot
-                for slot_key, dates_data in slots_data.items():
+        # Sort patient keys by name for consistent grouping and display
+        sorted_pat_keys = sorted(schedule_map.keys(), key=lambda pk: patient_info[pk]['name'].lower())
+        
+        for pat_key in sorted_pat_keys:
+            therapies_data = schedule_map[pat_key]
+            # Sort therapies by name
+            sorted_t_names = sorted(therapies_data.keys())
+            
+            # Get the raw patient_id value stored in TherapistBooking for historical queries
+            raw_patient_id = pat_key_to_booking_patient_id.get(pat_key)
+            
+            for t_name in sorted_t_names:
+                slots_data = therapies_data[t_name]
+                # Sort slots by time
+                sorted_slots = sorted(slots_data.keys())
+                
+                for slot_key in sorted_slots:
+                    dates_data = slots_data[slot_key]
                     row = {
-                        'patient': patient_info[pat_id],
+                        'patient': patient_info[pat_key],
                         'therapy_name': t_name,
-                        'slot': slot_key,  # Include slot in row data
+                        'slot': slot_key,
                         'cells': {}
                     }
                     
-                    baseline_set = None # This preserves Day-1 therapists for subsequent days
+                    target_slot_id = slot_id_map.get(slot_key)
+                    baseline_set = None
                     
                     for i, d_str in enumerate(date_cols):
                         curr_data = dates_data.get(d_str, {'therapists': {}})
                         curr_objs = curr_data.get('therapists', {})
                         curr_set = set(curr_objs.keys())
                         
-                        # If no data for this day, mark as empty
                         if not curr_set:
-                            row['cells'][d_str] = {
-                                'therapists': [],
-                                'status': 'empty'
-                            }
+                            row['cells'][d_str] = {'therapists': [], 'status': 'empty'}
                             continue
                             
                         date_obj = parse_date(d_str)
                         reference_set = set()
                         
                         if baseline_set is None:
-                            # === DAY 1 LOGIC (First day of treatment in this range) ===
-                            # Verify continuity by comparing with PREVIOUS TREATMENT therapist
-                            # (if any exists)
-                            
-                            # Fetch last valid booking BEFORE this date (exclude cancelled)
-                            last_booking = TherapistBooking.objects.filter(
-                                patient_id=pat_id,
+                            # DAY 1 LOGIC: Compare with the PREVIOUS booking for same patient+therapy+slot
+                            # Use pat_key (PatientSnapshot.id) for the query since TherapistBooking.patient_id
+                            # stores PatientSnapshot.id (not reg_no)
+                            query = TherapistBooking.objects.filter(
                                 therapy_name=t_name,
                                 date__lt=date_obj
                             ).exclude(
-                                status__icontains='cancel'  # Exclude both CANCELLED and CANCELED (any case variation)
-                            ).order_by('-date').first()
+                                status__icontains='cancel'
+                            ).exclude(
+                                status__icontains='fail'
+                            ).exclude(
+                                visit__status__icontains='cancel'
+                            ).exclude(
+                                visit__status__icontains='fail'
+                            )
+                            
+                            # Filter by patient — try PatientSnapshot.id via visit FK first (most accurate)
+                            if raw_patient_id is not None:
+                                query = query.filter(patient_id=raw_patient_id)
+                            else:
+                                # Fall back to visit->patient relationship
+                                query = query.filter(visit__patient__id=pat_key)
+                            
+                            # Ensure we only compare within the same slot
+                            if target_slot_id:
+                                query = query.filter(time_slot_id=target_slot_id)
+                            else:
+                                query = query.filter(time_slot__isnull=True)
+                                
+                            last_booking = query.order_by('-date').first()
                             
                             if last_booking:
-                                # Get all therapists for that previous day
-                                prev_bookings = TherapistBooking.objects.filter(
-                                    patient_id=pat_id,
+                                # Get all therapists from that previous date+slot
+                                prev_query = TherapistBooking.objects.filter(
                                     therapy_name=t_name,
-                                    date=last_booking.date
+                                    date=last_booking.date,
+                                    time_slot_id=last_booking.time_slot_id
                                 ).exclude(
-                                    status__icontains='cancel'  # Exclude both CANCELLED and CANCELED (any case variation)
-                                ).values_list('therapist_id', flat=True)
-                                reference_set = set(prev_bookings)
+                                    status__icontains='cancel'
+                                ).exclude(
+                                    status__icontains='fail'
+                                ).exclude(
+                                    visit__status__icontains='cancel'
+                                ).exclude(
+                                    visit__status__icontains='fail'
+                                )
+                                if raw_patient_id is not None:
+                                    prev_query = prev_query.filter(patient_id=raw_patient_id)
+                                else:
+                                    prev_query = prev_query.filter(visit__patient__id=pat_key)
+                                reference_set = set(prev_query.values_list('therapist_id', flat=True))
                             else:
-                                reference_set = set() # No history found
+                                reference_set = set()
                                 
-                            # Set Baseline for FUTURE days (Day 2 -> End)
                             baseline_set = curr_set
                         else:
-                            # === SUBSEQUENT DAYS LOGIC ===
-                            # Verify against FIRST DAY only (baseline_set)
-                            # Do NOT compare against immediately previous day
+                            # Day 2+ — compare against the FIRST day's therapists (baseline)
                             reference_set = baseline_set
                             
-                        # === COMMON VERIFICATION LOGIC ===
-                        # Check for missing therapists FROM THE REFERENCE SET
+                        # Determine which therapists are missing from the reference
                         missing_set = reference_set - curr_set
                         has_unexcused_loss = False
-                        
                         if missing_set:
                             leaves_today = leave_cache.get(date_obj, set())
                             for m_id in missing_set:
@@ -293,51 +303,25 @@ def continuity_matrix_api(request):
                                     has_unexcused_loss = True
                                     break
                                     
-                        # Determine colors for each allocated therapist
                         therapist_list = []
-                        for t_vals in curr_objs.values():
-                            t_data = t_vals.copy()
-                            
-                            # DEBUG LOGGING
-                            debug_info = {
-                                'patient': patient_info[pat_id]['name'],
-                                'therapy': t_name,
-                                'date': d_str,
-                                'therapist': t_data['name'],
-                                'therapist_id': t_data['id'],
-                                'is_day_1': (baseline_set == curr_set),
-                                'reference_set': [curr_objs.get(rid, {}).get('name', f'ID_{rid}') for rid in reference_set] if reference_set else 'NO_HISTORY',
-                                'current_set': list(curr_objs.values()),
-                                'missing_set': list(missing_set) if missing_set else [],
-                                'has_unexcused_loss': has_unexcused_loss
-                            }
-                            
-                            if t_data['id'] in reference_set:
-                                t_data['status'] = 'green' # Same as reference
-                                debug_info['decision'] = 'GREEN: Therapist matches reference'
+                        # Sort by therapist_id for consistent display order
+                        for t_id in sorted(curr_objs.keys()):
+                            t_data = curr_objs[t_id].copy()
+                            if t_id in reference_set:
+                                t_data['status'] = 'green'   # Same therapist as reference
                             else:
-                                # New or Replacement
                                 if has_unexcused_loss:
-                                    t_data['status'] = 'red' # Reference therapist matched was available but replaced
-                                    debug_info['decision'] = 'RED: Reference therapist(s) were available but replaced'
+                                    t_data['status'] = 'red'   # Different therapist (unexcused change)
                                 elif missing_set:
-                                     t_data['status'] = 'gray' # Reference therapist on leave
-                                     debug_info['decision'] = 'GRAY: Reference therapist is on leave'
+                                    t_data['status'] = 'gray'  # Different (on leave — excused)
                                 else:
-                                     t_data['status'] = 'green' # Pure addition
-                                     debug_info['decision'] = 'GREEN: Pure addition (no prior history or adding therapist)'
-                            
-                            # Log to console for debugging
-                            print(f"[CONTINUITY DEBUG] {debug_info}")
-                                
+                                    t_data['status'] = 'green'  # New therapist (no prior reference)
                             therapist_list.append(t_data)
     
-                        cell_data = {
+                        row['cells'][d_str] = {
                             'therapists': therapist_list,
                             'status': 'active'
                         }
-                        
-                        row['cells'][d_str] = cell_data
                     
                     rows.append(row)
             
@@ -351,11 +335,9 @@ def continuity_matrix_api(request):
                 'date_range': f"{from_date} to {to_date}"
             }
         })
-        # Add cache-control headers to prevent browser caching
         response['Cache-Control'] = 'no-cache, no-store, must-revalidate'
-        response['Pragma'] = 'no-cache'
-        response['Expires'] = '0'
         return response
+
     except Exception as e:
         import traceback
         return JsonResponse({
