@@ -182,7 +182,8 @@
                                     <tr>
                                         <td>
                                             <div style="font-weight: 500;">
-                                                {{ booking.allocation.patient.pat_name }} ({{ booking.allocation.patient.pat_reg_no }})
+                                                {{ booking.allocation.patient.pat_name }} ({{
+                                                booking.allocation.patient.pat_reg_no }})
                                             </div>
                                         </td>
                                         <td>{{ booking.allocation.therapy_name }}</td>
@@ -190,6 +191,7 @@
                                         <td>
                                             {% if booking.allocation.patient.pat_room_no %}
                                             {% with room_no=booking.allocation.patient.pat_room_no|get_staying_room_display %}
+
                                             {{ room_no|default:booking.allocation.patient.pat_room_no }}
                                             {% endwith %}
                                             {% else %}
@@ -198,7 +200,8 @@
                                         </td>
                                         <td>
                                             <span class="status-badge status-failed"
-                                                title="{{ booking.failure_reason }}">{{ booking.failure_reason|default:"—" }}</span>
+                                                title="{{ booking.failure_reason }}">{{
+                                                booking.failure_reason|default:"—" }}</span>
                                         </td>
                                         <td>Try different time slot</td>
                                         <td>
@@ -318,7 +321,8 @@
                                                     data-patient-name="{{ booking.allocation.patient.pat_name }}"
                                                     data-schedule-date="{{ booking.date|date:'Y-m-d' }}">
                                                     <div style="font-weight: 500;">
-                                                        {{ booking.allocation.patient.pat_name }} ({{ booking.allocation.patient.pat_reg_no }})
+                                                        {{ booking.allocation.patient.pat_name }} ({{
+                                                        booking.allocation.patient.pat_reg_no }})
                                                     </div>
                                                 </button>
                                             </td>
@@ -341,6 +345,7 @@
                                             <td>
                                                 {% if booking.allocation.patient.pat_room_no %}
                                                 {% with room_no=booking.allocation.patient.pat_room_no|get_staying_room_display %}
+
                                                 {{ room_no|default:booking.allocation.patient.pat_room_no }}
                                                 {% endwith %}
                                                 {% else %}
@@ -351,8 +356,10 @@
                                                 <div class="therapist-list">
                                                     {% for assignment in booking.assignments.all %}
                                                     {% with therapist_name=assignment.therapist.therapist_name|default:assignment.therapist.therapist_code %}
+
                                                     {% with is_bathing=assignment|get_therapist_bathing_flag:booking %}
                                                     {% with is_senior=assignment|is_senior_therapist_for_dhara:booking %}
+
                                                     {% with clean_name=therapist_name|cut:"(bathing)" %}
                                                     {% if is_senior %}
                                                     <span class="therapist-badge senior-therapist">
@@ -414,7 +421,8 @@
                                                     data-patient-name="{{ booking.allocation.patient.pat_name }}"
                                                     data-schedule-date="{{ booking.date|date:'Y-m-d' }}">
                                                     <div style="font-weight: 500;">
-                                                        {{ booking.allocation.patient.pat_name }} ({{ booking.allocation.patient.pat_reg_no }})
+                                                        {{ booking.allocation.patient.pat_name }} ({{
+                                                        booking.allocation.patient.pat_reg_no }})
                                                     </div>
                                                 </button>
                                             </td>
@@ -423,6 +431,7 @@
                                             <td>
                                                 {% if booking.allocation.patient.pat_room_no %}
                                                 {% with room_no=booking.allocation.patient.pat_room_no|get_staying_room_display %}
+
                                                 {{ room_no|default:booking.allocation.patient.pat_room_no }}
                                                 {% endwith %}
                                                 {% else %}
@@ -732,6 +741,22 @@
                             // Create therapist list without background colors
                             const div = document.createElement('div');
                             div.style.fontSize = '12px';
+
+                            // Show per-date slot badge if it differs from the row's header slot
+                            const cellSlot = cell.slot || '';
+                            if (cellSlot && cellSlot !== row.slot) {
+                                const slotBadge = document.createElement('div');
+                                slotBadge.innerText = '⏰ ' + cellSlot;
+                                slotBadge.style.fontSize = '10px';
+                                slotBadge.style.color = '#7c3aed';
+                                slotBadge.style.fontWeight = '600';
+                                slotBadge.style.marginBottom = '3px';
+                                slotBadge.style.background = '#ede9fe';
+                                slotBadge.style.borderRadius = '3px';
+                                slotBadge.style.padding = '1px 4px';
+                                slotBadge.style.display = 'inline-block';
+                                div.appendChild(slotBadge);
+                            }
 
                             cell.therapists.forEach((t, index) => {
                                 const span = document.createElement('div');
