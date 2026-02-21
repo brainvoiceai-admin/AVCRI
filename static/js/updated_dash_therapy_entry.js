@@ -62,6 +62,13 @@ $(function () {
   // --- DOM refs ---
   const $patientSelect = $('#header-patient-select');
   const $therapySelect = $('#therapy-select'), $slotSelect = $('#slot-select'), $fromDate = $('#from-date-input'), $toDate = $('#to-date-input'), $daysInput = $('#days-input');
+
+  // From date: allow only today or future (no past dates)
+  (function setFromDateMin() {
+    const d = new Date();
+    const todayStr = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+    $fromDate.attr('min', todayStr);
+  })();
   const $therapyUsageInput = $('#therapy-usage-input');
   const $procuredSelect = $('#procured-select');
   const $itemBuilder = $('#item-builder-select'), $itemGroupsList = $('#item-groups-list');

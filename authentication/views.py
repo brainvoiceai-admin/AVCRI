@@ -11,8 +11,17 @@ from django.core.paginator import Paginator
 from django.utils import timezone
 from django.db import transaction, models
 from django.core.exceptions import ValidationError
+from django.conf import settings
 import json
 from masters.models import get_staying_room_display_number
+
+# Timezone for audit log display (so timestamps show correct local time in reports)
+def _audit_display_tz():
+    try:
+        from zoneinfo import ZoneInfo
+    except ImportError:
+        from backports.zoneinfo import ZoneInfo
+    return ZoneInfo(getattr(settings, 'AUDIT_LOG_DISPLAY_TIMEZONE', 'Asia/Kolkata'))
 
 def log_audit_event(user, action, description, status='success', object_type='', object_id='', additional_data=None, request=None):
     """Utility function to log audit events"""
@@ -78,6 +87,21 @@ def role_management(request):
         'modules': modules,
     }
     return render(request, 'authentication/role_management.html', context)
+
+
+@login_required
+@super_admin_required
+@require_http_methods(["POST"])
+def toggle_role_status(request, role_id):
+    """Toggle role is_active (Activate / Deactivate) and redirect back to role management."""
+    from django.urls import reverse
+    role = get_object_or_404(Role, id=role_id)
+    role.is_active = not role.is_active
+    role.save(update_fields=['is_active', 'updated_at'])
+    status_label = 'activated' if role.is_active else 'deactivated'
+    messages.success(request, f'Role "{role.display_name}" has been {status_label}.')
+    return redirect(reverse('authentication:role_management') + f'?toggled=1')
+
 
 def categorize_modules(modules):
     """Group modules by category based on their names and display names"""
@@ -1011,6 +1035,8 @@ def therapist_schedule(request):
 @super_admin_required
 def Audit_Log(request):
     """Functional audit log view with filtering and pagination"""
+    # Show timestamps in local time (e.g. Asia/Kolkata) in both HTML and CSV
+    timezone.activate(_audit_display_tz())
     # Get filter parameters
     action_filter = request.GET.get('action', '')
     status_filter = request.GET.get('status', '')
@@ -1086,6 +1112,8 @@ def Audit_Log(request):
                 object_info = log.object_type
             else:
                 object_info = ''
+            # timezone.localtime uses the activated timezone (set at start of view)
+            ts_display = timezone.localtime(log.timestamp)
             writer.writerow([
                 log.id,
                 user,
@@ -1093,7 +1121,7 @@ def Audit_Log(request):
                 log.get_action_display(),
                 (log.description or '').replace('\n', ' ').replace('\r', ' '),
                 object_info,
-                timezone.localtime(log.timestamp).strftime('%Y-%m-%d %H:%M:%S'),
+                ts_display.strftime('%Y-%m-%d %H:%M:%S'),
                 log.ip_address or '',
                 log.get_status_display(),
             ])
@@ -1222,6 +1250,9 @@ def audit_log_api(request):
             if log.object_id:
                 object_info += f" ({log.object_id})"
         
+        # Show timestamp in audit display timezone (e.g. Asia/Kolkata)
+        audit_tz = _audit_display_tz()
+        ts_display = log.timestamp.astimezone(audit_tz) if timezone.is_aware(log.timestamp) else log.timestamp
         logs_data.append({
             'id': log.id,
             'user': log.user.username if log.user else 'System',
@@ -1229,8 +1260,8 @@ def audit_log_api(request):
             'action': log.get_action_display(),
             'description': log.description[:100] if log.description else '',  # Limit description length
             'object': object_info,
-            'timestamp': log.timestamp.strftime('%b %d, %Y'),
-            'time': log.timestamp.strftime('%H:%M:%S'),
+            'timestamp': ts_display.strftime('%b %d, %Y'),
+            'time': ts_display.strftime('%H:%M:%S'),
             'ip_address': log.ip_address or '-',
             'status': log.get_status_display(),
             'additional_info': additional_info
@@ -1246,6 +1277,8 @@ def audit_log_api(request):
 @super_admin_required
 def Therapy_Audit_Log(request):
     """Therapy-specific audit log view with filtering and pagination"""
+    # Show timestamps in local time (e.g. Asia/Kolkata) in both HTML and CSV
+    timezone.activate(_audit_display_tz())
     # Get filter parameters
     action_filter = request.GET.get('action', '')
     status_filter = request.GET.get('status', '')
@@ -1337,6 +1370,8 @@ def Therapy_Audit_Log(request):
                     details = ' | '.join(parts)
                 except Exception:
                     details = str(log.additional_data)
+            # timezone.localtime uses the activated timezone (set at start of view)
+            ts_display = timezone.localtime(log.timestamp)
             writer.writerow([
                 log.id,
                 user,
@@ -1344,17 +1379,17 @@ def Therapy_Audit_Log(request):
                 log.get_action_display(),
                 (log.description or '').replace('\n', ' ').replace('\r', ' '),
                 details,
-                timezone.localtime(log.timestamp).strftime('%Y-%m-%d %H:%M:%S'),
+                ts_display.strftime('%Y-%m-%d %H:%M:%S'),
                 log.ip_address or '',
                 log.get_status_display(),
             ])
         return response
-    
+
     # Pagination
     paginator = Paginator(audit_logs, 50)  # Show 50 logs per page
     page_number = request.GET.get('page')
     page_obj = paginator.get_page(page_number)
-    
+
     # Get filter options for dropdowns
     therapy_actions_choices = [choice for choice in AuditLog.ACTION_CHOICES if choice[0] in therapy_actions]
     statuses = AuditLog.STATUS_CHOICES

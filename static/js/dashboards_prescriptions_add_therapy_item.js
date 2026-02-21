@@ -8,12 +8,21 @@
         const $proc = $('#procured');
         const $oil = $('#oil_class');
 
+        // From date: allow only today or future (no past dates)
+        function getTodayStr() {
+          const d = new Date();
+          return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+        }
+        $from.attr('min', getTodayStr());
+
         // When therapy changes, set from/to/days from data- attributes
         $therapy.on('change', function(){
           const opt = $(this).find('option:selected');
-          const from = opt.data('from') || '';
+          let from = opt.data('from') || '';
           const to = opt.data('to') || '';
           const days = opt.data('days') || '';
+          const todayStr = getTodayStr();
+          if (from && from < todayStr) from = todayStr;
 
           // put into inputs (HTML date expects YYYY-MM-DD)
           $from.val(from);

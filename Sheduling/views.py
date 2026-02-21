@@ -4257,6 +4257,11 @@ def final_schedule_api(request):
         try:
             target_date = datetime.strptime(date_filter, '%Y-%m-%d').date()
 
+            if target_date < timezone.now().date():
+                return JsonResponse({
+                    'error': 'Final Schedule is not available for past dates. Please select today or a future date.',
+                }, status=400)
+
             # Check marker table
             if FinalScheduleRun.objects.filter(run_date=target_date).exists():
                 return JsonResponse({
@@ -5135,6 +5140,10 @@ def reschedule_all_failed_api(request):
         filter_date = parse_date(date)
         if not filter_date:
             return JsonResponse({'error': 'Invalid date format. Use YYYY-MM-DD.'}, status=400)
+        if filter_date < timezone.now().date():
+            return JsonResponse({
+                'error': 'Reschedule All Failed is not available for past dates. Please select today or a future date.',
+            }, status=400)
         # Get allocations that have failed bookings on the target date (day-wise filter)
         failed_allocations = (
             TherapyAllocation.objects

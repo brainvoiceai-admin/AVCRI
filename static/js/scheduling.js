@@ -1,7 +1,80 @@
+// State: allocation run in progress (Final Schedule or Reschedule All Failed)
+let allocationInProgress = false;
+// State: Final Schedule already run for the currently selected draft date (from status API)
+let finalScheduleAlreadyRun = false;
+
+// True if dateStr (YYYY-MM-DD) is before today (local date).
+function isPastDate(dateStr) {
+    if (!dateStr) return false;
+    const today = new Date();
+    const y = today.getFullYear(), m = String(today.getMonth() + 1).padStart(2, '0'), d = String(today.getDate()).padStart(2, '0');
+    const todayStr = y + '-' + m + '-' + d;
+    return dateStr < todayStr;
+}
+
+// Single place to enable/disable Final Schedule and Reschedule All Failed (past date + allocation running).
+function updateScheduleButtonsState() {
+    const draftDate = document.getElementById('draft-date') && document.getElementById('draft-date').value;
+    const failedDate = document.getElementById('failed-date') && document.getElementById('failed-date').value;
+    const finalScheduleBtn = document.getElementById('final-schedule-btn');
+    const rescheduleAllBtn = document.getElementById('reschedule-all');
+
+    if (finalScheduleBtn) {
+        const past = isPastDate(draftDate);
+        const disabled = allocationInProgress || !draftDate || past || finalScheduleAlreadyRun;
+        finalScheduleBtn.disabled = disabled;
+        if (disabled) {
+            finalScheduleBtn.setAttribute('disabled', 'disabled');
+        } else {
+            finalScheduleBtn.removeAttribute('disabled');
+        }
+        if (finalScheduleAlreadyRun) {
+            finalScheduleBtn.innerHTML = '<span>🎯</span> Final Schedule (Already Run)';
+            finalScheduleBtn.title = 'Final Schedule has already been run for this date.';
+            finalScheduleBtn.classList.remove('btn-primary');
+            finalScheduleBtn.classList.add('btn-secondary');
+        } else if (past) {
+            finalScheduleBtn.innerHTML = '<span>🎯</span> Final Schedule';
+            finalScheduleBtn.title = 'Not available for past dates. Select today or a future date.';
+            finalScheduleBtn.classList.remove('btn-secondary');
+            finalScheduleBtn.classList.add('btn-primary');
+        } else if (allocationInProgress) {
+            finalScheduleBtn.innerHTML = '<span>🎯</span> Final Schedule';
+            finalScheduleBtn.title = 'Scheduling in progress. Please wait.';
+            finalScheduleBtn.classList.remove('btn-secondary');
+            finalScheduleBtn.classList.add('btn-primary');
+        } else {
+            finalScheduleBtn.innerHTML = '<span>🎯</span> Final Schedule';
+            finalScheduleBtn.title = '';
+            finalScheduleBtn.classList.remove('btn-secondary');
+            finalScheduleBtn.classList.add('btn-primary');
+        }
+    }
+
+    if (rescheduleAllBtn) {
+        const past = isPastDate(failedDate);
+        const disabled = allocationInProgress || !failedDate || past;
+        rescheduleAllBtn.disabled = disabled;
+        if (disabled) {
+            rescheduleAllBtn.setAttribute('disabled', 'disabled');
+        } else {
+            rescheduleAllBtn.removeAttribute('disabled');
+        }
+        if (past) {
+            rescheduleAllBtn.title = 'Not available for past dates. Select today or a future date.';
+        } else if (allocationInProgress) {
+            rescheduleAllBtn.title = 'Scheduling in progress. Please wait.';
+        } else {
+            rescheduleAllBtn.title = '';
+        }
+    }
+}
+
 // Initialize the dashboard
 document.addEventListener('DOMContentLoaded', function () {
-    // Set up event listeners
     setupEventListeners();
+    updateScheduleButtonsState();
+    setTimeout(updateScheduleButtonsState, 50);
 });
 
 // Tab switching
@@ -9,13 +82,11 @@ function setupEventListeners() {
     // Tab switching
     document.querySelectorAll('.tab').forEach(tab => {
         tab.addEventListener('click', function () {
-            // Remove active class from all tabs and contents
             document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
             document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-
-            // Add active class to clicked tab and corresponding content
             this.classList.add('active');
             document.getElementById(this.dataset.tab).classList.add('active');
+            updateScheduleButtonsState();
         });
     });
 
@@ -35,23 +106,29 @@ function setupEventListeners() {
 
     // Date filters - show therapies scheduled for the selected date
     document.getElementById('draft-date').addEventListener('change', function () {
+        finalScheduleAlreadyRun = false;
+        updateScheduleButtonsState();
         if (this.value) {
             loadTherapyData('draft', this.value);
             checkFinalScheduleStatus(this.value);
         } else {
-            // If no date selected, show all draft therapies
             loadTherapyData('draft', '');
-            resetFinalScheduleButton();
         }
     });
-    document.getElementById('failed-date').addEventListener('change', function () {
-        if (this.value) {
-            loadTherapyData('failed', this.value);
-        } else {
-            // If no date selected, show all failed therapies
-            loadTherapyData('failed', '');
-        }
-    });
+    const failedDateInput = document.getElementById('failed-date');
+    if (failedDateInput) {
+        failedDateInput.addEventListener('change', function () {
+            if (this.value) {
+                loadTherapyData('failed', this.value);
+            } else {
+                loadTherapyData('failed', '');
+            }
+            updateScheduleButtonsState();
+        });
+        failedDateInput.addEventListener('input', function () {
+            updateScheduleButtonsState();
+        });
+    }
     document.getElementById('scheduled-date').addEventListener('change', function () {
         const selectedDate = this.value || '';
         activateScheduledTab();
@@ -627,11 +704,20 @@ function triggerFinalSchedule() {
         alert('Please select a date first using the date filter');
         return;
     }
+    if (isPastDate(selectedDate)) {
+        alert('You cannot make schedule for past days.');
+        return;
+    }
+    if (allocationInProgress) {
+        return;
+    }
 
     if (!confirm(`Are you sure you want to run Final Schedule for ${selectedDate}? This will update emergency leave data and allocate all draft therapies for this date.`)) {
         return;
     }
 
+    allocationInProgress = true;
+    updateScheduleButtonsState();
     showLoading('draft');
 
     fetch('/sheduling/scheduling/api/final-schedule/', {
@@ -647,15 +733,25 @@ function triggerFinalSchedule() {
             hideLoading('draft');
             if (!response.ok) {
                 return response.json().then(data => {
-                    const errMsg = data && data.error ? data.error : `Server error: ${response.status}`;
+                    const isPastError = response.status === 400 && data && data.error && (data.error.toLowerCase().indexOf('past') !== -1);
+                    const errMsg = isPastError ? 'You cannot make schedule for past days.' : (data && data.error ? data.error : `Server error: ${response.status}`);
                     throw new Error(errMsg);
-                }).catch(() => {
-                    throw new Error(`Server error: ${response.status}`);
+                }).catch(function (parseErr) {
+                    if (response.status === 400) {
+                        throw new Error('You cannot make schedule for past days.');
+                    }
+                    throw new Error(parseErr.message || `Server error: ${response.status}`);
                 });
             }
             return response.json();
         })
         .then(data => {
+            allocationInProgress = false;
+            if (data && data.already_run) {
+                finalScheduleAlreadyRun = true;
+            }
+            updateScheduleButtonsState();
+
             if (data.success) {
                 const statsSource = (data.stats && (data.stats.allocation || data.stats)) || {};
                 const total = statsSource.total_processed ?? statsSource.total ?? 0;
@@ -671,29 +767,25 @@ function triggerFinalSchedule() {
                 }
 
                 showAlert('success', message);
-                // Reload all data
                 loadTherapyData('draft', selectedDate);
                 loadTherapyData('failed', selectedDate);
                 loadTherapyData('allocated', selectedDate, getPatientSearchValue());
             } else {
-                if (data.already_run) {
+                if (data && data.already_run) {
                     showAlert('warning', data.error || 'Final Schedule has already been run for this date.');
-                    // Disable the Final Schedule button for this date
-                    const finalScheduleBtn = document.getElementById('final-schedule-btn');
-                    if (finalScheduleBtn) {
-                        finalScheduleBtn.disabled = true;
-                        finalScheduleBtn.textContent = 'Final Schedule (Already Run)';
-                        finalScheduleBtn.classList.remove('btn-primary');
-                        finalScheduleBtn.classList.add('btn-secondary');
-                    }
                 } else {
-                    showAlert('error', data.error || 'Final Schedule failed');
+                    showAlert('error', (data && data.error) || 'Final Schedule failed');
                 }
             }
         })
         .catch(error => {
+            allocationInProgress = false;
+            updateScheduleButtonsState();
             hideLoading('draft');
-            showAlert('error', 'Error running Final Schedule: ' + error.message);
+            const msg = (error && error.message && (error.message.indexOf('past') !== -1 || error.message.indexOf('400') !== -1))
+                ? 'You cannot make schedule for past days.'
+                : ('Error running Final Schedule: ' + (error && error.message ? error.message : 'Unknown error'));
+            showAlert('error', msg);
         });
 }
 
@@ -773,11 +865,17 @@ function rescheduleSingleFailed(id) {
 }
 
 function rescheduleAllFailed() {
-    // Get the selected date from the date filter
     const targetDate = document.getElementById('failed-date').value;
 
     if (!targetDate) {
         alert('Please select a date using the date filter first');
+        return;
+    }
+    if (isPastDate(targetDate)) {
+        alert('You cannot make schedule for past days.');
+        return;
+    }
+    if (allocationInProgress) {
         return;
     }
 
@@ -785,6 +883,8 @@ function rescheduleAllFailed() {
         return;
     }
 
+    allocationInProgress = true;
+    updateScheduleButtonsState();
     showLoading('failed');
 
     const requestData = {
@@ -801,18 +901,24 @@ function rescheduleAllFailed() {
         body: JSON.stringify(requestData)
     })
         .then(response => {
-            hideLoading('failed');
             if (!response.ok) {
                 return response.json().then(data => {
-                    const errMsg = data && data.error ? data.error : `Server error: ${response.status}`;
+                    const isPastError = response.status === 400 && data && data.error && (String(data.error).toLowerCase().indexOf('past') !== -1);
+                    const errMsg = isPastError ? 'You cannot make schedule for past days.' : ((data && data.error) ? data.error : `Server error: ${response.status}`);
                     throw new Error(errMsg);
-                }).catch(() => {
-                    throw new Error(`Server error: ${response.status}`);
+                }).catch(function (parseErr) {
+                    if (response.status === 400) {
+                        throw new Error('You cannot make schedule for past days.');
+                    }
+                    throw new Error(parseErr.message || `Server error: ${response.status}`);
                 });
             }
             return response.json();
         })
         .then(data => {
+            allocationInProgress = false;
+            updateScheduleButtonsState();
+            hideLoading('failed');
             if (data.success) {
                 const stats = data.stats || {};
                 const total = stats.total ?? 0;
@@ -826,18 +932,22 @@ function rescheduleAllFailed() {
                 }
 
                 showAlert('success', message);
-                // Reload all data to show updated status
                 loadTherapyData('failed', targetDate);
                 loadTherapyData('draft', targetDate);
                 loadTherapyData('allocated', targetDate, getPatientSearchValue());
             } else {
-                showAlert('error', data.error || 'Rescheduling failed');
+                showAlert('error', (data && data.error) || 'Rescheduling failed');
                 loadTherapyData('failed', targetDate);
             }
         })
         .catch(error => {
+            allocationInProgress = false;
+            updateScheduleButtonsState();
             hideLoading('failed');
-            showAlert('error', 'Error rescheduling therapies: ' + error.message);
+            const msg = (error && error.message && (String(error.message).indexOf('past') !== -1 || String(error.message).indexOf('400') !== -1))
+                ? 'You cannot make schedule for past days.'
+                : ('Error rescheduling therapies: ' + (error && error.message ? error.message : 'Unknown error'));
+            showAlert('error', msg);
         });
 }
 
@@ -896,26 +1006,16 @@ function closeRescheduleModal() {
 }
 
 function checkFinalScheduleStatus(selectedDate) {
-    // Check if Final Schedule has already been run for this date (GET, read-only)
     fetch(`/sheduling/scheduling/api/final-schedule/status/?date=${encodeURIComponent(selectedDate)}`)
         .then(response => response.json())
         .then(data => {
-            if (data.already_run) {
-                // Final Schedule already run for this date
-                const finalScheduleBtn = document.getElementById('final-schedule-btn');
-                finalScheduleBtn.disabled = true;
-                finalScheduleBtn.textContent = 'Final Schedule (Already Run)';
-                finalScheduleBtn.classList.remove('btn-primary');
-                finalScheduleBtn.classList.add('btn-secondary');
-            } else {
-                // Final Schedule not run yet, enable button
-                resetFinalScheduleButton();
-            }
+            finalScheduleAlreadyRun = !!data.already_run;
+            updateScheduleButtonsState();
         })
         .catch(error => {
             console.error('Error checking Final Schedule status:', error);
-            // On error, assume it's available
-            resetFinalScheduleButton();
+            finalScheduleAlreadyRun = false;
+            updateScheduleButtonsState();
         });
 }
 
