@@ -172,6 +172,8 @@ AUTH_PASSWORD_VALIDATORS = [
 LANGUAGE_CODE = 'en-us'
 
 TIME_ZONE = 'UTC'
+# Timezone for audit log report display (HTML, CSV, PDF). Use local timezone so timestamps show correct time.
+AUDIT_LOG_DISPLAY_TIMEZONE = os.getenv('AUDIT_LOG_DISPLAY_TIMEZONE', 'Asia/Kolkata')
 
 USE_I18N = True
 
@@ -253,10 +255,10 @@ CELERY_ENABLE_UTC = USE_TZ
 
 # Celery Beat schedule (runs in celery beat process)
 CELERY_BEAT_SCHEDULE = {
-    # Morning reschedule at 05:30 every day (today's date)
+    # Morning reschedule at 14:02 (2:02 PM) every day (today's date) - Changed from 05:30 for testing
     'morning-reschedule': {
         'task': 'Sheduling.tasks.task_reschedule_morning',
-        'schedule': crontab(hour=5, minute=30),
+        'schedule': crontab(hour=15, minute=20),
         'options': {'queue': 'default'},
     },
     # Night reschedule at 20:00 every day (tomorrow's date)

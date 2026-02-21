@@ -31,7 +31,12 @@ parser = argparse.ArgumentParser(description="Reassign therapist bookings when t
 parser.add_argument("--dry-run", action="store_true", help="Do not commit changes; show what would happen.")
 parser.add_argument("--date", type=str, default=None, help="Date to run for (YYYY-MM-DD). Defaults to today (server local timezone).")
 parser.add_argument("--settings", type=str, default=None, help="Optional DJANGO_SETTINGS_MODULE to use.")
-args = parser.parse_args()
+# IMPORTANT:
+# This module is imported by Django management commands (e.g. `python manage.py reschedule_morning`).
+# In that context, `sys.argv` contains Django's command name (`reschedule_morning`), which would
+# normally make argparse fail with "unrecognized arguments".
+# Using parse_known_args keeps standalone CLI behavior while avoiding import-time crashes.
+args, _unknown_args = parser.parse_known_args()
 
 # apply settings if provided
 if args.settings:
@@ -507,11 +512,176 @@ def available_candidates_by_level_and_bathing(target_date, time_slot, level, req
     return candidates
 
 
-def find_previous_bathing_therapist_for_patient(booking, target_date, em_therapist_ids, em_emp_codes):
+def _get_therapist_continuity_plan_model():
+    """Lazy import TherapistContinuityPlan from Sheduling.models."""
+    try:
+        from Sheduling.models import TherapistContinuityPlan
+        return TherapistContinuityPlan
+    except Exception:
+        return None
+
+
+def get_continuity_therapists_from_plan(allocation, patient_id, target_date, slot, need_bathing=None,
+                                        em_therapist_ids=None, em_emp_codes=None):
     """
-    Find most recent previous bathing therapist for the same patient.
+    Get continuity therapists from TherapistContinuityPlan for this allocation/date/slot/patient.
+    Returns list of (TherapistMaster, is_bathing) that are available (not on leave, not booked at slot).
+    """
+    TherapistContinuityPlan = _get_therapist_continuity_plan_model()
+    if not TherapistContinuityPlan or not allocation:
+        return []
+    em_therapist_ids = em_therapist_ids or set()
+    em_emp_codes = em_emp_codes or set()
+    try:
+        qs = TherapistContinuityPlan.objects.filter(
+            date=target_date,
+            time_slot=slot,
+            allocation_id=allocation.pk,
+            patient_id=patient_id,
+        ).select_related('therapist').order_by('priority', 'is_bathing', 'therapist_id')
+        result = []
+        for row in qs:
+            if not row.therapist:
+                continue
+            t = row.therapist
+            if getattr(t, 'pk', None) in em_therapist_ids or getattr(t, 'employee_code', None) in em_emp_codes:
+                continue
+            if therapist_has_weekly_leave_on(t, target_date):
+                continue
+            if TherapistBooking.objects.filter(therapist=t, date=target_date, time_slot=slot, status='BOOKED').exists():
+                continue
+            if need_bathing is True and not getattr(t, 'is_bathing_therapist', False):
+                continue
+            result.append((t, getattr(row, 'is_bathing', False)))
+        return result
+    except Exception as e:
+        logger.debug("get_continuity_therapists_from_plan failed: %s", e)
+        return []
+
+
+def find_bathing_therapist_from_start_of_therapy(booking, allocation, target_date, em_therapist_ids, em_emp_codes):
+    """
+    When bathing therapist is on emergency leave: try to reassign to the ORIGINAL bathing therapist
+    from start of therapy (first day of this allocation). Prefer first available in chronological order.
+    Returns TherapistMaster or None.
+    """
+    if not allocation or not getattr(booking, 'time_slot', None):
+        return None
+    slot = booking.time_slot
+    therapy_start_date = getattr(allocation, 'from_date', None)
+    if not therapy_start_date:
+        return None
+    try:
+        from django.db.models import Q
+        from masters.models import TherapistLeaveMaster, EmergencyLeave
+        prev_bath_qs = TherapistBooking.objects.filter(
+            patient_id=booking.patient_id,
+            visit_id=allocation.pk,
+            time_slot=slot,
+            date__gte=therapy_start_date,
+            date__lt=target_date,
+            is_bathing=True,
+            status='BOOKED',
+        ).select_related('therapist').order_by('date', 'created_at')
+        seen = set()
+        for prev_bath_booking in prev_bath_qs:
+            if not prev_bath_booking.therapist:
+                continue
+            t = prev_bath_booking.therapist
+            tid = getattr(t, 'pk', None)
+            if tid in seen:
+                continue
+            seen.add(tid)
+            if tid in em_therapist_ids or getattr(t, 'employee_code', None) in em_emp_codes:
+                continue
+            if therapist_has_weekly_leave_on(t, target_date):
+                continue
+            if TherapistBooking.objects.filter(therapist=t, date=target_date, time_slot=slot, status='BOOKED').exists():
+                continue
+            if not getattr(t, 'is_bathing_therapist', False):
+                continue
+            logger.info(
+                "Emergency reassign: Using bathing therapist from start of therapy %s for patient %s (allocation %s)",
+                getattr(t, 'therapist_code', tid), booking.patient_id, allocation.pk
+            )
+            return t
+    except Exception as e:
+        logger.debug("find_bathing_therapist_from_start_of_therapy failed: %s", e)
+    return None
+
+
+def find_previous_therapist_from_start_of_therapy(booking, allocation, target_date, em_therapist_ids, em_emp_codes,
+                                                  same_level=True, desired_gender=None, needs_bathing=False):
+    """
+    Prefer a therapist from start of therapy (same allocation) for continuity.
+    Returns first available TherapistMaster in chronological order from allocation.from_date.
+    """
+    if not allocation or not getattr(booking, 'time_slot', None):
+        return None
+    slot = booking.time_slot
+    therapy_start_date = getattr(allocation, 'from_date', None)
+    if not therapy_start_date:
+        return None
+    try:
+        qs = TherapistBooking.objects.filter(
+            visit_id=allocation.pk,
+            time_slot=slot,
+            date__gte=therapy_start_date,
+            date__lt=target_date,
+            status='BOOKED',
+        ).exclude(pk=booking.pk).select_related('therapist').order_by('date', 'created_at')
+        seen = set()
+        for prev_booking in qs:
+            if not prev_booking.therapist:
+                continue
+            t = prev_booking.therapist
+            tid = getattr(t, 'pk', None)
+            if tid in seen:
+                continue
+            seen.add(tid)
+            if getattr(t, 'pk', None) in em_therapist_ids or getattr(t, 'employee_code', None) in em_emp_codes:
+                continue
+            if therapist_has_weekly_leave_on(t, target_date):
+                continue
+            if TherapistBooking.objects.filter(therapist=t, date=target_date, time_slot=slot, status='BOOKED').exists():
+                continue
+            if same_level and booking.therapist:
+                old_grade = get_therapist_grade_name(booking.therapist)
+                new_grade = get_therapist_grade_name(t)
+                if old_grade != new_grade:
+                    continue
+            if desired_gender and get_therapist_gender(t) != desired_gender:
+                continue
+            if needs_bathing and not getattr(t, 'is_bathing_therapist', False):
+                continue
+            logger.info(
+                "Emergency reassign: Using therapist from start of therapy %s for patient %s (allocation %s)",
+                getattr(t, 'therapist_code', tid), booking.patient_id, allocation.pk
+            )
+            return t
+    except Exception as e:
+        logger.debug("find_previous_therapist_from_start_of_therapy failed: %s", e)
+    return None
+
+
+def find_previous_bathing_therapist_for_patient(booking, target_date, em_therapist_ids, em_emp_codes,
+                                                 allocation=None):
+    """
+    Find replacement bathing therapist when current bathing therapist is on emergency leave.
+    Priority:
+    1) Bathing therapist from start of therapy (same allocation) - if allocation provided
+    2) Most recent previous bathing therapist for the same patient (any allocation)
     Returns TherapistMaster instance or None.
     """
+    # 1) Prefer bathing therapist from start of therapy (continuity)
+    if allocation:
+        from_start = find_bathing_therapist_from_start_of_therapy(
+            booking, allocation, target_date, em_therapist_ids or set(), em_emp_codes or set()
+        )
+        if from_start:
+            return from_start
+
+    # 2) Fallback: most recent previous bathing therapist for patient
     try:
         prev_bath_booking = TherapistBooking.objects.filter(
             patient_id=booking.patient_id,
@@ -523,11 +693,10 @@ def find_previous_bathing_therapist_for_patient(booking, target_date, em_therapi
             date=target_date,
             time_slot=booking.time_slot
         ).select_related('therapist').order_by('-date', '-created_at').first()
-        
+
         if prev_bath_booking and prev_bath_booking.therapist:
             cand = prev_bath_booking.therapist
-            # Validate availability
-            if getattr(cand, 'pk', None) in em_therapist_ids or getattr(cand, 'employee_code', None) in em_emp_codes:
+            if getattr(cand, 'pk', None) in (em_therapist_ids or set()) or getattr(cand, 'employee_code', None) in (em_emp_codes or set()):
                 return None
             if therapist_has_weekly_leave_on(cand, target_date):
                 return None
@@ -540,33 +709,70 @@ def find_previous_bathing_therapist_for_patient(booking, target_date, em_therapi
         pass
     return None
 
-def find_previous_assigned_therapist_for_booking_patient_only(booking, needs_bathing, same_level, target_date, 
-                                                                em_therapist_ids, em_emp_codes, desired_gender=None):
+def find_previous_assigned_therapist_for_booking_patient_only(booking, needs_bathing, same_level, target_date,
+                                                                em_therapist_ids, em_emp_codes, desired_gender=None,
+                                                                allocation=None):
     """
-    Preference: 
-    1. Most recent previous BATHING therapist if needs_bathing=True
-    2. Most recent previous therapist for the same patient (ignore therapy).
-    Validate candidate against constraints (level, bathing, gender, not on leave, not weekly leave, not already booked at slot).
+    Continuity priority (aligned with main reschedule algorithm):
+    1. TherapistContinuityPlan – pre-planned continuity for this allocation/date/slot (prefer bathing if needs_bathing)
+    2. Bathing therapist from start of therapy (when bathing therapist on leave) – then most recent previous bathing
+    3. Any therapist from start of therapy (same allocation)
+    4. Most recent previous therapist for the same patient (any therapy)
+    Validates level, gender, not on leave, not already booked at slot.
     """
-    # First try to find previous bathing therapist if needed
+    slot = getattr(booking, 'time_slot', None)
+    em_therapist_ids = em_therapist_ids or set()
+    em_emp_codes = em_emp_codes or set()
+
+    # 1) TherapistContinuityPlan – use pre-planned continuity if available
+    if allocation and slot and booking.patient_id is not None:
+        plan_therapists = get_continuity_therapists_from_plan(
+            allocation, booking.patient_id, target_date, slot,
+            need_bathing=needs_bathing,
+            em_therapist_ids=em_therapist_ids, em_emp_codes=em_emp_codes
+        )
+        for t, is_bathing in plan_therapists:
+            if needs_bathing and not is_bathing and not getattr(t, 'is_bathing_therapist', False):
+                continue
+            if same_level and booking.therapist:
+                old_grade = get_therapist_grade_name(booking.therapist)
+                new_grade = get_therapist_grade_name(t)
+                if old_grade != new_grade:
+                    continue
+            if desired_gender and get_therapist_gender(t) != desired_gender:
+                continue
+            logger.info(
+                "Emergency reassign: Using therapist from TherapistContinuityPlan %s for booking %s",
+                getattr(t, 'therapist_code', t.pk), booking.pk
+            )
+            return t
+
+    # 2) Bathing therapist: from start of therapy first, then most recent previous bathing
     if needs_bathing:
-        prev_bath = find_previous_bathing_therapist_for_patient(booking, target_date, em_therapist_ids, em_emp_codes)
+        prev_bath = find_previous_bathing_therapist_for_patient(
+            booking, target_date, em_therapist_ids, em_emp_codes, allocation=allocation
+        )
         if prev_bath:
-            # Validate same level if required
-            if same_level:
-                old_grade = get_therapist_grade_name(booking.therapist) if booking.therapist else ''
+            if same_level and booking.therapist:
+                old_grade = get_therapist_grade_name(booking.therapist)
                 new_grade = get_therapist_grade_name(prev_bath)
                 if old_grade != new_grade:
-                    prev_bath = None  # Grade mismatch, continue to regular search
-            # Validate gender if required
-            if prev_bath and desired_gender:
-                t_gender = get_therapist_gender(prev_bath)
-                if t_gender != desired_gender:
-                    prev_bath = None  # Gender mismatch, continue to regular search
+                    prev_bath = None
+            if prev_bath and desired_gender and get_therapist_gender(prev_bath) != desired_gender:
+                prev_bath = None
             if prev_bath:
                 return prev_bath
-    
-    # Fallback to regular previous therapist search
+
+    # 3) Any therapist from start of therapy (same allocation)
+    if allocation:
+        from_start = find_previous_therapist_from_start_of_therapy(
+            booking, allocation, target_date, em_therapist_ids, em_emp_codes,
+            same_level=same_level, desired_gender=desired_gender, needs_bathing=needs_bathing
+        )
+        if from_start:
+            return from_start
+
+    # 4) Fallback: most recent previous therapist for same patient (any therapy)
     try:
         prev = (TherapistBooking.objects
                 .filter(patient_id=booking.patient_id)
@@ -581,38 +787,24 @@ def find_previous_assigned_therapist_for_booking_patient_only(booking, needs_bat
         return None
     cand = prev.therapist
 
-    # validate same level
-    if same_level:
-        old_grade = get_therapist_grade_name(booking.therapist) if booking.therapist else ''
+    if same_level and booking.therapist:
+        old_grade = get_therapist_grade_name(booking.therapist)
         new_grade = get_therapist_grade_name(cand)
         if old_grade != new_grade:
             return None
-    
-    # validate gender match
-    if desired_gender:
-        t_gender = get_therapist_gender(cand)
-        if t_gender != desired_gender:
-            return None
-    
-    # validate bathing if needed
+    if desired_gender and get_therapist_gender(cand) != desired_gender:
+        return None
     if needs_bathing and not getattr(cand, 'is_bathing_therapist', False):
         return None
-
-    # check emergency leave sets
     if getattr(cand, 'pk', None) in em_therapist_ids or getattr(cand, 'employee_code', None) in em_emp_codes:
         return None
-
-    # weekly leave check
     if therapist_has_weekly_leave_on(cand, target_date):
         return None
-
-    # slot conflict
     try:
         if TherapistBooking.objects.filter(therapist=cand, date=target_date, time_slot=booking.time_slot, status='BOOKED').exists():
             return None
     except Exception:
         pass
-
     return cand
 
 
@@ -677,7 +869,12 @@ def pick_least_loaded_candidate(candidates, target_date, max_daily_normal, max_d
 # -------------------------
 def process_reassignments(target_date=None, dry_run=True, max_daily_normal=5, max_daily_overtime_extra=2):
     """
-    Entry point. Returns summary dict.
+    Entry point. Reassigns TherapistBooking rows when therapist is on emergency leave.
+    Continuity (aligned with main reschedule algo): TherapistContinuityPlan, bathing therapist
+    from start of therapy, previous bathing therapist, therapist from start of therapy, then any
+    available candidate. When bathing therapist is on leave we try in order: plan, original bathing
+    from start of therapy, most recent previous bathing therapist, then pool.
+    Returns summary dict with checked, reassigned, cancelled, failed.
     """
     if target_date is None:
         target_date = timezone.localtime(timezone.now()).date()
@@ -685,12 +882,16 @@ def process_reassignments(target_date=None, dry_run=True, max_daily_normal=5, ma
     summary = {'checked': 0, 'reassigned': [], 'cancelled': [], 'failed': []}
 
     em_therapist_ids, em_emp_codes = get_emergency_leave_sets_for_date(target_date)
+    print(f"   [INFO] Found {len(em_therapist_ids)} therapist IDs and {len(em_emp_codes)} employee codes on emergency leave")
 
     # find bookings whose therapist is on emergency leave
     try:
         qs = TherapistBooking.objects.filter(date=target_date, status='BOOKED').select_related('therapist', 'time_slot')
+        total_bookings = qs.count()
+        print(f"   [INFO] Total bookings for {target_date}: {total_bookings}")
     except Exception as e:
         logger.exception("Failed to query TherapistBooking: %s", e)
+        print(f"   [ERROR] Error querying bookings: {e}")
         return summary
 
     affected = []
@@ -702,14 +903,19 @@ def process_reassignments(target_date=None, dry_run=True, max_daily_normal=5, ma
             affected.append(b)
 
     logger.info("Found %d affected bookings for date %s", len(affected), target_date.isoformat())
+    print(f"   [WARNING] Found {len(affected)} bookings with therapists on emergency leave")
     if not affected:
+        print("   [OK] No affected bookings - nothing to reassign")
         return summary
 
-    for booking in affected:
+    print(f"\n   [PROCESSING] Processing {len(affected)} affected booking(s)...\n")
+    for idx, booking in enumerate(affected, 1):
         summary['checked'] += 1
         old = booking.therapist
         if not old:
             continue
+        
+        print(f"   [{idx}/{len(affected)}] Processing Booking {booking.pk}: Therapist {getattr(old, 'therapist_code', old.pk)} on emergency leave")
         
         # Get therapist grade properly
         old_grade_name = get_therapist_grade_name(old)
@@ -747,31 +953,45 @@ def process_reassignments(target_date=None, dry_run=True, max_daily_normal=5, ma
         
         # Check if patient already has booking at this slot (excluding this booking and same allocation)
         exclude_allocation = None
+        allocation = getattr(booking, 'visit', None)  # TherapistBooking.visit = TherapyAllocation
         if hasattr(booking, 'visit'):
             exclude_allocation = booking.visit
-        if patient_already_has_booking(booking.patient_id, target_date, slot, 
-                                       exclude_booking_pk=booking.pk, 
+        if patient_already_has_booking(booking.patient_id, target_date, slot,
+                                       exclude_booking_pk=booking.pk,
                                        exclude_allocation=exclude_allocation):
-            logger.warning("Patient %s already has booking at %s %s - skipping reassignment", 
+            logger.warning("Patient %s already has booking at %s %s - skipping reassignment",
                           booking.patient_id, target_date, slot)
             summary['failed'].append((booking.pk, "patient_already_has_booking_at_slot"))
             continue
 
-        # 1) prefer previous therapist for same patient (not patient+therapy)
-        # Prioritize previous bathing therapist if needed
+        # When bathing therapist is on emergency leave: we try (1) TherapistContinuityPlan,
+        # (2) bathing therapist from start of therapy, (3) most recent previous bathing therapist,
+        # (4) any therapist from start of therapy, (5) any available bathing/level candidate.
+        if needs_bathing:
+            logger.info(
+                "Reassigning bathing therapist for booking %s (patient %s, therapy %s): current therapist %s on emergency leave",
+                booking.pk, booking.patient_id, therapy_name, getattr(old, 'therapist_code', old.pk)
+            )
+            print(f"      [BATHING] BATHING THERAPIST REASSIGNMENT: Trying continuity options...")
+
+        # 1) Continuity: plan, then bathing-from-start, then previous bathing, then from-start, then previous any
         prev = find_previous_assigned_therapist_for_booking_patient_only(
             booking, needs_bathing=needs_bathing,
             same_level=True, target_date=target_date,
             em_therapist_ids=em_therapist_ids, em_emp_codes=em_emp_codes,
-            desired_gender=desired_gender
+            desired_gender=desired_gender,
+            allocation=allocation
         )
         if prev:
             today_cnt = TherapistBooking.objects.filter(therapist=prev, date=target_date, status='BOOKED').count()
             if today_cnt < max_daily_normal or today_cnt < (max_daily_normal + max_daily_overtime_extra):
                 # reassign to prev
+                prev_code = getattr(prev, 'therapist_code', prev.pk)
+                old_code = getattr(old, 'therapist_code', old.pk)
                 if dry_run:
-                    summary['reassigned'].append((booking.pk, getattr(old, 'therapist_code', old.pk), getattr(prev, 'therapist_code', prev.pk)))
-                    logger.info("[DRY RUN] Would reassign booking %s -> therapist %s", booking.pk, getattr(prev, 'therapist_code', prev.pk))
+                    summary['reassigned'].append((booking.pk, old_code, prev_code))
+                    logger.info("[DRY RUN] Would reassign booking %s -> therapist %s", booking.pk, prev_code)
+                    print(f"      [OK] [DRY RUN] Would reassign: {old_code} -> {prev_code} (continuity therapist)")
                 else:
                     try:
                         with transaction.atomic():
@@ -779,12 +999,16 @@ def process_reassignments(target_date=None, dry_run=True, max_daily_normal=5, ma
                             if hasattr(booking, 'is_bathing') and needs_bathing:
                                 booking.is_bathing = True
                             booking.save(update_fields=['therapist', 'updated_at'] + (['is_bathing'] if hasattr(booking, 'is_bathing') else []))
-                        summary['reassigned'].append((booking.pk, getattr(old, 'therapist_code', old.pk), getattr(prev, 'therapist_code', prev.pk)))
-                        logger.info("Reassigned booking %s -> therapist %s", booking.pk, getattr(prev, 'therapist_code', prev.pk))
+                        summary['reassigned'].append((booking.pk, old_code, prev_code))
+                        logger.info("Reassigned booking %s -> therapist %s", booking.pk, prev_code)
+                        print(f"      [OK] Reassigned: {old_code} -> {prev_code} (continuity therapist)")
                     except Exception as e:
                         logger.exception("Error reassigning booking %s to prev therapist: %s", booking.pk, e)
                         summary['failed'].append((booking.pk, str(e)))
+                        print(f"      [ERROR] Failed to reassign: {e}")
                 continue
+            else:
+                print(f"      [WARNING] Continuity therapist {prev_code} at daily limit ({today_cnt} sessions) - trying other candidates")
 
         # 2) build candidate pool by level & bathing requirement with gender matching
         # Check if trainee substitution is needed (male trainee -> junior)
@@ -810,40 +1034,48 @@ def process_reassignments(target_date=None, dry_run=True, max_daily_normal=5, ma
 
         # 3) if no candidates -> cancel (single or full treatment)
         if not candidates:
+            print(f"      [WARNING] No available candidates found")
             if should_cancel_full_treatment(booking, target_date):
                 # cancel full treatment
                 if dry_run:
                     summary['cancelled'].append(("FULL_TREATMENT", booking.pk, booking.patient_id))
                     logger.info("[DRY RUN] Would cancel full treatment for patient %s at slot %s", booking.patient_id, getattr(slot, 'id', slot))
+                    print(f"      [CANCEL] [DRY RUN] Would cancel FULL TREATMENT for patient {booking.patient_id}")
                 else:
                     try:
                         canceled_counts = cancel_full_treatment_for_patient_slot(booking.patient_id, target_date, slot, by_user=None, reason="therapist_unavailable")
                         summary['cancelled'].append(("FULL_TREATMENT", booking.pk, booking.patient_id, canceled_counts))
                         logger.info("Cancelled full treatment for patient %s: %s", booking.patient_id, canceled_counts)
+                        print(f"      [CANCEL] Cancelled FULL TREATMENT: {canceled_counts}")
                     except Exception as e:
                         logger.exception("Error cancelling full treatment for booking %s: %s", booking.pk, e)
                         summary['failed'].append((booking.pk, str(e)))
+                        print(f"      [ERROR] Error cancelling: {e}")
             else:
                 # cancel just the single therapist booking
                 if dry_run:
                     summary['cancelled'].append(("SINGLE", booking.pk, booking.patient_id))
                     logger.info("[DRY RUN] Would cancel single therapist booking %s", booking.pk)
+                    print(f"      [CANCEL] [DRY RUN] Would cancel single booking {booking.pk}")
                 else:
                     try:
                         booking.cancel(by_user=None, reason="therapist_unavailable", cascade=True)
                         summary['cancelled'].append(("SINGLE", booking.pk, booking.patient_id))
                         logger.info("Cancelled therapist booking %s", booking.pk)
+                        print(f"      [CANCEL] Cancelled single booking {booking.pk}")
                     except Exception as e:
                         logger.exception("Error cancelling booking %s: %s", booking.pk, e)
                         summary['failed'].append((booking.pk, str(e)))
+                        print(f"      [ERROR] Error cancelling: {e}")
             continue
 
         # 4) pick candidate with daily-load & overtime rules + difficulty balancing
+        print(f"      [SEARCH] Found {len(candidates)} candidate(s) - selecting best match...")
         pick = pick_least_loaded_candidate(
             candidates,
             target_date,
             max_daily_normal,
-            max_daily_excess,
+            max_daily_overtime_extra,
             therapy_category=therapy_category,
         )
 
@@ -978,26 +1210,31 @@ def process_reassignments(target_date=None, dry_run=True, max_daily_normal=5, ma
             summary['reassigned'].append((booking.pk, getattr(old, 'therapist_code', old.pk), getattr(pick, 'therapist_code', pick.pk)))
             logger.info("[DRY RUN] Would reassign booking %s -> therapist %s", booking.pk, getattr(pick, 'therapist_code', pick.pk))
         else:
-            try:
-                with transaction.atomic():
-                    booking.therapist = pick
-                    if hasattr(booking, 'is_bathing') and needs_bathing:
-                        # For special treatments: ensure senior is NOT marked as bathing
-                        if requires_senior_tag:
-                            pick_grade = get_therapist_grade_name(pick)
-                            if pick_grade and 'Senior' in pick_grade:
-                                booking.is_bathing = False
-                                logger.info("Special treatment: Senior therapist %s NOT marked as bathing", getattr(pick, 'therapist_code', pick.pk))
-                            else:
-                                booking.is_bathing = True
-                        else:
-                            booking.is_bathing = True
-                    booking.save(update_fields=['therapist', 'updated_at'] + (['is_bathing'] if hasattr(booking, 'is_bathing') else []))
-                summary['reassigned'].append((booking.pk, getattr(old, 'therapist_code', old.pk), getattr(pick, 'therapist_code', pick.pk)))
-                logger.info("Reassigned booking %s -> therapist %s", booking.pk, getattr(pick, 'therapist_code', pick.pk))
-            except Exception as e:
-                logger.exception("Error reassigning booking %s: %s", booking.pk, e)
-                summary['failed'].append((booking.pk, str(e)))
+                    try:
+                        pick_code = getattr(pick, 'therapist_code', pick.pk)
+                        old_code = getattr(old, 'therapist_code', old.pk)
+                        with transaction.atomic():
+                            booking.therapist = pick
+                            if hasattr(booking, 'is_bathing') and needs_bathing:
+                                # For special treatments: ensure senior is NOT marked as bathing
+                                if requires_senior_tag:
+                                    pick_grade = get_therapist_grade_name(pick)
+                                    if pick_grade and 'Senior' in pick_grade:
+                                        booking.is_bathing = False
+                                        logger.info("Special treatment: Senior therapist %s NOT marked as bathing", pick_code)
+                                        print(f"      [WARNING] Special treatment: Senior {pick_code} NOT marked as bathing")
+                                    else:
+                                        booking.is_bathing = True
+                                else:
+                                    booking.is_bathing = True
+                            booking.save(update_fields=['therapist', 'updated_at'] + (['is_bathing'] if hasattr(booking, 'is_bathing') else []))
+                        summary['reassigned'].append((booking.pk, old_code, pick_code))
+                        logger.info("Reassigned booking %s -> therapist %s", booking.pk, pick_code)
+                        print(f"      [OK] Reassigned: {old_code} -> {pick_code} (from candidate pool)")
+                    except Exception as e:
+                        logger.exception("Error reassigning booking %s: %s", booking.pk, e)
+                        summary['failed'].append((booking.pk, str(e)))
+                        print(f"      [ERROR] Failed to reassign: {e}")
 
     return summary
 
