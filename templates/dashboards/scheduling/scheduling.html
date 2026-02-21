@@ -182,8 +182,7 @@
                                     <tr>
                                         <td>
                                             <div style="font-weight: 500;">
-                                                {{ booking.allocation.patient.pat_name }} ({{
-                                                booking.allocation.patient.pat_reg_no }})
+                                                {{ booking.allocation.patient.pat_name }} ({{ booking.allocation.patient.pat_reg_no }})
                                             </div>
                                         </td>
                                         <td>{{ booking.allocation.therapy_name }}</td>
@@ -191,7 +190,6 @@
                                         <td>
                                             {% if booking.allocation.patient.pat_room_no %}
                                             {% with room_no=booking.allocation.patient.pat_room_no|get_staying_room_display %}
-
                                             {{ room_no|default:booking.allocation.patient.pat_room_no }}
                                             {% endwith %}
                                             {% else %}
@@ -200,8 +198,7 @@
                                         </td>
                                         <td>
                                             <span class="status-badge status-failed"
-                                                title="{{ booking.failure_reason }}">{{
-                                                booking.failure_reason|default:"—" }}</span>
+                                                title="{{ booking.failure_reason }}">{{ booking.failure_reason|default:"—" }}</span>
                                         </td>
                                         <td>Try different time slot</td>
                                         <td>
@@ -321,8 +318,7 @@
                                                     data-patient-name="{{ booking.allocation.patient.pat_name }}"
                                                     data-schedule-date="{{ booking.date|date:'Y-m-d' }}">
                                                     <div style="font-weight: 500;">
-                                                        {{ booking.allocation.patient.pat_name }} ({{
-                                                        booking.allocation.patient.pat_reg_no }})
+                                                        {{ booking.allocation.patient.pat_name }} ({{ booking.allocation.patient.pat_reg_no }})
                                                     </div>
                                                 </button>
                                             </td>
@@ -345,7 +341,6 @@
                                             <td>
                                                 {% if booking.allocation.patient.pat_room_no %}
                                                 {% with room_no=booking.allocation.patient.pat_room_no|get_staying_room_display %}
-
                                                 {{ room_no|default:booking.allocation.patient.pat_room_no }}
                                                 {% endwith %}
                                                 {% else %}
@@ -356,10 +351,8 @@
                                                 <div class="therapist-list">
                                                     {% for assignment in booking.assignments.all %}
                                                     {% with therapist_name=assignment.therapist.therapist_name|default:assignment.therapist.therapist_code %}
-
                                                     {% with is_bathing=assignment|get_therapist_bathing_flag:booking %}
                                                     {% with is_senior=assignment|is_senior_therapist_for_dhara:booking %}
-
                                                     {% with clean_name=therapist_name|cut:"(bathing)" %}
                                                     {% if is_senior %}
                                                     <span class="therapist-badge senior-therapist">
@@ -431,7 +424,6 @@
                                             <td>
                                                 {% if booking.allocation.patient.pat_room_no %}
                                                 {% with room_no=booking.allocation.patient.pat_room_no|get_staying_room_display %}
-
                                                 {{ room_no|default:booking.allocation.patient.pat_room_no }}
                                                 {% endwith %}
                                                 {% else %}
@@ -442,9 +434,7 @@
                                                 <div class="nurse-list">
                                                     {% for nurse_assignment in booking.nurse_assignments.all %}
                                                     {% if nurse_assignment.status == 'assigned' %}
-                                                    <span class="nurse-badge">{{
-                                                        nurse_assignment.nurse.nurse_name|default:nurse_assignment.nurse.nurse_code
-                                                        }}</span>
+                                                    <span class="nurse-badge">{{ nurse_assignment.nurse.nurse_name|default:nurse_assignment.nurse.nurse_code }}
                                                     {% endif %}
                                                     {% empty %}
                                                     —
