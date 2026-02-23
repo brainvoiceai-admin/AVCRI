@@ -130,32 +130,79 @@ $(function () {
   let editingGroupInsertionIndex = null;
 
   // Track the last action performed on each therapy so we can color-code rows
+  // This in-memory dict is only used as an immediate-session override (e.g. right after an
+  // edit action so the row turns yellow before the page re-fetches from the DB).
   function rememberTherapyAction(id, action) {
     if (!id) return;
-    // Store with string key to ensure matching
     const key = String(id);
     therapyActionById[key] = action;
   }
+
+  // Derive the row colour action from DB-persisted timestamps.
+  // Priority: cancelled_at > resumed_at > updated_today > created_today > default(added)
+  function deriveTherapyActionFromDB(t) {
+    // Get local date string YYYY-MM-DD
+    const now = new Date();
+    const todayStr = now.getFullYear() + '-' +
+      String(now.getMonth() + 1).padStart(2, '0') + '-' +
+      String(now.getDate()).padStart(2, '0');
+
+    // Helper: extract YYYY-MM-DD from an ISO timestamp
+    function dateOf(ts) {
+      if (!ts || ts === 'null') return null;
+      return String(ts).slice(0, 10);
+    }
+
+    const cancelledAtDate = dateOf(t.cancelled_at);
+    const resumedAtDate = dateOf(t.resumed_at);
+    const updatedAtDate = dateOf(t.updated_at);
+    const createdAtDate = dateOf(t.created_at);
+
+    // 1. Cancelled: cancelled_at is set
+    if (t.cancelled_at && t.cancelled_at !== 'null') {
+      // Unless it was resumed AFTER being cancelled
+      if (t.resumed_at && t.resumed_at !== 'null' && t.resumed_at >= t.cancelled_at) {
+        return 'resumed';
+      }
+      return 'cancelled';
+    }
+
+    // 2. Resumed (has resumed_at and no active cancellation)
+    if (t.resumed_at && t.resumed_at !== 'null') {
+      return 'resumed';
+    }
+
+    // 3. Updated today: Compare timestamps with a threshold to ignore immediate background saves
+    // If updated_at is at least 10 seconds later than created_at AND update happened today
+    if (updatedAtDate === todayStr && t.updated_at && t.created_at) {
+      const upTs = new Date(t.updated_at).getTime();
+      const crTs = new Date(t.created_at).getTime();
+      if (!isNaN(upTs) && !isNaN(crTs) && (upTs - crTs) > 10000) { // 10 sec diff
+        return 'updated';
+      }
+    }
+
+    // 4. Newly created today or Pre-existing (Default)
+    // Blue for everything else that isn't cancelled/resumed/recently-updated
+    return 'added';
+  }
+
   function decorateTherapyList(list) {
     return (list || []).map(t => {
+      // Check in-memory session override first (set immediately after a user action
+      // so the UI is responsive without waiting for DB round-trip)
       const key1 = t.allocation_id ? String(t.allocation_id) : null;
       const key2 = t.id ? String(t.id) : null;
       const key3 = t.therapy_code ? String(t.therapy_code) : null;
-      const remembered = (key1 && therapyActionById[key1]) ||
+      const sessionOverride = (key1 && therapyActionById[key1]) ||
         (key2 && therapyActionById[key2]) ||
         (key3 && therapyActionById[key3]) || '';
 
-      const s = String(t.status || '').trim().toLowerCase();
-      const hasCancellations = t.cancelled_date_from && t.cancelled_date_to && t.cancelled_date_from !== 'null';
+      // DB-derived action (persistent, survives navigation)
+      const dbDerived = deriveTherapyActionFromDB(t);
 
-      let derived = '';
-      if (s === 'cancelled' || s === 'failed' || hasCancellations) {
-        derived = 'cancelled';
-      } else {
-        derived = 'added'; // DEFAULT = Blue
-      }
-
-      const action = remembered || derived;
+      // Session override wins for current session; DB-derived is authoritative on reload
+      const action = sessionOverride || dbDerived;
       return { ...t, last_action: action };
     });
   }
