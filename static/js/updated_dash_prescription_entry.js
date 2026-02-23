@@ -188,31 +188,70 @@ $(function () {
   let prescriptionActionById = {};
 
   // Track the last action performed so rows can be color-coded
+  // This in-memory dict is only used as an immediate-session override (e.g. right after an
+  // edit action so the row turns yellow before the page re-fetches from the DB).
   function rememberPrescriptionAction(id, action) {
     if (!id) return;
-    // Store with string key to ensure matching
     const key = String(id);
     prescriptionActionById[key] = action;
   }
+
+  // Derive the row colour action from DB-persisted timestamps.
+  // Priority: cancelled_at > resumed_at > updated_today > created_today > default(added)
+  function derivePrescriptionActionFromDB(p) {
+    const now = new Date();
+    const todayStr = now.getFullYear() + '-' +
+      String(now.getMonth() + 1).padStart(2, '0') + '-' +
+      String(now.getDate()).padStart(2, '0');
+
+    function dateOf(ts) {
+      if (!ts || ts === 'null') return null;
+      return String(ts).slice(0, 10);
+    }
+
+    const updatedAtDate = dateOf(p.updated_at);
+    const createdAtDate = dateOf(p.created_at);
+
+    // 1. Cancelled: cancelled_at is set
+    if (p.cancelled_at && p.cancelled_at !== 'null') {
+      // Unless it was resumed AFTER being cancelled
+      if (p.resumed_at && p.resumed_at !== 'null' && p.resumed_at >= p.cancelled_at) {
+        return 'resumed';
+      }
+      return 'cancelled';
+    }
+
+    // 2. Resumed (has resumed_at and no active cancellation)
+    if (p.resumed_at && p.resumed_at !== 'null') {
+      return 'resumed';
+    }
+
+    // 3. Updated today: Compare timestamps with a threshold
+    if (updatedAtDate === todayStr && p.updated_at && p.created_at) {
+      const upTs = new Date(p.updated_at).getTime();
+      const crTs = new Date(p.created_at).getTime();
+      if (!isNaN(upTs) && !isNaN(crTs) && (upTs - crTs) > 10000) { // 10 sec threshold
+        return 'updated';
+      }
+    }
+
+    // 4. Newly created today or Pre-existing
+    return 'added';
+  }
+
   function decoratePrescriptionList(list) {
     return (list || []).map(p => {
-      // Try multiple key formats to match what we stored
+      // Check in-memory session override first
       const key1 = p.allocation_id ? String(p.allocation_id) : null;
       const key2 = p.id ? String(p.id) : null;
-      const remembered = (key1 && prescriptionActionById[key1]) ||
+      const sessionOverride = (key1 && prescriptionActionById[key1]) ||
         (key2 && prescriptionActionById[key2]) || '';
 
-      const s = String(p.status || '').trim().toLowerCase();
-      const hasCancellations = p.cancelled_date_from && p.cancelled_date_to && p.cancelled_date_from !== 'null';
+      // DB-derived action (persistent, survives navigation)
+      const dbDerived = derivePrescriptionActionFromDB(p);
 
-      let derived = '';
-      if (s === 'cancelled' || hasCancellations) {
-        derived = 'cancelled';
-      } else {
-        derived = 'added'; // DEFAULT = Blue
-      }
-
-      const action = remembered || derived;
+      // Session override wins for current session; DB-derived is authoritative on reload
+      const action = sessionOverride || dbDerived;
       return { ...p, last_action: action };
     });
   }

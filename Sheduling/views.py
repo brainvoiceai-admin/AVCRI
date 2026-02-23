@@ -844,6 +844,8 @@ def therapy_entry(request):
                     allocation.procured_from = payload['procured_from']
                 if 'notes' in payload:
                     allocation.notes = payload['notes']
+                if 'ext_int' in payload:
+                    allocation.ext_int = payload['ext_int'] or ''
                 if new_timeslot is not None:
                     allocation.timeslot = new_timeslot
                 
