@@ -264,6 +264,58 @@ def get_emergency_leave_sets_for_date(target_date):
         return set(), set()
 
 
+def sync_booking_assignment_after_reassign(therapist_booking, old_therapist, new_therapist, target_date):
+    """
+    After reassigning a TherapistBooking (Patient), update the corresponding
+    Sheduling.BookingAssignment so the frontend (therapy-data API) shows the new therapist.
+    """
+    try:
+        from django.apps import apps
+        Booking = apps.get_model('Sheduling', 'Booking')
+        BookingAssignment = apps.get_model('Sheduling', 'BookingAssignment')
+        PatientTherapist = apps.get_model('Patient', 'Therapist')
+        allocation = getattr(therapist_booking, 'visit', None)
+        slot = getattr(therapist_booking, 'time_slot', None)
+        if not allocation or not slot:
+            return
+        sched_booking = Booking.objects.filter(
+            allocation=allocation,
+            date=target_date,
+            timeslot=slot
+        ).first()
+        if not sched_booking:
+            return
+        old_code = getattr(old_therapist, 'therapist_code', None) or getattr(old_therapist, 'pk', None)
+        new_code = getattr(new_therapist, 'therapist_code', None) or getattr(new_therapist, 'pk', None)
+        if not old_code or not new_code or old_code == new_code:
+            return
+        assignment = BookingAssignment.objects.filter(
+            booking=sched_booking,
+            therapist__therapist_code=old_code,
+            status='assigned'
+        ).first()
+        if not assignment:
+            return
+        grade_obj = getattr(new_therapist, 'therapist_grade', None)
+        grade_name = getattr(grade_obj, 'name', None) if grade_obj else None
+        grade_name = grade_name or getattr(new_therapist, 'therapist_grade', '') or ''
+        if not isinstance(grade_name, str):
+            grade_name = str(grade_name)
+        new_pt, _ = PatientTherapist.objects.get_or_create(
+            therapist_code=str(new_code),
+            defaults={
+                'therapist_name': getattr(new_therapist, 'therapist_name', str(new_code)),
+                'therapist_grade': grade_name,
+                'is_bathing_therapist': getattr(new_therapist, 'is_bathing_therapist', True),
+            }
+        )
+        assignment.therapist = new_pt
+        assignment.save(update_fields=['therapist'])
+        logger.info("Synced BookingAssignment %s to new therapist %s for frontend display", assignment.pk, new_code)
+    except Exception as e:
+        logger.warning("Could not sync BookingAssignment after reassign (frontend may show old therapist): %s", e)
+
+
 def therapist_has_weekly_leave_on(t_obj, target_date):
     """
     Return True if t_obj has an active weekly leave on the weekday of target_date.
@@ -999,6 +1051,7 @@ def process_reassignments(target_date=None, dry_run=True, max_daily_normal=5, ma
                             if hasattr(booking, 'is_bathing') and needs_bathing:
                                 booking.is_bathing = True
                             booking.save(update_fields=['therapist', 'updated_at'] + (['is_bathing'] if hasattr(booking, 'is_bathing') else []))
+                        sync_booking_assignment_after_reassign(booking, old, prev, target_date)
                         summary['reassigned'].append((booking.pk, old_code, prev_code))
                         logger.info("Reassigned booking %s -> therapist %s", booking.pk, prev_code)
                         print(f"      [OK] Reassigned: {old_code} -> {prev_code} (continuity therapist)")
@@ -1228,6 +1281,7 @@ def process_reassignments(target_date=None, dry_run=True, max_daily_normal=5, ma
                                 else:
                                     booking.is_bathing = True
                             booking.save(update_fields=['therapist', 'updated_at'] + (['is_bathing'] if hasattr(booking, 'is_bathing') else []))
+                        sync_booking_assignment_after_reassign(booking, old, pick, target_date)
                         summary['reassigned'].append((booking.pk, old_code, pick_code))
                         logger.info("Reassigned booking %s -> therapist %s", booking.pk, pick_code)
                         print(f"      [OK] Reassigned: {old_code} -> {pick_code} (from candidate pool)")
