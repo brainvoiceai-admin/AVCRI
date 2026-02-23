@@ -414,7 +414,8 @@
                                                     data-patient-name="{{ booking.allocation.patient.pat_name }}"
                                                     data-schedule-date="{{ booking.date|date:'Y-m-d' }}">
                                                     <div style="font-weight: 500;">
-                                                        {{ booking.allocation.patient.pat_name }} ({{ booking.allocation.patient.pat_reg_no }})
+                                                        {{ booking.allocation.patient.pat_name }} ({{
+                                                        booking.allocation.patient.pat_reg_no }})
                                                     </div>
                                                 </button>
                                             </td>
@@ -433,9 +434,7 @@
                                                 <div class="nurse-list">
                                                     {% for nurse_assignment in booking.nurse_assignments.all %}
                                                     {% if nurse_assignment.status == 'assigned' %}
-                                                    <span class="nurse-badge">{{
-                                                        nurse_assignment.nurse.nurse_name|default:nurse_assignment.nurse.nurse_code
-                                                        }}</span>
+                                                    <span class="nurse-badge">{{ nurse_assignment.nurse.nurse_name|default:nurse_assignment.nurse.nurse_code }}
                                                     {% endif %}
                                                     {% empty %}
                                                     —
@@ -732,6 +731,22 @@
                             // Create therapist list without background colors
                             const div = document.createElement('div');
                             div.style.fontSize = '12px';
+
+                            // Show per-date slot badge if it differs from the row's header slot
+                            const cellSlot = cell.slot || '';
+                            if (cellSlot && cellSlot !== row.slot) {
+                                const slotBadge = document.createElement('div');
+                                slotBadge.innerText = '⏰ ' + cellSlot;
+                                slotBadge.style.fontSize = '10px';
+                                slotBadge.style.color = '#7c3aed';
+                                slotBadge.style.fontWeight = '600';
+                                slotBadge.style.marginBottom = '3px';
+                                slotBadge.style.background = '#ede9fe';
+                                slotBadge.style.borderRadius = '3px';
+                                slotBadge.style.padding = '1px 4px';
+                                slotBadge.style.display = 'inline-block';
+                                div.appendChild(slotBadge);
+                            }
 
                             cell.therapists.forEach((t, index) => {
                                 const span = document.createElement('div');
