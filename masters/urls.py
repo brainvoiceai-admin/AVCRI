@@ -56,6 +56,8 @@ urlpatterns = [
     path('therapy/add/', views.TherapyMasterCreateView.as_view(), name='therapy_master_add'),
     path('therapy/<int:pk>/update/', views.TherapyMasterUpdateView.as_view(), name='therapy_master_update'),
     path('therapy/<int:pk>/delete/', views.therapy_master_delete, name='therapy_master_delete'),
+    path('therapy/<int:pk>/enable/', views.therapy_master_enable, name='therapy_master_enable'),
+    path('therapy/<int:pk>/disable/', views.therapy_master_disable, name='therapy_master_disable'),
     # Therapy Group Master CRUD
     path('therapy-groups/', views.TherapyGroupManagementView.as_view(), name='therapy_group_manage'),
     path('therapy-groups/add/', views.TherapyGroupCreateView.as_view(), name='therapy_group_add'),
@@ -68,6 +70,8 @@ urlpatterns = [
     path('items/add/', views.ItemMasterCreateView.as_view(), name='item_master_add'),
     path('items/<int:pk>/update/', views.ItemMasterUpdateView.as_view(), name='item_master_update'),
     path('items/<int:pk>/delete/', views.item_master_delete, name='item_master_delete'),
+    path('items/<int:pk>/enable/', views.item_master_enable, name='item_master_enable'),
+    path('items/<int:pk>/disable/', views.item_master_disable, name='item_master_disable'),
     # Item Group Master CRUD
     path('item-groups/', views.ItemGroupManagementView.as_view(), name='item_group_manage'),
     path('item-groups/add/', views.ItemGroupCreateView.as_view(), name='item_group_add'),
@@ -80,6 +84,8 @@ urlpatterns = [
     path('slots/add/', views.SlotMasterCreateView.as_view(), name='slot_master_add'),
     path('slots/<int:pk>/update/', views.SlotMasterUpdateView.as_view(), name='slot_master_update'),
     path('slots/<int:pk>/delete/', views.slot_master_delete, name='slot_master_delete'),
+    path('slots/<int:pk>/enable/', views.slot_master_enable, name='slot_master_enable'),
+    path('slots/<int:pk>/disable/', views.slot_master_disable, name='slot_master_disable'),
     # Ingredient Master CRUD
     path('ingredients/', views.IngredientMasterManagementView.as_view(), name='ingredient_master_manage'),
     path('ingredients/add/', views.IngredientMasterCreateView.as_view(), name='ingredient_master_add'),
@@ -99,12 +105,16 @@ urlpatterns = [
     path('therapists/add/', views.TherapistMasterCreateView.as_view(), name='therapist_master_add'),
     path('therapists/<int:pk>/update/', views.TherapistMasterUpdateView.as_view(), name='therapist_master_update'),
     path('therapists/<int:pk>/delete/', views.therapist_master_delete, name='therapist_master_delete'),
+    path('therapists/<int:pk>/enable/', views.therapist_master_enable, name='therapist_master_enable'),
+    path('therapists/<int:pk>/disable/', views.therapist_master_disable, name='therapist_master_disable'),
     path('therapists/export-excel/', views.therapist_master_export_excel, name='therapist_master_export_excel'),
     # Therapist Grade CRUD
     path('therapist-grades/', views.TherapistGradeManagementView.as_view(), name='therapistgrade_manage'),
     path('therapist-grades/add/', views.TherapistGradeCreateView.as_view(), name='therapistgrade_add'),
     path('therapist-grades/<int:pk>/update/', views.TherapistGradeUpdateView.as_view(), name='therapistgrade_update'),
     path('therapist-grades/<int:pk>/delete/', views.therapist_grade_delete, name='therapistgrade_delete'),
+    path('therapist-grades/<int:pk>/enable/', views.therapist_grade_enable, name='therapistgrade_enable'),
+    path('therapist-grades/<int:pk>/disable/', views.therapist_grade_disable, name='therapistgrade_disable'),
     # Nurse Treatment Master CRUD
     path('nurse-treatments/', views.NurseTreatmentMasterManagementView.as_view(), name='nursetreatment_manage'),
     path('nurse-treatments/add/', views.NurseTreatmentMasterCreateView.as_view(), name='nursetreatment_add'),

@@ -182,6 +182,20 @@
                                             class="btn btn-sm btn-outline-primary">
                                             <i class="fas fa-edit"></i>
                                         </a>
+                                        {% if therapy.is_active %}
+                                        <a href="{% url 'therapy_master_disable' therapy.pk %}"
+                                           class="btn btn-sm btn-outline-warning"
+                                           title="Disable"
+                                           onclick="return confirm('Are you sure you want to disable {{ therapy.therapy_name }}?');">
+                                            <i class="fas fa-ban"></i>
+                                        </a>
+                                        {% else %}
+                                        <a href="{% url 'therapy_master_enable' therapy.pk %}"
+                                           class="btn btn-sm btn-outline-success"
+                                           title="Enable">
+                                            <i class="fas fa-check"></i>
+                                        </a>
+                                        {% endif %}
                                         <a href="{% url 'therapy_master_delete' therapy.pk %}"
                                             class="btn btn-sm btn-outline-danger"
                                             onclick="return confirm('Are you sure you want to delete {{ therapy.therapy_name }}?')">

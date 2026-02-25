@@ -696,7 +696,10 @@ def Manage_user(request):
                     request.session['edit_error_message'] = 'Username already exists. Use another.'
                 else:
                     request.session['edit_error_message'] = 'Email already exists. Use another.'
-                request.session['edit_error_user_id'] = user_id
+                try:
+                    request.session['edit_error_user_id'] = int(user_id)
+                except (TypeError, ValueError):
+                    request.session['edit_error_user_id'] = user_id
                 from django.urls import reverse
                 from urllib.parse import urlencode
                 filter_params = {k: request.GET[k] for k in ('search', 'status', 'role') if request.GET.get(k)}
@@ -926,6 +929,7 @@ def Manage_user(request):
     if request.method == 'GET' and request.GET.get('action') == 'check_user_exists':
         username = request.GET.get('username', '').strip()
         email = request.GET.get('email', '').strip()
+        exclude_user_id = request.GET.get('exclude_user_id', '').strip()
         
         result = {
             'username_exists': False,
@@ -934,13 +938,20 @@ def Manage_user(request):
             'email_message': ''
         }
         
+        qs = CustomUser.objects.all()
+        if exclude_user_id:
+            try:
+                qs = qs.exclude(id=int(exclude_user_id))
+            except (TypeError, ValueError):
+                pass
+        
         if username:
-            if CustomUser.objects.filter(username=username).exists():
+            if qs.filter(username=username).exists():
                 result['username_exists'] = True
                 result['username_message'] = f'Username "{username}" already exists.'
         
         if email:
-            if CustomUser.objects.filter(email=email).exists():
+            if qs.filter(email=email).exists():
                 result['email_exists'] = True
                 result['email_message'] = f'Email "{email}" already exists.'
         
@@ -949,6 +960,12 @@ def Manage_user(request):
     # Pop edit-modal error from session so it shows in the modal and we reopen that modal
     edit_error_user_id = request.session.pop('edit_error_user_id', None)
     edit_error_message = request.session.pop('edit_error_message', None)
+    if edit_error_user_id is not None:
+        try:
+            edit_error_user_id = int(edit_error_user_id)
+        except (TypeError, ValueError):
+            edit_error_user_id = None
+            edit_error_message = None
     
     context = {
         'users': users,

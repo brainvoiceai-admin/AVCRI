@@ -1,11 +1,13 @@
-// Get CSRF token from meta tag or cookie
+// Get CSRF token from meta tag, form input, or cookie
 function getCsrfToken() {
-  // Try to get from meta tag first
   const metaTag = document.querySelector('meta[name="csrf-token"]');
-  if (metaTag) {
+  if (metaTag && metaTag.getAttribute('content')) {
     return metaTag.getAttribute('content');
   }
-  // Fallback: try to get from cookie
+  const formInput = document.querySelector('input[name="csrfmiddlewaretoken"]');
+  if (formInput && formInput.value) {
+    return formInput.value;
+  }
   const name = 'csrftoken';
   let cookieValue = null;
   if (document.cookie && document.cookie !== '') {
@@ -28,9 +30,12 @@ function deleteUser(userId, username) {
       alert('Error: CSRF token not found. Please refresh the page and try again.');
       return;
     }
+    const actionUrl = (window.manageUserConfig && window.manageUserConfig.manageUserActionUrl)
+      ? window.manageUserConfig.manageUserActionUrl
+      : window.location.pathname;
     const form = document.createElement('form');
     form.method = 'POST';
-    form.action = window.location.pathname;
+    form.action = actionUrl;
     form.innerHTML = `
       <input type="hidden" name="csrfmiddlewaretoken" value="${csrfToken}">
       <input type="hidden" name="action" value="delete_user">
@@ -230,7 +235,8 @@ window.toggleUserStatus = toggleUserStatus;
     function checkUsernameExists(username) {
       if (!username || username.length < 3) return;
       
-      fetch(`{% url 'authentication:Manage_user' %}?action=check_user_exists&username=${encodeURIComponent(username)}`)
+      var manageUrl = (window.manageUserConfig && window.manageUserConfig.manageUserActionUrl) || window.location.pathname;
+      fetch(`${manageUrl}?action=check_user_exists&username=${encodeURIComponent(username)}`)
         .then(response => response.json())
         .then(data => {
           const usernameInput = document.getElementById('username');
@@ -259,7 +265,8 @@ window.toggleUserStatus = toggleUserStatus;
         return;
       }
       
-      fetch(`{% url 'authentication:Manage_user' %}?action=check_user_exists&email=${encodeURIComponent(email)}`)
+      var manageUrl = (window.manageUserConfig && window.manageUserConfig.manageUserActionUrl) || window.location.pathname;
+      fetch(`${manageUrl}?action=check_user_exists&email=${encodeURIComponent(email)}`)
         .then(response => response.json())
         .then(data => {
           const emailInput = document.getElementById('email');
@@ -280,7 +287,8 @@ window.toggleUserStatus = toggleUserStatus;
     }
     
     function checkUserExistsSync(username, email, callback) {
-      fetch(`{% url 'authentication:Manage_user' %}?action=check_user_exists&username=${encodeURIComponent(username)}&email=${encodeURIComponent(email)}`)
+      var manageUrl = (window.manageUserConfig && window.manageUserConfig.manageUserActionUrl) || window.location.pathname;
+      fetch(`${manageUrl}?action=check_user_exists&username=${encodeURIComponent(username)}&email=${encodeURIComponent(email)}`)
         .then(response => response.json())
         .then(data => {
           callback(data);
@@ -437,17 +445,86 @@ window.toggleUserStatus = toggleUserStatus;
         }, true); // Use capture phase to catch event early
       });
       
-      // Handle edit modals
-      {% for user in users %}
-      const editRoleSelect{{ user.id }} = document.getElementById('edit_role{{ user.id }}');
-      if (editRoleSelect{{ user.id }}) {
-        editRoleSelect{{ user.id }}.addEventListener('change', function() {
-          toggleEditRoleSpecificFields('edit_role{{ user.id }}', {{ user.id }});
+      // Handle edit modals - use event delegation (no Django template in static JS)
+      document.querySelectorAll('[id^="edit_role"]').forEach(function(editRoleSelect) {
+        var match = editRoleSelect.id.match(/edit_role(\d+)/);
+        var userId = match ? match[1] : null;
+        if (userId) {
+          editRoleSelect.addEventListener('change', function() {
+            toggleEditRoleSpecificFields('edit_role' + userId, userId);
+          });
+          toggleEditRoleSpecificFields('edit_role' + userId, userId);
+        }
+      });
+
+      // Live username/email validation for edit user modals (exclude current user)
+      var editUsernameTimeouts = {};
+      var editEmailTimeouts = {};
+      document.querySelectorAll('[id^="editUserModal"]').forEach(function(modal) {
+        var match = modal.id.match(/editUserModal(\d+)/);
+        var userId = match ? match[1] : null;
+        if (!userId) return;
+        var usernameInput = document.getElementById('edit_username' + userId);
+        var emailInput = document.getElementById('edit_email' + userId);
+        var usernameError = document.getElementById('edit_username_error_' + userId);
+        var emailError = document.getElementById('edit_email_error_' + userId);
+        if (!usernameInput || !emailInput) return;
+        var manageUrl = (window.manageUserConfig && window.manageUserConfig.manageUserActionUrl) || window.location.pathname;
+        function checkEditUsername() {
+          var username = usernameInput.value.trim();
+          if (username.length < 3) {
+            if (usernameError) { usernameError.style.display = 'none'; usernameInput.classList.remove('is-invalid'); }
+            return;
+          }
+          fetch(manageUrl + '?action=check_user_exists&username=' + encodeURIComponent(username) + '&exclude_user_id=' + encodeURIComponent(userId))
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+              if (usernameError) {
+                if (data.username_exists) {
+                  usernameError.textContent = data.username_message || 'Username already exists.';
+                  usernameError.style.display = 'block';
+                  usernameInput.classList.add('is-invalid');
+                } else {
+                  usernameError.style.display = 'none';
+                  usernameInput.classList.remove('is-invalid');
+                }
+              }
+            })
+            .catch(function() {});
+        }
+        function checkEditEmail() {
+          var email = emailInput.value.trim();
+          if (!email) {
+            if (emailError) { emailError.style.display = 'none'; emailInput.classList.remove('is-invalid'); }
+            return;
+          }
+          fetch(manageUrl + '?action=check_user_exists&email=' + encodeURIComponent(email) + '&exclude_user_id=' + encodeURIComponent(userId))
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+              if (emailError) {
+                if (data.email_exists) {
+                  emailError.textContent = data.email_message || 'Email already exists.';
+                  emailError.style.display = 'block';
+                  emailInput.classList.add('is-invalid');
+                } else {
+                  emailError.style.display = 'none';
+                  emailInput.classList.remove('is-invalid');
+                }
+              }
+            })
+            .catch(function() {});
+        }
+        usernameInput.addEventListener('input', function() {
+          clearTimeout(editUsernameTimeouts[userId]);
+          editUsernameTimeouts[userId] = setTimeout(checkEditUsername, 500);
         });
-        // Initialize on page load
-        toggleEditRoleSpecificFields('edit_role{{ user.id }}', {{ user.id }});
-      }
-      {% endfor %}
+        usernameInput.addEventListener('blur', checkEditUsername);
+        emailInput.addEventListener('input', function() {
+          clearTimeout(editEmailTimeouts[userId]);
+          editEmailTimeouts[userId] = setTimeout(checkEditEmail, 500);
+        });
+        emailInput.addEventListener('blur', checkEditEmail);
+      });
     });
 
     // Handle edit role-specific fields
@@ -524,7 +601,13 @@ window.toggleUserStatus = toggleUserStatus;
         alert('Please select a different role');
         return;
       }
-      
-      // Redirect to role change confirmation page
-      window.location.href = `/authentication/confirm-role-change/${userId}/?new_role=${newRole}`;
+
+      var urlTemplate = (window.manageUserConfig && window.manageUserConfig.confirmRoleChangeUrl)
+        ? window.manageUserConfig.confirmRoleChangeUrl
+        : '/authentication/confirm-role-change/0/';
+      window.location.href = urlTemplate.replace(/\/0\/?$/, '/' + userId + '/') + '?new_role=' + encodeURIComponent(newRole);
     }
+
+  window.deleteUser = deleteUser;
+  window.changeRole = changeRole;
+  window.confirmRoleChange = confirmRoleChange;
