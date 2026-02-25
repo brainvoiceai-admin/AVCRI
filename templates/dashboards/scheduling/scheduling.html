@@ -413,10 +413,7 @@
                                                 <button type="button" class="patient-name-link"
                                                     data-patient-name="{{ booking.allocation.patient.pat_name }}"
                                                     data-schedule-date="{{ booking.date|date:'Y-m-d' }}">
-                                                    <div style="font-weight: 500;">
-                                                        {{ booking.allocation.patient.pat_name }} ({{
-                                                        booking.allocation.patient.pat_reg_no }})
-                                                    </div>
+                                                    <div style="font-weight: 500;">{{ booking.allocation.patient.pat_name }} ({{ booking.allocation.patient.pat_reg_no }})</div>
                                                 </button>
                                             </td>
                                             <td>{{ booking.allocation.therapy_name }}</td>
