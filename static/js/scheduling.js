@@ -1279,31 +1279,36 @@ function generateTherapyPDF(therapyData, date) {
             }
         });
 
-        // Group therapist treatments by time slot
+        // Group therapist treatments by time slot. Use placeholder for treatments with no slot (e.g. Mathra Vasthi).
+        const NO_SLOT_KEY = '—';
         const slotGroups = {};
         therapistTreatments.forEach(item => {
-            const slot = item.timeslot || '00:00';
+            const raw = item.timeslot;
+            const slot = (raw && String(raw).trim() && String(raw) !== '00:00') ? String(raw) : NO_SLOT_KEY;
             if (!slotGroups[slot]) {
                 slotGroups[slot] = [];
             }
             slotGroups[slot].push(item);
         });
 
-        // Helper function to format time in 12-hour format for PDF
+        // Helper function to format time in 12-hour format for PDF. Returns '—' for empty or placeholder.
         function format12HourPDF(time24) {
-            if (!time24) return '—';
+            if (!time24 || time24 === NO_SLOT_KEY) return '—';
             const parts = String(time24).split(':');
             if (parts.length !== 2) return time24;
             let hours = parseInt(parts[0], 10);
             const minutes = parts[1];
+            if (isNaN(hours)) return '—';
             const period = hours >= 12 ? 'PM' : 'AM';
             hours = hours % 12;
             hours = hours ? hours : 12; // 0 should be 12
             return `${hours}:${minutes} ${period}`;
         }
 
-        // Sort slots chronologically (morning to evening)
+        // Sort slots chronologically (morning to evening). Put "—" (no slot) at the end.
         const sortedSlots = Object.keys(slotGroups).sort((a, b) => {
+            if (a === NO_SLOT_KEY) return 1;
+            if (b === NO_SLOT_KEY) return -1;
             const timeA = a.split(':').map(Number);
             const timeB = b.split(':').map(Number);
             const minutesA = timeA[0] * 60 + (timeA[1] || 0);
