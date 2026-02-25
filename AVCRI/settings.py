@@ -174,6 +174,8 @@ LANGUAGE_CODE = 'en-us'
 TIME_ZONE = 'UTC'
 # Timezone for audit log report display (HTML, CSV, PDF). Use local timezone so timestamps show correct time.
 AUDIT_LOG_DISPLAY_TIMEZONE = os.getenv('AUDIT_LOG_DISPLAY_TIMEZONE', 'Asia/Kolkata')
+# Timezone for "5:30 AM lock" in therapy update: after 5:30 AM in this zone, today and past dates are not modified.
+SCHEDULE_LOCK_TIMEZONE = os.getenv('SCHEDULE_LOCK_TIMEZONE', 'Asia/Kolkata')
 
 USE_I18N = True
 

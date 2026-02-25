@@ -3,7 +3,7 @@ import json
 import sys
 import io
 from contextlib import redirect_stdout
-from datetime import timedelta, datetime
+from datetime import timedelta, datetime, time
 from django.shortcuts import render
 from django.http import JsonResponse, HttpResponseBadRequest, HttpResponse
 from django.apps import apps
@@ -18,6 +18,24 @@ from .decorators import scheduling_access_required, scheduling_admin_required, t
 from masters.models import get_staying_room_display_number
 
 EXTERNAL_DB_ALIAS = 'therapy_db'  # external SQL Server alias
+
+def _schedule_lock_upto_date():
+    """Return (lock_upto_date, first_editable_date). After 5:30 AM (in schedule timezone), today and past are locked."""
+    try:
+        from django.conf import settings
+        tz_name = getattr(settings, 'SCHEDULE_LOCK_TIMEZONE', 'Asia/Kolkata')
+        from zoneinfo import ZoneInfo
+        now_in_tz = timezone.now().astimezone(ZoneInfo(tz_name))
+    except Exception:
+        now_in_tz = timezone.localtime(timezone.now())
+    today = now_in_tz.date()
+    if now_in_tz.time() < time(5, 30):
+        lock_upto = today - timedelta(days=1)
+    else:
+        lock_upto = today
+    first_editable = lock_upto + timedelta(days=1)
+    return lock_upto, first_editable
+
 
 def generate_debug_pdf(debug_output, title="Debug Output", date=None):
     """
@@ -720,7 +738,6 @@ def therapy_entry(request):
                         allocation.status = 'draft'
                     # If resuming from the start, update from_date
                     elif resume_from_obj == allocation.cancelled_date_from:
-                        from datetime import timedelta
                         new_from = resume_to_obj + timedelta(days=1)
                         if new_from <= allocation.cancelled_date_to:
                             allocation.cancelled_date_from = new_from
@@ -732,7 +749,6 @@ def therapy_entry(request):
                             allocation.status = 'draft'
                     # If resuming from the end, update to_date
                     elif resume_to_obj == allocation.cancelled_date_to:
-                        from datetime import timedelta
                         new_to = resume_from_obj - timedelta(days=1)
                         if new_to >= allocation.cancelled_date_from:
                             allocation.cancelled_date_to = new_to
@@ -797,6 +813,7 @@ def therapy_entry(request):
 
                 # capture old state
                 old_name = allocation.therapy_name
+                old_slot = allocation.timeslot  # keep full object so we can cancel old-slot bookings
                 old_slot_id = getattr(allocation.timeslot, 'id', None)
                 old_from_date = allocation.from_date
                 old_to_date = allocation.to_date
@@ -870,14 +887,13 @@ def therapy_entry(request):
                     allocation.days = (allocation.to_date - allocation.from_date).days + 1
 
                 # Delete bookings outside the new date range if dates changed
-                # IMPORTANT: Only touch bookings from today onwards; keep past sessions unchanged.
+                # After 5:30 AM (schedule timezone): do not change today or past; only future.
+                lock_upto_date, first_editable_date = _schedule_lock_upto_date()
                 if dates_changed:
-                    from django.utils import timezone as _tz
-                    today = _tz.now().date()
-                    # Get future bookings that will be deleted
+                    # Only delete bookings from first_editable_date onward (today+ or tomorrow+ depending on 5:30 rule)
                     bookings_to_delete = Booking.objects.filter(
                         allocation=allocation,
-                        date__gte=today
+                        date__gte=first_editable_date
                     ).exclude(
                         date__gte=allocation.from_date,
                         date__lte=allocation.to_date
@@ -961,11 +977,8 @@ def therapy_entry(request):
 
                 # Process re-allocation for dates where name/slot/items changed
                 if (name_changed or slot_changed or items_changed) and FinalScheduleRun and expand_therapies_for_visit:
-                    # Process ONLY today and future dates in the NEW date range.
-                    # Past sessions must remain as they were.
-                    from django.utils import timezone as _tz2
-                    today_for_edit = _tz2.now().date()
-                    start_date_for_realloc = allocation.from_date if allocation.from_date >= today_for_edit else today_for_edit
+                    # Only process dates >= first_editable_date (after 5:30 AM in schedule TZ, today and past are locked).
+                    start_date_for_realloc = allocation.from_date if allocation.from_date >= first_editable_date else first_editable_date
 
                     for d in daterange(start_date_for_realloc, allocation.to_date):
                         # Only run allocation for dates where FinalScheduleRun exists.
@@ -975,7 +988,9 @@ def therapy_entry(request):
                                 day_bookings = Booking.objects.filter(allocation=allocation, date=d)
                                 BookingAssignment.objects.filter(booking__in=day_bookings).update(status='released')
                                 from Patient.models import TherapistBooking as TB, RoomBooking as RB
-                                day_timeslot = allocation.timeslot
+                                # Use the OLD timeslot when cancelling existing TherapistBooking/RoomBooking,
+                                # otherwise old-slot rows (e.g. 06:30) are left behind when the slot is changed.
+                                day_timeslot = old_slot or allocation.timeslot
                                 if day_timeslot:
                                     TB.objects.filter(
                                         visit=allocation, date=d, time_slot=day_timeslot,
@@ -1154,12 +1169,11 @@ def therapy_entry(request):
                         allocation.status = 'failed'
                     allocation.save(update_fields=['status'])
 
-                # Create draft bookings for any dates in the new range that don't have bookings (today+ only; do not create past with new items)
+                # Create draft bookings for any dates in the new range that don't have bookings.
+                # Do not create for past or for today after 5:30 AM (use same lock as above).
                 if dates_changed or (name_changed or slot_changed):
-                    from django.utils import timezone as _tz_fill
-                    _today_fill = _tz_fill.now().date()
                     for d in daterange(allocation.from_date, allocation.to_date):
-                        if d < _today_fill:
+                        if d <= lock_upto_date:
                             continue
                         if not Booking.objects.filter(allocation=allocation, date=d).exists():
                             booking = Booking.objects.create(
@@ -1186,12 +1200,10 @@ def therapy_entry(request):
                                     )
                 
                 # Auto-schedule new dates if FinalScheduleRun exists for them (even if name/slot didn't change)
-                # Only touch today and future; leave past bookings/items unchanged.
+                # Respect 5:30 lock: do not touch today or past after 5:30 AM.
                 if dates_changed and FinalScheduleRun and expand_therapies_for_visit:
-                    from django.utils import timezone as _tz_auto
-                    _today_auto = _tz_auto.now().date()
                     for d in daterange(allocation.from_date, allocation.to_date):
-                        if d < _today_auto:
+                        if d <= lock_upto_date:
                             continue
                         # Check if Final Schedule has already run for this date
                         if FinalScheduleRun.objects.filter(run_date=d).exists():
@@ -1403,8 +1415,6 @@ def therapy_entry(request):
         
         # ---------- allocate ----------
         if action_post == 'allocate':
-            # Ensure timedelta is available in this scope
-            from datetime import timedelta
             try:
                 # required fields (items_groups is optional - can be empty array)
                 required = ['patient_reg_no', 'therapy_code', 'therapy_name', 'from_date', 'to_date']
@@ -2345,8 +2355,7 @@ def prescription_entry_page(request):
                 
                 # Create PrescriptionScheduling records for each date in the range (similar to Booking for therapies)
                 from .models import PrescriptionScheduling
-                from datetime import timedelta
-                
+
                 current_date = from_date
                 while current_date <= to_date:
                     # Get or create PrescriptionScheduling for this date
@@ -2818,8 +2827,7 @@ def prescription_entry_page(request):
                 
                 # Create PrescriptionScheduling records for each date in the range (similar to Booking for therapies)
                 from .models import PrescriptionScheduling
-                from datetime import timedelta
-                
+
                 current_date = from_date_parsed
                 while current_date <= to_date_parsed:
                     # Get or create PrescriptionScheduling for this date
@@ -3159,7 +3167,6 @@ def prescription_entry_page(request):
                 # Create PrescriptionChangeLog entry for item updates (cover each date in range)
                 if items_changed:
                     from .models import PrescriptionChangeLog
-                    from datetime import timedelta
 
                     # Build date range
                     date_range = []
@@ -3317,7 +3324,6 @@ def prescription_entry_page(request):
                 
                 if p.from_date and p.to_date:
                     # Get PrescriptionScheduling records for this patient within the allocation date range
-                    from datetime import timedelta
                     scheduling_records = PrescriptionScheduling.objects.filter(
                         patient=patient,
                         prescription_date__gte=p.from_date,

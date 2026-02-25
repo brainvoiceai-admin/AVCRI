@@ -186,7 +186,7 @@
                                             </div>
                                         </td>
                                         <td>{{ booking.allocation.therapy_name }}</td>
-                                        <td>{{ booking.timeslot.slot_time|format_12hour|default:"—" }}</td>
+                                        <td>{% if booking.timeslot %}{{ booking.timeslot.slot_time|format_12hour }}{% else %}—{% endif %}</td>
                                         <td>
                                             {% if booking.allocation.patient.pat_room_no %}
                                             {% with room_no=booking.allocation.patient.pat_room_no|get_staying_room_display %}
@@ -217,7 +217,7 @@
                                             </div>
                                         </td>
                                         <td>{{ allocation.therapy_name }}</td>
-                                        <td>{{ allocation.timeslot.slot_time|format_12hour|default:"—" }}</td>
+                                        <td>{% if allocation.timeslot %}{{ allocation.timeslot.slot_time|format_12hour }}{% else %}—{% endif %}</td>
                                         <td>
                                             {% if allocation.patient.pat_room_no %}
                                             {% with room_no=allocation.patient.pat_room_no|get_staying_room_display %}
@@ -323,7 +323,7 @@
                                                 </button>
                                             </td>
                                             <td>{{ booking.allocation.therapy_name }}</td>
-                                            <td>{{ booking.timeslot.slot_time|format_12hour|default:"—" }}</td>
+                                            <td>{% if booking.timeslot %}{{ booking.timeslot.slot_time|format_12hour }}{% else %}—{% endif %}</td>
                                             <td>{{ booking.date|date:"Y-m-d" }}</td>
                                             <td>
                                                 {% if booking.room %}
