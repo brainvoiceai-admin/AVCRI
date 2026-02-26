@@ -1,18 +1,27 @@
 # Windows Task Scheduler Setup for Emergency Leave Reassignment
 
+Reschedule runs **twice per day**:
+
+| Time    | Task              | What it does                                      |
+|---------|-------------------|---------------------------------------------------|
+| **5:30 AM** | Morning reschedule | Reschedules **today’s** treatments (emergency leave). |
+| **8:00 PM** | Night reschedule   | Reschedules **tomorrow’s** treatments (emergency leave). |
+
+Create **two** scheduled tasks (one for each time). Celery Beat uses the same times if you run it instead.
+
 ## Quick Setup (Recommended for Testing)
 
 Since Celery Beat requires Redis (which may not be installed), use Windows Task Scheduler instead.
 
-### Step 1: Create Task
+### Step 1: Create Morning Task (5:30 AM – today’s reschedule)
 
 1. Open **Task Scheduler** (`Win + R`, type `taskschd.msc`, press Enter)
 
 2. Click **"Create Basic Task"** (right panel)
 
 3. **General Tab:**
-   - Name: `Emergency Leave Reassignment (2:02 PM)`
-   - Description: `Runs emergency leave reassignment algorithm daily at 2:02 PM`
+   - Name: `Emergency Leave Reassignment (5:30 AM)`
+   - Description: `Runs emergency leave reassignment for today at 5:30 AM`
    - Select: **"Run whether user is logged on or not"**
    - Check: **"Run with highest privileges"**
 
@@ -20,7 +29,7 @@ Since Celery Beat requires Redis (which may not be installed), use Windows Task 
    - Click **"New..."**
    - Begin the task: **"On a schedule"**
    - Settings: **"Daily"**
-   - Start: **2:02:00 PM** (or your preferred time)
+   - Start: **5:30:00 AM**
    - Recur every: **1 days**
    - Click **OK**
 
@@ -43,11 +52,40 @@ Since Celery Beat requires Redis (which may not be installed), use Windows Task 
 
 8. Click **OK** and enter your Windows password if prompted
 
-### Step 2: Test the Task
+### Step 2: Create Night Task (8:00 PM – next day’s reschedule)
+
+1. In Task Scheduler, click **"Create Basic Task"** again.
+
+2. **General Tab:**
+   - Name: `Emergency Leave Reassignment (8 PM)`
+   - Description: `Runs emergency leave reassignment for tomorrow at 8:00 PM`
+   - Select: **"Run whether user is logged on or not"**
+   - Check: **"Run with highest privileges"**
+
+3. **Trigger Tab:**
+   - Begin the task: **"On a schedule"**
+   - Settings: **"Daily"**
+   - Start: **8:00:00 PM**
+   - Recur every: **1 days**
+   - Click **OK**
+
+4. **Action Tab:**
+   - Action: **"Start a program"**
+   - Program/script: `C:\Users\jaise\OneDrive\Desktop\git\AVCRI\run_reschedule_night.bat`
+   - OR use Python directly:
+     - Program/script: `python` (or full path to `python.exe`)
+     - Add arguments: `manage.py reschedule_night`
+     - Start in: `C:\Users\jaise\OneDrive\Desktop\git\AVCRI`
+
+5. **Conditions / Settings:** Same as the morning task (optional: wake computer, run on missed start, etc.).
+
+6. Click **OK** and enter your Windows password if prompted.
+
+### Step 3: Test the Tasks
 
 1. Right-click the task → **"Run"**
 2. Check the log file or Task Scheduler history (see below)
-3. Or run manually: `python manage.py reschedule_morning`
+3. Or run manually: `python manage.py reschedule_morning` or `python manage.py reschedule_night`
 
 ---
 
@@ -58,7 +96,7 @@ Since Celery Beat requires Redis (which may not be installed), use Windows Task 
 The batch file writes every run to a **date-named log file**:
 
 - **Folder:** `C:\Users\jaise\OneDrive\Desktop\git\AVCRI\logs\`
-- **File name:** `reschedule_morning_YYYY-MM-DD.log` (e.g. `reschedule_morning_2026-02-19.log`)
+- **Morning:** `reschedule_morning_YYYY-MM-DD.log` (after 5:30 AM); **Night:** `reschedule_night_YYYY-MM-DD.log` (after 8:00 PM)
 
 **What to do:**
 1. Open the `logs` folder in your AVCRI project.
@@ -68,13 +106,13 @@ The batch file writes every run to a **date-named log file**:
    - Full algorithm output (emergency leave update, reassignment summary, etc.)
    - `========== RUN ENDED: ... ==========`
 
-If the file for today is missing or has no new “RUN STARTED” / “RUN ENDED” lines after 2:02 PM, the task did not run (or ran in a different folder).
+If the file for today is missing or has no new “RUN STARTED” / “RUN ENDED” lines after the scheduled time, the task did not run (or ran in a different folder).
 
 ### 2. Check Task Scheduler history
 
 1. Open **Task Scheduler** (`Win + R` → `taskschd.msc`).
 2. In the left panel, select **“Task Scheduler Library”**.
-3. Click your task (e.g. “Emergency Leave Reassignment (2:02 PM)”).
+3. Click your task (e.g. “Emergency Leave Reassignment (5:30 AM) or (8 PM)”).
 4. In the **“History”** tab (or **“Last Run Result”** in the middle panel):
    - **Last Run Time** – when it last ran.
    - **Last Run Result** – `0x0` means success; other codes mean failure.
@@ -82,14 +120,14 @@ If the file for today is missing or has no new “RUN STARTED” / “RUN ENDED�
 
 ### 3. Run it yourself once
 
-- Double‑click `run_reschedule_morning.bat` in the project folder, or  
+- Double‑click `run_reschedule_morning.bat` or `run_reschedule_night.bat` in the project folder, or  
 - In a command prompt: `cd C:\Users\jaise\OneDrive\Desktop\git\AVCRI` then `python manage.py reschedule_morning`  
 
 Then check today’s log file again; you should see a new run block.
 
-### Step 3: View output
+### Step 4: View output
 
-- **Log files:** Every run is appended to `logs\reschedule_morning_YYYY-MM-DD.log` (see “How to know the task ran” above).
+- **Log files:** Morning runs → `logs\\reschedule_morning_YYYY-MM-DD.log`; night runs → `logs\reschedule_night_YYYY-MM-DD.log` (see “How to know the task ran” above).
 - **Task Scheduler:** Use the task’s **History** tab and **Last Run Result** to see if it ran and whether it succeeded.
 
 ## Alternative: Fix Celery Beat (If You Want to Use It)
