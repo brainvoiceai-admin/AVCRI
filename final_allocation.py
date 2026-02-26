@@ -2,6 +2,7 @@
 from datetime import datetime, timedelta
 from types import SimpleNamespace
 from django.db import transaction, IntegrityError
+from django.db.models import Q
 
 # -----------------------
 # Helper: date range
@@ -1659,6 +1660,34 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
     bookings_qs = Booking.objects.filter(allocation_id=therapy_allocation_id, date=target_date)
     if not bookings_qs.exists():
         return {"error": f"No Booking rows found for allocation {therapy_allocation_id} on {target_date.isoformat()}."}
+
+    # CLEAR EXISTING ASSIGNMENTS/BOOKINGS for this allocation/date BEFORE starting algorithm.
+    # This prevents accumulation of therapists (ghost records) when rescheduling.
+    if create_bookings:
+        try:
+            from django.db.models import Q
+            # 1. Cancel existing TherapistBooking records linked to this allocation/date
+            TherapistBooking.objects.filter(
+                visit=allocation,
+                date=target_date,
+                status='BOOKED'
+            ).update(status='CANCELED')
+
+            # 2. Cancel existing RoomBooking records linked to this allocation/date
+            RoomBooking.objects.filter(
+                date=target_date,
+                status='BOOKED'
+            ).filter(
+                Q(therapy=allocation) | Q(visit__allocation=allocation)
+            ).update(status='CANCELED')
+
+            # 3. Delete existing UI assignments for these bookings
+            from Sheduling.models import BookingAssignment
+            BookingAssignment.objects.filter(booking__in=bookings_qs).delete()
+            
+            print(f"[FINAL ALLOCATION] 🧹 Cleared existing bookings/assignments for allocation {therapy_allocation_id} on {target_date} to prevent ghost therapists")
+        except Exception as cleanup_e:
+            print(f"[FINAL ALLOCATION] ⚠ Cleanup error (non-fatal): {cleanup_e}")
 
     bookings_list = list(bookings_qs)
     print(f"[CONTINUITY PASS2] expand_therapies_for_visit: Processing {len(bookings_list)} bookings for allocation {therapy_allocation_id}")

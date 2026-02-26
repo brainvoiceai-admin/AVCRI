@@ -1,5 +1,6 @@
 from datetime import timedelta
 from collections import defaultdict
+from django.db.models import Exists, OuterRef, Q
 from django.http import JsonResponse
 from django.utils.dateparse import parse_date
 from django.views.decorators.http import require_http_methods
@@ -48,18 +49,53 @@ def continuity_matrix_api(request):
         # Fast lookup: {(allocation_id, date, timeslot_id), ...}
         valid_pairs = set((aid, d, tid) for aid, d, tid in valid_bookings_qs)
         
+        # 1b. Fetch Valid Assignments (source of truth for therapists per booking)
+        from Sheduling.models import BookingAssignment
+        valid_assignments_qs = BookingAssignment.objects.filter(
+            booking__date__range=[from_date, to_date],
+            status='assigned'
+        ).exclude(
+            booking__status__icontains='cancel'
+        ).exclude(
+            booking__status__icontains='fail'
+        ).values_list('booking__allocation_id', 'booking__date', 'booking__timeslot_id', 'therapist_id')
+        
+        # therapist_id here is the string therapist_code (PK of Patient.Therapist)
+        valid_assignments = set(valid_assignments_qs)
+        
         # Also build: (allocation_id, date) -> timeslot_id — for slot display per date
         valid_slot_map = {}  # (allocation_id, date) -> timeslot_id
         for aid, d, tid in valid_bookings_qs:
             valid_slot_map[(aid, d)] = tid
         
         # Fetch all TherapistBookings in range (excluding self-cancelled/failed)
+        # Strategy: Only include records that have a corresponding 'assigned' BookingAssignment
+        # for that specific allocation, date, slot, and therapist.
+        # This prevents "ghost" records from appearing in the matrix.
+        valid_assignments_subquery = BookingAssignment.objects.filter(
+            booking__allocation_id=OuterRef('visit_id'),
+            booking__date=OuterRef('date'),
+            booking__timeslot_id=OuterRef('time_slot_id'),
+            therapist__therapist_code=OuterRef('therapist__therapist_code'),
+            status='assigned'
+        ).exclude(
+            booking__status__icontains='cancel'
+        ).exclude(
+            booking__status__icontains='fail'
+        )
+
         bookings = TherapistBooking.objects.filter(
             date__range=[from_date, to_date]
         ).exclude(
             status__icontains='cancel'
         ).exclude(
             status__icontains='fail'
+        ).annotate(
+            has_valid_assignment=Exists(valid_assignments_subquery)
+        ).filter(
+            # For records with a visit (allocation), enforce assignment check.
+            # For records without a visit (rare), we show them if they aren't explicitly cancelled.
+            Q(visit_id__isnull=True) | Q(has_valid_assignment=True)
         ).select_related('therapist', 'visit__patient', 'time_slot').order_by('date')
         
         # 2. Build Caches
@@ -111,10 +147,9 @@ def continuity_matrix_api(request):
         for b in bookings:
             d_str = b.date.strftime('%Y-%m-%d')
 
-            # Skip TherapistBooking rows that don't match a valid Booking (per allocation + date + timeslot).
-            # This filters out:
-            #  1. Bookings from failed/cancelled dates
-            #  2. Ghost records written at the ORIGINAL allocation slot when rescheduled to a different slot
+            # Skip TherapistBooking rows that don't match a valid Booking.
+            # This is now largely handled by the annotate(has_valid_assignment) + filter above,
+            # but we keep a check for valid_pairs to be absolutely certain about the booking status.
             if b.visit_id is not None:
                 if (b.visit_id, b.date, b.time_slot_id) not in valid_pairs:
                     continue
@@ -298,6 +333,21 @@ def continuity_matrix_api(request):
                             
                             if last_booking:
                                 # Get all therapists from that previous date (same visit + slot)
+                                # CRITICAL: Also filter by actual BookingAssignments using Exists
+                                # This prevents ghost therapists from previous dates from bloating the reference set
+                                
+                                valid_assignments_sub_prev = BookingAssignment.objects.filter(
+                                    booking__allocation_id=OuterRef('visit_id'),
+                                    booking__date=OuterRef('date'),
+                                    booking__timeslot_id=OuterRef('time_slot_id'),
+                                    therapist__therapist_code=OuterRef('therapist__therapist_code'),
+                                    status='assigned'
+                                ).exclude(
+                                    booking__status__icontains='cancel'
+                                ).exclude(
+                                    booking__status__icontains='fail'
+                                )
+
                                 prev_query = TherapistBooking.objects.filter(
                                     visit_id=last_booking.visit_id,
                                     date=last_booking.date,
@@ -306,7 +356,12 @@ def continuity_matrix_api(request):
                                     status__icontains='cancel'
                                 ).exclude(
                                     status__icontains='fail'
+                                ).annotate(
+                                    has_valid_assignment=Exists(valid_assignments_sub_prev)
+                                ).filter(
+                                    has_valid_assignment=True
                                 )
+                                
                                 reference_set = set(prev_query.values_list('therapist_id', flat=True))
                             else:
                                 reference_set = set()
