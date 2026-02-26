@@ -257,13 +257,13 @@ CELERY_ENABLE_UTC = USE_TZ
 
 # Celery Beat schedule (runs in celery beat process)
 CELERY_BEAT_SCHEDULE = {
-    # Morning reschedule at 14:02 (2:02 PM) every day (today's date) - Changed from 05:30 for testing
+    # Morning reschedule at 5:30 AM every day (today's date) – emergency leave therapist reschedule for today
     'morning-reschedule': {
         'task': 'Sheduling.tasks.task_reschedule_morning',
-        'schedule': crontab(hour=15, minute=20),
+        'schedule': crontab(hour=5, minute=30),
         'options': {'queue': 'default'},
     },
-    # Night reschedule at 20:00 every day (tomorrow's date)
+    # Night reschedule at 8:00 PM every day (tomorrow's date) – emergency leave therapist reschedule for next day
     'night-reschedule': {
         'task': 'Sheduling.tasks.task_reschedule_night',
         'schedule': crontab(hour=20, minute=0),
