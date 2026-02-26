@@ -149,7 +149,7 @@
                     <td>
                       <button class="btn btn-sm btn-warning" data-bs-toggle="modal" 
                               data-bs-target="#editUserModal{{ user.id }}">Edit</button>
-                      <button class="btn btn-sm btn-info" onclick="changeRole({{ user.id }}, '{{ user.username }}', '{{ user.role }}')">Change Role</button>
+                      <button class="btn btn-sm btn-info" onclick="changeRole({{ user.id }}, '{{ user.username|escapejs }}', '{{ user.role|escapejs }}')">Change Role</button>
                       {% if user.is_active %}
                       <form method="post" style="display:inline;" onsubmit="return confirm('Are you sure you want to deactivate user &quot;{{ user.username|escapejs }}&quot;?');">
                         {% csrf_token %}
@@ -167,7 +167,7 @@
                         <button type="submit" class="btn btn-sm btn-success">Activate</button>
                       </form>
                       {% endif %}
-                      <button class="btn btn-sm btn-danger" onclick="deleteUser({{ user.id }}, '{{ user.username }}')">Delete</button>
+                      <button class="btn btn-sm btn-danger" onclick="deleteUser({{ user.id }}, '{{ user.username|escapejs }}')">Delete</button>
                     </td>
                   </tr>
                   {% empty %}
@@ -362,6 +362,7 @@
                   <label for="edit_username{{ user.id }}" class="form-label">Username *</label>
                   <input type="text" class="form-control" id="edit_username{{ user.id }}" 
                          name="username" value="{{ user.username }}" required>
+                  <div id="edit_username_error_{{ user.id }}" class="text-danger small mt-1" style="display: none;"></div>
                   <small class="text-muted">Must be unique</small>
                 </div>
               </div>
@@ -370,6 +371,7 @@
                   <label for="edit_email{{ user.id }}" class="form-label">Email *</label>
                   <input type="email" class="form-control" id="edit_email{{ user.id }}" 
                          name="email" value="{{ user.email }}" required>
+                  <div id="edit_email_error_{{ user.id }}" class="text-danger small mt-1" style="display: none;"></div>
                 </div>
               </div>
             </div>
@@ -566,6 +568,12 @@
   </div>
 
   <input type="hidden" id="roleChangeUserId" value="">
+  <script>
+    window.manageUserConfig = {
+      confirmRoleChangeUrl: "{% url 'authentication:confirm_role_change' 0 %}",
+      manageUserActionUrl: "{% url 'authentication:Manage_user' %}"
+    };
+  </script>
     <script src="{% static 'js/dashboards_superadmin_Manage_user.js' %}"></script>
     <script src="{% static 'js/dashboards_nav.js' %}"></script>
     {% if edit_error_user_id %}

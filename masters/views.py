@@ -24,6 +24,26 @@ from io import BytesIO
 from django.db import transaction, connection
 from django.db.models import Max
 
+
+def _log_master_audit(request, action, object_type, object_id, description, additional_data=None):
+    """Log master CRUD to audit log (authentication.AuditLog)."""
+    try:
+        from authentication.views import log_audit_event
+        if request and getattr(request, 'user', None) and getattr(request.user, 'is_authenticated', False):
+            log_audit_event(
+                user=request.user,
+                action=action,
+                description=description,
+                status='success',
+                object_type=object_type,
+                object_id=str(object_id),
+                additional_data=additional_data,
+                request=request
+            )
+    except Exception:
+        pass
+
+
 def generate_unique_code(prefix, model_class, field_name):
     """
     Generates a unique code in the format PREFIX + 3 digits (e.g., ITM001).
@@ -220,6 +240,8 @@ def create_master_item(request):
         else:
             return JsonResponse({'error': 'Invalid master type'}, status=400)
         
+        obj_name = getattr(item, 'therapy_code', None) or getattr(item, 'item_name', None) or getattr(item, 'slot_number', None) or getattr(item, 'ingredient_code', None) or str(item.id)
+        _log_master_audit(request, 'create', master_type.title(), str(item.id), f'Created {master_type}: {obj_name}', {'master_type': master_type})
         return JsonResponse({'success': True, 'id': item.id})
         
     except Exception as e:
@@ -338,6 +360,8 @@ def update_master_item(request, item_id):
             return JsonResponse({'error': 'Invalid master type'}, status=400)
         
         item.save()
+        obj_name = getattr(item, 'therapy_code', None) or getattr(item, 'therapy_name', None) or getattr(item, 'item_name', None) or getattr(item, 'slot_number', None) or getattr(item, 'ingredient_code', None) or str(item.id)
+        _log_master_audit(request, 'update', master_type.title(), str(item_id), f'Updated {master_type}: {obj_name}', {'master_type': master_type})
         return JsonResponse({'success': True})
         
     except Exception as e:
@@ -364,7 +388,9 @@ def delete_master_item(request, item_id):
         else:
             return JsonResponse({'error': 'Invalid master type'}, status=400)
         
+        obj_name = getattr(item, 'therapy_code', None) or getattr(item, 'therapy_name', None) or getattr(item, 'item_name', None) or getattr(item, 'slot_number', None) or getattr(item, 'ingredient_code', None) or str(item_id)
         item.delete()
+        _log_master_audit(request, 'delete', master_type.title(), str(item_id), f'Deleted {master_type}: {obj_name}', {'master_type': master_type})
         return JsonResponse({'success': True})
         
     except Exception as e:
@@ -415,10 +441,11 @@ class ProcuredManagementView(ListView):
         # Create new record
         if name:
             try:
-                Procured.objects.create(
+                obj = Procured.objects.create(
                     name=name,
                     is_active=is_active
                 )
+                _log_master_audit(request, 'create', 'Procured', str(obj.id), f'Created Procured: {name}')
                 messages.success(request, f'Procurement source "{name}" created successfully.')
             except Exception as e:
                 messages.error(request, f'Error creating procurement source: {str(e)}')
@@ -434,6 +461,7 @@ class ProcuredUpdateView(UpdateView):
     success_url = reverse_lazy('procured_manage')
     
     def form_valid(self, form):
+        _log_master_audit(self.request, 'update', 'Procured', str(self.object.pk), f'Updated Procured: {self.object.name}')
         messages.success(self.request, 'Procurement source updated successfully.')
         return super().form_valid(form)
 
@@ -444,6 +472,7 @@ def procured_delete(request, pk):
     procured = get_object_or_404(Procured, pk=pk)
     procured_name = procured.name
     procured.delete()
+    _log_master_audit(request, 'delete', 'Procured', str(pk), f'Deleted Procured: {procured_name}')
     messages.success(request, f'Procurement source "{procured_name}" deleted successfully.')
     return redirect('procured_manage')
 
@@ -454,6 +483,7 @@ def procured_enable(request, pk):
     procured = get_object_or_404(Procured, pk=pk)
     procured.is_active = True
     procured.save()
+    _log_master_audit(request, 'update', 'Procured', str(pk), f'Enabled Procured: {procured.name}')
     messages.success(request, f'Procurement source "{procured.name}" enabled successfully.')
     return redirect('procured_manage')
 
@@ -464,6 +494,7 @@ def procured_disable(request, pk):
     procured = get_object_or_404(Procured, pk=pk)
     procured.is_active = False
     procured.save()
+    _log_master_audit(request, 'update', 'Procured', str(pk), f'Disabled Procured: {procured.name}')
     messages.success(request, f'Procurement source "{procured.name}" disabled successfully.')
     return redirect('procured_manage')
 
@@ -511,10 +542,8 @@ class OilClassManagementView(ListView):
         # Create new record
         if name:
             try:
-                OilClass.objects.create(
-                    name=name,
-                    is_active=is_active
-                )
+                obj = OilClass.objects.create(name=name, is_active=is_active)
+                _log_master_audit(request, 'create', 'OilClass', str(obj.id), f'Created OilClass: {name}')
                 messages.success(request, f'Oil class "{name}" created successfully.')
             except Exception as e:
                 messages.error(request, f'Error creating oil class: {str(e)}')
@@ -530,6 +559,7 @@ class OilClassUpdateView(UpdateView):
     success_url = reverse_lazy('oilclass_manage')
     
     def form_valid(self, form):
+        _log_master_audit(self.request, 'update', 'OilClass', str(self.object.pk), f'Updated OilClass: {self.object.name}')
         messages.success(self.request, 'Oil class updated successfully.')
         return super().form_valid(form)
 
@@ -540,6 +570,7 @@ def oil_class_delete(request, pk):
     oil_class = get_object_or_404(OilClass, pk=pk)
     oil_class_name = oil_class.name
     oil_class.delete()
+    _log_master_audit(request, 'delete', 'OilClass', str(pk), f'Deleted OilClass: {oil_class_name}')
     messages.success(request, f'Oil class "{oil_class_name}" deleted successfully.')
     return redirect('oilclass_manage')
 
@@ -550,6 +581,7 @@ def oil_class_enable(request, pk):
     oil_class = get_object_or_404(OilClass, pk=pk)
     oil_class.is_active = True
     oil_class.save()
+    _log_master_audit(request, 'update', 'OilClass', str(pk), f'Enabled OilClass: {oil_class.name}')
     messages.success(request, f'Oil class "{oil_class.name}" enabled successfully.')
     return redirect('oilclass_manage')
 
@@ -560,6 +592,7 @@ def oil_class_disable(request, pk):
     oil_class = get_object_or_404(OilClass, pk=pk)
     oil_class.is_active = False
     oil_class.save()
+    _log_master_audit(request, 'update', 'OilClass', str(pk), f'Disabled OilClass: {oil_class.name}')
     messages.success(request, f'Oil class "{oil_class.name}" disabled successfully.')
     return redirect('oilclass_manage')
 
@@ -615,10 +648,8 @@ class UsageTypeManagementView(ListView):
         # Create new record
         if name:
             try:
-                UsageType.objects.create(
-                    name=name,
-                    is_active=is_active
-                )
+                obj = UsageType.objects.create(name=name, is_active=is_active)
+                _log_master_audit(request, 'create', 'UsageType', str(obj.id), f'Created UsageType: {name}')
                 messages.success(request, f'Usage type "{name}" created successfully.')
             except Exception as e:
                 messages.error(request, f'Error creating usage type: {str(e)}')
@@ -634,6 +665,7 @@ class UsageTypeUpdateView(UpdateView):
     success_url = reverse_lazy('usagetype_manage')
     
     def form_valid(self, form):
+        _log_master_audit(self.request, 'update', 'UsageType', str(self.object.pk), f'Updated UsageType: {self.object.name}')
         messages.success(self.request, 'Usage type updated successfully.')
         return super().form_valid(form)
 
@@ -644,6 +676,7 @@ def usage_type_delete(request, pk):
     usage_type = get_object_or_404(UsageType, pk=pk)
     usage_type_name = usage_type.name
     usage_type.delete()
+    _log_master_audit(request, 'delete', 'UsageType', str(pk), f'Deleted UsageType: {usage_type_name}')
     messages.success(request, f'Usage type "{usage_type_name}" deleted successfully.')
     return redirect('usagetype_manage')
 
@@ -654,6 +687,7 @@ def usage_type_enable(request, pk):
     usage_type = get_object_or_404(UsageType, pk=pk)
     usage_type.is_active = True
     usage_type.save()
+    _log_master_audit(request, 'update', 'UsageType', str(pk), f'Enabled UsageType: {usage_type.name}')
     messages.success(request, f'Usage type "{usage_type.name}" enabled successfully.')
     return redirect('usagetype_manage')
 
@@ -664,6 +698,7 @@ def usage_type_disable(request, pk):
     usage_type = get_object_or_404(UsageType, pk=pk)
     usage_type.is_active = False
     usage_type.save()
+    _log_master_audit(request, 'update', 'UsageType', str(pk), f'Disabled UsageType: {usage_type.name}')
     messages.success(request, f'Usage type "{usage_type.name}" disabled successfully.')
     return redirect('usagetype_manage')
 
@@ -710,10 +745,8 @@ class PrescriptionUsageManagementView(ListView):
         # Create new record
         if name:
             try:
-                PrescriptionUsage.objects.create(
-                    name=name,
-                    is_active=is_active
-                )
+                obj = PrescriptionUsage.objects.create(name=name, is_active=is_active)
+                _log_master_audit(request, 'create', 'PrescriptionUsage', str(obj.id), f'Created PrescriptionUsage: {name}')
                 messages.success(request, f'Prescription usage "{name}" created successfully.')
             except Exception as e:
                 messages.error(request, f'Error creating prescription usage: {str(e)}')
@@ -730,6 +763,7 @@ class PrescriptionUsageUpdateView(UpdateView):
     success_url = reverse_lazy('prescriptionusage_manage')
     
     def form_valid(self, form):
+        _log_master_audit(self.request, 'update', 'PrescriptionUsage', str(self.object.pk), f'Updated PrescriptionUsage: {self.object.name}')
         messages.success(self.request, 'Prescription usage updated successfully.')
         return super().form_valid(form)
 
@@ -740,6 +774,7 @@ def prescription_usage_delete(request, pk):
     prescription_usage = get_object_or_404(PrescriptionUsage, pk=pk)
     prescription_usage_name = prescription_usage.name
     prescription_usage.delete()
+    _log_master_audit(request, 'delete', 'PrescriptionUsage', str(pk), f'Deleted PrescriptionUsage: {prescription_usage_name}')
     messages.success(request, f'Prescription usage "{prescription_usage_name}" deleted successfully.')
     return redirect('prescriptionusage_manage')
 
@@ -750,6 +785,7 @@ def prescription_usage_enable(request, pk):
     prescription_usage = get_object_or_404(PrescriptionUsage, pk=pk)
     prescription_usage.is_active = True
     prescription_usage.save()
+    _log_master_audit(request, 'update', 'PrescriptionUsage', str(pk), f'Enabled PrescriptionUsage: {prescription_usage.name}')
     messages.success(request, f'Prescription usage "{prescription_usage.name}" enabled successfully.')
     return redirect('prescriptionusage_manage')
 
@@ -760,6 +796,7 @@ def prescription_usage_disable(request, pk):
     prescription_usage = get_object_or_404(PrescriptionUsage, pk=pk)
     prescription_usage.is_active = False
     prescription_usage.save()
+    _log_master_audit(request, 'update', 'PrescriptionUsage', str(pk), f'Disabled PrescriptionUsage: {prescription_usage.name}')
     messages.success(request, f'Prescription usage "{prescription_usage.name}" disabled successfully.')
     return redirect('prescriptionusage_manage')
 
@@ -840,7 +877,7 @@ class NurseTreatmentMasterCreateView(CreateView):
         instance = form.save(commit=False)
         instance.treatment_code = treatment_code
         instance.save()
-        
+        _log_master_audit(self.request, 'create', 'NurseTreatmentMaster', str(instance.pk), f'Created NurseTreatmentMaster: {instance.name} ({treatment_code})')
         messages.success(self.request, f'Nurse treatment "{instance.name}" ({treatment_code}) created successfully.')
         return redirect(self.success_url)
 
@@ -852,6 +889,7 @@ class NurseTreatmentMasterUpdateView(UpdateView):
     success_url = reverse_lazy('nursetreatment_manage')
     
     def form_valid(self, form):
+        _log_master_audit(self.request, 'update', 'NurseTreatmentMaster', str(self.object.pk), f'Updated NurseTreatmentMaster: {self.object.name}')
         messages.success(self.request, 'Nurse treatment updated successfully.')
         return super().form_valid(form)
 
@@ -862,6 +900,7 @@ def nurse_treatment_delete(request, pk):
     treatment = get_object_or_404(NurseTreatmentMaster, pk=pk)
     treatment_name = f"{treatment.treatment_code} - {treatment.name}"
     treatment.delete()
+    _log_master_audit(request, 'delete', 'NurseTreatmentMaster', str(pk), f'Deleted NurseTreatmentMaster: {treatment_name}')
     messages.success(request, f'Nurse treatment "{treatment_name}" deleted successfully.')
     return redirect('nursetreatment_manage')
 
@@ -872,6 +911,7 @@ def nurse_treatment_enable(request, pk):
     treatment = get_object_or_404(NurseTreatmentMaster, pk=pk)
     treatment.is_active = True
     treatment.save()
+    _log_master_audit(request, 'update', 'NurseTreatmentMaster', str(pk), f'Enabled NurseTreatmentMaster: {treatment.treatment_code} - {treatment.name}')
     messages.success(request, f'Nurse treatment "{treatment.treatment_code} - {treatment.name}" enabled successfully.')
     return redirect('nursetreatment_manage')
 
@@ -882,6 +922,7 @@ def nurse_treatment_disable(request, pk):
     treatment = get_object_or_404(NurseTreatmentMaster, pk=pk)
     treatment.is_active = False
     treatment.save()
+    _log_master_audit(request, 'update', 'NurseTreatmentMaster', str(pk), f'Disabled NurseTreatmentMaster: {treatment.treatment_code} - {treatment.name}')
     messages.success(request, f'Nurse treatment "{treatment.treatment_code} - {treatment.name}" disabled successfully.')
     return redirect('nursetreatment_manage')
 
@@ -936,13 +977,13 @@ class NurseMasterManagementView(ListView):
             try:
                 # Auto-generate nurse_code (numeric 3-5 digits)
                 nurse_code = generate_numeric_code(NurseMaster, 'nurse_code', start_from=100)
-                
-                NurseMaster.objects.create(
+                obj = NurseMaster.objects.create(
                     nurse_code=nurse_code,
                     nurse_name=nurse_name,
                     designation=designation,
                     is_active=is_active
                 )
+                _log_master_audit(request, 'create', 'NurseMaster', str(obj.id), f'Created NurseMaster: {nurse_code} - {nurse_name}')
                 messages.success(request, f'Nurse "{nurse_code} - {nurse_name}" created successfully.')
             except Exception as e:
                 messages.error(request, f'Error creating nurse: {str(e)}')
@@ -967,6 +1008,7 @@ class NurseMasterUpdateView(UpdateView):
         return form
     
     def form_valid(self, form):
+        _log_master_audit(self.request, 'update', 'NurseMaster', str(self.object.pk), f'Updated NurseMaster: {self.object.nurse_code} - {self.object.nurse_name}')
         messages.success(self.request, 'Nurse updated successfully.')
         return super().form_valid(form)
 
@@ -978,6 +1020,7 @@ def nurse_master_delete(request, pk):
     nurse = get_object_or_404(NurseMaster, pk=pk)
     nurse_name = f"{nurse.nurse_code} - {nurse.nurse_name}"
     nurse.delete()
+    _log_master_audit(request, 'delete', 'NurseMaster', str(pk), f'Deleted NurseMaster: {nurse_name}')
     messages.success(request, f'Nurse "{nurse_name}" deleted successfully.')
     return redirect('nursemaster_manage')
 
@@ -988,6 +1031,7 @@ def nurse_master_enable(request, pk):
     nurse = get_object_or_404(NurseMaster, pk=pk)
     nurse.is_active = True
     nurse.save()
+    _log_master_audit(request, 'update', 'NurseMaster', str(pk), f'Enabled NurseMaster: {nurse.nurse_code} - {nurse.nurse_name}')
     messages.success(request, f'Nurse "{nurse.nurse_code} - {nurse.nurse_name}" enabled successfully.')
     return redirect('nursemaster_manage')
 
@@ -998,6 +1042,7 @@ def nurse_master_disable(request, pk):
     nurse = get_object_or_404(NurseMaster, pk=pk)
     nurse.is_active = False
     nurse.save()
+    _log_master_audit(request, 'update', 'NurseMaster', str(pk), f'Disabled NurseMaster: {nurse.nurse_code} - {nurse.nurse_name}')
     messages.success(request, f'Nurse "{nurse.nurse_code} - {nurse.nurse_name}" disabled successfully.')
     return redirect('nursemaster_manage')
 
@@ -1042,10 +1087,8 @@ class PrescriptionTimeManagementView(ListView):
         # Create new record
         if name:
             try:
-                PrescriptionTime.objects.create(
-                    name=name,
-                    is_active=is_active
-                )
+                obj = PrescriptionTime.objects.create(name=name, is_active=is_active)
+                _log_master_audit(request, 'create', 'PrescriptionTime', str(obj.id), f'Created PrescriptionTime: {name}')
                 messages.success(request, f'Prescription time "{name}" created successfully.')
             except Exception as e:
                 messages.error(request, f'Error creating prescription time: {str(e)}')
@@ -1061,6 +1104,7 @@ class PrescriptionTimeUpdateView(UpdateView):
     success_url = reverse_lazy('prestime_manage')
     
     def form_valid(self, form):
+        _log_master_audit(self.request, 'update', 'PrescriptionTime', str(self.object.pk), f'Updated PrescriptionTime: {self.object.name}')
         messages.success(self.request, 'Prescription time updated successfully.')
         return super().form_valid(form)
 
@@ -1071,6 +1115,7 @@ def prescription_time_delete(request, pk):
     time = get_object_or_404(PrescriptionTime, pk=pk)
     time_name = time.name
     time.delete()
+    _log_master_audit(request, 'delete', 'PrescriptionTime', str(pk), f'Deleted PrescriptionTime: {time_name}')
     messages.success(request, f'Prescription time "{time_name}" deleted successfully.')
     return redirect('prestime_manage')
 
@@ -1081,6 +1126,7 @@ def prescription_time_enable(request, pk):
     time = get_object_or_404(PrescriptionTime, pk=pk)
     time.is_active = True
     time.save()
+    _log_master_audit(request, 'update', 'PrescriptionTime', str(pk), f'Enabled PrescriptionTime: {time.name}')
     messages.success(request, f'Prescription time "{time.name}" enabled successfully.')
     return redirect('prestime_manage')
 
@@ -1091,6 +1137,7 @@ def prescription_time_disable(request, pk):
     time = get_object_or_404(PrescriptionTime, pk=pk)
     time.is_active = False
     time.save()
+    _log_master_audit(request, 'update', 'PrescriptionTime', str(pk), f'Disabled PrescriptionTime: {time.name}')
     messages.success(request, f'Prescription time "{time.name}" disabled successfully.')
     return redirect('prestime_manage')
 
@@ -1135,10 +1182,8 @@ class PrescriptionScopeManagementView(ListView):
         # Create new record
         if name:
             try:
-                PrescriptionScope.objects.create(
-                    name=name,
-                    is_active=is_active
-                )
+                obj = PrescriptionScope.objects.create(name=name, is_active=is_active)
+                _log_master_audit(request, 'create', 'PrescriptionScope', str(obj.id), f'Created PrescriptionScope: {name}')
                 messages.success(request, f'Prescription scope "{name}" created successfully.')
             except Exception as e:
                 messages.error(request, f'Error creating prescription scope: {str(e)}')
@@ -1154,6 +1199,7 @@ class PrescriptionScopeUpdateView(UpdateView):
     success_url = reverse_lazy('prescope_manage')
     
     def form_valid(self, form):
+        _log_master_audit(self.request, 'update', 'PrescriptionScope', str(self.object.pk), f'Updated PrescriptionScope: {self.object.name}')
         messages.success(self.request, 'Prescription scope updated successfully.')
         return super().form_valid(form)
 
@@ -1164,6 +1210,7 @@ def prescription_scope_delete(request, pk):
     scope = get_object_or_404(PrescriptionScope, pk=pk)
     scope_name = scope.name
     scope.delete()
+    _log_master_audit(request, 'delete', 'PrescriptionScope', str(pk), f'Deleted PrescriptionScope: {scope_name}')
     messages.success(request, f'Prescription scope "{scope_name}" deleted successfully.')
     return redirect('prescope_manage')
 
@@ -1174,6 +1221,7 @@ def prescription_scope_enable(request, pk):
     scope = get_object_or_404(PrescriptionScope, pk=pk)
     scope.is_active = True
     scope.save()
+    _log_master_audit(request, 'update', 'PrescriptionScope', str(pk), f'Enabled PrescriptionScope: {scope.name}')
     messages.success(request, f'Prescription scope "{scope.name}" enabled successfully.')
     return redirect('prescope_manage')
 
@@ -1184,6 +1232,7 @@ def prescription_scope_disable(request, pk):
     scope = get_object_or_404(PrescriptionScope, pk=pk)
     scope.is_active = False
     scope.save()
+    _log_master_audit(request, 'update', 'PrescriptionScope', str(pk), f'Disabled PrescriptionScope: {scope.name}')
     messages.success(request, f'Prescription scope "{scope.name}" disabled successfully.')
     return redirect('prescope_manage')
 
@@ -1228,10 +1277,8 @@ class UnitNoListView(ListView):
         
         if unit_name:
             try:
-                UnitNo.objects.create(
-                    unit_name=unit_name,
-                    is_active=is_active
-                )
+                obj = UnitNo.objects.create(unit_name=unit_name, is_active=is_active)
+                _log_master_audit(request, 'create', 'UnitNo', str(obj.id), f'Created UnitNo: {unit_name}')
                 messages.success(request, f'Unit "{unit_name}" created successfully.')
             except Exception as e:
                 messages.error(request, f'Error creating unit: {str(e)}')
@@ -1247,8 +1294,10 @@ class UnitNoCreateView(CreateView):
     success_url = reverse_lazy('unit_list')
     
     def form_valid(self, form):
+        response = super().form_valid(form)
+        _log_master_audit(self.request, 'create', 'UnitNo', str(self.object.pk), f'Created UnitNo: {self.object.unit_name}')
         messages.success(self.request, 'Unit created successfully.')
-        return super().form_valid(form)
+        return response
 
 class UnitNoUpdateView(UpdateView):
     model = UnitNo
@@ -1257,6 +1306,7 @@ class UnitNoUpdateView(UpdateView):
     success_url = reverse_lazy('unit_list')
     
     def form_valid(self, form):
+        _log_master_audit(self.request, 'update', 'UnitNo', str(self.object.pk), f'Updated UnitNo: {self.object.unit_name}')
         messages.success(self.request, 'Unit updated successfully.')
         return super().form_valid(form)
 
@@ -1267,6 +1317,7 @@ def unit_no_delete(request, pk):
     unit = get_object_or_404(UnitNo, pk=pk)
     unit_name = unit.unit_name
     unit.delete()
+    _log_master_audit(request, 'delete', 'UnitNo', str(pk), f'Deleted UnitNo: {unit_name}')
     messages.success(request, f'Unit "{unit_name}" deleted successfully.')
     return redirect('unit_list')
 
@@ -1276,6 +1327,7 @@ def unit_no_enable(request, pk):
     unit = get_object_or_404(UnitNo, pk=pk)
     unit.is_active = True
     unit.save()
+    _log_master_audit(request, 'update', 'UnitNo', str(pk), f'Enabled UnitNo: {unit.unit_name}')
     messages.success(request, f'Unit {unit.unit_name} enabled successfully.')
     return redirect('unit_list')
 
@@ -1285,6 +1337,7 @@ def unit_no_disable(request, pk):
     unit = get_object_or_404(UnitNo, pk=pk)
     unit.is_active = False
     unit.save()
+    _log_master_audit(request, 'update', 'UnitNo', str(pk), f'Disabled UnitNo: {unit.unit_name}')
     messages.success(request, f'Unit {unit.unit_name} disabled successfully.')
     return redirect('unit_list')
 
@@ -1520,7 +1573,7 @@ class TherapyMasterCreateView(CreateView):
             instance.no_of_trainee_therapist
         )
         instance.save()
-        
+        _log_master_audit(self.request, 'create', 'TherapyMaster', str(instance.pk), f'Created TherapyMaster: {instance.therapy_name} ({therapy_code})')
         messages.success(self.request, f'Therapy "{instance.therapy_name}" ({therapy_code}) created successfully.')
         return redirect(self.success_url)
 
@@ -1567,7 +1620,7 @@ class TherapyMasterUpdateView(UpdateView):
             instance.no_of_trainee_therapist
         )
         instance.save()
-        
+        _log_master_audit(self.request, 'update', 'TherapyMaster', str(self.object.pk), f'Updated TherapyMaster: {instance.therapy_name}')
         messages.success(self.request, f'Therapy "{instance.therapy_name}" updated successfully.')
         return redirect(self.success_url)
 
@@ -1578,7 +1631,32 @@ def therapy_master_delete(request, pk):
     therapy = get_object_or_404(TherapyMaster, pk=pk)
     therapy_name = therapy.therapy_name
     therapy.delete()
+    _log_master_audit(request, 'delete', 'TherapyMaster', str(pk), f'Deleted TherapyMaster: {therapy_name}')
     messages.success(request, f'Therapy "{therapy_name}" deleted successfully.')
+    return redirect('therapy_master_manage')
+
+
+@login_required
+@super_admin_required
+def therapy_master_enable(request, pk):
+    """Enable a therapy master record."""
+    therapy = get_object_or_404(TherapyMaster, pk=pk)
+    therapy.is_active = True
+    therapy.save()
+    _log_master_audit(request, 'update', 'TherapyMaster', str(pk), f'Enabled TherapyMaster: {therapy.therapy_name}')
+    messages.success(request, f'Therapy "{therapy.therapy_name}" enabled successfully.')
+    return redirect('therapy_master_manage')
+
+
+@login_required
+@super_admin_required
+def therapy_master_disable(request, pk):
+    """Disable a therapy master record."""
+    therapy = get_object_or_404(TherapyMaster, pk=pk)
+    therapy.is_active = False
+    therapy.save()
+    _log_master_audit(request, 'update', 'TherapyMaster', str(pk), f'Disabled TherapyMaster: {therapy.therapy_name}')
+    messages.success(request, f'Therapy "{therapy.therapy_name}" disabled successfully.')
     return redirect('therapy_master_manage')
 
 # Item Master CRUD Views
@@ -1680,6 +1758,7 @@ class ItemMasterCreateView(CreateView):
         instance = form.save(commit=False)
         instance.item_code = generate_numeric_code(ItemMaster, 'item_code')
         instance.save()
+        _log_master_audit(self.request, 'create', 'ItemMaster', str(instance.pk), f'Created ItemMaster: {instance.item_name} ({instance.item_code})')
         messages.success(self.request, f'Item "{instance.item_name}" ({instance.item_code}) created successfully.')
         return redirect(self.success_url)
 
@@ -1691,6 +1770,7 @@ class ItemMasterUpdateView(UpdateView):
     success_url = reverse_lazy('item_master_manage')
     
     def form_valid(self, form):
+        _log_master_audit(self.request, 'update', 'ItemMaster', str(self.object.pk), f'Updated ItemMaster: {self.object.item_name}')
         messages.success(self.request, 'Item updated successfully.')
         return super().form_valid(form)
 
@@ -1702,7 +1782,32 @@ def item_master_delete(request, pk):
     item_name = item.item_name
     item_code = item.item_code
     item.delete()
+    _log_master_audit(request, 'delete', 'ItemMaster', str(pk), f'Deleted ItemMaster: {item_name} ({item_code})')
     messages.success(request, f'Item "{item_name}" ({item_code}) deleted successfully.')
+    return redirect('item_master_manage')
+
+
+@login_required
+@super_admin_required
+def item_master_enable(request, pk):
+    """Enable an item master record."""
+    item = get_object_or_404(ItemMaster, pk=pk)
+    item.is_active = True
+    item.save()
+    _log_master_audit(request, 'update', 'ItemMaster', str(pk), f'Enabled ItemMaster: {item.item_name}')
+    messages.success(request, f'Item "{item.item_name}" enabled successfully.')
+    return redirect('item_master_manage')
+
+
+@login_required
+@super_admin_required
+def item_master_disable(request, pk):
+    """Disable an item master record."""
+    item = get_object_or_404(ItemMaster, pk=pk)
+    item.is_active = False
+    item.save()
+    _log_master_audit(request, 'update', 'ItemMaster', str(pk), f'Disabled ItemMaster: {item.item_name}')
+    messages.success(request, f'Item "{item.item_name}" disabled successfully.')
     return redirect('item_master_manage')
 
 # Item Group Master CRUD Views
@@ -1768,8 +1873,10 @@ class ItemGroupCreateView(CreateView):
     success_url = reverse_lazy('item_group_manage')
     
     def form_valid(self, form):
+        response = super().form_valid(form)
+        _log_master_audit(self.request, 'create', 'ItemGroup', str(self.object.pk), f'Created ItemGroup: {self.object.name}')
         messages.success(self.request, 'Item group created successfully.')
-        return super().form_valid(form)
+        return response
 
 class ItemGroupUpdateView(UpdateView):
     model = ItemGroup
@@ -1778,6 +1885,7 @@ class ItemGroupUpdateView(UpdateView):
     success_url = reverse_lazy('item_group_manage')
     
     def form_valid(self, form):
+        _log_master_audit(self.request, 'update', 'ItemGroup', str(self.object.pk), f'Updated ItemGroup: {self.object.name}')
         messages.success(self.request, 'Item group updated successfully.')
         return super().form_valid(form)
 
@@ -1796,6 +1904,7 @@ def item_group_delete(request, pk):
             return redirect('item_group_manage')
         
         item_group.delete()
+        _log_master_audit(request, 'delete', 'ItemGroup', str(pk), f'Deleted ItemGroup: {item_group_name}')
         messages.success(request, f'Item group "{item_group_name}" deleted successfully.')
     except Exception as e:
         messages.error(request, f'Error deleting item group: {str(e)}')
@@ -1809,6 +1918,7 @@ def item_group_enable(request, pk):
     item_group = get_object_or_404(ItemGroup, pk=pk)
     item_group.is_active = True
     item_group.save()
+    _log_master_audit(request, 'update', 'ItemGroup', str(pk), f'Enabled ItemGroup: {item_group.name}')
     messages.success(request, f'Item group "{item_group.name}" enabled successfully.')
     return redirect('item_group_manage')
 
@@ -1819,6 +1929,7 @@ def item_group_disable(request, pk):
     item_group = get_object_or_404(ItemGroup, pk=pk)
     item_group.is_active = False
     item_group.save()
+    _log_master_audit(request, 'update', 'ItemGroup', str(pk), f'Disabled ItemGroup: {item_group.name}')
     messages.success(request, f'Item group "{item_group.name}" disabled successfully.')
     return redirect('item_group_manage')
 
@@ -1866,10 +1977,8 @@ class TherapyGroupManagementView(ListView):
         # Create new record
         if name:
             try:
-                TherapyGroup.objects.create(
-                    name=name,
-                    is_active=is_active
-                )
+                obj = TherapyGroup.objects.create(name=name, is_active=is_active)
+                _log_master_audit(request, 'create', 'TherapyGroup', str(obj.id), f'Created TherapyGroup: {name}')
                 messages.success(request, f'Therapy group "{name}" created successfully.')
             except Exception as e:
                 messages.error(request, f'Error creating therapy group: {str(e)}')
@@ -1885,8 +1994,10 @@ class TherapyGroupCreateView(CreateView):
     success_url = reverse_lazy('therapy_group_manage')
     
     def form_valid(self, form):
+        response = super().form_valid(form)
+        _log_master_audit(self.request, 'create', 'TherapyGroup', str(self.object.pk), f'Created TherapyGroup: {self.object.name}')
         messages.success(self.request, 'Therapy group created successfully.')
-        return super().form_valid(form)
+        return response
 
 class TherapyGroupUpdateView(UpdateView):
     model = TherapyGroup
@@ -1895,6 +2006,7 @@ class TherapyGroupUpdateView(UpdateView):
     success_url = reverse_lazy('therapy_group_manage')
     
     def form_valid(self, form):
+        _log_master_audit(self.request, 'update', 'TherapyGroup', str(self.object.pk), f'Updated TherapyGroup: {self.object.name}')
         messages.success(self.request, 'Therapy group updated successfully.')
         return super().form_valid(form)
 
@@ -1913,6 +2025,7 @@ def therapy_group_delete(request, pk):
             return redirect('therapy_group_manage')
         
         therapy_group.delete()
+        _log_master_audit(request, 'delete', 'TherapyGroup', str(pk), f'Deleted TherapyGroup: {therapy_group_name}')
         messages.success(request, f'Therapy group "{therapy_group_name}" deleted successfully.')
     except Exception as e:
         messages.error(request, f'Error deleting therapy group: {str(e)}')
@@ -1926,6 +2039,7 @@ def therapy_group_enable(request, pk):
     therapy_group = get_object_or_404(TherapyGroup, pk=pk)
     therapy_group.is_active = True
     therapy_group.save()
+    _log_master_audit(request, 'update', 'TherapyGroup', str(pk), f'Enabled TherapyGroup: {therapy_group.name}')
     messages.success(request, f'Therapy group "{therapy_group.name}" enabled successfully.')
     return redirect('therapy_group_manage')
 
@@ -1936,6 +2050,7 @@ def therapy_group_disable(request, pk):
     therapy_group = get_object_or_404(TherapyGroup, pk=pk)
     therapy_group.is_active = False
     therapy_group.save()
+    _log_master_audit(request, 'update', 'TherapyGroup', str(pk), f'Disabled TherapyGroup: {therapy_group.name}')
     messages.success(request, f'Therapy group "{therapy_group.name}" disabled successfully.')
     return redirect('therapy_group_manage')
 
@@ -1990,7 +2105,7 @@ class SlotMasterCreateView(CreateView):
             instance = form.save(commit=False)
             instance.slot_number = next_val
             instance.save()
-            
+        _log_master_audit(self.request, 'create', 'SlotMaster', str(instance.pk), f'Created SlotMaster: {instance.slot_number}')
         messages.success(self.request, f'Slot {instance.slot_number} created successfully.')
         return redirect(self.success_url)
 
@@ -2008,6 +2123,7 @@ class SlotMasterUpdateView(UpdateView):
         return form
     
     def form_valid(self, form):
+        _log_master_audit(self.request, 'update', 'SlotMaster', str(self.object.pk), f'Updated SlotMaster: {self.object.slot_number}')
         messages.success(self.request, 'Slot updated successfully.')
         return super().form_valid(form)
 
@@ -2019,7 +2135,32 @@ def slot_master_delete(request, pk):
     slot = get_object_or_404(SlotMaster, pk=pk)
     slot_number = slot.slot_number
     slot.delete()
+    _log_master_audit(request, 'delete', 'SlotMaster', str(pk), f'Deleted SlotMaster: {slot_number}')
     messages.success(request, f'Slot {slot_number} deleted successfully.')
+    return redirect('slot_master_manage')
+
+
+@login_required
+@super_admin_required
+def slot_master_enable(request, pk):
+    """Enable a slot master record."""
+    slot = get_object_or_404(SlotMaster, pk=pk)
+    slot.is_active = True
+    slot.save()
+    _log_master_audit(request, 'update', 'SlotMaster', str(pk), f'Enabled SlotMaster: {slot.slot_number}')
+    messages.success(request, f'Slot {slot.slot_number} enabled successfully.')
+    return redirect('slot_master_manage')
+
+
+@login_required
+@super_admin_required
+def slot_master_disable(request, pk):
+    """Disable a slot master record."""
+    slot = get_object_or_404(SlotMaster, pk=pk)
+    slot.is_active = False
+    slot.save()
+    _log_master_audit(request, 'update', 'SlotMaster', str(pk), f'Disabled SlotMaster: {slot.slot_number}')
+    messages.success(request, f'Slot {slot.slot_number} disabled successfully.')
     return redirect('slot_master_manage')
 
 # Ingredient Master CRUD Views
@@ -2098,7 +2239,7 @@ class IngredientMasterCreateView(CreateView):
         instance = form.save(commit=False)
         instance.ingredient_code = ingredient_code
         instance.save()
-        
+        _log_master_audit(self.request, 'create', 'IngredientMaster', str(instance.pk), f'Created IngredientMaster: {instance.ingredient_name} ({ingredient_code})')
         messages.success(self.request, f'Ingredient "{instance.ingredient_name}" ({ingredient_code}) created successfully.')
         return redirect(self.success_url)
 
@@ -2126,6 +2267,7 @@ class IngredientMasterUpdateView(UpdateView):
                     continue
             instance.ingredient_code = f"ING{max_number + 1:03d}"
         instance.save()
+        _log_master_audit(self.request, 'update', 'IngredientMaster', str(self.object.pk), f'Updated IngredientMaster: {instance.ingredient_name}')
         messages.success(self.request, f'Ingredient "{instance.ingredient_name}" updated successfully.')
         return redirect(self.success_url)
 
@@ -2136,6 +2278,7 @@ def ingredient_master_delete(request, pk):
     ingredient = get_object_or_404(IngredientMaster, pk=pk)
     ingredient_name = ingredient.ingredient_name
     ingredient.delete()
+    _log_master_audit(request, 'delete', 'IngredientMaster', str(pk), f'Deleted IngredientMaster: {ingredient_name}')
     messages.success(request, f'Ingredient {ingredient_name} deleted successfully.')
     return redirect('ingredient_master_manage')
 
@@ -2146,6 +2289,7 @@ def ingredient_master_enable(request, pk):
     ingredient = get_object_or_404(IngredientMaster, pk=pk)
     ingredient.is_active = True
     ingredient.save()
+    _log_master_audit(request, 'update', 'IngredientMaster', str(pk), f'Enabled IngredientMaster: {ingredient.ingredient_name}')
     messages.success(request, f'Ingredient {ingredient.ingredient_name} enabled successfully.')
     return redirect('ingredient_master_manage')
 
@@ -2156,6 +2300,7 @@ def ingredient_master_disable(request, pk):
     ingredient = get_object_or_404(IngredientMaster, pk=pk)
     ingredient.is_active = False
     ingredient.save()
+    _log_master_audit(request, 'update', 'IngredientMaster', str(pk), f'Disabled IngredientMaster: {ingredient.ingredient_name}')
     messages.success(request, f'Ingredient {ingredient.ingredient_name} disabled successfully.')
     return redirect('ingredient_master_manage')
 
@@ -2213,6 +2358,7 @@ class TreatmentRoomCreateView(CreateView):
         instance = form.save(commit=False)
         instance.room_no = generate_unique_code('TR', TreatmentRoom, 'room_no')
         instance.save()
+        _log_master_audit(self.request, 'create', 'TreatmentRoom', str(instance.pk), f'Created TreatmentRoom: {instance.room_no}')
         messages.success(self.request, f'Treatment room {instance.room_no} created successfully.')
         return redirect(self.success_url)
 
@@ -2231,6 +2377,7 @@ class TreatmentRoomUpdateView(UpdateView):
         return form
     
     def form_valid(self, form):
+        _log_master_audit(self.request, 'update', 'TreatmentRoom', str(self.object.pk), f'Updated TreatmentRoom: {self.object.room_no}')
         messages.success(self.request, 'Treatment room updated successfully.')
         return super().form_valid(form)
 
@@ -2241,6 +2388,7 @@ def treatment_room_master_delete(request, pk):
     room = get_object_or_404(TreatmentRoom, pk=pk)
     room_no = room.room_no
     room.delete()
+    _log_master_audit(request, 'delete', 'TreatmentRoom', str(pk), f'Deleted TreatmentRoom: {room_no}')
     messages.success(request, f'Treatment room {room_no} deleted successfully.')
     return redirect('treatment_room_master_manage')
 
@@ -2251,6 +2399,7 @@ def treatment_room_master_enable(request, pk):
     room = get_object_or_404(TreatmentRoom, pk=pk)
     room.is_active = True
     room.save()
+    _log_master_audit(request, 'update', 'TreatmentRoom', str(pk), f'Enabled TreatmentRoom: {room.room_no}')
     messages.success(request, f'Treatment room {room.room_no} enabled successfully.')
     return redirect('treatment_room_master_manage')
 
@@ -2261,6 +2410,7 @@ def treatment_room_master_disable(request, pk):
     room = get_object_or_404(TreatmentRoom, pk=pk)
     room.is_active = False
     room.save()
+    _log_master_audit(request, 'update', 'TreatmentRoom', str(pk), f'Disabled TreatmentRoom: {room.room_no}')
     messages.success(request, f'Treatment room {room.room_no} disabled successfully.')
     return redirect('treatment_room_master_manage')
 
@@ -2423,7 +2573,7 @@ class TherapistMasterCreateView(CreateView):
         instance.user = user
         instance.therapist_profile = therapist_profile
         instance.save()
-        
+        _log_master_audit(self.request, 'create', 'TherapistMaster', str(instance.pk), f'Created TherapistMaster: {therapist_name} ({therapist_code})')
         messages.success(self.request, f'Therapist "{therapist_name}" ({therapist_code}) created successfully. Username: {username}, Default password: {default_password}')
         return redirect(self.success_url)
 
@@ -2468,6 +2618,7 @@ class TherapistMasterUpdateView(UpdateView):
     def form_valid(self, form):
         # Save the therapist first
         response = super().form_valid(form)
+        _log_master_audit(self.request, 'update', 'TherapistMaster', str(self.object.pk), f'Updated TherapistMaster: {self.object.therapist_name} ({self.object.therapist_code})')
         
         # Handle leave days
         if 'leave_days' in self.request.POST:
@@ -3516,7 +3667,32 @@ def therapist_master_delete(request, pk):
     therapist_name = therapist.therapist_name
     therapist_code = therapist.therapist_code
     therapist.delete()
+    _log_master_audit(request, 'delete', 'TherapistMaster', str(pk), f'Deleted TherapistMaster: {therapist_name} ({therapist_code})')
     messages.success(request, f'Therapist "{therapist_name}" ({therapist_code}) deleted successfully.')
+    return redirect('therapist_master_manage')
+
+
+@login_required
+@super_admin_required
+def therapist_master_enable(request, pk):
+    """Enable a therapist master record."""
+    therapist = get_object_or_404(TherapistMaster, pk=pk)
+    therapist.is_active = True
+    therapist.save()
+    _log_master_audit(request, 'update', 'TherapistMaster', str(pk), f'Enabled TherapistMaster: {therapist.therapist_name} ({therapist.therapist_code})')
+    messages.success(request, f'Therapist "{therapist.therapist_name}" ({therapist.therapist_code}) enabled successfully.')
+    return redirect('therapist_master_manage')
+
+
+@login_required
+@super_admin_required
+def therapist_master_disable(request, pk):
+    """Disable a therapist master record."""
+    therapist = get_object_or_404(TherapistMaster, pk=pk)
+    therapist.is_active = False
+    therapist.save()
+    _log_master_audit(request, 'update', 'TherapistMaster', str(pk), f'Disabled TherapistMaster: {therapist.therapist_name} ({therapist.therapist_code})')
+    messages.success(request, f'Therapist "{therapist.therapist_name}" ({therapist.therapist_code}) disabled successfully.')
     return redirect('therapist_master_manage')
 
 # Therapist Grade CRUD Views
@@ -3559,8 +3735,10 @@ class TherapistGradeCreateView(CreateView):
     success_url = reverse_lazy('therapistgrade_manage')
     
     def form_valid(self, form):
+        response = super().form_valid(form)
+        _log_master_audit(self.request, 'create', 'TherapistGrade', str(self.object.pk), f'Created TherapistGrade: {self.object.name}')
         messages.success(self.request, 'Therapist grade created successfully.')
-        return super().form_valid(form)
+        return response
 
 class TherapistGradeUpdateView(UpdateView):
     model = TherapistGrade
@@ -3569,6 +3747,7 @@ class TherapistGradeUpdateView(UpdateView):
     success_url = reverse_lazy('therapistgrade_manage')
     
     def form_valid(self, form):
+        _log_master_audit(self.request, 'update', 'TherapistGrade', str(self.object.pk), f'Updated TherapistGrade: {self.object.name}')
         messages.success(self.request, 'Therapist grade updated successfully.')
         return super().form_valid(form)
 
@@ -3583,7 +3762,32 @@ def therapist_grade_delete(request, pk):
         messages.error(request, f'Cannot delete grade "{grade_name}" because it is assigned to one or more therapists.')
         return redirect('therapistgrade_manage')
     grade.delete()
+    _log_master_audit(request, 'delete', 'TherapistGrade', str(pk), f'Deleted TherapistGrade: {grade_name}')
     messages.success(request, f'Therapist grade "{grade_name}" deleted successfully.')
+    return redirect('therapistgrade_manage')
+
+
+@login_required
+@super_admin_required
+def therapist_grade_enable(request, pk):
+    """Enable a therapist grade record."""
+    grade = get_object_or_404(TherapistGrade, pk=pk)
+    grade.is_active = True
+    grade.save()
+    _log_master_audit(request, 'update', 'TherapistGrade', str(pk), f'Enabled TherapistGrade: {grade.name}')
+    messages.success(request, f'Therapist grade "{grade.name}" enabled successfully.')
+    return redirect('therapistgrade_manage')
+
+
+@login_required
+@super_admin_required
+def therapist_grade_disable(request, pk):
+    """Disable a therapist grade record."""
+    grade = get_object_or_404(TherapistGrade, pk=pk)
+    grade.is_active = False
+    grade.save()
+    _log_master_audit(request, 'update', 'TherapistGrade', str(pk), f'Disabled TherapistGrade: {grade.name}')
+    messages.success(request, f'Therapist grade "{grade.name}" disabled successfully.')
     return redirect('therapistgrade_manage')
 
 # Therapist Management API endpoints
@@ -3659,6 +3863,7 @@ def create_therapist(request):
             is_bathing_therapist=is_bathing_therapist,
             is_active=is_active
         )
+        _log_master_audit(request, 'create', 'TherapistMaster', str(therapist.id), f'Created TherapistMaster (API): {therapist_name} ({therapist_code})')
         
         return JsonResponse({
             'success': True, 
@@ -3689,6 +3894,7 @@ def create_therapist_leave(request):
             leave_day=data['leave_day'],
             is_active=data.get('is_active', True)
         )
+        _log_master_audit(request, 'create', 'TherapistLeaveMaster', str(leave.id), f'Created TherapistLeaveMaster (API): therapist {therapist.therapist_code}, day {leave.leave_day}')
         
         return JsonResponse({'success': True, 'id': leave.id})
         
@@ -3711,6 +3917,7 @@ def update_therapist(request, therapist_id):
         therapist.is_bathing_therapist = data.get('is_bathing_therapist', therapist.is_bathing_therapist)
         therapist.is_active = data.get('is_active', therapist.is_active)
         therapist.save()
+        _log_master_audit(request, 'update', 'TherapistMaster', str(therapist_id), f'Updated TherapistMaster (API): {therapist.therapist_name} ({therapist.therapist_code})')
         
         return JsonResponse({'success': True})
         
@@ -3725,7 +3932,9 @@ def delete_therapist(request, therapist_id):
     """API endpoint to delete therapist (Super Admin only)"""
     try:
         therapist = get_object_or_404(TherapistMaster, id=therapist_id)
+        name, code = therapist.therapist_name, therapist.therapist_code
         therapist.delete()
+        _log_master_audit(request, 'delete', 'TherapistMaster', str(therapist_id), f'Deleted TherapistMaster (API): {name} ({code})')
         return JsonResponse({'success': True})
         
     except Exception as e:
@@ -3739,7 +3948,9 @@ def delete_therapist_leave(request, leave_id):
     """API endpoint to delete therapist leave (Super Admin only)"""
     try:
         leave = get_object_or_404(TherapistLeaveMaster, id=leave_id)
+        info = f'therapist {leave.therapist.therapist_code}, day {leave.leave_day}'
         leave.delete()
+        _log_master_audit(request, 'delete', 'TherapistLeaveMaster', str(leave_id), f'Deleted TherapistLeaveMaster (API): {info}')
         return JsonResponse({'success': True})
         
     except Exception as e:

@@ -909,6 +909,11 @@
                     const margin = 20;
                     const tableWidth = pageWidth - 2 * margin;
 
+                    // Heading for Continuity Matrix PDF
+                    doc.setFontSize(14);
+                    doc.setFont('helvetica', 'bold');
+                    doc.text('Therapist Continuity Matrix', pageWidth / 2, 24, { align: 'center' });
+
                     // Render one table per patient group so that page breaks
                     // never mix/overlap different patients' name/therapy rows.
                     let isFirstTable = true;

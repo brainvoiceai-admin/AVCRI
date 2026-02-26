@@ -126,6 +126,18 @@
                                             class="btn btn-sm btn-outline-primary" title="Edit">
                                             <i class="fas fa-edit"></i>
                                         </a>
+                                        {% if slot.is_active %}
+                                        <a href="{% url 'slot_master_disable' slot.pk %}"
+                                           class="btn btn-sm btn-outline-warning" title="Disable"
+                                           onclick="return confirm('Are you sure you want to disable Slot {{ slot.slot_number }}?');">
+                                            <i class="fas fa-ban"></i>
+                                        </a>
+                                        {% else %}
+                                        <a href="{% url 'slot_master_enable' slot.pk %}"
+                                           class="btn btn-sm btn-outline-success" title="Enable">
+                                            <i class="fas fa-check"></i>
+                                        </a>
+                                        {% endif %}
                                         <a href="{% url 'slot_master_delete' slot.pk %}"
                                             class="btn btn-sm btn-outline-danger" title="Delete"
                                             onclick="return confirm('Are you sure you want to delete Slot {{ slot.slot_number }}? This action cannot be undone.');">
