@@ -2505,7 +2505,6 @@ def prescription_entry_page(request):
                 if items_changed:
                     from .models import PrescriptionChangeLog
                     from django.utils import timezone as tz
-                    from datetime import timedelta
                     
                     # Get all dates in the allocation range
                     date_range = []
@@ -2967,7 +2966,6 @@ def prescription_entry_page(request):
                         allocation.status = 'draft'
                     # If resuming from the start, update from_date
                     elif resume_from_obj == allocation.cancelled_date_from:
-                        from datetime import timedelta
                         new_from = resume_to_obj + timedelta(days=1)
                         if new_from <= allocation.cancelled_date_to:
                             allocation.cancelled_date_from = new_from
@@ -2979,7 +2977,6 @@ def prescription_entry_page(request):
                             allocation.status = 'draft'
                     # If resuming from the end, update to_date
                     elif resume_to_obj == allocation.cancelled_date_to:
-                        from datetime import timedelta
                         new_to = resume_from_obj - timedelta(days=1)
                         if new_to >= allocation.cancelled_date_from:
                             allocation.cancelled_date_to = new_to
@@ -3132,7 +3129,6 @@ def prescription_entry_page(request):
 
                 # Create/update PrescriptionScheduling records for the date range (especially for extended dates)
                 from .models import PrescriptionScheduling
-                from datetime import timedelta
                 
                 if allocation.from_date and allocation.to_date:
                     current_date = allocation.from_date
@@ -4219,7 +4215,6 @@ def final_schedule_status_api(request):
     if not date_str:
         return JsonResponse({'error': 'date required'}, status=400)
     try:
-        from datetime import datetime
         target_date = datetime.strptime(date_str, '%Y-%m-%d').date()
     except ValueError:
         return JsonResponse({'error': 'invalid date'}, status=400)
