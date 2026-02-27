@@ -564,6 +564,67 @@ def available_candidates_by_level_and_bathing(target_date, time_slot, level, req
     return candidates
 
 
+# Grade substitution rules for emergency-leave single-therapist reassignment.
+# Mirrors the intent of reshedule.allocate_therapists_with_grade_substitution:
+# - Senior/Super Senior can substitute for Junior/Trainee
+# - Senior and Super Senior can substitute for each other
+GRADE_SUBSTITUTION_MAP_EMERGENCY = {
+    "Super Senior Therapist": ["Senior Therapist"],
+    "Senior Therapist": ["Super Senior Therapist"],
+    "Junior Therapist": ["Senior Therapist", "Super Senior Therapist"],
+    "Trainee Therapist": ["Junior Therapist", "Senior Therapist", "Super Senior Therapist"],
+}
+
+
+def expand_candidates_with_grade_substitution(target_date, time_slot, old_grade_name, require_bathing,
+                                              desired_gender, patient_gender,
+                                              em_therapist_ids, em_emp_codes):
+    """
+    If no same-level candidates are available, broaden the search using grade substitution
+    rules similar to reshedule.py, while keeping the SAME slot and other constraints.
+    """
+    from masters.models import TherapistGrade
+
+    if not old_grade_name:
+        return []
+    subs = GRADE_SUBSTITUTION_MAP_EMERGENCY.get(old_grade_name)
+    if not subs:
+        return []
+
+    all_candidates = []
+    for sub_name in subs:
+        try:
+            sub_level = TherapistGrade.objects.filter(name__iexact=sub_name).first()
+        except Exception:
+            sub_level = None
+        if not sub_level:
+            continue
+        c = available_candidates_by_level_and_bathing(
+            target_date,
+            time_slot,
+            sub_level,
+            require_bathing=require_bathing,
+            desired_gender=desired_gender,
+            patient_gender=patient_gender,
+            em_therapist_ids=em_therapist_ids,
+            em_emp_codes=em_emp_codes,
+            allow_trainee_substitution=False,  # grade substitution handled here explicitly
+        )
+        if c:
+            all_candidates.extend(c)
+
+    # Deduplicate by pk
+    seen = set()
+    unique = []
+    for t in all_candidates:
+        pk = getattr(t, "pk", None)
+        if pk in seen:
+            continue
+        seen.add(pk)
+        unique.append(t)
+    return unique
+
+
 def _get_therapist_continuity_plan_model():
     """Lazy import TherapistContinuityPlan from Sheduling.models."""
     try:
@@ -962,6 +1023,15 @@ def process_reassignments(target_date=None, dry_run=True, max_daily_normal=5, ma
 
     print(f"\n   [PROCESSING] Processing {len(affected)} affected booking(s)...\n")
     for idx, booking in enumerate(affected, 1):
+        # Always work with the latest DB state; earlier iterations (or other jobs)
+        # may have already modified/cancelled this booking.
+        try:
+            booking.refresh_from_db()
+        except Exception:
+            continue
+        if getattr(booking, 'status', None) != 'BOOKED':
+            continue
+
         summary['checked'] += 1
         old = booking.therapist
         if not old:
@@ -987,12 +1057,12 @@ def process_reassignments(target_date=None, dry_run=True, max_daily_normal=5, ma
         therapy_req = therapist_requirements(booking) if therapist_requirements else {}
         therapy_category = therapy_req.get("therapy_category")
         
-        # Determine if therapy needs bathing (from TherapyMaster, not just booking flag)
-        needs_bathing = False
-        if therapy_needs_bath:
-            needs_bathing = therapy_needs_bath(booking)
-        else:
-            needs_bathing = bool(getattr(booking, 'is_bathing', False))
+        # Determine whether THIS booking is a bathing role.
+        # For multi-therapist therapies (e.g. Navarakizhi), only some rows are bathing.
+        # We must respect the existing per-booking flag instead of forcing all rows
+        # of a bathing-required therapy to be bathing.
+        original_is_bathing = bool(getattr(booking, 'is_bathing', False))
+        needs_bathing = original_is_bathing
         
         # Check if special treatment (Dhara & Pizichil)
         requires_senior_tag = False
@@ -1008,13 +1078,24 @@ def process_reassignments(target_date=None, dry_run=True, max_daily_normal=5, ma
         allocation = getattr(booking, 'visit', None)  # TherapistBooking.visit = TherapyAllocation
         if hasattr(booking, 'visit'):
             exclude_allocation = booking.visit
-        if patient_already_has_booking(booking.patient_id, target_date, slot,
-                                       exclude_booking_pk=booking.pk,
-                                       exclude_allocation=exclude_allocation):
-            logger.warning("Patient %s already has booking at %s %s - skipping reassignment",
-                          booking.patient_id, target_date, slot)
-            summary['failed'].append((booking.pk, "patient_already_has_booking_at_slot"))
-            continue
+
+        # NOTE:
+        # Previously we skipped reassignment entirely when the patient already had
+        # another booking at the same date+slot (room or therapist) by calling
+        # patient_already_has_booking(...) here and marking the booking as failed.
+        #
+        # That behaviour caused emergency-leave bookings to remain unchanged in
+        # cases where the patient legitimately has multiple parallel rows for the
+        # same session (e.g. one room booking + multiple therapist bookings for
+        # a multi-therapist treatment). In those scenarios we *do* want to
+        # reassign the therapist who is on emergency leave.
+        #
+        # We now always attempt reassignment/cancellation for the affected
+        # TherapistBooking itself, and rely on therapist/room availability rules
+        # later in the algorithm to prevent invalid overbooking.
+        #
+        # If we ever need to reintroduce a guard, it should only block cases
+        # where there is a *different* allocation for the same patient+slot.
 
         # When bathing therapist is on emergency leave: we try (1) TherapistContinuityPlan,
         # (2) bathing therapist from start of therapy, (3) most recent previous bathing therapist,
@@ -1048,8 +1129,8 @@ def process_reassignments(target_date=None, dry_run=True, max_daily_normal=5, ma
                     try:
                         with transaction.atomic():
                             booking.therapist = prev
-                            if hasattr(booking, 'is_bathing') and needs_bathing:
-                                booking.is_bathing = True
+                            if hasattr(booking, 'is_bathing'):
+                                booking.is_bathing = original_is_bathing
                             booking.save(update_fields=['therapist', 'updated_at'] + (['is_bathing'] if hasattr(booking, 'is_bathing') else []))
                         sync_booking_assignment_after_reassign(booking, old, prev, target_date)
                         summary['reassigned'].append((booking.pk, old_code, prev_code))
@@ -1059,9 +1140,10 @@ def process_reassignments(target_date=None, dry_run=True, max_daily_normal=5, ma
                         logger.exception("Error reassigning booking %s to prev therapist: %s", booking.pk, e)
                         summary['failed'].append((booking.pk, str(e)))
                         print(f"      [ERROR] Failed to reassign: {e}")
-                continue
             else:
+                prev_code = getattr(prev, 'therapist_code', prev.pk)
                 print(f"      [WARNING] Continuity therapist {prev_code} at daily limit ({today_cnt} sessions) - trying other candidates")
+            continue
 
         # 2) build candidate pool by level & bathing requirement with gender matching
         # Check if trainee substitution is needed (male trainee -> junior)
@@ -1085,41 +1167,104 @@ def process_reassignments(target_date=None, dry_run=True, max_daily_normal=5, ma
                 allow_trainee_substitution=allow_trainee_sub
             )
 
+        # If still no candidates at the same level, broaden search using grade
+        # substitution rules similar to reshedule.py (Senior/Super Senior can
+        # substitute for Junior/Trainee, and Senior/Super Senior for each other),
+        # while keeping the SAME slot for emergency replacement.
+        if not candidates:
+            candidates = expand_candidates_with_grade_substitution(
+                target_date,
+                slot,
+                old_grade_name,
+                needs_bathing,
+                desired_gender,
+                patient_gender,
+                em_therapist_ids,
+                em_emp_codes,
+            )
+
         # 3) if no candidates -> cancel (single or full treatment)
         if not candidates:
-            print(f"      [WARNING] No available candidates found")
-            if should_cancel_full_treatment(booking, target_date):
-                # cancel full treatment
-                if dry_run:
-                    summary['cancelled'].append(("FULL_TREATMENT", booking.pk, booking.patient_id))
-                    logger.info("[DRY RUN] Would cancel full treatment for patient %s at slot %s", booking.patient_id, getattr(slot, 'id', slot))
-                    print(f"      [CANCEL] [DRY RUN] Would cancel FULL TREATMENT for patient {booking.patient_id}")
-                else:
-                    try:
-                        canceled_counts = cancel_full_treatment_for_patient_slot(booking.patient_id, target_date, slot, by_user=None, reason="therapist_unavailable")
-                        summary['cancelled'].append(("FULL_TREATMENT", booking.pk, booking.patient_id, canceled_counts))
-                        logger.info("Cancelled full treatment for patient %s: %s", booking.patient_id, canceled_counts)
-                        print(f"      [CANCEL] Cancelled FULL TREATMENT: {canceled_counts}")
-                    except Exception as e:
-                        logger.exception("Error cancelling full treatment for booking %s: %s", booking.pk, e)
-                        summary['failed'].append((booking.pk, str(e)))
-                        print(f"      [ERROR] Error cancelling: {e}")
+            print(f"      [WARNING] No available emergency candidates found for this slot – handing off to main scheduler")
+            # Handoff: Let the main reschedule algorithm (reshedule.py) try full allocation
+            # for this TherapyAllocation/date. It will clear existing bookings for this
+            # allocation+date and attempt to reallocate therapists/rooms, possibly to a
+            # different slot, and mark the allocation as failed if it cannot.
+            if allocation:
+                try:
+                    tasks = []
+                    if 'reshedule' in sys.modules and hasattr(sys.modules['reshedule'], 'allocate_therapy_for_visit'):
+                        tasks = sys.modules['reshedule'].allocate_therapy_for_visit(allocation.pk, target_date, create_bookings=not dry_run)
+                    elif 'reshedule' in globals():
+                        # Fallback if module is imported under name reshedule
+                        try:
+                            from reshedule import allocate_therapy_for_visit
+                            tasks = allocate_therapy_for_visit(allocation.pk, target_date, create_bookings=not dry_run)
+                        except Exception:
+                            tasks = []
+                    # tasks can be a dict with 'error' or a list of task dicts
+                    any_success = False
+                    error_reason = None
+                    if isinstance(tasks, dict) and 'error' in tasks:
+                        error_reason = tasks['error']
+                    elif isinstance(tasks, list):
+                        # In reshedule.expand_therapies_for_visit, each task is a dict
+                        # with at least: {"status": "BOOKED" or "FAILED", "reason": ...}
+                        # Treat any task with status=='BOOKED' (and no error) as success.
+                        for t in tasks:
+                            if not isinstance(t, dict):
+                                continue
+                            status_val = str(t.get('status', '')).upper()
+                            if status_val == 'BOOKED' and not t.get('reason'):
+                                any_success = True
+                                break
+                    if any_success:
+                        # Consider this booking handled by main scheduler
+                        old_code = getattr(old, 'therapist_code', old.pk)
+                        summary['reassigned'].append((booking.pk, old_code, 'via_main_scheduler'))
+                        logger.info("Handoff: main scheduler reallocated allocation %s for patient %s on %s", allocation.pk, booking.patient_id, target_date)
+                        print("      [OK] Handoff succeeded: main scheduler reallocated this therapy (may be new slot).")
+                    else:
+                        reason_msg = error_reason or "main_scheduler_failed_or_no_success_tasks"
+                        summary['failed'].append((booking.pk, reason_msg))
+                        logger.warning("Handoff failed for booking %s/allocation %s: %s", booking.pk, allocation.pk, reason_msg)
+                        print(f"      [FAILED] Handoff failed in main scheduler: {reason_msg}")
+                except Exception as e:
+                    summary['failed'].append((booking.pk, f"handoff_exception:{e}"))
+                    logger.exception("Error handing off booking %s to main scheduler: %s", booking.pk, e)
+                    print(f"      [ERROR] Exception during handoff to main scheduler: {e}")
             else:
-                # cancel just the single therapist booking
-                if dry_run:
-                    summary['cancelled'].append(("SINGLE", booking.pk, booking.patient_id))
-                    logger.info("[DRY RUN] Would cancel single therapist booking %s", booking.pk)
-                    print(f"      [CANCEL] [DRY RUN] Would cancel single booking {booking.pk}")
+                # No allocation context – fall back to cancelling as before
+                if should_cancel_full_treatment(booking, target_date):
+                    if dry_run:
+                        summary['cancelled'].append(("FULL_TREATMENT", booking.pk, booking.patient_id))
+                        logger.info("[DRY RUN] Would cancel full treatment for patient %s at slot %s", booking.patient_id, getattr(slot, 'id', slot))
+                        print(f"      [CANCEL] [DRY RUN] Would cancel FULL TREATMENT for patient {booking.patient_id}")
+                    else:
+                        try:
+                            canceled_counts = cancel_full_treatment_for_patient_slot(booking.patient_id, target_date, slot, by_user=None, reason="therapist_unavailable")
+                            summary['cancelled'].append(("FULL_TREATMENT", booking.pk, booking.patient_id, canceled_counts))
+                            logger.info("Cancelled full treatment for patient %s: %s", booking.patient_id, canceled_counts)
+                            print(f"      [CANCEL] Cancelled FULL TREATMENT: {canceled_counts}")
+                        except Exception as e:
+                            logger.exception("Error cancelling full treatment for booking %s: %s", booking.pk, e)
+                            summary['failed'].append((booking.pk, str(e)))
+                            print(f"      [ERROR] Error cancelling: {e}")
                 else:
-                    try:
-                        booking.cancel(by_user=None, reason="therapist_unavailable", cascade=True)
+                    if dry_run:
                         summary['cancelled'].append(("SINGLE", booking.pk, booking.patient_id))
-                        logger.info("Cancelled therapist booking %s", booking.pk)
-                        print(f"      [CANCEL] Cancelled single booking {booking.pk}")
-                    except Exception as e:
-                        logger.exception("Error cancelling booking %s: %s", booking.pk, e)
-                        summary['failed'].append((booking.pk, str(e)))
-                        print(f"      [ERROR] Error cancelling: {e}")
+                        logger.info("[DRY RUN] Would cancel single therapist booking %s", booking.pk)
+                        print(f"      [CANCEL] [DRY RUN] Would cancel single booking {booking.pk}")
+                    else:
+                        try:
+                            booking.cancel(by_user=None, reason="therapist_unavailable", cascade=True)
+                            summary['cancelled'].append(("SINGLE", booking.pk, booking.patient_id))
+                            logger.info("Cancelled therapist booking %s", booking.pk)
+                            print(f"      [CANCEL] Cancelled single booking {booking.pk}")
+                        except Exception as e:
+                            logger.exception("Error cancelling booking %s: %s", booking.pk, e)
+                            summary['failed'].append((booking.pk, str(e)))
+                            print(f"      [ERROR] Error cancelling: {e}")
             continue
 
         # 4) pick candidate with daily-load & overtime rules + difficulty balancing
@@ -1158,31 +1303,69 @@ def process_reassignments(target_date=None, dry_run=True, max_daily_normal=5, ma
             except Exception as e:
                 logger.debug("Error while enforcing senior-tag limit: %s", e)
         if not pick:
-            # no pick due to load limits -> treat like no candidates
-            if should_cancel_full_treatment(booking, target_date):
-                if dry_run:
-                    summary['cancelled'].append(("FULL_TREATMENT", booking.pk, booking.patient_id))
-                    logger.info("[DRY RUN] Would cancel full treatment for patient %s at slot %s (no pick due to load limits)", booking.patient_id, getattr(slot, 'id', slot))
-                else:
-                    try:
-                        canceled_counts = cancel_full_treatment_for_patient_slot(booking.patient_id, target_date, slot, by_user=None, reason="therapist_unavailable")
-                        summary['cancelled'].append(("FULL_TREATMENT", booking.pk, booking.patient_id, canceled_counts))
-                        logger.info("Cancelled full treatment for patient %s: %s", booking.patient_id, canceled_counts)
-                    except Exception as e:
-                        logger.exception("Error cancelling full treatment for booking %s: %s", booking.pk, e)
-                        summary['failed'].append((booking.pk, str(e)))
+            print("      [WARNING] Candidate pool exists but all over daily/overtime limits – handing off to main scheduler")
+            if allocation:
+                try:
+                    tasks = []
+                    if 'reshedule' in sys.modules and hasattr(sys.modules['reshedule'], 'allocate_therapy_for_visit'):
+                        tasks = sys.modules['reshedule'].allocate_therapy_for_visit(allocation.pk, target_date, create_bookings=not dry_run)
+                    elif 'reshedule' in globals():
+                        try:
+                            from reshedule import allocate_therapy_for_visit
+                            tasks = allocate_therapy_for_visit(allocation.pk, target_date, create_bookings=not dry_run)
+                        except Exception:
+                            tasks = []
+                    any_success = False
+                    error_reason = None
+                    if isinstance(tasks, dict) and 'error' in tasks:
+                        error_reason = tasks['error']
+                    elif isinstance(tasks, list):
+                        for t in tasks:
+                            if not isinstance(t, dict):
+                                continue
+                            status_val = str(t.get('status', '')).upper()
+                            if status_val == 'BOOKED' and not t.get('reason'):
+                                any_success = True
+                                break
+                    if any_success:
+                        old_code = getattr(old, 'therapist_code', old.pk)
+                        summary['reassigned'].append((booking.pk, old_code, 'via_main_scheduler'))
+                        logger.info("Handoff (load-limit): main scheduler reallocated allocation %s for patient %s on %s", allocation.pk, booking.patient_id, target_date)
+                        print("      [OK] Handoff (load-limit) succeeded: main scheduler reallocated this therapy (may be new slot).")
+                    else:
+                        reason_msg = error_reason or "main_scheduler_failed_or_no_success_tasks"
+                        summary['failed'].append((booking.pk, reason_msg))
+                        logger.warning("Handoff (load-limit) failed for booking %s/allocation %s: %s", booking.pk, allocation.pk, reason_msg)
+                        print(f"      [FAILED] Handoff (load-limit) failed in main scheduler: {reason_msg}")
+                except Exception as e:
+                    summary['failed'].append((booking.pk, f"handoff_loadlimit_exception:{e}"))
+                    logger.exception("Error handing off (load-limit) booking %s to main scheduler: %s", booking.pk, e)
+                    print(f"      [ERROR] Exception during handoff (load-limit) to main scheduler: {e}")
             else:
-                if dry_run:
-                    summary['cancelled'].append(("SINGLE", booking.pk, booking.patient_id))
-                    logger.info("[DRY RUN] Would cancel single therapist booking %s (no pick due to load limits)", booking.pk)
+                if should_cancel_full_treatment(booking, target_date):
+                    if dry_run:
+                        summary['cancelled'].append(("FULL_TREATMENT", booking.pk, booking.patient_id))
+                        logger.info("[DRY RUN] Would cancel full treatment for patient %s at slot %s (no pick due to load limits)", booking.patient_id, getattr(slot, 'id', slot))
+                    else:
+                        try:
+                            canceled_counts = cancel_full_treatment_for_patient_slot(booking.patient_id, target_date, slot, by_user=None, reason="therapist_unavailable")
+                            summary['cancelled'].append(("FULL_TREATMENT", booking.pk, booking.patient_id, canceled_counts))
+                            logger.info("Cancelled full treatment for patient %s: %s", booking.patient_id, canceled_counts)
+                        except Exception as e:
+                            logger.exception("Error cancelling full treatment for booking %s: %s", booking.pk, e)
+                            summary['failed'].append((booking.pk, str(e)))
                 else:
-                    try:
-                        booking.cancel(by_user=None, reason="therapist_unavailable", cascade=True)
+                    if dry_run:
                         summary['cancelled'].append(("SINGLE", booking.pk, booking.patient_id))
-                        logger.info("Cancelled therapist booking %s (no pick due to load limits)", booking.pk)
-                    except Exception as e:
-                        logger.exception("Error cancelling booking %s: %s", booking.pk, e)
-                        summary['failed'].append((booking.pk, str(e)))
+                        logger.info("[DRY RUN] Would cancel single therapist booking %s (no pick due to load limits)", booking.pk)
+                    else:
+                        try:
+                            booking.cancel(by_user=None, reason="therapist_unavailable", cascade=True)
+                            summary['cancelled'].append(("SINGLE", booking.pk, booking.patient_id))
+                            logger.info("Cancelled therapist booking %s (no pick due to load limits)", booking.pk)
+                        except Exception as e:
+                            logger.exception("Error cancelling booking %s: %s", booking.pk, e)
+                            summary['failed'].append((booking.pk, str(e)))
             continue
 
         # 5) perform reassignment with special treatment handling
@@ -1210,14 +1393,87 @@ def process_reassignments(target_date=None, dry_run=True, max_daily_normal=5, ma
                     else:
                         logger.warning("Special treatment: Senior therapist %s cannot be bathing therapist, no non-senior alternative found", 
                                       getattr(pick, 'therapist_code', 'unknown'))
-                        summary['failed'].append((booking.pk, "special_treatment_senior_cannot_be_bathing_no_alternative"))
-                        continue
+                        # Fall back to full reschedule via main scheduler for this allocation/date
+                        if allocation:
+                            try:
+                                tasks = []
+                                if 'reshedule' in sys.modules and hasattr(sys.modules['reshedule'], 'allocate_therapy_for_visit'):
+                                    tasks = sys.modules['reshedule'].allocate_therapy_for_visit(allocation.pk, target_date, create_bookings=not dry_run)
+                                else:
+                                    from reshedule import allocate_therapy_for_visit
+                                    tasks = allocate_therapy_for_visit(allocation.pk, target_date, create_bookings=not dry_run)
+                                any_success = False
+                                error_reason = None
+                                if isinstance(tasks, dict) and 'error' in tasks:
+                                    error_reason = tasks['error']
+                                elif isinstance(tasks, list):
+                                    for t in tasks:
+                                        if not isinstance(t, dict):
+                                            continue
+                                        status_val = str(t.get('status', '')).upper()
+                                        if status_val == 'BOOKED' and not t.get('reason'):
+                                            any_success = True
+                                            break
+                                if any_success:
+                                    old_code = getattr(old, 'therapist_code', old.pk)
+                                    summary['reassigned'].append((booking.pk, old_code, 'via_main_scheduler'))
+                                    logger.info("Special-treatment handoff: main scheduler reallocated allocation %s for patient %s on %s", allocation.pk, booking.patient_id, target_date)
+                                    print("      [OK] Special-treatment handoff succeeded: main scheduler reallocated this therapy (may be new slot).")
+                                    continue
+                                else:
+                                    reason_msg = error_reason or "main_scheduler_failed_or_no_success_tasks"
+                                    summary['failed'].append((booking.pk, f"special_treatment_no_non_senior:{reason_msg}"))
+                                    logger.warning("Special-treatment handoff failed for booking %s/allocation %s: %s", booking.pk, allocation.pk, reason_msg)
+                                    continue
+                            except Exception as e:
+                                summary['failed'].append((booking.pk, f"special_treatment_handoff_exception:{e}"))
+                                logger.exception("Error handing off special-treatment booking %s to main scheduler: %s", booking.pk, e)
+                                continue
+                        else:
+                            summary['failed'].append((booking.pk, "special_treatment_senior_cannot_be_bathing_no_alternative"))
+                            continue
                 else:
                     # No non-senior bathing therapist available - this is a problem
                     logger.warning("Special treatment: Senior therapist %s is only bathing option, but cannot be bathing therapist", 
                                   getattr(pick, 'therapist_code', 'unknown'))
-                    summary['failed'].append((booking.pk, "special_treatment_senior_only_bathing_option"))
-                    continue
+                    if allocation:
+                        try:
+                            tasks = []
+                            if 'reshedule' in sys.modules and hasattr(sys.modules['reshedule'], 'allocate_therapy_for_visit'):
+                                tasks = sys.modules['reshedule'].allocate_therapy_for_visit(allocation.pk, target_date, create_bookings=not dry_run)
+                            else:
+                                from reshedule import allocate_therapy_for_visit
+                                tasks = allocate_therapy_for_visit(allocation.pk, target_date, create_bookings=not dry_run)
+                            any_success = False
+                            error_reason = None
+                            if isinstance(tasks, dict) and 'error' in tasks:
+                                error_reason = tasks['error']
+                            elif isinstance(tasks, list):
+                                for t in tasks:
+                                    if not isinstance(t, dict):
+                                        continue
+                                    status_val = str(t.get('status', '')).upper()
+                                    if status_val == 'BOOKED' and not t.get('reason'):
+                                        any_success = True
+                                        break
+                            if any_success:
+                                old_code = getattr(old, 'therapist_code', old.pk)
+                                summary['reassigned'].append((booking.pk, old_code, 'via_main_scheduler'))
+                                logger.info("Special-treatment handoff: main scheduler reallocated allocation %s for patient %s on %s", allocation.pk, booking.patient_id, target_date)
+                                print("      [OK] Special-treatment handoff succeeded: main scheduler reallocated this therapy (may be new slot).")
+                                continue
+                            else:
+                                reason_msg = error_reason or "main_scheduler_failed_or_no_success_tasks"
+                                summary['failed'].append((booking.pk, f"special_treatment_senior_only_bathing_option:{reason_msg}"))
+                                logger.warning("Special-treatment handoff failed for booking %s/allocation %s: %s", booking.pk, allocation.pk, reason_msg)
+                                continue
+                        except Exception as e:
+                            summary['failed'].append((booking.pk, f"special_treatment_handoff_exception:{e}"))
+                            logger.exception("Error handing off special-treatment booking %s to main scheduler: %s", booking.pk, e)
+                            continue
+                    else:
+                        summary['failed'].append((booking.pk, "special_treatment_senior_only_bathing_option"))
+                        continue
         
         # Check room availability if therapy needs room
         if therapy_needs_room and therapy_needs_room(booking):
@@ -1263,32 +1519,30 @@ def process_reassignments(target_date=None, dry_run=True, max_daily_normal=5, ma
             summary['reassigned'].append((booking.pk, getattr(old, 'therapist_code', old.pk), getattr(pick, 'therapist_code', pick.pk)))
             logger.info("[DRY RUN] Would reassign booking %s -> therapist %s", booking.pk, getattr(pick, 'therapist_code', pick.pk))
         else:
-                    try:
-                        pick_code = getattr(pick, 'therapist_code', pick.pk)
-                        old_code = getattr(old, 'therapist_code', old.pk)
-                        with transaction.atomic():
-                            booking.therapist = pick
-                            if hasattr(booking, 'is_bathing') and needs_bathing:
-                                # For special treatments: ensure senior is NOT marked as bathing
-                                if requires_senior_tag:
-                                    pick_grade = get_therapist_grade_name(pick)
-                                    if pick_grade and 'Senior' in pick_grade:
-                                        booking.is_bathing = False
-                                        logger.info("Special treatment: Senior therapist %s NOT marked as bathing", pick_code)
-                                        print(f"      [WARNING] Special treatment: Senior {pick_code} NOT marked as bathing")
-                                    else:
-                                        booking.is_bathing = True
-                                else:
-                                    booking.is_bathing = True
-                            booking.save(update_fields=['therapist', 'updated_at'] + (['is_bathing'] if hasattr(booking, 'is_bathing') else []))
-                        sync_booking_assignment_after_reassign(booking, old, pick, target_date)
-                        summary['reassigned'].append((booking.pk, old_code, pick_code))
-                        logger.info("Reassigned booking %s -> therapist %s", booking.pk, pick_code)
-                        print(f"      [OK] Reassigned: {old_code} -> {pick_code} (from candidate pool)")
-                    except Exception as e:
-                        logger.exception("Error reassigning booking %s: %s", booking.pk, e)
-                        summary['failed'].append((booking.pk, str(e)))
-                        print(f"      [ERROR] Failed to reassign: {e}")
+            try:
+                pick_code = getattr(pick, 'therapist_code', pick.pk)
+                old_code = getattr(old, 'therapist_code', old.pk)
+                with transaction.atomic():
+                    booking.therapist = pick
+                    if hasattr(booking, 'is_bathing'):
+                        # Default: preserve original bathing role for this booking
+                        booking.is_bathing = original_is_bathing
+                        # For special treatments (Dhara & Pizhichil): senior must NOT be bathing
+                        if needs_bathing and requires_senior_tag:
+                            pick_grade = get_therapist_grade_name(pick)
+                            if pick_grade and 'Senior' in pick_grade:
+                                booking.is_bathing = False
+                                logger.info("Special treatment: Senior therapist %s NOT marked as bathing", pick_code)
+                                print(f"      [WARNING] Special treatment: Senior {pick_code} NOT marked as bathing")
+                    booking.save(update_fields=['therapist', 'updated_at'] + (['is_bathing'] if hasattr(booking, 'is_bathing') else []))
+                sync_booking_assignment_after_reassign(booking, old, pick, target_date)
+                summary['reassigned'].append((booking.pk, old_code, pick_code))
+                logger.info("Reassigned booking %s -> therapist %s", booking.pk, pick_code)
+                print(f"      [OK] Reassigned: {old_code} -> {pick_code} (from candidate pool)")
+            except Exception as e:
+                logger.exception("Error reassigning booking %s: %s", booking.pk, e)
+                summary['failed'].append((booking.pk, str(e)))
+                print(f"      [ERROR] Failed to reassign: {e}")
 
     return summary
 
