@@ -240,6 +240,7 @@ $(function () {
   }
 
   function decoratePrescriptionList(list) {
+    console.log('Decorating prescription list. IDs:', (list || []).map(p => p.id));
     return (list || []).map(p => {
       // Check in-memory session override first
       const key1 = p.allocation_id ? String(p.allocation_id) : null;
@@ -1292,40 +1293,31 @@ $(function () {
         $commonUsageSelect.val(null).trigger('change');
         usageSelectionOrder = []; // Reset selection order
 
-        // Reload patient prescriptions from server to get accurate status counts
-        // Use the same registration number format that was used to save
-        if (selectedPatient) {
-          // Use correct registration number based on patient type
+        if (j.prescriptions && Array.isArray(j.prescriptions)) {
+          addedPrescriptions = decoratePrescriptionList(j.prescriptions);
+          console.log('Allocation successful. Updated prescription list count:', addedPrescriptions.length);
+          renderAll();
+          alert('Prescription saved to server as Draft.');
+        } else if (selectedPatient) {
+          // Fallback if prescriptions not in response
           const patientType = selectedPatient.patient_type ||
             (selectedPatient.pat_reg_no && selectedPatient.pat_reg_no.toString().replace(/\D/g, '').length === 5 ? 'OP' : 'IP');
           const patientRegNo = patientType === 'IP'
             ? selectedPatient.pat_reg_no
             : (selectedPatient.pat_op_reg_no || selectedPatient.pat_reg_no);
-          // Small delay to ensure server has processed the save
+
           setTimeout(() => {
             ajax({ action: 'patient_prescriptions', patient_reg_no: patientRegNo }).then(list => {
               if (list && Array.isArray(list)) {
                 addedPrescriptions = decoratePrescriptionList(list);
                 renderAll();
                 alert('Prescription saved to server as Draft.');
-              } else {
-                // If list is empty or invalid, show error but don't break
-                addedPrescriptions = [];
-                renderAll();
-                alert('Prescription saved to server as Draft. (Note: Could not load updated prescription list - please refresh)');
               }
-            }).catch(err => {
-              console.error('Error reloading prescriptions:', err);
-              // Clear and show empty state if reload fails
-              addedPrescriptions = [];
-              renderAll();
-              alert('Prescription saved to server as Draft. (Note: Could not refresh prescription list - please refresh page)');
             });
-          }, 300); // 300ms delay to ensure server has processed
+          }, 500);
         } else {
-          addedPrescriptions = [];
-          renderAll();
           alert('Prescription saved to server as Draft.');
+          renderAll();
         }
       } else {
         alert('Failed to save prescription: ' + (j.error || 'Unknown error'));
@@ -1686,7 +1678,10 @@ $(function () {
         notes: p.notes || ''
       };
 
-      fetch(API_URL + '?action=update_prescription', {
+      console.log('--- Sending Update to Server ---');
+      console.log('Payload:', JSON.stringify(updatePayload));
+
+      fetch(API_URL + '?action=update_prescription&_cb=' + Date.now(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updatePayload)
@@ -1700,6 +1695,9 @@ $(function () {
         }
         return response.json();
       }).then(j => {
+        console.log('--- Server Response Received ---');
+        console.log('Raw result:', j);
+
         if (j.status === 'ok') {
           // Check if today is cancelled or resumed BEFORE marking as updated
           const today = new Date().toISOString().slice(0, 10);
@@ -1708,66 +1706,67 @@ $(function () {
             today >= p.cancelled_date_from && today <= p.cancelled_date_to;
           const todayIsResumed = p.resumed_at && p.resumed_at.slice(0, 10) === today;
 
-          // Priority: Cancelled > Resumed > Updated
+          // Use the potentially new allocation_id returned by the server for color-coding
+          const resultId = j.allocation_id || p.allocation_id || p.id;
+
           if (todayIsCancelled) {
-            // Today is cancelled - keep RED color
-            p.last_action = 'cancelled';
-            rememberPrescriptionAction(p.allocation_id || p.id, 'cancelled');
+            rememberPrescriptionAction(resultId, 'cancelled');
           } else if (todayIsResumed) {
-            // Today is resumed - keep GREEN color
-            p.last_action = 'resumed';
-            rememberPrescriptionAction(p.allocation_id || p.id, 'resumed');
+            rememberPrescriptionAction(resultId, 'resumed');
           } else {
-            // Today is not cancelled/resumed - mark as updated (YELLOW)
-            p.last_action = 'updated';
-            rememberPrescriptionAction(p.allocation_id || p.id, 'updated');
+            rememberPrescriptionAction(resultId, 'updated');
           }
 
-          // Render immediately to show correct color
-          renderAll();
-          alert('Prescription updated successfully on server.');
+          // Also mark the local object just in case, though it might be replaced soon
+          p.last_action = todayIsCancelled ? 'cancelled' : (todayIsResumed ? 'resumed' : 'updated');
+
+          // Non-blocking feedback instead of alert
+          console.log('Prescription updated successfully on server. Returned ID:', resultId);
           resetFormState();
 
-          // Reload from server to get updated data, but preserve last_action
-          if (selectedPatient && p.allocation_id) {
-            // Use correct registration number based on patient type
-            const patientType = selectedPatient.patient_type ||
-              (selectedPatient.pat_reg_no && selectedPatient.pat_reg_no.toString().replace(/\D/g, '').length === 5 ? 'OP' : 'IP');
-            const patientRegNo = patientType === 'IP'
-              ? selectedPatient.pat_reg_no
-              : (selectedPatient.pat_op_reg_no || selectedPatient.pat_reg_no);
-            if (patientRegNo) {
-              ajax({ action: 'patient_prescriptions', patient_reg_no: patientRegNo }).then(list => {
-                if (list && Array.isArray(list)) {
-                  // Use decoratePrescriptionList to preserve remembered actions
-                  const decoratedList = decoratePrescriptionList(list);
-                  // Find and update the specific prescription to preserve the reference
-                  const updatedPrescription = decoratedList.find(pr => pr.allocation_id === p.allocation_id);
-                  if (updatedPrescription) {
-                    // Update all fields from server, but preserve last_action
-                    Object.assign(p, updatedPrescription);
-                    // Ensure last_action is preserved (decoratePrescriptionList should have set it)
-                    const rememberedAction = prescriptionActionById[String(p.allocation_id || p.id || '')];
-                    if (rememberedAction) {
-                      p.last_action = rememberedAction;
-                    }
-                  } else {
-                    // If not found, replace entire array
-                    addedPrescriptions = decoratedList;
-                  }
-                  renderAll();
-                } else {
-                  renderAll();
-                }
-              }).catch(() => {
-                // If reload fails, use local values (already rendered above)
-                renderAll();
-              });
-            } else {
-              renderAll();
+          // Use the refreshed prescriptions list returned directly in the response
+          if (j.prescriptions && Array.isArray(j.prescriptions)) {
+            const oldLen = addedPrescriptions.length;
+            console.log(`Syncing UI. Before: ${oldLen}, After: ${j.prescriptions.length}`);
+            console.table(j.prescriptions.map(p => ({
+              id: p.id,
+              name: p.prescription_name,
+              from: p.from_date,
+              to: p.to_date,
+              status: JSON.stringify(p.status_summary)
+            })));
+
+            // Atomically replace and re-render
+            addedPrescriptions = decoratePrescriptionList(j.prescriptions);
+
+            if (addedPrescriptions.length > oldLen) {
+              console.log('%c Prescription split successfully! New record added for historical integrity. ', 'background: #222; color: #bada55');
+              alert(`Update successful.\n\nHistorical integrity preserved: Today's dispatched record was shortened, and a new record was created starting tomorrow.\n\nTotal prescriptions: ${addedPrescriptions.length}`);
             }
+
+            setTimeout(renderAll, 100);
           } else {
+            console.warn('Backend did not return updated prescriptions list. Attempting manual sync.');
             renderAll();
+            // Fallback for backward compatibility
+            setTimeout(() => {
+              if (selectedPatient) {
+                const patientType = selectedPatient.patient_type ||
+                  (selectedPatient.pat_reg_no && selectedPatient.pat_reg_no.toString().replace(/\D/g, '').length === 5 ? 'OP' : 'IP');
+                const patientRegNo = patientType === 'IP'
+                  ? selectedPatient.pat_reg_no
+                  : (selectedPatient.pat_op_reg_no || selectedPatient.pat_reg_no);
+
+                if (patientRegNo) {
+                  ajax({ action: 'patient_prescriptions', patient_reg_no: patientRegNo, _t: Date.now() }).then(list => {
+                    if (list && Array.isArray(list)) {
+                      addedPrescriptions = decoratePrescriptionList(list);
+                      renderAll();
+                    }
+                  });
+                }
+              }
+            }, 500);
           }
         } else {
           alert('Failed to update prescription: ' + (j.error || JSON.stringify(j)));
@@ -1999,60 +1998,21 @@ $(function () {
         if (j.status === 'ok') {
           // UI already updated above, alert already shown, server sync will happen in background
 
-          // Then reload from server to get merged cancellation dates (in background)
-          if (p.allocation_id && selectedPatient) {
-            // Use correct registration number based on patient type
-            const patientType = selectedPatient.patient_type ||
-              (selectedPatient.pat_reg_no && selectedPatient.pat_reg_no.toString().replace(/\D/g, '').length === 5 ? 'OP' : 'IP');
-            const patientRegNo = patientType === 'IP'
-              ? selectedPatient.pat_reg_no
-              : (selectedPatient.pat_op_reg_no || selectedPatient.pat_reg_no);
-            if (patientRegNo) {
-              setTimeout(() => {
-                ajax({ action: 'patient_prescriptions', patient_reg_no: patientRegNo }).then(list => {
-                  if (list && Array.isArray(list)) {
-                    const updated = list.find(pr => pr.allocation_id === p.allocation_id);
-                    if (updated) {
-                      // Get the remembered action before updating
-                      const rememberedAction = prescriptionActionById[p.allocation_id || p.id];
-
-                      // Update all fields from server response
-                      Object.assign(p, updated);
-
-                      // Explicitly set cancelled dates (handle null/undefined/string 'null')
-                      p.cancelled_date_from = (updated.cancelled_date_from && updated.cancelled_date_from !== 'null') ? updated.cancelled_date_from : null;
-                      p.cancelled_date_to = (updated.cancelled_date_to && updated.cancelled_date_to !== 'null') ? updated.cancelled_date_to : null;
-                      p.cancellation_reason = updated.cancellation_reason || '';
-                      p.status = updated.status || p.status;
-
-                      // Update status_summary if available
-                      if (updated.status_summary) {
-                        p.status_summary = updated.status_summary;
-                      }
-
-                      const today = new Date().toISOString().slice(0, 10);
-                      const hasCancellations = p.cancelled_date_from && p.cancelled_date_to &&
-                        p.cancelled_date_from !== 'null' && p.cancelled_date_to !== 'null';
-
-                      // If there are cancellations, override any previous action with 'cancelled'
-                      if (hasCancellations) {
-                        p.last_action = 'cancelled';
-                        rememberPrescriptionAction(p.allocation_id || p.id, 'cancelled');
-                      } else if (rememberedAction && rememberedAction !== 'cancelled') {
-                        // Restore the remembered action (updated/resumed/added)
-                        p.last_action = rememberedAction;
-                      }
-
-                      // Update UI again with server data
-                      renderAll();
-                    }
-                  }
-                }).catch(() => {
-                  // Silently fail - UI already updated with local values
-                  console.log('Failed to reload prescription data from server, using local values');
-                });
-              }, 500);
-            }
+          // Use the refreshed prescriptions list returned directly in the response
+          if (j.prescriptions && Array.isArray(j.prescriptions)) {
+            addedPrescriptions = decoratePrescriptionList(j.prescriptions);
+            renderAll();
+          } else if (selectedPatient) {
+            // Fallback
+            const patientRegNo = selectedPatient.pat_reg_no || selectedPatient.pat_op_reg_no;
+            setTimeout(() => {
+              ajax({ action: 'patient_prescriptions', patient_reg_no: patientRegNo, _t: Date.now() }).then(list => {
+                if (list && Array.isArray(list)) {
+                  addedPrescriptions = decoratePrescriptionList(list);
+                  renderAll();
+                }
+              });
+            }, 500);
           }
         } else {
           alert('Failed: ' + JSON.stringify(j));
