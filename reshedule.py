@@ -92,19 +92,48 @@ def get_senior_tag_count_for_therapist(therapist, date):
 # -----------------------
 therapy_cache = {}
 def get_therapy_details(therapy_name):
+    """
+    Robust therapy lookup that tolerates minor name formatting differences.
+    Tries by normalized name (lowercase, extra spaces collapsed) so that
+    variations like 'Full Body Navaradhara ( 5 T)' and 'Full Body Navaradhara (5 T)'
+    resolve to the same TherapyMaster row.
+    """
     from masters.models import TherapyMaster
-    name = (therapy_name or "").strip().lower()
-    if not name:
+
+    raw = (therapy_name or "").strip()
+    if not raw:
         return None
-    if name in therapy_cache:
-        return therapy_cache[name]
+
+    # Cache key based on normalized whitespace + lowercase
+    norm_key = " ".join(raw.lower().split())
+    if norm_key in therapy_cache:
+        return therapy_cache[norm_key]
+
+    details = None
+
+    # 1) Try exact iexact on original name first
     try:
-        details = TherapyMaster.objects.get(therapy_name__iexact=therapy_name)
-        therapy_cache[name] = details
-        return details
+        details = TherapyMaster.objects.get(therapy_name__iexact=raw)
     except TherapyMaster.DoesNotExist:
-        therapy_cache[name] = None
-        return None
+        details = None
+
+    # 2) If not found, try normalized name match (whitespace-insensitive)
+    if details is None:
+        try:
+            candidates = TherapyMaster.objects.all()
+            best = None
+            for tm in candidates:
+                tname = getattr(tm, "therapy_name", "") or ""
+                t_norm = " ".join(tname.lower().split())
+                if t_norm == norm_key:
+                    best = tm
+                    break
+            details = best
+        except Exception:
+            details = None
+
+    therapy_cache[norm_key] = details
+    return details
 
 # -----------------------
 # Therapy attribute helpers
@@ -2252,6 +2281,27 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
                 else:
                     tb_objs.append(SimpleNamespace(therapist_code=getattr(t,'therapist_code',str(t)), is_bathing=is_bath_for_t))
 
+            # Clean up any extra TherapistBooking rows for this visit/date/slot that are
+            # not part of the final assigned_therapists list. This prevents over-booking
+            # (e.g. 5 bookings when only 3 therapists are actually required/assigned).
+            try:
+                from Patient.models import TherapistBooking as _TB
+                assigned_ids = {getattr(t, 'id', None) for t in assigned_therapists if getattr(t, 'id', None)}
+                extra_qs = _TB.objects.filter(
+                    visit=allocation,
+                    date=date,
+                    time_slot=canonical_slot,
+                    status='BOOKED',
+                )
+                if assigned_ids:
+                    extra_qs = extra_qs.exclude(therapist_id__in=assigned_ids)
+                extra_count = extra_qs.count()
+                if extra_count:
+                    print(f"[RESCHEDULE] Cleaning up {extra_count} extra TherapistBooking rows for allocation {allocation.pk} on {date} at {canonical_slot}")
+                    extra_qs.delete()
+            except Exception as e:
+                print(f"[RESCHEDULE] Error cleaning up extra TherapistBooking rows: {e}")
+
             # success audit
             if AllocationAttempt:
                 try:
@@ -2428,7 +2478,30 @@ def assign_continuity_therapists_pass1(booking, allocation, target_date, locked_
     # Get patient info
     patient_id = getattr(allocation.patient, 'id', None)
     patient_gender = getattr(getattr(allocation, 'patient', None), 'pat_sex', None)
+
+    # Determine if this therapy needs a bathing therapist.
+    # Primary source: TherapyMaster.bathing_required via therapy_needs_bath(allocation).
     needs_bath_flag = therapy_needs_bath(allocation) if therapy_needs_bath else False
+
+    # Secondary source (continuity): if this allocation already has any previous
+    # TherapistBooking rows with is_bathing=True for this patient/allocation,
+    # we must continue to treat it as a bathing-required therapy on reschedule,
+    # even if the master data is misconfigured.
+    if not needs_bath_flag and patient_id:
+        try:
+            from Patient.models import TherapistBooking
+            has_previous_bath = TherapistBooking.objects.filter(
+                patient_id=patient_id,
+                visit_id=allocation.id,
+                is_bathing=True,
+                status='BOOKED'
+            ).exists()
+            if has_previous_bath:
+                needs_bath_flag = True
+                print(f"[RESCHEDULE] Enabling bathing requirement from history for allocation {allocation.id} (patient {patient_id})")
+        except Exception as e:
+            print(f"[RESCHEDULE] Error checking previous bathing bookings for allocation {allocation.id}: {e}")
+
     therapy_name = allocation.therapy_name
     
     # Get slot

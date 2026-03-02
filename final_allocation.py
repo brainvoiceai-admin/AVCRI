@@ -98,19 +98,51 @@ def get_senior_tag_count_for_therapist(therapist, date):
 # -----------------------
 therapy_cache = {}
 def get_therapy_details(therapy_name):
+    """
+    Robust therapy lookup that tolerates minor name formatting differences.
+    Tries by therapy_code (if encoded in parentheses) and by normalized name
+    (lowercase, extra spaces collapsed) so that variations like
+    'Full Body Navaradhara ( 5 T)' and 'Full Body Navaradhara (5 T)' resolve
+    to the same TherapyMaster row.
+    """
     from masters.models import TherapyMaster
-    name = (therapy_name or "").strip().lower()
-    if not name:
+
+    raw = (therapy_name or "").strip()
+    if not raw:
         return None
-    if name in therapy_cache:
-        return therapy_cache[name]
+
+    # First, try cache by normalized name key
+    norm_key = " ".join(raw.lower().split())
+    if norm_key in therapy_cache:
+        return therapy_cache[norm_key]
+
+    details = None
+
+    # 1) Try exact iexact match on original name
     try:
-        details = TherapyMaster.objects.get(therapy_name__iexact=therapy_name)
-        therapy_cache[name] = details
-        return details
+        details = TherapyMaster.objects.get(therapy_name__iexact=raw)
     except TherapyMaster.DoesNotExist:
-        therapy_cache[name] = None
-        return None
+        details = None
+
+    # 2) If not found, try normalized whitespace-insensitive match
+    if details is None:
+        from django.db.models import F
+        try:
+            # Fetch candidates and normalize in Python
+            candidates = TherapyMaster.objects.all()
+            best = None
+            for tm in candidates:
+                tname = getattr(tm, "therapy_name", "") or ""
+                t_norm = " ".join(tname.lower().split())
+                if t_norm == norm_key:
+                    best = tm
+                    break
+            details = best
+        except Exception:
+            details = None
+
+    therapy_cache[norm_key] = details
+    return details
 
 # -----------------------
 # Therapy attribute helpers
@@ -2431,6 +2463,66 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
         assigned_therapists = candidate_therapists[:req_total]
         print(f"[CONTINUITY PASS2] assigned_therapists set to {len(assigned_therapists)} therapists from candidate_therapists (req_total={req_total})")
         print(f"[CONTINUITY PASS2]   assigned_therapists: {[getattr(t, 'therapist_code', 'UNKNOWN') for t in assigned_therapists]}")
+
+        # De-duplicate assigned_therapists by therapist_code to avoid counting the same therapist twice
+        # This prevents scenarios where we think we have N therapists but only N-1 unique assignments.
+        seen_codes = set()
+        deduped_assigned = []
+        for t in assigned_therapists:
+            code = getattr(t, 'therapist_code', None)
+            key = code or id(t)
+            if key in seen_codes:
+                print(f"[CONTINUITY PASS2] ⚠ Duplicate therapist in assigned_therapists list: {code} - removing duplicate")
+                continue
+            seen_codes.add(key)
+            deduped_assigned.append(t)
+        if len(deduped_assigned) != len(assigned_therapists):
+            print(f"[CONTINUITY PASS2] Deduplicated assigned_therapists from {len(assigned_therapists)} to {len(deduped_assigned)} based on therapist_code")
+        assigned_therapists = deduped_assigned
+
+        # If after de-duplication we have fewer therapists than required, treat as insufficient therapists
+        # and expose the same style of message as the earlier insufficient_therapists_available branch.
+        if len(assigned_therapists) < req_total:
+            unique_count = len(assigned_therapists)
+            # Try to infer patient gender for message consistency
+            pat_sex = getattr(getattr(allocation, 'patient', None), 'pat_sex', None)
+            if pat_sex:
+                g = str(pat_sex).strip().lower()
+                if g.startswith('m'):
+                    desired_gender = 'male'
+                elif g.startswith('f'):
+                    desired_gender = 'female'
+                else:
+                    desired_gender = 'n/a'
+            else:
+                desired_gender = 'n/a'
+            reason = f"insufficient_therapists_available (required={req_total}, found={unique_count}, gender={desired_gender})"
+            print(f"[CONTINUITY PASS2] ❌ Not enough unique therapists after de-duplication: required={req_total}, unique={unique_count}")
+            try:
+                booking.status = 'failed'
+                booking.failure_reason = (reason or '')[:512]
+                booking.save(update_fields=['status', 'failure_reason', 'updated_at'])
+                print(f"[CONTINUITY PASS2] Booking {booking_id} marked as failed (user message): {reason}")
+            except Exception as e:
+                print(f"[CONTINUITY PASS2] Could not update booking status: {e}")
+            if AllocationAttempt:
+                try:
+                    AllocationAttempt.objects.create(
+                        visit=None, therapy=None, date=target_date,
+                        requested_time_slot=canonical_slot, requested_time_slot_value=requested_slot_value or '',
+                        status='FAILED', reason=reason,
+                        extra={"booking_id": booking_id, "therapists": [therapist_entry(t, False) for t in assigned_therapists]}
+                    )
+                except Exception:
+                    pass
+            tasks.append({
+                "booking_id": booking_id, "allocation_id": therapy_allocation_id, "date": target_date.isoformat(),
+                "therapy_name": therapy_name, "slot": requested_slot_value, "status": "FAILED", "reason": reason,
+                "room_no": getattr(booking.room, 'room_no', None) if getattr(booking, 'room', None) else None,
+                "therapists": [therapist_entry(t, False) for t in assigned_therapists]
+            })
+            continue
+
         bath_assigned = None
         
         # Initialize variables to store booking status info (will be set inside transaction)
@@ -3045,6 +3137,27 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                                 tb_objs.append(tb_obj)
                         else:
                             tb_objs.append(SimpleNamespace(therapist_code=getattr(t,'therapist_code',str(t)), is_bathing=is_bath_for_t))
+
+                    # Clean up any extra TherapistBooking rows for this allocation/date/slot
+                    # that are not part of the final assigned_therapists list. This prevents
+                    # over-booking (e.g. 5 bookings when only 3 therapists are required/assigned).
+                    try:
+                        from Patient.models import TherapistBooking as _TBModel
+                        assigned_ids = {getattr(t, 'id', None) for t in assigned_therapists if getattr(t, 'id', None)}
+                        extra_qs = _TBModel.objects.filter(
+                            visit=allocation,
+                            date=target_date,
+                            time_slot=slot_master,
+                            status='BOOKED',
+                        )
+                        if assigned_ids:
+                            extra_qs = extra_qs.exclude(therapist_id__in=assigned_ids)
+                        extra_count = extra_qs.count()
+                        if extra_count:
+                            print(f"[CONTINUITY PASS2] Cleaning up {extra_count} extra TherapistBooking rows for allocation {allocation.id} on {target_date} at {slot_master}")
+                            extra_qs.delete()
+                    except Exception as e:
+                        print(f"[CONTINUITY PASS2] Error cleaning up extra TherapistBooking rows: {e}")
                     # slot_master and booking.timeslot are already set and saved above (before RoomBooking/TherapistBooking)
                     # Now create BookingAssignment records
                     
@@ -3416,12 +3529,18 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                 any_success = True
                 print(f"[CONTINUITY PASS2] ✓ Booking {booking_id} marked as BOOKED in task list")
             else:
-                # Not all therapists have BookingAssignment records - mark as failed
-                reason = f"incomplete_assignment: Only {actual_ba_count}/{expected_ba_count} BookingAssignment records created. Success: {ba_success_count}/{expected_ba_count}. Errors: {', '.join(ba_errors) if ba_errors else 'None'}"
+                # Not all therapists have BookingAssignment records - mark as failed with user-friendly reason.
+                internal_reason = (
+                    f"incomplete_assignment: Only {actual_ba_count}/{expected_ba_count} BookingAssignment records created. "
+                    f"Success: {ba_success_count}/{expected_ba_count}. "
+                    f"Errors: {', '.join(ba_errors) if ba_errors else 'None'}"
+                )
+                print(f"[CONTINUITY PASS2] ❌ Booking {booking_id} incomplete assignment (log): {internal_reason}")
+                reason = "Could not assign all therapists for this slot."
                 booking.status = 'failed'
                 booking.failure_reason = (str(reason) or '')[:512]
                 booking.save(update_fields=['status', 'failure_reason', 'updated_at'])
-                print(f"[CONTINUITY PASS2] ❌ Booking {booking_id} marked as 'failed': {reason}")
+                print(f"[CONTINUITY PASS2] Booking {booking_id} marked as 'failed' (user message): {reason}")
                 
                 # Release locked therapists from PASS 1 if booking failed
                 if booking_continuity_map and booking_id in booking_continuity_map:
@@ -3582,20 +3701,15 @@ def bulk_allocate_for_date(target_date_str):
             'error': f'Invalid date format: {target_date_str}. Expected YYYY-MM-DD'
         }
     
-    # Get all allocations that have draft bookings for the target date
-    # This ensures we process dates separately, regardless of overall allocation status
+    # Get all draft bookings for the target date
+    # We will process them in a patient-aware order (older-from_date therapies first)
     from Sheduling.models import Booking
-    draft_bookings = Booking.objects.filter(
+    draft_bookings_qs = Booking.objects.filter(
         date=target_date,
         status='draft'
-    ).select_related('allocation')
+    ).select_related('allocation', 'allocation__patient')
     
-    # Get unique allocations from these bookings
-    draft_allocations = TherapyAllocation.objects.filter(
-        bookings__in=draft_bookings
-    ).distinct()
-    
-    if not draft_allocations.exists():
+    if not draft_bookings_qs.exists():
         return {
             'success': True,
             'message': 'No draft therapies found for the selected date',
@@ -3604,6 +3718,30 @@ def bulk_allocate_for_date(target_date_str):
             'failed': 0,
             'results': []
         }
+
+    # Order bookings per patient by therapy start date (allocation.from_date) so that,
+    # for the same patient, earlier-started therapies get continuity first.
+    from collections import defaultdict
+    by_patient = defaultdict(list)
+    for b in draft_bookings_qs:
+        pat = getattr(b.allocation, 'patient', None)
+        pid = getattr(pat, 'id', None)
+        by_patient[pid].append(b)
+
+    ordered_bookings = []
+    for pid, bookings in by_patient.items():
+        bookings.sort(key=lambda bk: getattr(bk.allocation, 'from_date', target_date))
+        ordered_bookings.extend(bookings)
+    
+    # Derive the unique allocations from these ordered bookings
+    allocation_ids = []
+    seen_alloc_ids = set()
+    for b in ordered_bookings:
+        aid = getattr(b.allocation, 'id', None)
+        if aid and aid not in seen_alloc_ids:
+            seen_alloc_ids.add(aid)
+            allocation_ids.append(aid)
+    draft_allocations = TherapyAllocation.objects.filter(id__in=allocation_ids)
     
     results = []
     successful_count = 0
