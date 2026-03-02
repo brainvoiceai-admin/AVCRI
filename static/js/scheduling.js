@@ -3,6 +3,51 @@ let allocationInProgress = false;
 // State: Final Schedule already run for the currently selected draft date (from status API)
 let finalScheduleAlreadyRun = false;
 
+// Show/hide full-page overlay while long-running scheduling tasks execute
+function showPageOverlay(message) {
+    const overlay = document.getElementById('page-overlay');
+    if (!overlay) {
+        return;
+    }
+    const messageEl = overlay.querySelector('.overlay-message');
+    if (messageEl && message) {
+        messageEl.textContent = message;
+    }
+    overlay.style.display = 'flex';
+}
+
+function hidePageOverlay() {
+    const overlay = document.getElementById('page-overlay');
+    if (!overlay) {
+        return;
+    }
+    overlay.style.display = 'none';
+}
+
+// Central helper to toggle allocation state + overlay + navigation warning
+function setAllocationInProgress(value, overlayMessage) {
+    allocationInProgress = !!value;
+
+    if (allocationInProgress) {
+        const msg = overlayMessage || 'Scheduling is running. Please do not refresh or close this page.';
+        showPageOverlay(msg);
+        window.onbeforeunload = function (e) {
+            e = e || window.event;
+            // Standard beforeunload message (exact text may be ignored by some browsers)
+            const warning = 'Scheduling is running. If you leave or refresh, the operation may be interrupted.';
+            if (e) {
+                e.returnValue = warning;
+            }
+            return warning;
+        };
+    } else {
+        hidePageOverlay();
+        window.onbeforeunload = null;
+    }
+
+    updateScheduleButtonsState();
+}
+
 // True if dateStr (YYYY-MM-DD) is before today (local date).
 function isPastDate(dateStr) {
     if (!dateStr) return false;
@@ -716,8 +761,7 @@ function triggerFinalSchedule() {
         return;
     }
 
-    allocationInProgress = true;
-    updateScheduleButtonsState();
+    setAllocationInProgress(true, `Final Schedule is running for ${selectedDate}. Please do not refresh or close this page.`);
     showLoading('draft');
 
     fetch('/sheduling/scheduling/api/final-schedule/', {
@@ -746,11 +790,10 @@ function triggerFinalSchedule() {
             return response.json();
         })
         .then(data => {
-            allocationInProgress = false;
+            setAllocationInProgress(false);
             if (data && data.already_run) {
                 finalScheduleAlreadyRun = true;
             }
-            updateScheduleButtonsState();
 
             if (data.success) {
                 const statsSource = (data.stats && (data.stats.allocation || data.stats)) || {};
@@ -779,8 +822,7 @@ function triggerFinalSchedule() {
             }
         })
         .catch(error => {
-            allocationInProgress = false;
-            updateScheduleButtonsState();
+            setAllocationInProgress(false);
             hideLoading('draft');
             const msg = (error && error.message && (error.message.indexOf('past') !== -1 || error.message.indexOf('400') !== -1))
                 ? 'You cannot make schedule for past days.'
@@ -883,8 +925,7 @@ function rescheduleAllFailed() {
         return;
     }
 
-    allocationInProgress = true;
-    updateScheduleButtonsState();
+    setAllocationInProgress(true, `Reschedule All Failed is running for ${targetDate}. Please do not refresh or close this page.`);
     showLoading('failed');
 
     const requestData = {
@@ -916,8 +957,7 @@ function rescheduleAllFailed() {
             return response.json();
         })
         .then(data => {
-            allocationInProgress = false;
-            updateScheduleButtonsState();
+            setAllocationInProgress(false);
             hideLoading('failed');
             if (data.success) {
                 const stats = data.stats || {};
@@ -941,8 +981,7 @@ function rescheduleAllFailed() {
             }
         })
         .catch(error => {
-            allocationInProgress = false;
-            updateScheduleButtonsState();
+            setAllocationInProgress(false);
             hideLoading('failed');
             const msg = (error && error.message && (String(error.message).indexOf('past') !== -1 || String(error.message).indexOf('400') !== -1))
                 ? 'You cannot make schedule for past days.'

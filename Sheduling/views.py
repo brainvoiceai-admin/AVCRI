@@ -5074,8 +5074,17 @@ def reschedule_therapy_api(request):
                 
                 # Process results
                 if isinstance(tasks, list):
-                    success_tasks = [t for t in tasks if t.get('status') == 'BOOKED']
-                    failed_tasks = [t for t in tasks if t.get('status') == 'FAILED']
+                    # Safeguard: filter out any unexpected None or non-dict entries from algorithm
+                    safe_tasks = [t for t in tasks if isinstance(t, dict)]
+
+                    if not safe_tasks:
+                        return JsonResponse({
+                            'success': False,
+                            'error': 'Unexpected response from scheduling algorithm'
+                        }, status=500)
+
+                    success_tasks = [t for t in safe_tasks if t.get('status') == 'BOOKED']
+                    failed_tasks = [t for t in safe_tasks if t.get('status') == 'FAILED']
                     
                     if success_tasks:
                         allocation.status = 'allocated'

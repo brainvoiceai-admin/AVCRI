@@ -4,6 +4,11 @@ from types import SimpleNamespace
 from django.db import transaction, IntegrityError
 from django.db.models import Q
 
+# Raised when not all therapist assignments could be created for a booking.
+# Handled so the booking is marked as failed with a user-friendly message (not shown as a site error).
+class IncompleteAssignmentError(Exception):
+    pass
+
 # -----------------------
 # Helper: date range
 # -----------------------
@@ -3116,15 +3121,25 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                                 ba_created = True
                                 ba_success_count += 1
                         except Exception as e:
+                            # Any exception here means the current DB transaction is now in an error state
+                            # (e.g. UNIQUE constraint on BookingAssignment or other IntegrityError).
+                            # If we continue the loop and perform more ORM queries, Django will raise:
+                            # "TransactionManagementError: An error occurred in the current transaction..."
                             error_msg = f"Error creating BookingAssignment for {getattr(t, 'therapist_code', 'unknown')}: {e}"
                             print(f"[CONTINUITY PASS2] ❌ {error_msg}")
                             import traceback
                             traceback.print_exc()
                             ba_failed_count += 1
                             ba_errors.append(error_msg)
+                            # Immediately abort the loop and bubble up as IncompleteAssignmentError so the
+                            # outer handler can roll back the atomic block and mark the booking as failed.
+                            raise IncompleteAssignmentError()
+                    
+                    expected_ba_count = len(assigned_therapists)
+                    # At this point, all BookingAssignment saves have succeeded (no exceptions).
+                    # It is now safe to run additional queries (e.g. .count()) within this atomic block.
                     
                     # Verify all therapists have BookingAssignment records
-                    expected_ba_count = len(assigned_therapists)
                     actual_ba_count = BookingAssignment.objects.filter(booking=booking).count()
                     print(f"[CONTINUITY PASS2] BookingAssignment summary for booking {booking_id}:")
                     print(f"[CONTINUITY PASS2]   - Expected: {expected_ba_count} therapists")
@@ -3455,6 +3470,34 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
             traceback.print_exc()
             print(f"[DEBUG] ============================================")
             reason = f"exception:{str(outer_ie)}"
+            if AllocationAttempt:
+                try:
+                    AllocationAttempt.objects.create(
+                        visit=None, therapy=None, date=target_date,
+                        requested_time_slot=canonical_slot, requested_time_slot_value=requested_slot_value or '',
+                        status='FAILED', reason=reason, extra={"booking_id": booking_id, "therapists": therapists_for_audit}
+                    )
+                except Exception:
+                    pass
+            tasks.append({
+                "booking_id": booking_id, "allocation_id": therapy_allocation_id, "date": target_date.isoformat(),
+                "therapy_name": therapy_name, "slot": requested_slot_value, "status": "FAILED", "reason": reason,
+                "room_no": getattr(room_candidate,"room_no",None) if room_candidate else None, "therapists": therapists_for_audit
+            })
+            continue
+
+        except IncompleteAssignmentError:
+            # Booking could not be completed (e.g. only 4/5 therapist assignments created).
+            # Mark as failed and show a user-friendly message, not a technical error.
+            reason = "Could not assign all therapists for this slot."
+            try:
+                booking.refresh_from_db()
+                booking.status = 'failed'
+                booking.failure_reason = (reason or '')[:512]
+                booking.save(update_fields=['status', 'failure_reason', 'updated_at'])
+                print(f"[CONTINUITY PASS2] ❌ Booking {booking_id} marked as failed (user message): {reason}")
+            except Exception as e:
+                print(f"[CONTINUITY PASS2] Could not update booking status: {e}")
             if AllocationAttempt:
                 try:
                     AllocationAttempt.objects.create(

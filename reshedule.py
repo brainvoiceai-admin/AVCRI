@@ -112,12 +112,18 @@ def get_therapy_details(therapy_name):
 def therapy_needs_room(allocation_or_booking):
     th_name = getattr(allocation_or_booking, 'therapy_name', None) or getattr(allocation_or_booking, 'therapy', None)
     details = get_therapy_details(th_name) if th_name else None
-    return bool(details and str(getattr(details, 'treatment_room_required', '')).lower() == 'yes')
+    if not details:
+        return False
+    val = getattr(details, 'treatment_room_required', '')
+    return str(val).strip().lower() == 'yes'
 
 def therapy_needs_bath(allocation_or_booking):
     th_name = getattr(allocation_or_booking, 'therapy_name', None) or getattr(allocation_or_booking, 'therapy', None)
     details = get_therapy_details(th_name) if th_name else None
-    return bool(details and str(getattr(details, 'bathing_required', '')).lower() == 'yes')
+    if not details:
+        return False
+    val = getattr(details, 'bathing_required', '')
+    return str(val).strip().lower() == 'yes'
 
 def get_therapist_grade_name(therapist):
     """Helper function to get therapist grade name from TherapistGrade FK"""
