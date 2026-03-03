@@ -96,9 +96,10 @@ function updateTable(status, data, date) {
             message = 'No dispatched prescriptions found. Dispatched prescriptions will appear here after procurement departments mark them as dispatched.';
         }
 
+        const colspan = status === 'draft' ? 7 : 9;
         tbody.innerHTML = `
                     <tr>
-                        <td colspan="7" class="empty-state">
+                        <td colspan="${colspan}" class="empty-state">
                             <div class="empty-state-icon">📋</div>
                             <div>${message}</div>
                         </td>
@@ -109,35 +110,58 @@ function updateTable(status, data, date) {
 
     data.forEach(item => {
         const row = document.createElement('tr');
+
+        let statusSpecificCells = '';
+        if (status === 'draft') {
+            statusSpecificCells = '';
+        } else if (status === 'scheduled') {
+            statusSpecificCells = `
+                <td>${escapeHtml(item.entered_by || '-')}</td>
+                <td>${escapeHtml(item.sent_to || '-')}</td>
+            `;
+        } else if (status === 'dispatched') {
+            statusSpecificCells = `
+                <td>${escapeHtml(item.entered_by || '-')}</td>
+                <td>${escapeHtml(item.dispatched_from || '-')}</td>
+                <td>${formatDate(item.dispatched_at) || '-'}</td>
+            `;
+        }
+
+        if (status === 'scheduled' && item.has_changes) {
+            row.classList.add('row-modified');
+        }
+
         row.innerHTML = `
                     <td>
                         <div class="patient-details">
                             <div class="patient-name">${escapeHtml(item.patient_name)}</div>
-                            <div class="patient-meta">ID: ${escapeHtml(item.patient_id)}</div>
+                            <div class="patient-meta">ID: ${escapeHtml(item.patient_id_display || item.patient_id)}</div>
                         </div>
                     </td>
-                    <td>${escapeHtml(item.registration_no)}</td>
+                    <td>${escapeHtml(item.registration_no || '-')}</td>
                     <td>${escapeHtml(item.room_no || '-')}</td>
-                    <td>${escapeHtml(item.doctor_name)}</td>
+                    <td>${escapeHtml(item.doctor_name || '-')}</td>
                     <td>
-                        <span class="prescription-count">${item.prescription_count}</span>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <span class="prescription-name" style="font-weight: 500;">${escapeHtml(item.prescription_name)}</span>
+                            ${(status === 'scheduled' && item.has_changes) ? `
+                                <button class="btn-change-log" onclick="viewChangeLog(${item.patient_id}, '${date}')" title="View Change Log" style="background: #3b82f6; color: white; border: none; padding: 4px 10px; border-radius: 4px; cursor: pointer; font-size: 11px; font-weight: 600; white-space: nowrap;">
+                                    📋 Change Log
+                                </button>
+                            ` : ''}
+                        </div>
                     </td>
                     <td>
-                        <span class="status-badge status-${status}">${getStatusLabel(status)}</span>
+                        <div style="display: flex; align-items: center; gap: 5px;">
+                            <span class="status-badge status-${status}">${getStatusLabel(status)}</span>
+                        </div>
                     </td>
-                    ${status === 'scheduled' ? `<td>${escapeHtml(item.sent_to || '-')}</td>` : ''}
-                    ${status === 'dispatched' ? `<td>${escapeHtml(item.dispatched_from || '-')}</td>` : ''}
-                    ${status === 'dispatched' ? `<td>${formatDate(item.dispatched_at) || '-'}</td>` : ''}
+                    ${statusSpecificCells}
                     <td>
                         <div style="display: flex; gap: 8px;">
                             <button class="btn btn-outline btn-small" onclick="viewPrescriptionDetails(${item.patient_id}, '${date}')">
                                 View Details
                             </button>
-                            ${status === 'draft' ? `
-                                <button class="btn btn-outline btn-small" onclick="viewChangeLog(${item.patient_id}, '${date}')">
-                                    Change Log
-                                </button>
-                            ` : ''}
                         </div>
                     </td>
                 `;
@@ -248,6 +272,7 @@ function showPrescriptionModal(patientInfo, prescriptionGroups, therapyItems) {
                 <p><strong>Registration No:</strong> ${escapeHtml(patientInfo.registration_no)}</p>
                 <p><strong>Room No:</strong> ${escapeHtml(patientInfo.room_no || 'N/A')}</p>
                 <p><strong>Doctor:</strong> ${escapeHtml(patientInfo.doctor_name || 'N/A')}</p>
+                ${patientInfo.entered_by ? `<p><strong>Entered By:</strong> ${escapeHtml(patientInfo.entered_by)}</p>` : ''}
             `;
 
     // Clear and render prescription items in grouped format (like procurement dashboard)
@@ -264,15 +289,19 @@ function showPrescriptionModal(patientInfo, prescriptionGroups, therapyItems) {
         const groupsByAllocation = {};
         prescriptionGroups.forEach(group => {
             let allocationId = 'unknown';
-            // Try to extract allocation_id from group_id
-            const groupMatch = group.group_id.match(/prescription_group_(\d+)_/);
-            if (groupMatch) {
-                allocationId = groupMatch[1];
+            if (group.change_type === 'removed') {
+                allocationId = 'removed_items';
             } else {
-                // For prescription_item format, use item_id as allocation key (each item is its own "allocation")
-                const itemMatch = group.group_id.match(/prescription_item_(\d+)/);
-                if (itemMatch) {
-                    allocationId = `item_${itemMatch[1]}`;
+                // Try to extract allocation_id from group_id
+                const groupMatch = group.group_id.match(/prescription_group_(\d+)_/);
+                if (groupMatch) {
+                    allocationId = groupMatch[1];
+                } else {
+                    // For prescription_item format, use item_id as allocation key (each item is its own "allocation")
+                    const itemMatch = group.group_id.match(/prescription_item_(\d+)/);
+                    if (itemMatch) {
+                        allocationId = `item_${itemMatch[1]}`;
+                    }
                 }
             }
             if (!groupsByAllocation[allocationId]) {
@@ -295,20 +324,34 @@ function showPrescriptionModal(patientInfo, prescriptionGroups, therapyItems) {
             entryHeader.style.marginBottom = '12px';
             entryHeader.style.paddingBottom = '8px';
             entryHeader.style.borderBottom = '2px solid #2c7be5';
-            entryHeader.innerHTML = `Entry ${entryIndex + 1}`;
-            if (allocationIsCancelled) {
-                entryHeader.innerHTML += ' <span style="color: #e63757; font-weight: bold; margin-left: 8px;">[CANCELLED]</span>';
+
+            if (allocationId === 'removed_items') {
+                entryHeader.innerHTML = '<span style="color: #e63757;">⚠️ Removed from Scheduled Prescription</span>';
+                entryHeader.style.borderBottom = '2px solid #e63757';
+            } else {
+                entryHeader.innerHTML = `Entry ${entryIndex + 1}`;
+                if (allocationIsCancelled) {
+                    entryHeader.innerHTML += ' <span style="color: #e63757; font-weight: bold; margin-left: 8px;">[CANCELLED]</span>';
+                }
             }
             prescriptionSection.appendChild(entryHeader);
 
             // Single container for this allocation: per-group lines with items highlighted and details below
             const allocationDiv = document.createElement('div');
             allocationDiv.style.marginBottom = '25px';
-            allocationDiv.style.border = allocationIsCancelled ? '2px solid #e63757' : '1px solid #e3ebf6';
+
+            if (allocationId === 'removed_items') {
+                allocationDiv.style.border = '2px solid #e63757';
+                allocationDiv.style.backgroundColor = '#fff5f5';
+            } else {
+                allocationDiv.style.border = allocationIsCancelled ? '2px solid #e63757' : '1px solid #e3ebf6';
+                allocationDiv.style.backgroundColor = allocationIsCancelled ? '#fff5f5' : '#f9fafd';
+            }
+
             allocationDiv.style.borderRadius = '8px';
             allocationDiv.style.padding = '15px';
-            allocationDiv.style.backgroundColor = allocationIsCancelled ? '#fff5f5' : '#f9fafd';
-            if (allocationIsCancelled) {
+
+            if (allocationIsCancelled && allocationId !== 'removed_items') {
                 allocationDiv.style.opacity = '0.7';
             }
 
@@ -367,11 +410,30 @@ function showPrescriptionModal(patientInfo, prescriptionGroups, therapyItems) {
                 const groupWrapper = document.createElement('div');
                 groupWrapper.style.marginBottom = '6px';
 
+                // Highlight logic based on change_type
+                let badgeBg = '#e3f2fd'; // default blue
+                let badgeColor = '#0d47a1';
+                let changeStatusText = '';
+
+                if (group.change_type === 'added') {
+                    badgeBg = '#dcfce7'; // green
+                    badgeColor = '#166534';
+                    changeStatusText = ' <span style="font-size:0.75rem; color:#166534; font-weight:bold; background:#dcfce7; padding:2px 6px; border-radius:4px; margin-left:8px;">[ADDED]</span>';
+                } else if (group.change_type === 'modified') {
+                    badgeBg = '#fef9c3'; // yellow
+                    badgeColor = '#854d0e';
+                    changeStatusText = ' <span style="font-size:0.75rem; color:#854d0e; font-weight:bold; background:#fef9c3; padding:2px 6px; border-radius:4px; margin-left:8px;">[MODIFIED]</span>';
+                } else if (group.change_type === 'removed') {
+                    badgeBg = '#fee2e2'; // red
+                    badgeColor = '#991b1b';
+                    changeStatusText = ' <span style="font-size:0.75rem; color:#991b1b; font-weight:bold; background:#fee2e2; padding:2px 6px; border-radius:4px; margin-left:8px;">[REMOVED]</span>';
+                }
+
                 const line1 = document.createElement('div');
                 line1.style.fontWeight = '600';
                 line1.style.marginBottom = '2px';
                 const prefix = groupIndex === 0 ? '• ' : '+ ';
-                line1.innerHTML = `${prefix}<span style="display:inline-block;padding:2px 8px;border-radius:999px;background:#e3f2fd;color:#0d47a1;">${itemNames || 'No medicines'}</span>`;
+                line1.innerHTML = `${prefix}<span style="display:inline-block;padding:2px 8px;border-radius:999px;background:${badgeBg};color:${badgeColor};">${itemNames || 'No medicines'}</span>${changeStatusText}`;
 
                 const line2 = document.createElement('div');
                 line2.style.fontSize = '0.85rem';
@@ -615,17 +677,23 @@ function showChangeLogModal(changeLog) {
     if (changeLog.length === 0) {
         content.innerHTML = '<p>No changes recorded for this prescription.</p>';
     } else {
-        content.innerHTML = changeLog.map(entry => `
+        const filteredLog = changeLog.filter(entry => entry.action !== 'Status Change');
+
+        if (filteredLog.length === 0) {
+            content.innerHTML = '<p>No modifications recorded for this prescription.</p>';
+        } else {
+            content.innerHTML = filteredLog.map(entry => `
                     <div style="border: 1px solid var(--border); border-radius: 8px; padding: 15px; margin-bottom: 10px;">
                         <h4>${escapeHtml(entry.action)}</h4>
                         <p><strong>Patient:</strong> ${escapeHtml(entry.patient_name)}</p>
                         <p><strong>Date:</strong> ${formatDate(entry.date)}</p>
                         <p><strong>Changed By:</strong> ${escapeHtml(entry.changed_by)}</p>
-                        <p><strong>Time:</strong> ${escapeHtml(entry.timestamp)}</p>
+                        <p><strong>Time:</strong> ${formatDate(entry.timestamp, true)}</p>
                         ${entry.before_values ? `<p><strong>Before:</strong><br><pre style="white-space: pre-wrap; background:#f8fafc; padding:8px; border-radius:4px; margin-top:4px;">${escapeHtml(formatChangeLogValues(entry.before_values))}</pre></p>` : ''}
                         ${entry.after_values ? `<p><strong>After:</strong><br><pre style="white-space: pre-wrap; background:#f8fafc; padding:8px; border-radius:4px; margin-top:4px;">${escapeHtml(formatChangeLogValues(entry.after_values))}</pre></p>` : ''}
                     </div>
                 `).join('');
+        }
     }
 
     modal.style.display = 'block';
@@ -660,29 +728,47 @@ function showAlert(type, message) {
     }, 5000);
 }
 
-// Format date as DD/MM/YYYY
-function formatDate(dateStr) {
+// Format date as DD/MM/YYYY HH:mm
+function formatDate(dateStr, includeTime = false) {
     if (!dateStr) return '';
     try {
-        // Handle both YYYY-MM-DD format and Date objects
         let date;
         if (typeof dateStr === 'string') {
-            date = new Date(dateStr + 'T00:00:00');
+            // Check if it's already an ISO timestamp (has T)
+            if (dateStr.includes('T')) {
+                date = new Date(dateStr);
+            } else {
+                // For YYYY-MM-DD format
+                date = new Date(dateStr + 'T00:00:00');
+            }
         } else if (dateStr instanceof Date) {
             date = dateStr;
         } else {
             return dateStr;
         }
-        if (isNaN(date.getTime())) return dateStr; // Return original if invalid
+
+        if (isNaN(date.getTime())) return dateStr;
+
         const day = String(date.getDate()).padStart(2, '0');
         const month = String(date.getMonth() + 1).padStart(2, '0');
         const year = date.getFullYear();
-        return `${day}/${month}/${year}`;
+        let formattedDate = `${day}/${month}/${year}`;
+
+        if (includeTime || (typeof dateStr === 'string' && dateStr.includes('T'))) {
+            let hours = date.getHours();
+            const minutes = String(date.getMinutes()).padStart(2, '0');
+            const ampm = hours >= 12 ? 'PM' : 'AM';
+            hours = hours % 12;
+            hours = hours ? hours : 12; // the hour '0' should be '12'
+            formattedDate += ` ${String(hours).padStart(2, '0')}:${minutes} ${ampm}`;
+        }
+
+        return formattedDate;
     } catch (e) {
-        return dateStr; // Return original if error
+        return dateStr;
     }
 }
-
+// Return original if error
 function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;

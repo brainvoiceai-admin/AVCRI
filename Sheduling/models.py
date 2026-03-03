@@ -586,6 +586,7 @@ class PrescriptionScheduling(models.Model):
     sent_to = models.CharField(max_length=100, blank=True, null=True)  # IP Pharmacy, Kashaya Room, etc.
     dispatched_from = models.CharField(max_length=100, blank=True, null=True)
     dispatched_at = models.DateTimeField(blank=True, null=True)
+    scheduled_by = models.ForeignKey('authentication.CustomUser', null=True, blank=True, on_delete=models.SET_NULL, related_name='scheduled_prescriptions')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
