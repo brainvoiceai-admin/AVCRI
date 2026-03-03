@@ -1700,15 +1700,35 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
 
     # CLEAR EXISTING ASSIGNMENTS/BOOKINGS for this allocation/date BEFORE starting algorithm.
     # This prevents accumulation of therapists (ghost records) when rescheduling.
+    # IMPORTANT: When booking_continuity_map is provided (PASS 1 was done), preserve the
+    # TherapistBooking records created by PASS 1 so continuity therapists are not "freed"
+    # and stolen by other allocations running in PASS 2.
     if create_bookings:
         try:
             from django.db.models import Q
+
+            # Collect therapist IDs that PASS 1 locked for this allocation so we can exclude them from cleanup.
+            pass1_locked_therapist_ids = set()
+            if booking_continuity_map:
+                for bk in bookings_qs:
+                    cont = booking_continuity_map.get(bk.pk)
+                    if cont and isinstance(cont, dict):
+                        for t in cont.get('assigned_therapists', []):
+                            tid = getattr(t, 'id', None)
+                            if tid is not None:
+                                pass1_locked_therapist_ids.add(tid)
+
             # 1. Cancel existing TherapistBooking records linked to this allocation/date
-            TherapistBooking.objects.filter(
+            #    BUT exclude PASS 1 continuity therapists so their locks remain intact.
+            cancel_tb_qs = TherapistBooking.objects.filter(
                 visit=allocation,
                 date=target_date,
                 status='BOOKED'
-            ).update(status='CANCELED')
+            )
+            if pass1_locked_therapist_ids:
+                cancel_tb_qs = cancel_tb_qs.exclude(therapist_id__in=pass1_locked_therapist_ids)
+                print(f"[FINAL ALLOCATION] Preserving {len(pass1_locked_therapist_ids)} PASS 1 continuity therapist bookings during cleanup")
+            cancel_tb_qs.update(status='CANCELED')
 
             # 2. Cancel existing RoomBooking records linked to this allocation/date
             RoomBooking.objects.filter(
@@ -2070,6 +2090,14 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                     except Exception as e:
                         print(f"[CONTINUITY PASS2] Error building from-start for remaining: {e}")
                     
+                    # Build avoid set from continuity therapists so allocate_therapists
+                    # does not return them again (their PASS 1 bookings were cancelled by
+                    # the cleanup step, so they appear "free" and can be picked as duplicates).
+                    continuity_codes_to_avoid = {
+                        getattr(t, 'therapist_code', None)
+                        for t in assigned_continuity
+                        if getattr(t, 'therapist_code', None)
+                    }
                     # Allocate remaining therapists (prefer from-start who are available)
                     additional_therapists = allocate_therapists(
                         target_date,
@@ -2078,7 +2106,7 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                         last_therapists=last_therapists_for_remaining,
                         needs_bathing=needs_bath_flag and (result_bath_assigned is None),  # Only if no bathing therapist yet
                         patient_gender=pat_sex,
-                        avoid_therapists=None,  # Don't avoid - continuity already locked
+                        avoid_therapists=continuity_codes_to_avoid if continuity_codes_to_avoid else None,
                     )
                     candidate_therapists.extend(additional_therapists)
                     print(f"[CONTINUITY PASS2] Booking {booking.pk}: Added {len(additional_therapists)} additional therapists")
@@ -2748,15 +2776,20 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                         print(f"[DEBUG] Using previous bathing therapist {previous_bathing_therapist.therapist_code} (PASS 1 therapist not in assigned list)")
                     bath_assigned = previous_bathing_therapist
                     print(f"[DEBUG] ✓ Using previous bathing therapist {previous_bathing_therapist.therapist_code} for patient {patient_id} (maintaining continuity)")
-                elif not bath_assigned:
-                    # No previous therapist and no PASS 1 assignment - pick first bathing therapist from assigned list
-                    for t in assigned_therapists:
-                        if getattr(t, 'is_bathing_therapist', False):
-                            bath_assigned = t
-                            print(f"[DEBUG] Assigned bathing therapist {bath_assigned.therapist_code} (no previous or PASS 1 therapist available)")
-                            break
-                    if bath_assigned:
-                        print(f"[DEBUG] Using first assigned therapist {bath_assigned.therapist_code} for patient {patient_id} (no continuity available)")
+                else:
+                    # PASS 1 / previous bathing therapist not in assigned_therapists (e.g. cancelled,
+                    # on leave, or at max sessions). Reset stale bath_assigned and pick from actual list.
+                    if bath_assigned and bath_assigned not in assigned_therapists:
+                        print(f"[DEBUG] ⚠ PASS 1 bathing therapist {getattr(bath_assigned, 'therapist_code', '?')} is NOT in assigned_therapists - resetting to pick from assigned list")
+                        bath_assigned = None
+                    if not bath_assigned:
+                        for t in assigned_therapists:
+                            if getattr(t, 'is_bathing_therapist', False):
+                                bath_assigned = t
+                                print(f"[DEBUG] Assigned bathing therapist {bath_assigned.therapist_code} (no previous or PASS 1 therapist available)")
+                                break
+                        if bath_assigned:
+                            print(f"[DEBUG] Using first assigned therapist {bath_assigned.therapist_code} for patient {patient_id} (no continuity available)")
                 
                 if not bath_assigned:
                     # Find any bathing therapist from assigned list
@@ -2795,6 +2828,18 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                         })
                         continue  # Skip to next booking
         
+        # FINAL SAFETY CHECK: Ensure bath_assigned is actually in assigned_therapists.
+        # Prevents the scenario where PASS 1 set bath_assigned to a therapist that
+        # ended up NOT being in the final assigned list (e.g. cancelled, on leave,
+        # at max sessions), which would cause all bookings to have is_bathing=False.
+        if needs_bath_flag and bath_assigned and bath_assigned not in assigned_therapists:
+            print(f"[FINAL_ALLOC] ⚠ SAFETY: bath_assigned {getattr(bath_assigned, 'therapist_code', '?')} is NOT in assigned_therapists! Picking replacement from assigned list.")
+            bath_assigned = next((t for t in assigned_therapists if getattr(t, 'is_bathing_therapist', False)), None)
+            if bath_assigned:
+                print(f"[FINAL_ALLOC] ✓ SAFETY: Replaced with {bath_assigned.therapist_code} from assigned list")
+            else:
+                print(f"[FINAL_ALLOC] ⚠ SAFETY: No bathing therapist in assigned list - bath_assigned remains None")
+
         # build therapist audit list - mark senior therapist for special treatments
         therapists_for_audit = []
         for t in assigned_therapists:
