@@ -13,6 +13,17 @@
 </head>
 
 <body>
+    <!-- Full-page overlay shown while Final Schedule / Reschedule All Failed are running -->
+    <div id="page-overlay" class="page-overlay" style="display: none;">
+        <div class="page-overlay-content">
+            <div class="page-overlay-spinner"></div>
+            <div class="overlay-title">Scheduling in progress</div>
+            <div class="overlay-message">
+                Final Schedule / Reschedule is running. Please do not refresh or close this page until it finishes.
+            </div>
+        </div>
+    </div>
+
     {% include 'dashboards/nav.html' %}
     <div class="main-content">
         <div class="container">

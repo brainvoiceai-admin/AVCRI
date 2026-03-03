@@ -5149,8 +5149,17 @@ def reschedule_therapy_api(request):
                 
                 # Process results
                 if isinstance(tasks, list):
-                    success_tasks = [t for t in tasks if t.get('status') == 'BOOKED']
-                    failed_tasks = [t for t in tasks if t.get('status') == 'FAILED']
+                    # Safeguard: filter out any unexpected None or non-dict entries from algorithm
+                    safe_tasks = [t for t in tasks if isinstance(t, dict)]
+
+                    if not safe_tasks:
+                        return JsonResponse({
+                            'success': False,
+                            'error': 'Unexpected response from scheduling algorithm'
+                        }, status=500)
+
+                    success_tasks = [t for t in safe_tasks if t.get('status') == 'BOOKED']
+                    failed_tasks = [t for t in safe_tasks if t.get('status') == 'FAILED']
                     
                     if success_tasks:
                         allocation.status = 'allocated'
@@ -5222,21 +5231,14 @@ def reschedule_all_failed_api(request):
             return JsonResponse({
                 'error': 'Reschedule All Failed is not available for past dates. Please select today or a future date.',
             }, status=400)
-        # Get allocations that have failed bookings on the target date (day-wise filter)
-        failed_allocations = (
-            TherapyAllocation.objects
-            .filter(
-                from_date__lte=filter_date,
-                to_date__gte=filter_date,
-                bookings__date=filter_date,
-                bookings__status='failed'
-            )
-            .distinct()
-        )
-
-        print(f"[RESCHEDULE ALL FAILED] Found {failed_allocations.count()} failed allocations for date {date}")
-
-        if not failed_allocations.exists():
+        # Get failed bookings for the target date and order them per patient by therapy start date,
+        # so that for the same patient, earlier-started therapies get continuity first.
+        failed_bookings_qs = Booking.objects.filter(
+            date=filter_date,
+            status='failed'
+        ).select_related('allocation', 'allocation__patient')
+        
+        if not failed_bookings_qs.exists():
             return JsonResponse({
                 'success': True,
                 'message': f'No failed therapies found for {date} to reschedule.',
@@ -5247,15 +5249,35 @@ def reschedule_all_failed_api(request):
                     'failed': 0,
                 }
             })
+        
+        from collections import defaultdict
+        by_patient = defaultdict(list)
+        for b in failed_bookings_qs:
+            pat = getattr(b.allocation, 'patient', None)
+            pid = getattr(pat, 'id', None)
+            by_patient[pid].append(b)
+
+        ordered_failed_allocations = []
+        seen_alloc_ids = set()
+        for pid, bookings in by_patient.items():
+            bookings.sort(key=lambda bk: getattr(bk.allocation, 'from_date', filter_date))
+            for bk in bookings:
+                aid = getattr(bk.allocation, 'id', None)
+                if aid and aid not in seen_alloc_ids:
+                    seen_alloc_ids.add(aid)
+                    ordered_failed_allocations.append(bk.allocation)
+
+        print(f"[RESCHEDULE ALL FAILED] Found {len(ordered_failed_allocations)} failed allocations for date {date}")
 
         results = []
         success_count = 0
         failed_count = 0
 
-        # Process each failed allocation
-        for idx, allocation in enumerate(failed_allocations, 1):
+        # Process each failed allocation in patient/start-date order
+        total_allocations = len(ordered_failed_allocations)
+        for idx, allocation in enumerate(ordered_failed_allocations, 1):
             try:
-                print(f"\n[RESCHEDULE {idx}/{failed_allocations.count()}] Processing allocation ID: {allocation.id}, Therapy: {allocation.therapy_name}")
+                print(f"\n[RESCHEDULE {idx}/{total_allocations}] Processing allocation ID: {allocation.id}, Therapy: {allocation.therapy_name}")
 
                 # Ensure booking exists for this date
                 booking = Booking.objects.filter(allocation=allocation, date=filter_date).first()
@@ -5334,7 +5356,7 @@ def reschedule_all_failed_api(request):
                 })
                 failed_count += 1
 
-        total = failed_allocations.count()
+        total = total_allocations
         return JsonResponse({
             'success': True,
             'message': f'Reschedule All Failed completed for {date}. Total: {total}, successfully rescheduled: {success_count}, failed: {failed_count}.',
