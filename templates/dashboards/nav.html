@@ -17,7 +17,7 @@
     <div class="sidebar-menu">
         {# ---------- Dynamic Module-based Navigation with Organized Sections ---------- #}
         {% if user_modules %}
-        {# Masters Section #}
+        {# Masters Section - show for super_admin (full list) or any user with master modules #}
         {% if request.user.role == "super_admin" %}
         <div class="menu-section">
             <div class="menu-section-header" onclick="toggleSection('masters-section')">
@@ -92,6 +92,22 @@
                 <a href="{% url 'unit_list' %}" class="menu-item" data-url="{% url 'unit_list' %}">
                     <span>📏</span> Unit Numbers
                 </a>
+            </div>
+        </div>
+        {% elif user_master_modules %}
+        {# For non-super_admin users: show Masters section dynamically based on assigned modules #}
+        <div class="menu-section">
+            <div class="menu-section-header" onclick="toggleSection('masters-section')">
+                <span class="section-icon">🗃️</span>
+                <span class="section-title">Masters</span>
+                <span class="section-arrow" id="masters-section-arrow">▼</span>
+            </div>
+            <div class="menu-subsection" id="masters-section">
+                {% for module in user_master_modules %}
+                <a href="{% url module.url_name %}" class="menu-item" data-url="{% url module.url_name %}">
+                    <span>{{ module.icon }}</span> {{ module.display_name }}
+                </a>
+                {% endfor %}
             </div>
         </div>
         {% endif %}
