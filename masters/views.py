@@ -2496,11 +2496,20 @@ class TherapistMasterCreateView(CreateView):
     
     def form_valid(self, form):
         """Create user account and profile when creating therapist master"""
-        # Auto-generate unique therapist code by incrementing from highest existing code
-        # Get all existing therapist codes that start with THP
-        existing_codes = TherapistMaster.objects.filter(
+        from authentication.models import TherapistProfile
+        
+        # Auto-generate unique therapist code by checking both tables
+        # Get existing codes from TherapistMaster
+        existing_master_codes = list(TherapistMaster.objects.filter(
             therapist_code__startswith='THP'
-        ).values_list('therapist_code', flat=True)
+        ).values_list('therapist_code', flat=True))
+        
+        # Get existing codes from TherapistProfile
+        existing_profile_codes = list(TherapistProfile.objects.filter(
+            therapist_code__startswith='THP'
+        ).values_list('therapist_code', flat=True))
+        
+        existing_codes = set(existing_master_codes + existing_profile_codes)
         
         # Extract numbers from existing codes and find the highest
         max_number = 0
@@ -2536,10 +2545,13 @@ class TherapistMasterCreateView(CreateView):
         username = therapist_code.lower().replace(' ', '_')
         email = f"{username}@avcri.local"
         
-        # Check if username exists
+        # Check if username exists and guarantee uniqueness
         from authentication.models import CustomUser
-        if CustomUser.objects.filter(username=username).exists():
-            username = f"{username}_{therapist_code}"
+        base_username = username
+        counter = 1
+        while CustomUser.objects.filter(username=username).exists():
+            username = f"{base_username}_{counter}"
+            counter += 1
         
         # Split name
         name_parts = therapist_name.split(maxsplit=1)

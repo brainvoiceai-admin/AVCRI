@@ -1,0 +1,467 @@
+[CONTINUITY PASS1] ========== STARTING PASS 1: CONTINUITY PRIORITY ==========
+[CONTINUITY PASS1] Processing 1 patients with bookings
+[CONTINUITY PASS1] ===== PATIENT: RUTHIRAPATHY BALASUBRAMANIAM (id=621) - Processing 1 bookings =====
+[CONTINUITY PASS1] >>> Processing booking 17387 (allocation_id=2402, patient_id=621)
+[CONTINUITY PASS1] ✓ Bathing continuity: first-day therapist THP1199 available - use as bathing (from start of therapy)
+[CONTINUITY PASS1] ✓ Using bathing therapist THP1199 (first available from start of therapy)
+[CONTINUITY PASS1] Booking 17387: Found 8 continuity therapists from TherapistContinuityPlan
+[CONTINUITY PASS1]   Continuity therapists: ['THP1117', 'THP1199', 'THP1081', 'THP1055', 'THP1238', 'THP1247', 'THP1280', 'THP1201']
+[CONTINUITY PASS1] ✓ SELECTED continuity therapist THP1117 (Super Senior Therapist) for booking 17387
+[CONTINUITY PASS1]   - Added to locked_therapist_slots: (therapist_id=56, slot_id=7)
+[CONTINUITY PASS1]   - Will create TherapistBooking to LOCK this therapist-slot combination
+[CONTINUITY PASS1] ✓ SELECTED continuity therapist THP1199 (Super Senior Therapist) for booking 17387
+[CONTINUITY PASS1]   - Added to locked_therapist_slots: (therapist_id=66, slot_id=7)
+[CONTINUITY PASS1]   - Will create TherapistBooking to LOCK this therapist-slot combination
+[CONTINUITY PASS1] ✓ SELECTED continuity therapist THP1081 (Senior Therapist) for booking 17387
+[CONTINUITY PASS1]   - Added to locked_therapist_slots: (therapist_id=73, slot_id=7)
+[CONTINUITY PASS1]   - Will create TherapistBooking to LOCK this therapist-slot combination
+[CONTINUITY PASS1] ========== STARTING PASS 1: CONTINUITY PRIORITY ==========
+[CONTINUITY PASS1] Processing 1 patients with bookings
+[CONTINUITY PASS1] ===== PATIENT: RUTHIRAPATHY BALASUBRAMANIAM (id=621) - Processing 1 bookings =====
+[CONTINUITY PASS1] >>> Processing booking 17387 (allocation_id=2402, patient_id=621)
+[CONTINUITY PASS1] ✓ Bathing continuity: first-day therapist THP1199 available - use as bathing (from start of therapy)
+[CONTINUITY PASS1] ✓ Using bathing therapist THP1199 (first available from start of therapy)
+[CONTINUITY PASS1] Booking 17387: Found 8 continuity therapists from TherapistContinuityPlan
+[CONTINUITY PASS1]   Continuity therapists: ['THP1117', 'THP1199', 'THP1081', 'THP1055', 'THP1238', 'THP1247', 'THP1280', 'THP1201']
+[CONTINUITY PASS1] ✓ SELECTED continuity therapist THP1117 (Super Senior Therapist) for booking 17387
+[CONTINUITY PASS1]   - Added to locked_therapist_slots: (therapist_id=56, slot_id=7)
+[CONTINUITY PASS1]   - Will create TherapistBooking to LOCK this therapist-slot combination
+[CONTINUITY PASS1] ✓ SELECTED continuity therapist THP1199 (Super Senior Therapist) for booking 17387
+[CONTINUITY PASS1]   - Added to locked_therapist_slots: (therapist_id=66, slot_id=7)
+[CONTINUITY PASS1]   - Will create TherapistBooking to LOCK this therapist-slot combination
+[CONTINUITY PASS1] ✓ SELECTED continuity therapist THP1081 (Senior Therapist) for booking 17387
+[CONTINUITY PASS1]   - Added to locked_therapist_slots: (therapist_id=73, slot_id=7)
+[CONTINUITY PASS1]   - Will create TherapistBooking to LOCK this therapist-slot combination
+[CONTINUITY PASS1] Therapist THP1055 on leave - skipping
+[CONTINUITY PASS1] Processing 1 patients with bookings
+[CONTINUITY PASS1] ===== PATIENT: RUTHIRAPATHY BALASUBRAMANIAM (id=621) - Processing 1 bookings =====
+[CONTINUITY PASS1] >>> Processing booking 17387 (allocation_id=2402, patient_id=621)
+[CONTINUITY PASS1] ✓ Bathing continuity: first-day therapist THP1199 available - use as bathing (from start of therapy)
+[CONTINUITY PASS1] ✓ Using bathing therapist THP1199 (first available from start of therapy)
+[CONTINUITY PASS1] Booking 17387: Found 8 continuity therapists from TherapistContinuityPlan
+[CONTINUITY PASS1]   Continuity therapists: ['THP1117', 'THP1199', 'THP1081', 'THP1055', 'THP1238', 'THP1247', 'THP1280', 'THP1201']
+[CONTINUITY PASS1] ✓ SELECTED continuity therapist THP1117 (Super Senior Therapist) for booking 17387
+[CONTINUITY PASS1]   - Added to locked_therapist_slots: (therapist_id=56, slot_id=7)
+[CONTINUITY PASS1]   - Will create TherapistBooking to LOCK this therapist-slot combination
+[CONTINUITY PASS1] ✓ SELECTED continuity therapist THP1199 (Super Senior Therapist) for booking 17387
+[CONTINUITY PASS1]   - Added to locked_therapist_slots: (therapist_id=66, slot_id=7)
+[CONTINUITY PASS1]   - Will create TherapistBooking to LOCK this therapist-slot combination
+[CONTINUITY PASS1] ✓ SELECTED continuity therapist THP1081 (Senior Therapist) for booking 17387
+[CONTINUITY PASS1]   - Added to locked_therapist_slots: (therapist_id=73, slot_id=7)
+[CONTINUITY PASS1]   - Will create TherapistBooking to LOCK this therapist-slot combination
+[CONTINUITY PASS1] Therapist THP1055 on leave - skipping
+[CONTINUITY PASS1] ✓ SELECTED continuity therapist THP1238 (Junior Therapist) for booking 17387
+[CONTINUITY PASS1]   - Added to locked_therapist_slots: (therapist_id=70, slot_id=7)
+[CONTINUITY PASS1]   - Will create TherapistBooking to LOCK this therapist-slot combination
+[CONTINUITY PASS1] >>> Processing booking 17387 (allocation_id=2402, patient_id=621)
+[CONTINUITY PASS1] ✓ Bathing continuity: first-day therapist THP1199 available - use as bathing (from start of therapy)
+[CONTINUITY PASS1] ✓ Using bathing therapist THP1199 (first available from start of therapy)
+[CONTINUITY PASS1] Booking 17387: Found 8 continuity therapists from TherapistContinuityPlan
+[CONTINUITY PASS1]   Continuity therapists: ['THP1117', 'THP1199', 'THP1081', 'THP1055', 'THP1238', 'THP1247', 'THP1280', 'THP1201']
+[CONTINUITY PASS1] ✓ SELECTED continuity therapist THP1117 (Super Senior Therapist) for booking 17387
+[CONTINUITY PASS1]   - Added to locked_therapist_slots: (therapist_id=56, slot_id=7)
+[CONTINUITY PASS1]   - Will create TherapistBooking to LOCK this therapist-slot combination
+[CONTINUITY PASS1] ✓ SELECTED continuity therapist THP1199 (Super Senior Therapist) for booking 17387
+[CONTINUITY PASS1]   - Added to locked_therapist_slots: (therapist_id=66, slot_id=7)
+[CONTINUITY PASS1]   - Will create TherapistBooking to LOCK this therapist-slot combination
+[CONTINUITY PASS1] ✓ SELECTED continuity therapist THP1081 (Senior Therapist) for booking 17387
+[CONTINUITY PASS1]   - Added to locked_therapist_slots: (therapist_id=73, slot_id=7)
+[CONTINUITY PASS1]   - Will create TherapistBooking to LOCK this therapist-slot combination
+[CONTINUITY PASS1] Therapist THP1055 on leave - skipping
+[CONTINUITY PASS1] ✓ SELECTED continuity therapist THP1238 (Junior Therapist) for booking 17387
+[CONTINUITY PASS1]   - Added to locked_therapist_slots: (therapist_id=70, slot_id=7)
+[CONTINUITY PASS1]   - Will create TherapistBooking to LOCK this therapist-slot combination
+[CONTINUITY PASS1] Therapist THP1247 on leave - skipping
+[CONTINUITY PASS1] Therapist THP1280 grade Junior Therapist can substitute for needed Senior Therapist (continuity)
+[CONTINUITY PASS1] Booking 17387: Found 8 continuity therapists from TherapistContinuityPlan
+[CONTINUITY PASS1]   Continuity therapists: ['THP1117', 'THP1199', 'THP1081', 'THP1055', 'THP1238', 'THP1247', 'THP1280', 'THP1201']
+[CONTINUITY PASS1] ✓ SELECTED continuity therapist THP1117 (Super Senior Therapist) for booking 17387
+[CONTINUITY PASS1]   - Added to locked_therapist_slots: (therapist_id=56, slot_id=7)
+[CONTINUITY PASS1]   - Will create TherapistBooking to LOCK this therapist-slot combination
+[CONTINUITY PASS1] ✓ SELECTED continuity therapist THP1199 (Super Senior Therapist) for booking 17387
+[CONTINUITY PASS1]   - Added to locked_therapist_slots: (therapist_id=66, slot_id=7)
+[CONTINUITY PASS1]   - Will create TherapistBooking to LOCK this therapist-slot combination
+[CONTINUITY PASS1] ✓ SELECTED continuity therapist THP1081 (Senior Therapist) for booking 17387
+[CONTINUITY PASS1]   - Added to locked_therapist_slots: (therapist_id=73, slot_id=7)
+[CONTINUITY PASS1]   - Will create TherapistBooking to LOCK this therapist-slot combination
+[CONTINUITY PASS1] Therapist THP1055 on leave - skipping
+[CONTINUITY PASS1] ✓ SELECTED continuity therapist THP1238 (Junior Therapist) for booking 17387
+[CONTINUITY PASS1]   - Added to locked_therapist_slots: (therapist_id=70, slot_id=7)
+[CONTINUITY PASS1]   - Will create TherapistBooking to LOCK this therapist-slot combination
+[CONTINUITY PASS1] Therapist THP1247 on leave - skipping
+[CONTINUITY PASS1] Therapist THP1280 grade Junior Therapist can substitute for needed Senior Therapist (continuity)
+[CONTINUITY PASS1] Using Junior Therapist for continuity to satisfy Senior Therapist requirement
+[CONTINUITY PASS1] ✓ SELECTED continuity therapist THP1280 (Junior Therapist) for booking 17387
+[CONTINUITY PASS1]   - Added to locked_therapist_slots: (therapist_id=7, slot_id=7)
+[CONTINUITY PASS1]   - Added to locked_therapist_slots: (therapist_id=56, slot_id=7)
+[CONTINUITY PASS1]   - Will create TherapistBooking to LOCK this therapist-slot combination
+[CONTINUITY PASS1] ✓ SELECTED continuity therapist THP1199 (Super Senior Therapist) for booking 17387
+[CONTINUITY PASS1]   - Added to locked_therapist_slots: (therapist_id=66, slot_id=7)
+[CONTINUITY PASS1]   - Will create TherapistBooking to LOCK this therapist-slot combination
+[CONTINUITY PASS1] ✓ SELECTED continuity therapist THP1081 (Senior Therapist) for booking 17387
+[CONTINUITY PASS1]   - Added to locked_therapist_slots: (therapist_id=73, slot_id=7)
+[CONTINUITY PASS1]   - Will create TherapistBooking to LOCK this therapist-slot combination
+[CONTINUITY PASS1] Therapist THP1055 on leave - skipping
+[CONTINUITY PASS1] ✓ SELECTED continuity therapist THP1238 (Junior Therapist) for booking 17387
+[CONTINUITY PASS1]   - Added to locked_therapist_slots: (therapist_id=70, slot_id=7)
+[CONTINUITY PASS1]   - Will create TherapistBooking to LOCK this therapist-slot combination
+[CONTINUITY PASS1] Therapist THP1247 on leave - skipping
+[CONTINUITY PASS1] Therapist THP1280 grade Junior Therapist can substitute for needed Senior Therapist (continuity)
+[CONTINUITY PASS1] Using Junior Therapist for continuity to satisfy Senior Therapist requirement
+[CONTINUITY PASS1] ✓ SELECTED continuity therapist THP1280 (Junior Therapist) for booking 17387
+[CONTINUITY PASS1]   - Added to locked_therapist_slots: (therapist_id=7, slot_id=7)
+[CONTINUITY PASS1]   - Will create TherapistBooking to LOCK this therapist-slot combination
+[CONTINUITY PASS1] Therapist THP1201 on leave - skipping
+[CONTINUITY PASS1] ✓ Using previous bathing therapist: THP1199 (maintaining continuity)
+[CONTINUITY PASS1]   - Will create TherapistBooking to LOCK this therapist-slot combination
+[CONTINUITY PASS1] ✓ SELECTED continuity therapist THP1081 (Senior Therapist) for booking 17387
+[CONTINUITY PASS1]   - Added to locked_therapist_slots: (therapist_id=73, slot_id=7)
+[CONTINUITY PASS1]   - Will create TherapistBooking to LOCK this therapist-slot combination
+[CONTINUITY PASS1] Therapist THP1055 on leave - skipping
+[CONTINUITY PASS1] ✓ SELECTED continuity therapist THP1238 (Junior Therapist) for booking 17387
+[CONTINUITY PASS1]   - Added to locked_therapist_slots: (therapist_id=70, slot_id=7)
+[CONTINUITY PASS1]   - Will create TherapistBooking to LOCK this therapist-slot combination
+[CONTINUITY PASS1] Therapist THP1247 on leave - skipping
+[CONTINUITY PASS1] Therapist THP1280 grade Junior Therapist can substitute for needed Senior Therapist (continuity)
+[CONTINUITY PASS1] Using Junior Therapist for continuity to satisfy Senior Therapist requirement
+[CONTINUITY PASS1] ✓ SELECTED continuity therapist THP1280 (Junior Therapist) for booking 17387
+[CONTINUITY PASS1]   - Added to locked_therapist_slots: (therapist_id=7, slot_id=7)
+[CONTINUITY PASS1]   - Will create TherapistBooking to LOCK this therapist-slot combination
+[CONTINUITY PASS1] Therapist THP1201 on leave - skipping
+[CONTINUITY PASS1] ✓ Using previous bathing therapist: THP1199 (maintaining continuity)
+[CONTINUITY PASS1] Excluding bathing therapist THP1199 from senior tag (must be different)
+[CONTINUITY PASS1] Assigned senior_therapist: THP1117 (senior tag count: 0, different from bathing THP1199)
+[CONTINUITY PASS1] ===== LOCKING 5 THERAPISTS FOR BOOKING 17387 =====
+[CONTINUITY PASS1] Creating TherapistBooking to LOCK: therapist=THP1117 (id=56), date=2026-03-03, slot_id=7, booking_id=17387
+[CONTINUITY PASS1]   - Added to locked_therapist_slots: (therapist_id=70, slot_id=7)
+[CONTINUITY PASS1]   - Will create TherapistBooking to LOCK this therapist-slot combination
+[CONTINUITY PASS1] Therapist THP1247 on leave - skipping
+[CONTINUITY PASS1] Therapist THP1280 grade Junior Therapist can substitute for needed Senior Therapist (continuity)
+[CONTINUITY PASS1] Using Junior Therapist for continuity to satisfy Senior Therapist requirement
+[CONTINUITY PASS1] ✓ SELECTED continuity therapist THP1280 (Junior Therapist) for booking 17387
+[CONTINUITY PASS1]   - Added to locked_therapist_slots: (therapist_id=7, slot_id=7)
+[CONTINUITY PASS1]   - Will create TherapistBooking to LOCK this therapist-slot combination
+[CONTINUITY PASS1] Therapist THP1201 on leave - skipping
+[CONTINUITY PASS1] ✓ Using previous bathing therapist: THP1199 (maintaining continuity)
+[CONTINUITY PASS1] Excluding bathing therapist THP1199 from senior tag (must be different)
+[CONTINUITY PASS1] Assigned senior_therapist: THP1117 (senior tag count: 0, different from bathing THP1199)
+[CONTINUITY PASS1] ===== LOCKING 5 THERAPISTS FOR BOOKING 17387 =====
+[CONTINUITY PASS1] Creating TherapistBooking to LOCK: therapist=THP1117 (id=56), date=2026-03-03, slot_id=7, booking_id=17387
+[CONTINUITY PASS1] ✓✓✓ LOCKED therapist THP1117 (id=56) with TherapistBooking pk=14572 for booking 17387
+[CONTINUITY PASS1]   - TherapistBooking: pk=14572, therapist_id=56, date=2026-03-03, slot_id=7, status=BOOKED
+[CONTINUITY PASS1] Creating TherapistBooking to LOCK: therapist=THP1199 (id=66), date=2026-03-03, slot_id=7, booking_id=17387
+[CONTINUITY PASS1]   - Will create TherapistBooking to LOCK this therapist-slot combination
+[CONTINUITY PASS1] Therapist THP1201 on leave - skipping
+[CONTINUITY PASS1] ✓ Using previous bathing therapist: THP1199 (maintaining continuity)
+[CONTINUITY PASS1] Excluding bathing therapist THP1199 from senior tag (must be different)
+[CONTINUITY PASS1] Assigned senior_therapist: THP1117 (senior tag count: 0, different from bathing THP1199)
+[CONTINUITY PASS1] ===== LOCKING 5 THERAPISTS FOR BOOKING 17387 =====
+[CONTINUITY PASS1] Creating TherapistBooking to LOCK: therapist=THP1117 (id=56), date=2026-03-03, slot_id=7, booking_id=17387
+[CONTINUITY PASS1] ✓✓✓ LOCKED therapist THP1117 (id=56) with TherapistBooking pk=14572 for booking 17387
+[CONTINUITY PASS1]   - TherapistBooking: pk=14572, therapist_id=56, date=2026-03-03, slot_id=7, status=BOOKED
+[CONTINUITY PASS1] Creating TherapistBooking to LOCK: therapist=THP1199 (id=66), date=2026-03-03, slot_id=7, booking_id=17387
+[CONTINUITY PASS1] ✓✓✓ LOCKED therapist THP1199 (id=66) with TherapistBooking pk=14573 for booking 17387
+[CONTINUITY PASS1]   - TherapistBooking: pk=14573, therapist_id=66, date=2026-03-03, slot_id=7, status=BOOKED
+[CONTINUITY PASS1] Creating TherapistBooking to LOCK: therapist=THP1081 (id=73), date=2026-03-03, slot_id=7, booking_id=17387
+[CONTINUITY PASS1] Therapist THP1201 on leave - skipping
+[CONTINUITY PASS1] ✓ Using previous bathing therapist: THP1199 (maintaining continuity)
+[CONTINUITY PASS1] Excluding bathing therapist THP1199 from senior tag (must be different)
+[CONTINUITY PASS1] Assigned senior_therapist: THP1117 (senior tag count: 0, different from bathing THP1199)
+[CONTINUITY PASS1] ===== LOCKING 5 THERAPISTS FOR BOOKING 17387 =====
+[CONTINUITY PASS1] Creating TherapistBooking to LOCK: therapist=THP1117 (id=56), date=2026-03-03, slot_id=7, booking_id=17387
+[CONTINUITY PASS1] ✓✓✓ LOCKED therapist THP1117 (id=56) with TherapistBooking pk=14572 for booking 17387
+[CONTINUITY PASS1]   - TherapistBooking: pk=14572, therapist_id=56, date=2026-03-03, slot_id=7, status=BOOKED
+[CONTINUITY PASS1] Creating TherapistBooking to LOCK: therapist=THP1199 (id=66), date=2026-03-03, slot_id=7, booking_id=17387
+[CONTINUITY PASS1] ✓✓✓ LOCKED therapist THP1199 (id=66) with TherapistBooking pk=14573 for booking 17387
+[CONTINUITY PASS1]   - TherapistBooking: pk=14573, therapist_id=66, date=2026-03-03, slot_id=7, status=BOOKED
+[CONTINUITY PASS1] Creating TherapistBooking to LOCK: therapist=THP1081 (id=73), date=2026-03-03, slot_id=7, booking_id=17387
+[CONTINUITY PASS1] ✓✓✓ LOCKED therapist THP1081 (id=73) with TherapistBooking pk=14574 for booking 17387
+[CONTINUITY PASS1] ✓ Using previous bathing therapist: THP1199 (maintaining continuity)
+[CONTINUITY PASS1] Excluding bathing therapist THP1199 from senior tag (must be different)
+[CONTINUITY PASS1] Assigned senior_therapist: THP1117 (senior tag count: 0, different from bathing THP1199)
+[CONTINUITY PASS1] ===== LOCKING 5 THERAPISTS FOR BOOKING 17387 =====
+[CONTINUITY PASS1] Creating TherapistBooking to LOCK: therapist=THP1117 (id=56), date=2026-03-03, slot_id=7, booking_id=17387
+[CONTINUITY PASS1] ✓✓✓ LOCKED therapist THP1117 (id=56) with TherapistBooking pk=14572 for booking 17387
+[CONTINUITY PASS1]   - TherapistBooking: pk=14572, therapist_id=56, date=2026-03-03, slot_id=7, status=BOOKED
+[CONTINUITY PASS1] Creating TherapistBooking to LOCK: therapist=THP1199 (id=66), date=2026-03-03, slot_id=7, booking_id=17387
+[CONTINUITY PASS1] ✓✓✓ LOCKED therapist THP1199 (id=66) with TherapistBooking pk=14573 for booking 17387
+[CONTINUITY PASS1]   - TherapistBooking: pk=14573, therapist_id=66, date=2026-03-03, slot_id=7, status=BOOKED
+[CONTINUITY PASS1] Creating TherapistBooking to LOCK: therapist=THP1081 (id=73), date=2026-03-03, slot_id=7, booking_id=17387
+[CONTINUITY PASS1] ✓✓✓ LOCKED therapist THP1081 (id=73) with TherapistBooking pk=14574 for booking 17387
+[CONTINUITY PASS1]   - TherapistBooking: pk=14574, therapist_id=73, date=2026-03-03, slot_id=7, status=BOOKED
+[CONTINUITY PASS1] Assigned senior_therapist: THP1117 (senior tag count: 0, different from bathing THP1199)
+[CONTINUITY PASS1] ===== LOCKING 5 THERAPISTS FOR BOOKING 17387 =====
+[CONTINUITY PASS1] Creating TherapistBooking to LOCK: therapist=THP1117 (id=56), date=2026-03-03, slot_id=7, booking_id=17387
+[CONTINUITY PASS1] ✓✓✓ LOCKED therapist THP1117 (id=56) with TherapistBooking pk=14572 for booking 17387
+[CONTINUITY PASS1]   - TherapistBooking: pk=14572, therapist_id=56, date=2026-03-03, slot_id=7, status=BOOKED
+[CONTINUITY PASS1] Creating TherapistBooking to LOCK: therapist=THP1199 (id=66), date=2026-03-03, slot_id=7, booking_id=17387
+[CONTINUITY PASS1] ✓✓✓ LOCKED therapist THP1199 (id=66) with TherapistBooking pk=14573 for booking 17387
+[CONTINUITY PASS1]   - TherapistBooking: pk=14573, therapist_id=66, date=2026-03-03, slot_id=7, status=BOOKED
+[CONTINUITY PASS1] Creating TherapistBooking to LOCK: therapist=THP1081 (id=73), date=2026-03-03, slot_id=7, booking_id=17387
+[CONTINUITY PASS1] ✓✓✓ LOCKED therapist THP1081 (id=73) with TherapistBooking pk=14574 for booking 17387
+[CONTINUITY PASS1]   - TherapistBooking: pk=14574, therapist_id=73, date=2026-03-03, slot_id=7, status=BOOKED
+[CONTINUITY PASS1] Creating TherapistBooking to LOCK: therapist=THP1238 (id=70), date=2026-03-03, slot_id=7, booking_id=17387
+[CONTINUITY PASS1] Creating TherapistBooking to LOCK: therapist=THP1117 (id=56), date=2026-03-03, slot_id=7, booking_id=17387
+[CONTINUITY PASS1] ✓✓✓ LOCKED therapist THP1117 (id=56) with TherapistBooking pk=14572 for booking 17387
+[CONTINUITY PASS1]   - TherapistBooking: pk=14572, therapist_id=56, date=2026-03-03, slot_id=7, status=BOOKED
+[CONTINUITY PASS1] Creating TherapistBooking to LOCK: therapist=THP1199 (id=66), date=2026-03-03, slot_id=7, booking_id=17387
+[CONTINUITY PASS1] ✓✓✓ LOCKED therapist THP1199 (id=66) with TherapistBooking pk=14573 for booking 17387
+[CONTINUITY PASS1]   - TherapistBooking: pk=14573, therapist_id=66, date=2026-03-03, slot_id=7, status=BOOKED
+[CONTINUITY PASS1] Creating TherapistBooking to LOCK: therapist=THP1081 (id=73), date=2026-03-03, slot_id=7, booking_id=17387
+[CONTINUITY PASS1] ✓✓✓ LOCKED therapist THP1081 (id=73) with TherapistBooking pk=14574 for booking 17387
+[CONTINUITY PASS1]   - TherapistBooking: pk=14574, therapist_id=73, date=2026-03-03, slot_id=7, status=BOOKED
+[CONTINUITY PASS1] Creating TherapistBooking to LOCK: therapist=THP1238 (id=70), date=2026-03-03, slot_id=7, booking_id=17387
+[CONTINUITY PASS1] ✓✓✓ LOCKED therapist THP1238 (id=70) with TherapistBooking pk=14575 for booking 17387
+[CONTINUITY PASS1] ✓✓✓ LOCKED therapist THP1117 (id=56) with TherapistBooking pk=14572 for booking 17387
+[CONTINUITY PASS1]   - TherapistBooking: pk=14572, therapist_id=56, date=2026-03-03, slot_id=7, status=BOOKED
+[CONTINUITY PASS1] Creating TherapistBooking to LOCK: therapist=THP1199 (id=66), date=2026-03-03, slot_id=7, booking_id=17387
+[CONTINUITY PASS1] ✓✓✓ LOCKED therapist THP1199 (id=66) with TherapistBooking pk=14573 for booking 17387
+[CONTINUITY PASS1]   - TherapistBooking: pk=14573, therapist_id=66, date=2026-03-03, slot_id=7, status=BOOKED
+[CONTINUITY PASS1] Creating TherapistBooking to LOCK: therapist=THP1081 (id=73), date=2026-03-03, slot_id=7, booking_id=17387
+[CONTINUITY PASS1] ✓✓✓ LOCKED therapist THP1081 (id=73) with TherapistBooking pk=14574 for booking 17387
+[CONTINUITY PASS1]   - TherapistBooking: pk=14574, therapist_id=73, date=2026-03-03, slot_id=7, status=BOOKED
+[CONTINUITY PASS1] Creating TherapistBooking to LOCK: therapist=THP1238 (id=70), date=2026-03-03, slot_id=7, booking_id=17387
+[CONTINUITY PASS1] ✓✓✓ LOCKED therapist THP1238 (id=70) with TherapistBooking pk=14575 for booking 17387
+[CONTINUITY PASS1]   - TherapistBooking: pk=14575, therapist_id=70, date=2026-03-03, slot_id=7, status=BOOKED
+[CONTINUITY PASS1] ✓✓✓ LOCKED therapist THP1117 (id=56) with TherapistBooking pk=14572 for booking 17387
+[CONTINUITY PASS1]   - TherapistBooking: pk=14572, therapist_id=56, date=2026-03-03, slot_id=7, status=BOOKED
+[CONTINUITY PASS1] Creating TherapistBooking to LOCK: therapist=THP1199 (id=66), date=2026-03-03, slot_id=7, booking_id=17387
+[CONTINUITY PASS1] ✓✓✓ LOCKED therapist THP1199 (id=66) with TherapistBooking pk=14573 for booking 17387
+[CONTINUITY PASS1]   - TherapistBooking: pk=14573, therapist_id=66, date=2026-03-03, slot_id=7, status=BOOKED
+[CONTINUITY PASS1] Creating TherapistBooking to LOCK: therapist=THP1081 (id=73), date=2026-03-03, slot_id=7, booking_id=17387
+[CONTINUITY PASS1] ✓✓✓ LOCKED therapist THP1081 (id=73) with TherapistBooking pk=14574 for booking 17387
+[CONTINUITY PASS1]   - TherapistBooking: pk=14574, therapist_id=73, date=2026-03-03, slot_id=7, status=BOOKED
+[CONTINUITY PASS1] Creating TherapistBooking to LOCK: therapist=THP1238 (id=70), date=2026-03-03, slot_id=7, booking_id=17387
+[CONTINUITY PASS1] ✓✓✓ LOCKED therapist THP1238 (id=70) with TherapistBooking pk=14575 for booking 17387
+[CONTINUITY PASS1]   - TherapistBooking: pk=14575, therapist_id=70, date=2026-03-03, slot_id=7, status=BOOKED
+[CONTINUITY PASS1] Creating TherapistBooking to LOCK: therapist=THP1280 (id=7), date=2026-03-03, slot_id=7, booking_id=17387
+[CONTINUITY PASS1]   - TherapistBooking: pk=14572, therapist_id=56, date=2026-03-03, slot_id=7, status=BOOKED
+[CONTINUITY PASS1] Creating TherapistBooking to LOCK: therapist=THP1199 (id=66), date=2026-03-03, slot_id=7, booking_id=17387
+[CONTINUITY PASS1] ✓✓✓ LOCKED therapist THP1199 (id=66) with TherapistBooking pk=14573 for booking 17387
+[CONTINUITY PASS1]   - TherapistBooking: pk=14573, therapist_id=66, date=2026-03-03, slot_id=7, status=BOOKED
+[CONTINUITY PASS1] Creating TherapistBooking to LOCK: therapist=THP1081 (id=73), date=2026-03-03, slot_id=7, booking_id=17387
+[CONTINUITY PASS1] ✓✓✓ LOCKED therapist THP1081 (id=73) with TherapistBooking pk=14574 for booking 17387
+[CONTINUITY PASS1]   - TherapistBooking: pk=14574, therapist_id=73, date=2026-03-03, slot_id=7, status=BOOKED
+[CONTINUITY PASS1] Creating TherapistBooking to LOCK: therapist=THP1238 (id=70), date=2026-03-03, slot_id=7, booking_id=17387
+[CONTINUITY PASS1] ✓✓✓ LOCKED therapist THP1238 (id=70) with TherapistBooking pk=14575 for booking 17387
+[CONTINUITY PASS1]   - TherapistBooking: pk=14575, therapist_id=70, date=2026-03-03, slot_id=7, status=BOOKED
+[CONTINUITY PASS1] Creating TherapistBooking to LOCK: therapist=THP1280 (id=7), date=2026-03-03, slot_id=7, booking_id=17387
+[CONTINUITY PASS1] ✓✓✓ LOCKED therapist THP1199 (id=66) with TherapistBooking pk=14573 for booking 17387
+[CONTINUITY PASS1]   - TherapistBooking: pk=14573, therapist_id=66, date=2026-03-03, slot_id=7, status=BOOKED
+[CONTINUITY PASS1] Creating TherapistBooking to LOCK: therapist=THP1081 (id=73), date=2026-03-03, slot_id=7, booking_id=17387
+[CONTINUITY PASS1] ✓✓✓ LOCKED therapist THP1081 (id=73) with TherapistBooking pk=14574 for booking 17387
+[CONTINUITY PASS1]   - TherapistBooking: pk=14574, therapist_id=73, date=2026-03-03, slot_id=7, status=BOOKED
+[CONTINUITY PASS1] Creating TherapistBooking to LOCK: therapist=THP1238 (id=70), date=2026-03-03, slot_id=7, booking_id=17387
+[CONTINUITY PASS1] ✓✓✓ LOCKED therapist THP1238 (id=70) with TherapistBooking pk=14575 for booking 17387
+[CONTINUITY PASS1]   - TherapistBooking: pk=14575, therapist_id=70, date=2026-03-03, slot_id=7, status=BOOKED
+[CONTINUITY PASS1] Creating TherapistBooking to LOCK: therapist=THP1280 (id=7), date=2026-03-03, slot_id=7, booking_id=17387
+[CONTINUITY PASS1] ✓✓✓ LOCKED therapist THP1280 (id=7) with TherapistBooking pk=14576 for booking 17387
+[CONTINUITY PASS1]   - TherapistBooking: pk=14576, therapist_id=7, date=2026-03-03, slot_id=7, status=BOOKED
+[CONTINUITY PASS1] ✓✓✓ LOCKED therapist THP1199 (id=66) with TherapistBooking pk=14573 for booking 17387
+[CONTINUITY PASS1]   - TherapistBooking: pk=14573, therapist_id=66, date=2026-03-03, slot_id=7, status=BOOKED
+[CONTINUITY PASS1] Creating TherapistBooking to LOCK: therapist=THP1081 (id=73), date=2026-03-03, slot_id=7, booking_id=17387
+[CONTINUITY PASS1] ✓✓✓ LOCKED therapist THP1081 (id=73) with TherapistBooking pk=14574 for booking 17387
+[CONTINUITY PASS1]   - TherapistBooking: pk=14574, therapist_id=73, date=2026-03-03, slot_id=7, status=BOOKED
+[CONTINUITY PASS1] Creating TherapistBooking to LOCK: therapist=THP1238 (id=70), date=2026-03-03, slot_id=7, booking_id=17387
+[CONTINUITY PASS1] ✓✓✓ LOCKED therapist THP1238 (id=70) with TherapistBooking pk=14575 for booking 17387
+[CONTINUITY PASS1]   - TherapistBooking: pk=14575, therapist_id=70, date=2026-03-03, slot_id=7, status=BOOKED
+[CONTINUITY PASS1] Creating TherapistBooking to LOCK: therapist=THP1280 (id=7), date=2026-03-03, slot_id=7, booking_id=17387
+[CONTINUITY PASS1] ✓✓✓ LOCKED therapist THP1280 (id=7) with TherapistBooking pk=14576 for booking 17387
+[CONTINUITY PASS1]   - TherapistBooking: pk=14576, therapist_id=7, date=2026-03-03, slot_id=7, status=BOOKED
+[CONTINUITY PASS1] ===== FINISHED LOCKING THERAPISTS FOR BOOKING 17387 =====
+[CONTINUITY PASS1] ✓✓✓ LOCKED therapist THP1199 (id=66) with TherapistBooking pk=14573 for booking 17387
+[CONTINUITY PASS1]   - TherapistBooking: pk=14573, therapist_id=66, date=2026-03-03, slot_id=7, status=BOOKED
+[CONTINUITY PASS1] Creating TherapistBooking to LOCK: therapist=THP1081 (id=73), date=2026-03-03, slot_id=7, booking_id=17387
+[CONTINUITY PASS1] ✓✓✓ LOCKED therapist THP1081 (id=73) with TherapistBooking pk=14574 for booking 17387
+[CONTINUITY PASS1]   - TherapistBooking: pk=14574, therapist_id=73, date=2026-03-03, slot_id=7, status=BOOKED
+[CONTINUITY PASS1] Creating TherapistBooking to LOCK: therapist=THP1238 (id=70), date=2026-03-03, slot_id=7, booking_id=17387
+[CONTINUITY PASS1] ✓✓✓ LOCKED therapist THP1238 (id=70) with TherapistBooking pk=14575 for booking 17387
+[CONTINUITY PASS1]   - TherapistBooking: pk=14575, therapist_id=70, date=2026-03-03, slot_id=7, status=BOOKED
+[CONTINUITY PASS1] Creating TherapistBooking to LOCK: therapist=THP1280 (id=7), date=2026-03-03, slot_id=7, booking_id=17387
+[CONTINUITY PASS1] ✓✓✓ LOCKED therapist THP1280 (id=7) with TherapistBooking pk=14576 for booking 17387
+[CONTINUITY PASS1]   - TherapistBooking: pk=14576, therapist_id=7, date=2026-03-03, slot_id=7, status=BOOKED
+[CONTINUITY PASS1] ===== FINISHED LOCKING THERAPISTS FOR BOOKING 17387 =====
+[CONTINUITY PASS1] Booking 17387: Assigned 5/6 continuity therapists. Remaining: 1
+[CONTINUITY PASS1] Booking 17387: Assigned 5 continuity therapists, 1 remaining (PARTIAL - will fill in PASS 2)
+[CONTINUITY PASS1] Creating TherapistBooking to LOCK: therapist=THP1081 (id=73), date=2026-03-03, slot_id=7, booking_id=17387
+[CONTINUITY PASS1] ✓✓✓ LOCKED therapist THP1081 (id=73) with TherapistBooking pk=14574 for booking 17387
+[CONTINUITY PASS1]   - TherapistBooking: pk=14574, therapist_id=73, date=2026-03-03, slot_id=7, status=BOOKED
+[CONTINUITY PASS1] Creating TherapistBooking to LOCK: therapist=THP1238 (id=70), date=2026-03-03, slot_id=7, booking_id=17387
+[CONTINUITY PASS1] ✓✓✓ LOCKED therapist THP1238 (id=70) with TherapistBooking pk=14575 for booking 17387
+[CONTINUITY PASS1]   - TherapistBooking: pk=14575, therapist_id=70, date=2026-03-03, slot_id=7, status=BOOKED
+[CONTINUITY PASS1] Creating TherapistBooking to LOCK: therapist=THP1280 (id=7), date=2026-03-03, slot_id=7, booking_id=17387
+[CONTINUITY PASS1] ✓✓✓ LOCKED therapist THP1280 (id=7) with TherapistBooking pk=14576 for booking 17387
+[CONTINUITY PASS1]   - TherapistBooking: pk=14576, therapist_id=7, date=2026-03-03, slot_id=7, status=BOOKED
+[CONTINUITY PASS1] ===== FINISHED LOCKING THERAPISTS FOR BOOKING 17387 =====
+[CONTINUITY PASS1] Booking 17387: Assigned 5/6 continuity therapists. Remaining: 1
+[CONTINUITY PASS1] Booking 17387: Assigned 5 continuity therapists, 1 remaining (PARTIAL - will fill in PASS 2)
+[CONTINUITY PASS1] ===== FINISHED PATIENT: RUTHIRAPATHY BALASUBRAMANIAM (id=621) =====
+[CONTINUITY PASS1] ========== PASS 1 COMPLETE ==========
+[CONTINUITY PASS1] ✓✓✓ LOCKED therapist THP1081 (id=73) with TherapistBooking pk=14574 for booking 17387
+[CONTINUITY PASS1]   - TherapistBooking: pk=14574, therapist_id=73, date=2026-03-03, slot_id=7, status=BOOKED
+[CONTINUITY PASS1] Creating TherapistBooking to LOCK: therapist=THP1238 (id=70), date=2026-03-03, slot_id=7, booking_id=17387
+[CONTINUITY PASS1] ✓✓✓ LOCKED therapist THP1238 (id=70) with TherapistBooking pk=14575 for booking 17387
+[CONTINUITY PASS1]   - TherapistBooking: pk=14575, therapist_id=70, date=2026-03-03, slot_id=7, status=BOOKED
+[CONTINUITY PASS1] Creating TherapistBooking to LOCK: therapist=THP1280 (id=7), date=2026-03-03, slot_id=7, booking_id=17387
+[CONTINUITY PASS1] ✓✓✓ LOCKED therapist THP1280 (id=7) with TherapistBooking pk=14576 for booking 17387
+[CONTINUITY PASS1]   - TherapistBooking: pk=14576, therapist_id=7, date=2026-03-03, slot_id=7, status=BOOKED
+[CONTINUITY PASS1] ===== FINISHED LOCKING THERAPISTS FOR BOOKING 17387 =====
+[CONTINUITY PASS1] Booking 17387: Assigned 5/6 continuity therapists. Remaining: 1
+[CONTINUITY PASS1] Booking 17387: Assigned 5 continuity therapists, 1 remaining (PARTIAL - will fill in PASS 2)
+[CONTINUITY PASS1] ===== FINISHED PATIENT: RUTHIRAPATHY BALASUBRAMANIAM (id=621) =====
+[CONTINUITY PASS1] ========== PASS 1 COMPLETE ==========
+[CONTINUITY PASS1] - Processed 1 patients
+[CONTINUITY PASS1] ✓✓✓ LOCKED therapist THP1081 (id=73) with TherapistBooking pk=14574 for booking 17387
+[CONTINUITY PASS1]   - TherapistBooking: pk=14574, therapist_id=73, date=2026-03-03, slot_id=7, status=BOOKED
+[CONTINUITY PASS1] Creating TherapistBooking to LOCK: therapist=THP1238 (id=70), date=2026-03-03, slot_id=7, booking_id=17387
+[CONTINUITY PASS1] ✓✓✓ LOCKED therapist THP1238 (id=70) with TherapistBooking pk=14575 for booking 17387
+[CONTINUITY PASS1]   - TherapistBooking: pk=14575, therapist_id=70, date=2026-03-03, slot_id=7, status=BOOKED
+[CONTINUITY PASS1] Creating TherapistBooking to LOCK: therapist=THP1280 (id=7), date=2026-03-03, slot_id=7, booking_id=17387
+[CONTINUITY PASS1] ✓✓✓ LOCKED therapist THP1280 (id=7) with TherapistBooking pk=14576 for booking 17387
+[CONTINUITY PASS1]   - TherapistBooking: pk=14576, therapist_id=7, date=2026-03-03, slot_id=7, status=BOOKED
+[CONTINUITY PASS1] ===== FINISHED LOCKING THERAPISTS FOR BOOKING 17387 =====
+[CONTINUITY PASS1] Booking 17387: Assigned 5/6 continuity therapists. Remaining: 1
+[CONTINUITY PASS1] Booking 17387: Assigned 5 continuity therapists, 1 remaining (PARTIAL - will fill in PASS 2)
+[CONTINUITY PASS1] ===== FINISHED PATIENT: RUTHIRAPATHY BALASUBRAMANIAM (id=621) =====
+[CONTINUITY PASS1] ========== PASS 1 COMPLETE ==========
+[CONTINUITY PASS1] - Processed 1 patients
+[CONTINUITY PASS1] - Processed 1 bookings
+[CONTINUITY PASS1] - Assigned continuity for 1 bookings
+[CONTINUITY PASS1] Creating TherapistBooking to LOCK: therapist=THP1238 (id=70), date=2026-03-03, slot_id=7, booking_id=17387
+[CONTINUITY PASS1] ✓✓✓ LOCKED therapist THP1238 (id=70) with TherapistBooking pk=14575 for booking 17387
+[CONTINUITY PASS1]   - TherapistBooking: pk=14575, therapist_id=70, date=2026-03-03, slot_id=7, status=BOOKED
+[CONTINUITY PASS1] Creating TherapistBooking to LOCK: therapist=THP1280 (id=7), date=2026-03-03, slot_id=7, booking_id=17387
+[CONTINUITY PASS1] ✓✓✓ LOCKED therapist THP1280 (id=7) with TherapistBooking pk=14576 for booking 17387
+[CONTINUITY PASS1]   - TherapistBooking: pk=14576, therapist_id=7, date=2026-03-03, slot_id=7, status=BOOKED
+[CONTINUITY PASS1] ===== FINISHED LOCKING THERAPISTS FOR BOOKING 17387 =====
+[CONTINUITY PASS1] Booking 17387: Assigned 5/6 continuity therapists. Remaining: 1
+[CONTINUITY PASS1] Booking 17387: Assigned 5 continuity therapists, 1 remaining (PARTIAL - will fill in PASS 2)
+[CONTINUITY PASS1] ===== FINISHED PATIENT: RUTHIRAPATHY BALASUBRAMANIAM (id=621) =====
+[CONTINUITY PASS1] ========== PASS 1 COMPLETE ==========
+[CONTINUITY PASS1] - Processed 1 patients
+[CONTINUITY PASS1] - Processed 1 bookings
+[CONTINUITY PASS1] - Assigned continuity for 1 bookings
+[CONTINUITY PASS1] - Partial assignments (need remaining slots): 1
+[CONTINUITY PASS1] - Locked 5 therapist-slot pairs
+[CONTINUITY PASS1] ✓✓✓ LOCKED therapist THP1238 (id=70) with TherapistBooking pk=14575 for booking 17387
+[CONTINUITY PASS1]   - TherapistBooking: pk=14575, therapist_id=70, date=2026-03-03, slot_id=7, status=BOOKED
+[CONTINUITY PASS1] Creating TherapistBooking to LOCK: therapist=THP1280 (id=7), date=2026-03-03, slot_id=7, booking_id=17387
+[CONTINUITY PASS1] ✓✓✓ LOCKED therapist THP1280 (id=7) with TherapistBooking pk=14576 for booking 17387
+[CONTINUITY PASS1]   - TherapistBooking: pk=14576, therapist_id=7, date=2026-03-03, slot_id=7, status=BOOKED
+[CONTINUITY PASS1] ===== FINISHED LOCKING THERAPISTS FOR BOOKING 17387 =====
+[CONTINUITY PASS1] Booking 17387: Assigned 5/6 continuity therapists. Remaining: 1
+[CONTINUITY PASS1] Booking 17387: Assigned 5 continuity therapists, 1 remaining (PARTIAL - will fill in PASS 2)
+[CONTINUITY PASS1] ===== FINISHED PATIENT: RUTHIRAPATHY BALASUBRAMANIAM (id=621) =====
+[CONTINUITY PASS1] ========== PASS 1 COMPLETE ==========
+[CONTINUITY PASS1] - Processed 1 patients
+[CONTINUITY PASS1] - Processed 1 bookings
+[CONTINUITY PASS1] - Assigned continuity for 1 bookings
+[CONTINUITY PASS1] - Partial assignments (need remaining slots): 1
+[CONTINUITY PASS1] - Locked 5 therapist-slot pairs
+[CONTINUITY PASS1] - Moving to PASS 2 to fill remaining slots and complete bookings
+[CONTINUITY PASS1] ✓✓✓ LOCKED therapist THP1238 (id=70) with TherapistBooking pk=14575 for booking 17387
+[CONTINUITY PASS1]   - TherapistBooking: pk=14575, therapist_id=70, date=2026-03-03, slot_id=7, status=BOOKED
+[CONTINUITY PASS1] Creating TherapistBooking to LOCK: therapist=THP1280 (id=7), date=2026-03-03, slot_id=7, booking_id=17387
+[CONTINUITY PASS1] ✓✓✓ LOCKED therapist THP1280 (id=7) with TherapistBooking pk=14576 for booking 17387
+[CONTINUITY PASS1]   - TherapistBooking: pk=14576, therapist_id=7, date=2026-03-03, slot_id=7, status=BOOKED
+[CONTINUITY PASS1] ===== FINISHED LOCKING THERAPISTS FOR BOOKING 17387 =====
+[CONTINUITY PASS1] Booking 17387: Assigned 5/6 continuity therapists. Remaining: 1
+[CONTINUITY PASS1] Booking 17387: Assigned 5 continuity therapists, 1 remaining (PARTIAL - will fill in PASS 2)
+[CONTINUITY PASS1] ===== FINISHED PATIENT: RUTHIRAPATHY BALASUBRAMANIAM (id=621) =====
+[CONTINUITY PASS1] ========== PASS 1 COMPLETE ==========
+[CONTINUITY PASS1] - Processed 1 patients
+[CONTINUITY PASS1] - Processed 1 bookings
+[CONTINUITY PASS1] - Assigned continuity for 1 bookings
+[CONTINUITY PASS1] - Partial assignments (need remaining slots): 1
+[CONTINUITY PASS1] - Locked 5 therapist-slot pairs
+[CONTINUITY PASS1] - Moving to PASS 2 to fill remaining slots and complete bookings
+[CONTINUITY PASS1] Creating TherapistBooking to LOCK: therapist=THP1280 (id=7), date=2026-03-03, slot_id=7, booking_id=17387
+[CONTINUITY PASS1] ✓✓✓ LOCKED therapist THP1280 (id=7) with TherapistBooking pk=14576 for booking 17387
+[CONTINUITY PASS1]   - TherapistBooking: pk=14576, therapist_id=7, date=2026-03-03, slot_id=7, status=BOOKED
+[CONTINUITY PASS1] ===== FINISHED LOCKING THERAPISTS FOR BOOKING 17387 =====
+[CONTINUITY PASS1] Booking 17387: Assigned 5/6 continuity therapists. Remaining: 1
+[CONTINUITY PASS1] Booking 17387: Assigned 5 continuity therapists, 1 remaining (PARTIAL - will fill in PASS 2)
+[CONTINUITY PASS1] ===== FINISHED PATIENT: RUTHIRAPATHY BALASUBRAMANIAM (id=621) =====
+[CONTINUITY PASS1] ========== PASS 1 COMPLETE ==========
+[CONTINUITY PASS1] - Processed 1 patients
+[CONTINUITY PASS1] - Processed 1 bookings
+[CONTINUITY PASS1] - Assigned continuity for 1 bookings
+[CONTINUITY PASS1] - Partial assignments (need remaining slots): 1
+[CONTINUITY PASS1] - Locked 5 therapist-slot pairs
+[CONTINUITY PASS1] - Moving to PASS 2 to fill remaining slots and complete bookings
+[CONTINUITY PASS1] ✓✓✓ LOCKED therapist THP1280 (id=7) with TherapistBooking pk=14576 for booking 17387
+[CONTINUITY PASS1]   - TherapistBooking: pk=14576, therapist_id=7, date=2026-03-03, slot_id=7, status=BOOKED
+[CONTINUITY PASS1] ===== FINISHED LOCKING THERAPISTS FOR BOOKING 17387 =====
+[CONTINUITY PASS1] Booking 17387: Assigned 5/6 continuity therapists. Remaining: 1
+[CONTINUITY PASS1] Booking 17387: Assigned 5 continuity therapists, 1 remaining (PARTIAL - will fill in PASS 2)
+[CONTINUITY PASS1] ===== FINISHED PATIENT: RUTHIRAPATHY BALASUBRAMANIAM (id=621) =====
+[CONTINUITY PASS1] ========== PASS 1 COMPLETE ==========
+[CONTINUITY PASS1] - Processed 1 patients
+[CONTINUITY PASS1] - Processed 1 bookings
+[CONTINUITY PASS1] - Assigned continuity for 1 bookings
+[CONTINUITY PASS1] - Partial assignments (need remaining slots): 1
+[CONTINUITY PASS1] - Locked 5 therapist-slot pairs
+[CONTINUITY PASS1] - Moving to PASS 2 to fill remaining slots and complete bookings
+[CONTINUITY PASS1] ✓✓✓ LOCKED therapist THP1280 (id=7) with TherapistBooking pk=14576 for booking 17387
+[CONTINUITY PASS1]   - TherapistBooking: pk=14576, therapist_id=7, date=2026-03-03, slot_id=7, status=BOOKED
+[CONTINUITY PASS1] ===== FINISHED LOCKING THERAPISTS FOR BOOKING 17387 =====
+[CONTINUITY PASS1] Booking 17387: Assigned 5/6 continuity therapists. Remaining: 1
+[CONTINUITY PASS1] Booking 17387: Assigned 5 continuity therapists, 1 remaining (PARTIAL - will fill in PASS 2)
+[CONTINUITY PASS1] ===== FINISHED PATIENT: RUTHIRAPATHY BALASUBRAMANIAM (id=621) =====
+[CONTINUITY PASS1] ========== PASS 1 COMPLETE ==========
+[CONTINUITY PASS1] - Processed 1 patients
+[CONTINUITY PASS1] - Processed 1 bookings
+[CONTINUITY PASS1] - Assigned continuity for 1 bookings
+[CONTINUITY PASS1] - Partial assignments (need remaining slots): 1
+[CONTINUITY PASS1] - Locked 5 therapist-slot pairs
+[CONTINUITY PASS1] - Moving to PASS 2 to fill remaining slots and complete bookings
+[CONTINUITY PASS1] ✓✓✓ LOCKED therapist THP1280 (id=7) with TherapistBooking pk=14576 for booking 17387
+[CONTINUITY PASS1]   - TherapistBooking: pk=14576, therapist_id=7, date=2026-03-03, slot_id=7, status=BOOKED
+[CONTINUITY PASS1] ===== FINISHED LOCKING THERAPISTS FOR BOOKING 17387 =====
+[CONTINUITY PASS1] Booking 17387: Assigned 5/6 continuity therapists. Remaining: 1
+[CONTINUITY PASS1] Booking 17387: Assigned 5 continuity therapists, 1 remaining (PARTIAL - will fill in PASS 2)
+[CONTINUITY PASS1] ===== FINISHED PATIENT: RUTHIRAPATHY BALASUBRAMANIAM (id=621) =====
+[CONTINUITY PASS1] ========== PASS 1 COMPLETE ==========
+[CONTINUITY PASS1] - Processed 1 patients
+[CONTINUITY PASS1] - Processed 1 bookings
+[CONTINUITY PASS1] - Assigned continuity for 1 bookings
+[CONTINUITY PASS1] - Partial assignments (need remaining slots): 1
+[CONTINUITY PASS1] - Locked 5 therapist-slot pairs
+[CONTINUITY PASS1] - Moving to PASS 2 to fill remaining slots and complete bookings
+[DEBUG Continuity] Checking 3 previous therapists for continuity: ['THP1055', 'THP1247', 'THP1201']
+[DEBUG Continuity] Shijoy. C. (THP1055, Senior Therapist) - assigning for continuity, will use for Trainee Therapist requirement
+[DEBUG Continuity] Shijoy. C. (THP1055) - on leave - skipping
+[DEBUG Continuity] Jisso Thomas (THP1247, Junior Therapist) - assigning for continuity, will use for Trainee Therapist requirement
+[DEBUG Continuity] Jisso Thomas (THP1247) - on leave - skipping
+[DEBUG Continuity] Radha Krishnan.V (THP1201, Super Senior Therapist) - assigning for continuity, will use for Trainee Therapist requirement
+[DEBUG Continuity] Checking 3 previous therapists for continuity: ['THP1055', 'THP1247', 'THP1201']
+[DEBUG Continuity] Shijoy. C. (THP1055, Senior Therapist) - assigning for continuity, will use for Trainee Therapist requirement
+[DEBUG Continuity] Shijoy. C. (THP1055) - on leave - skipping
+[DEBUG Continuity] Jisso Thomas (THP1247, Junior Therapist) - assigning for continuity, will use for Trainee Therapist requirement
+[DEBUG Continuity] Jisso Thomas (THP1247) - on leave - skipping
+[DEBUG Continuity] Radha Krishnan.V (THP1201, Super Senior Therapist) - assigning for continuity, will use for Trainee Therapist requirement
+[DEBUG Continuity] Radha Krishnan.V (THP1201) - on leave - skipping
+[DEBUG Continuity] Checking 3 previous therapists for continuity: ['THP1055', 'THP1247', 'THP1201']
+[DEBUG Continuity] Shijoy. C. (THP1055, Senior Therapist) - assigning for continuity, will use for Trainee Therapist requirement
+[DEBUG Continuity] Shijoy. C. (THP1055) - on leave - skipping
+[DEBUG Continuity] Jisso Thomas (THP1247, Junior Therapist) - assigning for continuity, will use for Trainee Therapist requirement
+[DEBUG Continuity] Jisso Thomas (THP1247) - on leave - skipping
+[DEBUG Continuity] Radha Krishnan.V (THP1201, Super Senior Therapist) - assigning for continuity, will use for Trainee Therapist requirement
+[DEBUG Continuity] Radha Krishnan.V (THP1201) - on leave - skipping
+[DEBUG Continuity] Continuity assignment complete. Assigned 0 previous therapists out of 3
+[DEBUG Continuity] Checking 3 previous therapists for continuity: ['THP1055', 'THP1247', 'THP1201']
+[DEBUG Continuity] Shijoy. C. (THP1055, Senior Therapist) - assigning for continuity, will use for Trainee Therapist requirement
+[DEBUG Continuity] Shijoy. C. (THP1055) - on leave - skipping
+[DEBUG Continuity] Jisso Thomas (THP1247, Junior Therapist) - assigning for continuity, will use for Trainee Therapist requirement
+[DEBUG Continuity] Jisso Thomas (THP1247) - on leave - skipping
+[DEBUG Continuity] Radha Krishnan.V (THP1201, Super Senior Therapist) - assigning for continuity, will use for Trainee Therapist requirement
+[DEBUG Continuity] Radha Krishnan.V (THP1201) - on leave - skipping
+[DEBUG Continuity] Continuity assignment complete. Assigned 0 previous therapists out of 3
+[DEBUG Continuity] Checking 3 previous therapists for continuity: ['THP1055', 'THP1247', 'THP1201']
+[DEBUG Continuity] Shijoy. C. (THP1055, Senior Therapist) - assigning for continuity, will use for Trainee Therapist requirement
+[DEBUG Continuity] Shijoy. C. (THP1055) - on leave - skipping
+[DEBUG Continuity] Jisso Thomas (THP1247, Junior Therapist) - assigning for continuity, will use for Trainee Therapist requirement
+[DEBUG Continuity] Jisso Thomas (THP1247) - on leave - skipping
+[DEBUG Continuity] Radha Krishnan.V (THP1201, Super Senior Therapist) - assigning for continuity, will use for Trainee Therapist requirement
+[DEBUG Continuity] Radha Krishnan.V (THP1201) - on leave - skipping
+[DEBUG Continuity] Continuity assignment complete. Assigned 0 previous therapists out of 3
