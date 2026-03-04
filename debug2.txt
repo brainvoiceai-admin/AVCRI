@@ -1,8 +1,0 @@
-Narayanankutty K: leave=False booked=False sessions=0
-Raju.V: leave=False booked=False sessions=0
-Satheesh K: leave=False booked=False sessions=1
-Shijoy. C.: leave=True booked=False sessions=0
-Sangameshwaran.P: leave=False booked=False sessions=1
-Jisso Thomas: leave=True booked=False sessions=0
-Anoop: leave=False booked=False sessions=1
-Radha Krishnan.V: leave=True booked=False sessions=0
