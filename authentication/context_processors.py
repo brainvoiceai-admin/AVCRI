@@ -37,8 +37,16 @@ def user_modules(request):
                     # If module has no name, include it anyway (shouldn't happen, but safe)
                     unique_modules.append(module)
             
+            master_modules = [
+                m for m in unique_modules
+                if 'master' in (m.name or '').lower()
+                or 'master' in (m.display_name or '').lower()
+                or 'master' in (m.url_name or '').lower()
+            ]
+
             return {
                 'user_modules': unique_modules,
+                'user_master_modules': master_modules,
                 'user_has_module_access': request.user.has_module_access,
             }
         except Exception as e:
@@ -48,9 +56,11 @@ def user_modules(request):
             logger.error(f"Error getting user modules: {e}", exc_info=True)
             return {
                 'user_modules': [],
+                'user_master_modules': [],
                 'user_has_module_access': lambda x: False,
             }
     return {
         'user_modules': [],
+        'user_master_modules': [],
         'user_has_module_access': lambda x: False,
     }
