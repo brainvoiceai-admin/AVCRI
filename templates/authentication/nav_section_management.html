@@ -1,0 +1,171 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nav Section Management - AVCRI</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="{% static 'css/dashboards_nav.css' %}">
+    <style>
+        .main { margin-left: 270px; padding: 30px; }
+        @media (max-width: 768px) { .main { margin-left: 0; } }
+        .module-badge { font-size: 0.8rem; margin: 2px; }
+    </style>
+</head>
+<body>
+    <div class="container-fluid">
+        <div class="row">
+            <div class="sidebar p-0">
+                {% include 'dashboards/nav.html' %}
+            </div>
+            <div class="main">
+                <div class="d-flex justify-content-between align-items-center mb-4">
+                    <h2>Nav Section Management</h2>
+                    <a href="{% url 'authentication:module_management' %}" class="btn btn-secondary">Back to Modules</a>
+                </div>
+
+                <p class="text-muted mb-4">
+                    Manage sidebar navigation headings. Each section groups modules together in the sidebar.
+                    Assign modules to sections via <a href="{% url 'authentication:module_management' %}">Module Management</a>.
+                </p>
+
+                {% if messages %}
+                    {% for message in messages %}
+                        <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
+                            {{ message }}
+                            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                        </div>
+                    {% endfor %}
+                {% endif %}
+
+                <div class="row g-3">
+                    <div class="col-lg-4">
+                        <div class="card">
+                            <div class="card-header bg-primary text-white"><strong>Create New Section</strong></div>
+                            <div class="card-body">
+                                <form method="post">
+                                    {% csrf_token %}
+                                    <input type="hidden" name="action" value="create" />
+                                    <div class="mb-3">
+                                        <label class="form-label">Name (unique key)</label>
+                                        <input type="text" name="name" class="form-control" placeholder="e.g., scheduling" required />
+                                    </div>
+                                    <div class="mb-3">
+                                        <label class="form-label">Display Name</label>
+                                        <input type="text" name="display_name" class="form-control" placeholder="e.g., Scheduling" required />
+                                    </div>
+                                    <div class="row">
+                                        <div class="col-6 mb-3">
+                                            <label class="form-label">Icon (emoji)</label>
+                                            <input type="text" name="icon" class="form-control" value="📌" />
+                                        </div>
+                                        <div class="col-6 mb-3">
+                                            <label class="form-label">Order</label>
+                                            <input type="number" name="order" class="form-control" value="0" />
+                                            <small class="text-muted">Lower = higher in sidebar</small>
+                                        </div>
+                                    </div>
+                                    <button type="submit" class="btn btn-primary w-100">Create Section</button>
+                                </form>
+                            </div>
+                        </div>
+
+                        {% if unassigned_modules %}
+                        <div class="card mt-3">
+                            <div class="card-header bg-warning text-dark"><strong>Unassigned Modules</strong></div>
+                            <div class="card-body">
+                                <p class="text-muted small">These active modules are not assigned to any section and won't appear in the sidebar.</p>
+                                <ul class="list-group list-group-flush">
+                                    {% for m in unassigned_modules %}
+                                    <li class="list-group-item d-flex justify-content-between align-items-center">
+                                        {{ m.icon }} {{ m.display_name }}
+                                        <a href="{% url 'authentication:module_management' %}" class="btn btn-sm btn-outline-primary">Assign</a>
+                                    </li>
+                                    {% endfor %}
+                                </ul>
+                            </div>
+                        </div>
+                        {% endif %}
+                    </div>
+
+                    <div class="col-lg-8">
+                        {% for sec in sections %}
+                        <div class="card mb-3">
+                            <div class="card-header d-flex justify-content-between align-items-center">
+                                <span>
+                                    <strong>{{ sec.icon }} {{ sec.display_name }}</strong>
+                                    <small class="text-muted ms-2">({{ sec.name }})</small>
+                                    <span class="badge {% if sec.is_active %}bg-success{% else %}bg-danger{% endif %} ms-2">
+                                        {% if sec.is_active %}Active{% else %}Inactive{% endif %}
+                                    </span>
+                                    <span class="badge bg-secondary ms-1">Order: {{ sec.order }}</span>
+                                </span>
+                                <div>
+                                    <button class="btn btn-sm btn-warning" data-bs-toggle="collapse" data-bs-target="#edit-{{ sec.id }}">Edit</button>
+                                    <form method="post" class="d-inline">
+                                        {% csrf_token %}
+                                        <input type="hidden" name="action" value="delete" />
+                                        <input type="hidden" name="section_id" value="{{ sec.id }}" />
+                                        <button class="btn btn-sm btn-danger" onclick="return confirm('Delete section {{ sec.display_name }}? Modules will be unlinked.')">Delete</button>
+                                    </form>
+                                </div>
+                            </div>
+                            <div class="collapse" id="edit-{{ sec.id }}">
+                                <div class="card-body bg-light">
+                                    <form method="post">
+                                        {% csrf_token %}
+                                        <input type="hidden" name="action" value="update" />
+                                        <input type="hidden" name="section_id" value="{{ sec.id }}" />
+                                        <div class="row g-2">
+                                            <div class="col-md-4">
+                                                <label class="form-label">Display Name</label>
+                                                <input type="text" name="display_name" value="{{ sec.display_name }}" class="form-control" />
+                                            </div>
+                                            <div class="col-md-2">
+                                                <label class="form-label">Icon</label>
+                                                <input type="text" name="icon" value="{{ sec.icon }}" class="form-control" />
+                                            </div>
+                                            <div class="col-md-2">
+                                                <label class="form-label">Order</label>
+                                                <input type="number" name="order" value="{{ sec.order }}" class="form-control" />
+                                            </div>
+                                            <div class="col-md-2 d-flex align-items-end">
+                                                <div class="form-check">
+                                                    <input type="checkbox" name="is_active" id="sec-active-{{ sec.id }}" class="form-check-input" {% if sec.is_active %}checked{% endif %} />
+                                                    <label class="form-check-label" for="sec-active-{{ sec.id }}">Active</label>
+                                                </div>
+                                            </div>
+                                            <div class="col-md-2 d-flex align-items-end">
+                                                <button class="btn btn-primary w-100">Save</button>
+                                            </div>
+                                        </div>
+                                    </form>
+                                </div>
+                            </div>
+                            <div class="card-body">
+                                {% if sec.modules.all %}
+                                <div class="d-flex flex-wrap gap-1">
+                                    {% for m in sec.modules.all %}
+                                    <span class="badge module-badge {% if m.is_active %}bg-info text-dark{% else %}bg-secondary{% endif %}">
+                                        {{ m.icon }} {{ m.display_name }}
+                                    </span>
+                                    {% endfor %}
+                                </div>
+                                {% else %}
+                                <span class="text-muted small">No modules assigned to this section</span>
+                                {% endif %}
+                            </div>
+                        </div>
+                        {% empty %}
+                        <div class="alert alert-info">No sections created yet. Create one to start organizing your sidebar.</div>
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="{% static 'js/dashboards_nav.js' %}"></script>
+</body>
+</html>

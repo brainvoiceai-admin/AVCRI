@@ -5,7 +5,7 @@ from django.http import JsonResponse
 from django.views.decorators.http import require_http_methods
 from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.forms import AuthenticationForm
-from .models import Role, Module, CustomUser, AuditLog
+from .models import Role, Module, NavSection, CustomUser, AuditLog
 from .decorators import super_admin_required, role_required
 from django.core.paginator import Paginator
 from django.utils import timezone
@@ -305,32 +305,40 @@ def user_role_assignment(request):
 @super_admin_required
 def module_management(request):
     """View for Super Admin to manage modules"""
+    from authentication.models import NavSection
+
     if request.method == 'POST':
         action = request.POST.get('action')
-        
+
         if action == 'create':
             name = request.POST.get('name')
             display_name = request.POST.get('display_name')
-            url_name = request.POST.get('url_name')
-            icon = request.POST.get('icon', '≡ƒôï')
+            url_name = request.POST.get('url_name', '')
+            url_path = request.POST.get('url_path', '')
+            icon = request.POST.get('icon', '📋')
             try:
                 order = int(request.POST.get('order', 0))
             except (ValueError, TypeError):
                 order = 0
             description = request.POST.get('description', '')
-            
-            if not name or not display_name or not url_name:
-                messages.error(request, 'Name, Display Name, and URL Name are required.')
+            nav_section_id = request.POST.get('nav_section') or None
+
+            if not name or not display_name:
+                messages.error(request, 'Name and Display Name are required.')
+            elif not url_name and not url_path:
+                messages.error(request, 'Either URL Name or URL Path is required.')
             else:
                 try:
                     module = Module.objects.create(
                         name=name,
                         display_name=display_name,
                         url_name=url_name,
+                        url_path=url_path,
                         icon=icon,
                         order=order,
                         description=description,
-                        is_active=True  # Explicitly set to active by default
+                        nav_section_id=nav_section_id,
+                        is_active=True,
                     )
                     messages.success(request, f'Module "{module.display_name}" created successfully.')
                 except Exception as e:
@@ -338,33 +346,33 @@ def module_management(request):
                         messages.error(request, f'A module with name "{name}" already exists.')
                     else:
                         messages.error(request, f'Error creating module: {str(e)}')
-        
+
         elif action == 'update':
             module_id = request.POST.get('module_id')
             module = get_object_or_404(Module, id=module_id)
-            
+
             module.display_name = request.POST.get('display_name')
-            module.url_name = request.POST.get('url_name')
-            module.icon = request.POST.get('icon', '≡ƒôï')
+            module.url_name = request.POST.get('url_name', '')
+            module.url_path = request.POST.get('url_path', '')
+            module.icon = request.POST.get('icon', '📋')
             try:
                 module.order = int(request.POST.get('order', 0))
             except (ValueError, TypeError):
                 module.order = 0
             module.description = request.POST.get('description', '')
             module.is_active = request.POST.get('is_active') == 'on'
+            nav_section_id = request.POST.get('nav_section') or None
+            module.nav_section_id = nav_section_id
             module.save()
-            
+
             messages.success(request, f'Module "{module.display_name}" updated successfully.')
-        
+
         elif action == 'delete':
             module_id = request.POST.get('module_id')
             module = get_object_or_404(Module, id=module_id)
-            
-            # Check if module is used by any roles
+
             roles_using_module = Role.objects.filter(modules=module)
             if roles_using_module.exists():
-                # Force-remove this module from all roles, then delete the module
-                # so it no longer appears anywhere in the system.
                 count = roles_using_module.count()
                 for role in roles_using_module:
                     role.modules.remove(module)
@@ -377,16 +385,81 @@ def module_management(request):
             else:
                 module.delete()
                 messages.success(request, f'Module "{module.display_name}" deleted successfully.')
-        
+
         return redirect('authentication:module_management')
-    
-    # Get all modules after POST processing (to show updated list)
-    modules = Module.objects.all().order_by('order', 'name')
-    
+
+    modules = Module.objects.select_related('nav_section').all().order_by('order', 'name')
+    all_nav_sections = NavSection.objects.filter(is_active=True).order_by('order', 'name')
+
     context = {
         'modules': modules,
+        'all_nav_sections': all_nav_sections,
     }
     return render(request, 'authentication/module_management.html', context)
+
+
+@login_required
+@super_admin_required
+def nav_section_management(request):
+    """View for Super Admin to manage sidebar navigation sections"""
+    from authentication.models import NavSection
+
+    if request.method == 'POST':
+        action = request.POST.get('action')
+
+        if action == 'create':
+            name = request.POST.get('name', '').strip()
+            display_name = request.POST.get('display_name', '').strip()
+            icon = request.POST.get('icon', '📌').strip()
+            try:
+                order = int(request.POST.get('order', 0))
+            except (ValueError, TypeError):
+                order = 0
+
+            if not name or not display_name:
+                messages.error(request, 'Name and Display Name are required.')
+            else:
+                try:
+                    NavSection.objects.create(
+                        name=name, display_name=display_name, icon=icon, order=order, is_active=True,
+                    )
+                    messages.success(request, f'Section "{display_name}" created.')
+                except Exception as e:
+                    if 'unique' in str(e).lower():
+                        messages.error(request, f'A section with name "{name}" already exists.')
+                    else:
+                        messages.error(request, f'Error: {e}')
+
+        elif action == 'update':
+            sec = get_object_or_404(NavSection, id=request.POST.get('section_id'))
+            sec.display_name = request.POST.get('display_name', sec.display_name)
+            sec.icon = request.POST.get('icon', sec.icon)
+            try:
+                sec.order = int(request.POST.get('order', sec.order))
+            except (ValueError, TypeError):
+                pass
+            sec.is_active = request.POST.get('is_active') == 'on'
+            sec.save()
+            messages.success(request, f'Section "{sec.display_name}" updated.')
+
+        elif action == 'delete':
+            sec = get_object_or_404(NavSection, id=request.POST.get('section_id'))
+            mod_count = sec.modules.count()
+            if mod_count:
+                sec.modules.update(nav_section=None)
+            sec.delete()
+            messages.success(request, f'Section deleted. {mod_count} module(s) unlinked.')
+
+        return redirect('authentication:nav_section_management')
+
+    sections = NavSection.objects.prefetch_related('modules').all().order_by('order', 'name')
+    unassigned_modules = Module.objects.filter(nav_section__isnull=True, is_active=True).order_by('order', 'name')
+
+    return render(request, 'authentication/nav_section_management.html', {
+        'sections': sections,
+        'unassigned_modules': unassigned_modules,
+    })
+
 
 # Original authentication views that were in the system
 def login_view(request):

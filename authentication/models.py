@@ -4,21 +4,61 @@ from django.db import models
 from django.contrib.auth.models import AbstractUser
 from django.db import models
 
+class NavSection(models.Model):
+    """Configurable sidebar navigation sections (headings)"""
+    name = models.CharField(max_length=100, unique=True)
+    display_name = models.CharField(max_length=100)
+    icon = models.CharField(max_length=50, default="📌")
+    order = models.PositiveIntegerField(default=0, help_text="Display order in sidebar")
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ['order', 'name']
+
+    def __str__(self):
+        return self.display_name
+
+
 class Module(models.Model):
     """Model to define available modules in the system"""
     name = models.CharField(max_length=100, unique=True)
     display_name = models.CharField(max_length=100)
     description = models.TextField(blank=True)
-    url_name = models.CharField(max_length=100, help_text="URL name for the module")
+    url_name = models.CharField(max_length=100, help_text="Django URL name (used if url_path is empty)")
+    url_path = models.CharField(
+        max_length=255, blank=True, default="",
+        help_text="Direct URL path (e.g. /sheduling/scheduling/). Takes priority over url_name."
+    )
     icon = models.CharField(max_length=50, default="📋", help_text="Icon for the module")
     is_active = models.BooleanField(default=True)
-    order = models.PositiveIntegerField(default=0, help_text="Display order")
-    
+    order = models.PositiveIntegerField(default=0, help_text="Display order within its section")
+    nav_section = models.ForeignKey(
+        NavSection, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='modules',
+        help_text="Sidebar section this module appears under"
+    )
+
     class Meta:
         ordering = ['order', 'name']
-    
+
     def __str__(self):
         return self.display_name
+
+    def get_url(self):
+        """Return the resolved URL for this module."""
+        if self.url_path:
+            return self.url_path
+        from django.urls import reverse, NoReverseMatch
+        try:
+            return reverse(self.url_name)
+        except NoReverseMatch:
+            try:
+                return reverse(f'authentication:{self.url_name}')
+            except NoReverseMatch:
+                try:
+                    return reverse(f'sheduling:{self.url_name}')
+                except NoReverseMatch:
+                    return '#'
 
 class Role(models.Model):
     """Model to define user roles with module permissions"""

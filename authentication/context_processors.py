@@ -1,66 +1,90 @@
+from collections import OrderedDict
+
+
 def user_modules(request):
     """
-    Context processor to make user's accessible modules available in templates
+    Context processor to make user's accessible modules available in templates,
+    grouped by their NavSection for dynamic sidebar rendering.
     """
-    if request.user.is_authenticated:
-        try:
-            # Refresh user from database to ensure we have latest role and custom_role data
-            # Only refresh if user is not being created (has a pk)
-            if hasattr(request.user, 'pk') and request.user.pk:
-                try:
-                    request.user.refresh_from_db(fields=['role', 'custom_role_id'])
-                except:
-                    pass  # If refresh fails, continue with current values
-            
-            # Get modules - this will return a queryset
-            modules_queryset = request.user.get_accessible_modules()
-            
-            # Convert to list to force evaluation and ensure it's always fresh
-            # This also ensures the queryset is evaluated once per request
-            if hasattr(modules_queryset, '__iter__'):
-                modules_list = list(modules_queryset)
-            else:
-                modules_list = []
-            
-            # Filter to ensure unique module names (by name field, not display_name)
-            # If multiple modules have the same name, only show the first one
-            # But allow modules with different names even if they have the same URL
-            seen_names = set()
-            unique_modules = []
-            for module in modules_list:
-                # Use the 'name' field (not display_name) to check for duplicates
-                module_name_lower = module.name.lower() if hasattr(module, 'name') else ''
-                if module_name_lower and module_name_lower not in seen_names:
-                    seen_names.add(module_name_lower)
-                    unique_modules.append(module)
-                elif not module_name_lower:
-                    # If module has no name, include it anyway (shouldn't happen, but safe)
-                    unique_modules.append(module)
-            
-            master_modules = [
-                m for m in unique_modules
-                if 'master' in (m.name or '').lower()
-                or 'master' in (m.display_name or '').lower()
-                or 'master' in (m.url_name or '').lower()
-            ]
-
-            return {
-                'user_modules': unique_modules,
-                'user_master_modules': master_modules,
-                'user_has_module_access': request.user.has_module_access,
-            }
-        except Exception as e:
-            # If there's any error, return empty list to prevent template errors
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.error(f"Error getting user modules: {e}", exc_info=True)
-            return {
-                'user_modules': [],
-                'user_master_modules': [],
-                'user_has_module_access': lambda x: False,
-            }
-    return {
+    empty = {
         'user_modules': [],
         'user_master_modules': [],
+        'nav_sections': [],
         'user_has_module_access': lambda x: False,
     }
+
+    if not request.user.is_authenticated:
+        return empty
+
+    try:
+        if hasattr(request.user, 'pk') and request.user.pk:
+            try:
+                request.user.refresh_from_db(fields=['role', 'custom_role_id'])
+            except Exception:
+                pass
+
+        modules_qs = request.user.get_accessible_modules()
+        modules_list = list(modules_qs) if hasattr(modules_qs, '__iter__') else []
+
+        seen_names = set()
+        unique_modules = []
+        for module in modules_list:
+            key = (module.name or '').lower()
+            if key and key not in seen_names:
+                seen_names.add(key)
+                unique_modules.append(module)
+            elif not key:
+                unique_modules.append(module)
+
+        # Preload nav_section to avoid N+1 queries
+        from authentication.models import Module as ModuleModel
+        mod_ids = [m.id for m in unique_modules]
+        mod_map = {}
+        if mod_ids:
+            for m in ModuleModel.objects.filter(id__in=mod_ids).select_related('nav_section'):
+                mod_map[m.id] = m
+
+        # Group by nav_section, preserving section order
+        section_dict = OrderedDict()
+        unsectioned = []
+        for module in unique_modules:
+            rich = mod_map.get(module.id, module)
+            # Attach resolved URL for template usage
+            rich.resolved_url = rich.get_url()
+            sec = rich.nav_section
+            if sec and sec.is_active:
+                key = sec.id
+                if key not in section_dict:
+                    section_dict[key] = {'section': sec, 'modules': []}
+                section_dict[key]['modules'].append(rich)
+            else:
+                unsectioned.append(rich)
+
+        # Sort sections by order
+        sorted_sections = sorted(section_dict.values(), key=lambda s: (s['section'].order, s['section'].name))
+
+        # If there are unsectioned modules, add them under "Other"
+        if unsectioned:
+            sorted_sections.append({
+                'section': type('Obj', (), {'display_name': 'Other', 'icon': '📌', 'name': 'other', 'id': 0})(),
+                'modules': unsectioned,
+            })
+
+        master_modules = [
+            m for m in unique_modules
+            if 'master' in (m.name or '').lower()
+            or 'master' in (m.display_name or '').lower()
+            or 'master' in (getattr(m, 'url_name', '') or '').lower()
+        ]
+
+        return {
+            'user_modules': unique_modules,
+            'user_master_modules': master_modules,
+            'nav_sections': sorted_sections,
+            'user_has_module_access': request.user.has_module_access,
+        }
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Error getting user modules: {e}", exc_info=True)
+        return empty
