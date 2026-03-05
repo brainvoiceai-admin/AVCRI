@@ -147,6 +147,7 @@ def get_prescription_data_api(request):
                 
                 # Handle potential None values
                 patient_name = patient.pat_name or 'Unknown'
+                doa = ''
                 
                 # Get doctor information from Registration and doctor_master tables
                 doctor_name = ''
@@ -179,11 +180,52 @@ def get_prescription_data_api(request):
                                     doctor = doctor_master.objects.using('therapy_db').filter(
                                         Doct_Code=registration.doctcode
                                     ).first()
-                                    
                                     if doctor:
                                         doctor_name = doctor.Doct_Name or ''
+                                        
+                                # Fetch DOA - Date of Admission (use .values() to avoid utcoffset crash)
+                                doa = ''
+                                try:
+                                    from MySql_Data_pull.models import Treatment
+                                    # Try various formats for Pat_Reg_No
+                                    for v in [reg_no_str, digits_only]:
+                                        if not v: continue
+                                        for pad in [0, 4, 5, 6]:
+                                            val = v.zfill(pad) if pad > 0 else v
+                                            doa_row = Treatment.objects.using('iptherapy_db').filter(
+                                                Pat_Reg_No=val
+                                            ).exclude(DOA__isnull=True).order_by('-DOA').values('DOA').first()
+                                            if doa_row and doa_row['DOA']:
+                                                doa_val = doa_row['DOA']
+                                                doa = doa_val.strftime('%d/%m/%Y') if hasattr(doa_val, 'strftime') else str(doa_val).split(' ')[0]
+                                                break
+                                        if doa: break
+                                    
+                                    # Fallback to Registration date for IP
+                                    if not doa and registration.pat_reg_date:
+                                        doa = registration.pat_reg_date.strftime('%d/%m/%Y')
+                                except Exception as e:
+                                    print(f"Error fetching DOA in Data API: {e}")
                         except (ValueError, TypeError) as e:
                             print(f"Error converting registration number to integer: {e}")
+                    else:
+                        # OP patient or registration not found - try Treatment table directly to find DOA
+                        try:
+                            from MySql_Data_pull.models import Treatment
+                            for v in [reg_no_str, digits_only]:
+                                if not v: continue
+                                for pad in [0, 4, 5, 6]:
+                                    val = v.zfill(pad) if pad > 0 else v
+                                    doa_row = Treatment.objects.using('iptherapy_db').filter(
+                                        Pat_Reg_No=val
+                                    ).exclude(DOA__isnull=True).order_by('-DOA').values('DOA').first()
+                                    if doa_row and doa_row['DOA']:
+                                        doa_val = doa_row['DOA']
+                                        doa = doa_val.strftime('%d/%m/%Y') if hasattr(doa_val, 'strftime') else str(doa_val).split(' ')[0]
+                                        break
+                                if doa: break
+                        except Exception as e:
+                            print(f"Error fetching DOA for OP in Data API: {e}")
                 except Exception as e:
                     # If there's an error fetching from Registration/doctor_master, show empty
                     print(f"Error fetching doctor info from Registration: {e}")
@@ -271,6 +313,7 @@ def get_prescription_data_api(request):
                     'room_no': room_no,
                     'doctor_name': doctor_name,
                     'doctor_team': doctor_team,
+                    'doa': doa if 'doa' in locals() else '',
                     'prescription_count': prescription_count,
                     'status': prescription_scheduling.status,
                     'has_changes': has_changes,
@@ -326,7 +369,8 @@ def get_prescription_details_api(request):
             'age': '',
             'sex': '',
             'doctor_name': None,
-            'doctor_team': ''
+            'doctor_team': '',
+            'doa': ''
         }
         
         try:
@@ -338,7 +382,8 @@ def get_prescription_details_api(request):
                 'age': getattr(patient, 'pat_age', '') or '',
                 'sex': getattr(patient, 'pat_sex', '') or '',
                 'doctor_name': None,  # Will be set from Registration->doctor_master
-                'doctor_team': ''  # Will be set from Registration
+                'doctor_team': '',  # Will be set from Registration
+                'doa': ''
             }
         except PatientSnapshot.DoesNotExist:
             # Patient not in snapshot - try to get from therapy allocations
@@ -355,8 +400,9 @@ def get_prescription_details_api(request):
                     'room_no': getattr(patient, 'pat_room_no', None),
                     'age': getattr(patient, 'pat_age', '') or '',
                     'sex': getattr(patient, 'pat_sex', '') or '',
-                    'doctor_name': None,  # Will be set from Registration->doctor_master
-                    'doctor_team': ''  # Will be set from Registration
+                    'doctor_name': '',
+                    'doctor_team': '',
+                    'doa': ''
                 }
             else:
                 # If still not found, return 404
@@ -388,6 +434,31 @@ def get_prescription_details_api(request):
                         # Get doctor team from Registration table
                         patient_info['doctor_team'] = registration.dct_team or ''
                         
+                        # Fetch DOA - Date of Admission (use .values() to avoid utcoffset crash)
+                        try:
+                            from MySql_Data_pull.models import Treatment
+                            # Try various formats for Pat_Reg_No
+                            doa_found = ''
+                            for v in [reg_no_str, digits_only]:
+                                if not v: continue
+                                for pad in [0, 4, 5, 6]:
+                                    val = v.zfill(pad) if pad > 0 else v
+                                    doa_row = Treatment.objects.using('iptherapy_db').filter(
+                                        Pat_Reg_No=val
+                                    ).exclude(DOA__isnull=True).order_by('-DOA').values('DOA').first()
+                                    if doa_row and doa_row['DOA']:
+                                        doa_val = doa_row['DOA']
+                                        doa_found = doa_val.strftime('%d/%m/%Y') if hasattr(doa_val, 'strftime') else str(doa_val).split(' ')[0]
+                                        break
+                                if doa_found: break
+                            
+                            if doa_found:
+                                patient_info['doa'] = doa_found
+                            elif registration.pat_reg_date:
+                                patient_info['doa'] = registration.pat_reg_date.strftime('%d/%m/%Y')
+                        except Exception as e:
+                            print(f"Error fetching DOA in API: {e}")
+
                         # Get doctor name from doctor_master table using doctcode
                         if registration.doctcode:
                             doctor = doctor_master.objects.using('therapy_db').filter(
@@ -397,7 +468,14 @@ def get_prescription_details_api(request):
                             if doctor:
                                 patient_info['doctor_name'] = doctor.Doct_Name or ''
                             else:
-                                patient_info['doctor_name'] = ''
+                                # Try with zfill for doctor code
+                                doctor = doctor_master.objects.using('therapy_db').filter(
+                                    Doct_Code=str(registration.doctcode).zfill(4)
+                                ).first()
+                                if doctor:
+                                    patient_info['doctor_name'] = doctor.Doct_Name or ''
+                                else:
+                                    patient_info['doctor_name'] = ''
                         else:
                             patient_info['doctor_name'] = ''
                     else:
@@ -408,9 +486,48 @@ def get_prescription_details_api(request):
                     patient_info['doctor_name'] = ''
                     patient_info['doctor_team'] = ''
             else:
-                # OP patient - not in Registration table
-                patient_info['doctor_name'] = ''
-                patient_info['doctor_team'] = ''
+                # OP patient - search Treatment table for latest info (use .values() to avoid utcoffset crash)
+                try:
+                    from MySql_Data_pull.models import Treatment, doctor_master
+                    treatment_row = Treatment.objects.using('iptherapy_db').filter(
+                        Pat_Reg_No=reg_no_str
+                    ).exclude(DOA__isnull=True).order_by('-DOA').values('DOA', 'Treat_Doc_Code').first()
+                    
+                    if not treatment_row:
+                        # Try padded versions
+                        for pad in [4, 5, 6]:
+                            treatment_row = Treatment.objects.using('iptherapy_db').filter(
+                                Pat_Reg_No=reg_no_str.zfill(pad)
+                            ).exclude(DOA__isnull=True).order_by('-DOA').values('DOA', 'Treat_Doc_Code').first()
+                            if treatment_row: break
+                    
+                    if treatment_row:
+                        if treatment_row.get('DOA'):
+                            doa_val = treatment_row['DOA']
+                            if hasattr(doa_val, 'strftime'):
+                                patient_info['doa'] = doa_val.strftime('%d/%m/%Y')
+                            else:
+                                patient_info['doa'] = str(doa_val).split(' ')[0]
+                        
+                        if treatment_row.get('Treat_Doc_Code'):
+                            # Fetch doctor name for OP using Treat_Doc_Code
+                            try:
+                                doctor = doctor_master.objects.using('therapy_db').filter(
+                                    Doct_Code=treatment_row['Treat_Doc_Code']
+                                ).first()
+                                if doctor:
+                                    patient_info['doctor_name'] = doctor.Doct_Name or ''
+                                else:
+                                    # Try padded Doct_Code
+                                    doctor = doctor_master.objects.using('therapy_db').filter(
+                                        Doct_Code=str(treatment_row['Treat_Doc_Code']).zfill(4)
+                                    ).first()
+                                    if doctor:
+                                        patient_info['doctor_name'] = doctor.Doct_Name or ''
+                            except Exception as e:
+                                print(f"Error fetching doctor name for OP in API: {e}")
+                except Exception as e:
+                    print(f"Error fetching treatment info for OP in API: {e}")
         except Exception as e:
             # If there's an error fetching from Registration/doctor_master, show empty
             print(f"Error fetching doctor info from Registration: {e}")

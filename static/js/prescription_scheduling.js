@@ -271,7 +271,8 @@ function showPrescriptionModal(patientInfo, prescriptionGroups, therapyItems) {
                 <h4>${escapeHtml(patientInfo.name)}</h4>
                 <p><strong>Registration No:</strong> ${escapeHtml(patientInfo.registration_no)}</p>
                 <p><strong>Room No:</strong> ${escapeHtml(patientInfo.room_no || 'N/A')}</p>
-                <p><strong>Doctor:</strong> ${escapeHtml(patientInfo.doctor_name || 'N/A')}</p>
+                <p><strong>Doctor:</strong> ${escapeHtml(patientInfo.doctor_name || 'N/A')} ${patientInfo.doctor_team ? `(${escapeHtml(patientInfo.doctor_team)})` : ''}</p>
+                <p><strong>DOA:</strong> ${escapeHtml(patientInfo.doa || '—')}</p>
                 ${patientInfo.entered_by ? `<p><strong>Entered By:</strong> ${escapeHtml(patientInfo.entered_by)}</p>` : ''}
             `;
 
@@ -904,6 +905,7 @@ function printPrescriptionScheduleToPDF() {
                                         room_no: detailData.patient_info.room_no || therapyForPatient.patient_room_no || null,
                                         doctor_name: detailData.patient_info.doctor_name || '',
                                         doctor_team: detailData.patient_info.doctor_team || '',
+                                        doa: detailData.patient_info.doa || '',
                                         age: detailData.patient_info.age || '',
                                         sex: detailData.patient_info.sex || '',
                                         prescription_count: 0,
@@ -936,7 +938,8 @@ function printPrescriptionScheduleToPDF() {
                                                 age: '',
                                                 sex: '',
                                                 doctor_name: '',
-                                                doctor_team: ''
+                                                doctor_team: '',
+                                                doa: ''
                                             },
                                             prescription_groups: [],
                                             therapy_items: []
@@ -966,7 +969,8 @@ function printPrescriptionScheduleToPDF() {
                                             age: '',
                                             sex: '',
                                             doctor_name: '',
-                                            doctor_team: ''
+                                            doctor_team: '',
+                                            doa: ''
                                         },
                                         prescription_groups: [],
                                         therapy_items: []
@@ -1055,6 +1059,9 @@ function printPrescriptionScheduleToPDF() {
                             if (!existing.doctor_team && p.doctor_team) {
                                 existing.doctor_team = p.doctor_team;
                             }
+                            if (!existing.doa && p.doa) {
+                                existing.doa = p.doa;
+                            }
 
                             // Ensure we don't lose the registration number if one source had a better one
                             if (!existing.registration_no && p.registration_no) {
@@ -1088,6 +1095,9 @@ function printPrescriptionScheduleToPDF() {
                                         }
                                         if (!merged.doctor_team && detailData.patient_info.doctor_team) {
                                             merged.doctor_team = detailData.patient_info.doctor_team;
+                                        }
+                                        if (!merged.doa && detailData.patient_info.doa) {
+                                            merged.doa = detailData.patient_info.doa;
                                         }
                                     }
                                     return merged;
@@ -1420,7 +1430,7 @@ function generatePrescriptionPDF(prescriptionData, date) {
     if (typeof generatePrescriptionPDF_NEW === 'undefined') {
         // Dynamically load the new PDF script
         const script = document.createElement('script');
-        script.src = '/static/js/prescription_pdf_new.js';
+        script.src = '/static/js/prescription_pdf_new.js?v=' + new Date().getTime();
         script.onload = function () {
             generatePrescriptionPDF_NEW(prescriptionData, date);
         };

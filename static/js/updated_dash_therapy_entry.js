@@ -585,35 +585,79 @@ $(function () {
         const patName = history[0].pat_name || selectedPatient.pat_name || '';
         $historyInfo.text(`History for ${patName} (Reg No: ${regNo})`);
 
-        let html = '';
-        history.forEach(row => {
-          const date = row.date || '';
-          const treatment = row.treatment || '';
-          const thName = row.therapist_name || '';
-          const thCode = row.therapist_code || '';
-          const room = row.room_no || '';
-          const tRoom = row.t_room || '';
-          html += `
-            <div style="padding:10px 12px;border-bottom:1px solid #eee;font-size:0.9rem;">
-              <div style="display:flex;justify-content:space-between;align-items:center;">
-                <div>
-                  <div style="font-weight:600;color:#333;">${treatment || '—'}</div>
-                  <div style="margin-top:2px;color:#555;">
-                    <span><strong>Date:</strong> ${date || '—'}</span>
-                    &nbsp;|&nbsp;
-                    <span><strong>Therapist:</strong> ${thName || '—'} ${thCode ? '(' + thCode + ')' : ''}</span>
-                  </div>
-                  <div style="margin-top:2px;color:#777;">
-                    <span><strong>Patient Room:</strong> ${room || '—'}</span>
-                    &nbsp;|&nbsp;
-                    <span><strong>Treatment Room:</strong> ${tRoom || '—'}</span>
-                  </div>
-                </div>
-              </div>
-            </div>
+        // Sort by date DESC (Latest first)
+        history.sort((a, b) => {
+          return new Date(b.date || '') - new Date(a.date || '');
+        });
+
+        // Grouping: If Date and Treatment are same, combine therapists
+        const grouped = [];
+        const seen = new Map();
+
+        history.forEach(item => {
+          const rawTreatment = item.treatment || '—';
+          const isBathing = rawTreatment.startsWith('*');
+          const cleanedTreatment = isBathing ? rawTreatment.substring(1).trim() : rawTreatment.trim();
+
+          const key = `${item.date}_${cleanedTreatment}`;
+          const thName = item.therapist_name || '—';
+          const thCode = item.therapist_code || '';
+          let fullTh = thCode ? `${thName} (${thCode})` : thName;
+
+          if (isBathing) {
+            fullTh = `*${fullTh}`;
+          }
+
+          if (seen.has(key)) {
+            const group = seen.get(key);
+            if (!group.therapists.includes(fullTh)) {
+              group.therapists.push(fullTh);
+            }
+          } else {
+            const newGroup = {
+              date: item.date,
+              treatment: cleanedTreatment,
+              therapists: [fullTh],
+              room_no: item.room_no,
+              t_room: item.t_room
+            };
+            seen.set(key, newGroup);
+            grouped.push(newGroup);
+          }
+        });
+
+        let tableHtml = `
+          <table class="history-table">
+            <thead>
+              <tr>
+                <th class="col-date">Date</th>
+                <th class="col-treatment">Treatment</th>
+                <th class="col-therapist">Therapist(s)</th>
+                <th class="col-room">Patient Room</th>
+                <th class="col-troom">Treatment Room</th>
+              </tr>
+            </thead>
+            <tbody>
+        `;
+
+        grouped.forEach(row => {
+          // Format date if needed, but keeping original for now as requested
+          const displayDate = row.date || '—';
+          const therapistList = row.therapists.join(', ');
+
+          tableHtml += `
+            <tr>
+              <td><strong>${displayDate}</strong></td>
+              <td>${row.treatment || '—'}</td>
+              <td>${therapistList}</td>
+              <td>${row.room_no || '—'}</td>
+              <td>${row.t_room || '—'}</td>
+            </tr>
           `;
         });
-        $historyList.html(html);
+
+        tableHtml += '</tbody></table>';
+        $historyList.html(tableHtml);
       })
       .catch(err => {
         console.error('Error loading patient history:', err);
