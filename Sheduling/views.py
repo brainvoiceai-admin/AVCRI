@@ -1422,6 +1422,19 @@ def therapy_entry(request):
                 if missing:
                     return JsonResponse({'error': 'missing_fields', 'missing': missing}, status=400)
                 
+                # ----- INACTIVE PATIENT CHECK -----
+                # Before creating any allocation, verify the patient is active
+                try:
+                    from final_allocation import is_patient_active
+                    if not is_patient_active(payload['patient_reg_no']):
+                        return JsonResponse({
+                            'error': 'patient_inactive',
+                            'message': 'Cannot schedule therapies for an inactive patient. '
+                                       'The patient has been discharged or marked as inactive.'
+                        }, status=400)
+                except ImportError:
+                    pass  # fail-open if import fails
+
                 # items_groups is optional - default to empty array if not provided
                 items_groups = payload.get('items_groups', [])
                 if not isinstance(items_groups, list):
