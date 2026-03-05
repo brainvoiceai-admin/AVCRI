@@ -1,0 +1,79 @@
+{%load static%}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% if object %}Edit{% else %}Add{% endif %} Room Name</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet"
+        integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="{% static 'css/masters_procured_form.css' %}">
+    <link rel="stylesheet" href="{% static 'css/dashboards_nav.css' %}">
+</head>
+<body>
+    {% include 'dashboards/nav.html' %}
+
+    <div class="main-content container mt-4">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h2>
+                <i class="fas fa-door-open text-primary"></i>
+                {% if object %}Edit Room Name{% else %}Add New Room Name{% endif %}
+            </h2>
+            <a href="{% url 'roomname_manage' %}" class="btn btn-secondary"><i class="fas fa-arrow-left me-2"></i>Back to List</a>
+        </div>
+
+        {% if messages %}
+        {% for message in messages %}
+        <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
+            {{ message }}
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+        {% endfor %}
+        {% endif %}
+
+        <form method="post" class="needs-validation" novalidate>
+            {% csrf_token %}
+            <div class="row">
+                <div class="col-md-8">
+                    <div class="form-section">
+                        <h5 class="text-primary mb-3"><i class="fas fa-info-circle me-2"></i>Room Name Information</h5>
+                        <div class="row">
+                            <div class="col-md-8 mb-3">
+                                <label for="id_name" class="form-label required-field">Room Name</label>
+                                <input type="text" class="form-control" id="id_name" name="name"
+                                       value="{{ form.name.value|default:'' }}" required
+                                       placeholder="e.g., Treatment Room A">
+                                <small class="form-text text-muted">Unique name for the room</small>
+                            </div>
+                            <div class="col-md-4 mb-3">
+                                <div class="form-check form-switch mt-4">
+                                    <input class="form-check-input" type="checkbox" id="id_is_active"
+                                           name="is_active" {% if form.is_active.value|default:True %}checked{% endif %}>
+                                    <label class="form-check-label" for="id_is_active">Active</label>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="card">
+                        <div class="card-header"><h6 class="mb-0"><i class="fas fa-question-circle me-2"></i>Help</h6></div>
+                        <div class="card-body">
+                            <p class="small text-muted">Room names appear as dropdown options when creating or editing treatment rooms.</p>
+                            <p class="small text-muted">Only active room names will appear in dropdowns.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="d-flex justify-content-between mt-4">
+                <a href="{% url 'roomname_manage' %}" class="btn btn-outline-secondary"><i class="fas fa-times me-2"></i>Cancel</a>
+                <button type="submit" class="btn btn-success"><i class="fas fa-save me-2"></i>{% if object %}Update{% else %}Create{% endif %}</button>
+            </div>
+        </form>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="{% static 'js/dashboards_nav.js' %}"></script>
+</body>
+</html>

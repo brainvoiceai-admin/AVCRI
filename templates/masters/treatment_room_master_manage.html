@@ -9,8 +9,6 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet"
         integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
-
-
     <link rel="stylesheet" href="{% static 'css/masters_treatment_room_master_manage.css' %}">
     <link rel="stylesheet" href="{% static 'css/dashboards_nav.css' %}">
 </head>
@@ -57,10 +55,8 @@
                         <div class="col-md-3">
                             <select class="form-select" name="status" id="statusFilter">
                                 <option value="">All Status</option>
-                                <option value="active" {% if status_filter == 'active' %}selected{% endif %}>Active
-                                </option>
-                                <option value="inactive" {% if status_filter == 'inactive' %}selected{% endif %}>Inactive
-                                </option>
+                                <option value="active" {% if status_filter == 'active' %}selected{% endif %}>Active</option>
+                                <option value="inactive" {% if status_filter == 'inactive' %}selected{% endif %}>Inactive</option>
                             </select>
                         </div>
                         <div class="col-md-2">
@@ -93,6 +89,7 @@
                             <tr>
                                 <th>Room No</th>
                                 <th>TR Code</th>
+                                <th>Room Name</th>
                                 <th>Floor</th>
                                 <th>Description</th>
                                 <th>Status</th>
@@ -103,11 +100,10 @@
                         <tbody>
                             {% for room in treatment_room_list %}
                             <tr>
-                                <td>
-                                    <strong>{{ room.room_no }}</strong>
-                                </td>
+                                <td><strong>{{ room.room_no }}</strong></td>
                                 <td>{{ room.tr_code|default:"-" }}</td>
-                                <td>{{ room.floor|default:"-" }}</td>
+                                <td>{{ room.room_name.name|default:"-" }}</td>
+                                <td>{{ room.floor_master.name|default:"-" }}</td>
                                 <td>{{ room.description|default:"-"|truncatewords:10 }}</td>
                                 <td>
                                     {% if room.is_active %}
@@ -147,11 +143,10 @@
                             </tr>
                             {% empty %}
                             <tr>
-                                <td colspan="7" class="text-center py-4">
+                                <td colspan="8" class="text-center py-4">
                                     <div class="text-muted">
                                         <i class="fas fa-door-open fa-3x mb-3"></i>
-                                        <p>No treatment rooms found. <a href="{% url 'treatment_room_master_add' %}">Add
-                                                the first room</a></p>
+                                        <p>No treatment rooms found. <a href="{% url 'treatment_room_master_add' %}">Add the first room</a></p>
                                     </div>
                                 </td>
                             </tr>
@@ -169,8 +164,7 @@
                 {% if page_obj.has_previous %}
                 <li class="page-item">
                     <a class="page-link"
-                        href="?page=1{% if search %}&search={{ search }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}">&laquo;
-                        First</a>
+                        href="?page=1{% if search %}&search={{ search }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}">&laquo; First</a>
                 </li>
                 <li class="page-item">
                     <a class="page-link"
@@ -191,8 +185,7 @@
                 </li>
                 <li class="page-item">
                     <a class="page-link"
-                        href="?page={{ page_obj.paginator.num_pages }}{% if search %}&search={{ search }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}">Last
-                        &raquo;</a>
+                        href="?page={{ page_obj.paginator.num_pages }}{% if search %}&search={{ search }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}">Last &raquo;</a>
                 </li>
                 {% endif %}
             </ul>

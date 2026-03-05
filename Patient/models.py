@@ -106,20 +106,71 @@ class TimeSlot(models.Model):
         return f"Slot {self.slot_number}: {self.start_time.strftime('%H:%M')} - {self.end_time.strftime('%H:%M')}"
 
 
- # optional if you want Room_Rent
+class RoomName(models.Model):
+    name = models.CharField(max_length=100, unique=True, verbose_name="Room Name")
+    is_active = models.BooleanField(default=True, verbose_name="Active")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Created At")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="Updated At")
+
+    def __str__(self):
+        return self.name
+
+    class Meta:
+        verbose_name = "Room Name"
+        verbose_name_plural = "Room Names"
+        ordering = ["name"]
+
+
+class Floor(models.Model):
+    name = models.CharField(max_length=100, unique=True, verbose_name="Floor Name")
+    is_active = models.BooleanField(default=True, verbose_name="Active")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Created At")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="Updated At")
+
+    def __str__(self):
+        return self.name
+
+    class Meta:
+        verbose_name = "Floor"
+        verbose_name_plural = "Floors"
+        ordering = ["name"]
+
 
 class TreatmentRoom(models.Model):
-    room_no = models.CharField(max_length=20, primary_key=True)
+    room_no = models.CharField(max_length=20, primary_key=True, verbose_name="Room Number")
+    room_name = models.ForeignKey(
+        RoomName, on_delete=models.SET_NULL, null=True, blank=True,
+        verbose_name="Room Name"
+    )
     floor = models.CharField(max_length=20, null=True, blank=True)
+    floor_master = models.ForeignKey(
+        Floor, on_delete=models.SET_NULL, null=True, blank=True,
+        verbose_name="Floor"
+    )
     description = models.TextField(null=True, blank=True)
-    tr_code = models.CharField(max_length=20, null=True, blank=True)
+    tr_code = models.CharField(max_length=20, null=True, blank=True, verbose_name="TR Code")
     is_active = models.BooleanField(default=True, verbose_name="Active")
     created_at = models.DateTimeField(auto_now_add=True, null=True, blank=True, verbose_name="Created At")
     updated_at = models.DateTimeField(auto_now=True, null=True, blank=True, verbose_name="Updated At")
-    
+
+    def save(self, *args, **kwargs):
+        if not self.tr_code:
+            self.tr_code = self._generate_tr_code()
+        super().save(*args, **kwargs)
+
+    def _generate_tr_code(self):
+        existing = TreatmentRoom.objects.values_list("tr_code", flat=True)
+        max_num = 0
+        for code in existing:
+            if code and code.isdigit():
+                num = int(code)
+                if num > max_num:
+                    max_num = num
+        return f"{max_num + 1:04d}"
+
     def __str__(self):
         return f"{self.room_no} ({self.tr_code})"
-    
+
     class Meta:
         verbose_name = "Treatment Room"
         verbose_name_plural = "Treatment Rooms"

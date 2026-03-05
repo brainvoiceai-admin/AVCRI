@@ -128,6 +128,18 @@ urlpatterns = [
     path('nurses/<int:pk>/delete/', views.nurse_master_delete, name='nursemaster_delete'),
     path('nurses/<int:pk>/enable/', views.nurse_master_enable, name='nursemaster_enable'),
     path('nurses/<int:pk>/disable/', views.nurse_master_disable, name='nursemaster_disable'),
+    # Room Name Master CRUD
+    path('room-names/', views.RoomNameManagementView.as_view(), name='roomname_manage'),
+    path('room-names/<int:pk>/update/', views.RoomNameUpdateView.as_view(), name='roomname_update'),
+    path('room-names/<int:pk>/delete/', views.roomname_delete, name='roomname_delete'),
+    path('room-names/<int:pk>/enable/', views.roomname_enable, name='roomname_enable'),
+    path('room-names/<int:pk>/disable/', views.roomname_disable, name='roomname_disable'),
+    # Floor Master CRUD
+    path('floors/', views.FloorManagementView.as_view(), name='floor_manage'),
+    path('floors/<int:pk>/update/', views.FloorUpdateView.as_view(), name='floor_update'),
+    path('floors/<int:pk>/delete/', views.floor_delete, name='floor_delete'),
+    path('floors/<int:pk>/enable/', views.floor_enable, name='floor_enable'),
+    path('floors/<int:pk>/disable/', views.floor_disable, name='floor_disable'),
     # Bulk Upload
     path('bulk-upload/', views.bulk_upload_master, name='bulk_upload_master'),
     # Download Template

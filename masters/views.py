@@ -16,7 +16,7 @@ from .models import (
     TherapistGrade, TherapistMaster, TherapistLeaveMaster, NurseTreatmentMaster,
     NurseMaster, IngredientMaster
 )
-from Patient.models import TreatmentRoom
+from Patient.models import TreatmentRoom, RoomName, Floor
 import json
 import pandas as pd
 from datetime import datetime
@@ -2314,68 +2314,89 @@ class TreatmentRoomManagementView(ListView):
     paginate_by = 20
 
     def get_queryset(self):
-        queryset = TreatmentRoom.objects.all()
-        
-        # Search filter
+        queryset = TreatmentRoom.objects.select_related('room_name', 'floor_master').all()
+
         search = self.request.GET.get('search', '')
         if search:
             queryset = queryset.filter(
                 db_models.Q(room_no__icontains=search) |
                 db_models.Q(tr_code__icontains=search) |
-                db_models.Q(floor__icontains=search) |
+                db_models.Q(room_name__name__icontains=search) |
+                db_models.Q(floor_master__name__icontains=search) |
                 db_models.Q(description__icontains=search)
             )
-        
-        # Status filter
+
         status = self.request.GET.get('status', '')
         if status == 'active':
             queryset = queryset.filter(is_active=True)
         elif status == 'inactive':
             queryset = queryset.filter(is_active=False)
-        
+
         return queryset.order_by('room_no')
-    
+
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context['search'] = self.request.GET.get('search', '')
         context['status_filter'] = self.request.GET.get('status', '')
         context['master_type'] = 'treatmentroom'
         context['master_name'] = 'Treatment Room Master'
-        context['required_fields'] = ['floor']
-        context['optional_fields'] = ['description', 'tr_code', 'is_active']
         return context
+
+
+class TreatmentRoomForm(forms.ModelForm):
+    class Meta:
+        model = TreatmentRoom
+        fields = ['room_no', 'room_name', 'floor_master', 'description', 'is_active']
+        widgets = {
+            'room_no': forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'e.g., TR-1, RM-101'}),
+            'room_name': forms.Select(attrs={'class': 'form-select'}),
+            'floor_master': forms.Select(attrs={'class': 'form-select'}),
+            'description': forms.Textarea(attrs={'class': 'form-control', 'rows': 3}),
+        }
+        labels = {
+            'room_no': 'Room Number',
+            'room_name': 'Room Name',
+            'floor_master': 'Floor',
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['room_name'].queryset = RoomName.objects.filter(is_active=True)
+        self.fields['floor_master'].queryset = Floor.objects.filter(is_active=True)
+        self.fields['room_no'].required = True
+        self.fields['room_name'].required = False
+        self.fields['floor_master'].required = False
+
 
 @method_decorator(login_required, name='dispatch')
 @method_decorator(super_admin_required, name='dispatch')
 class TreatmentRoomCreateView(CreateView):
     model = TreatmentRoom
-    fields = ['floor', 'description', 'tr_code', 'is_active']
+    form_class = TreatmentRoomForm
     template_name = 'masters/treatment_room_master_form.html'
     success_url = reverse_lazy('treatment_room_master_manage')
-    
+
     def form_valid(self, form):
-        # Auto-generate room_no (TR + number)
         instance = form.save(commit=False)
-        instance.room_no = generate_unique_code('TR', TreatmentRoom, 'room_no')
         instance.save()
         _log_master_audit(self.request, 'create', 'TreatmentRoom', str(instance.pk), f'Created TreatmentRoom: {instance.room_no}')
         messages.success(self.request, f'Treatment room {instance.room_no} created successfully.')
         return redirect(self.success_url)
 
+
 @method_decorator(login_required, name='dispatch')
 @method_decorator(super_admin_required, name='dispatch')
 class TreatmentRoomUpdateView(UpdateView):
     model = TreatmentRoom
-    fields = ['room_no', 'floor', 'description', 'tr_code', 'is_active']
+    form_class = TreatmentRoomForm
     template_name = 'masters/treatment_room_master_form.html'
     success_url = reverse_lazy('treatment_room_master_manage')
-    
+
     def get_form(self, form_class=None):
         form = super().get_form(form_class)
-        if 'room_no' in form.fields:
-            form.fields['room_no'].disabled = True
+        form.fields['room_no'].disabled = True
         return form
-    
+
     def form_valid(self, form):
         _log_master_audit(self.request, 'update', 'TreatmentRoom', str(self.object.pk), f'Updated TreatmentRoom: {self.object.room_no}')
         messages.success(self.request, 'Treatment room updated successfully.')
@@ -3967,3 +3988,185 @@ def delete_therapist_leave(request, leave_id):
         
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=500)
+
+
+# ── Room Name Master CRUD ──
+
+@method_decorator(login_required, name='dispatch')
+@method_decorator(super_admin_required, name='dispatch')
+class RoomNameManagementView(ListView):
+    model = RoomName
+    template_name = 'masters/roomname_manage.html'
+    context_object_name = 'roomname_list'
+    paginate_by = 20
+
+    def get_queryset(self):
+        queryset = RoomName.objects.all()
+        search = self.request.GET.get('search', '').strip()
+        if search:
+            queryset = queryset.filter(name__icontains=search)
+        status = self.request.GET.get('status', '').strip().lower()
+        if status == 'active':
+            queryset = queryset.filter(is_active=True)
+        elif status == 'inactive':
+            queryset = queryset.filter(is_active=False)
+        return queryset
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['search'] = self.request.GET.get('search', '')
+        context['status_filter'] = self.request.GET.get('status', '')
+        context['master_type'] = 'roomname'
+        return context
+
+    def post(self, request, *args, **kwargs):
+        name = request.POST.get('name', '').strip()
+        is_active = request.POST.get('is_active') == 'on'
+        if not name:
+            messages.error(request, 'Room name is required.')
+            return redirect('roomname_manage')
+        if RoomName.objects.filter(name__iexact=name).exists():
+            messages.error(request, f'Room name "{name}" already exists.')
+            return redirect('roomname_manage')
+        obj = RoomName.objects.create(name=name, is_active=is_active)
+        _log_master_audit(request, 'create', 'RoomName', str(obj.pk), f'Created RoomName: {obj.name}')
+        messages.success(request, f'Room name "{obj.name}" created successfully.')
+        return redirect('roomname_manage')
+
+
+@method_decorator(login_required, name='dispatch')
+@method_decorator(super_admin_required, name='dispatch')
+class RoomNameUpdateView(UpdateView):
+    model = RoomName
+    fields = ['name', 'is_active']
+    template_name = 'masters/roomname_form.html'
+    success_url = reverse_lazy('roomname_manage')
+
+    def form_valid(self, form):
+        _log_master_audit(self.request, 'update', 'RoomName', str(self.object.pk), f'Updated RoomName: {self.object.name}')
+        messages.success(self.request, 'Room name updated successfully.')
+        return super().form_valid(form)
+
+
+@login_required
+@super_admin_required
+def roomname_delete(request, pk):
+    obj = get_object_or_404(RoomName, pk=pk)
+    name = obj.name
+    obj.delete()
+    _log_master_audit(request, 'delete', 'RoomName', str(pk), f'Deleted RoomName: {name}')
+    messages.success(request, f'Room name "{name}" deleted successfully.')
+    return redirect('roomname_manage')
+
+
+@login_required
+@super_admin_required
+def roomname_enable(request, pk):
+    obj = get_object_or_404(RoomName, pk=pk)
+    obj.is_active = True
+    obj.save()
+    _log_master_audit(request, 'update', 'RoomName', str(pk), f'Enabled RoomName: {obj.name}')
+    messages.success(request, f'Room name "{obj.name}" enabled successfully.')
+    return redirect('roomname_manage')
+
+
+@login_required
+@super_admin_required
+def roomname_disable(request, pk):
+    obj = get_object_or_404(RoomName, pk=pk)
+    obj.is_active = False
+    obj.save()
+    _log_master_audit(request, 'update', 'RoomName', str(pk), f'Disabled RoomName: {obj.name}')
+    messages.success(request, f'Room name "{obj.name}" disabled successfully.')
+    return redirect('roomname_manage')
+
+
+# ── Floor Master CRUD ──
+
+@method_decorator(login_required, name='dispatch')
+@method_decorator(super_admin_required, name='dispatch')
+class FloorManagementView(ListView):
+    model = Floor
+    template_name = 'masters/floor_manage.html'
+    context_object_name = 'floor_list'
+    paginate_by = 20
+
+    def get_queryset(self):
+        queryset = Floor.objects.all()
+        search = self.request.GET.get('search', '').strip()
+        if search:
+            queryset = queryset.filter(name__icontains=search)
+        status = self.request.GET.get('status', '').strip().lower()
+        if status == 'active':
+            queryset = queryset.filter(is_active=True)
+        elif status == 'inactive':
+            queryset = queryset.filter(is_active=False)
+        return queryset
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['search'] = self.request.GET.get('search', '')
+        context['status_filter'] = self.request.GET.get('status', '')
+        context['master_type'] = 'floor'
+        return context
+
+    def post(self, request, *args, **kwargs):
+        name = request.POST.get('name', '').strip()
+        is_active = request.POST.get('is_active') == 'on'
+        if not name:
+            messages.error(request, 'Floor name is required.')
+            return redirect('floor_manage')
+        if Floor.objects.filter(name__iexact=name).exists():
+            messages.error(request, f'Floor "{name}" already exists.')
+            return redirect('floor_manage')
+        obj = Floor.objects.create(name=name, is_active=is_active)
+        _log_master_audit(request, 'create', 'Floor', str(obj.pk), f'Created Floor: {obj.name}')
+        messages.success(request, f'Floor "{obj.name}" created successfully.')
+        return redirect('floor_manage')
+
+
+@method_decorator(login_required, name='dispatch')
+@method_decorator(super_admin_required, name='dispatch')
+class FloorUpdateView(UpdateView):
+    model = Floor
+    fields = ['name', 'is_active']
+    template_name = 'masters/floor_form.html'
+    success_url = reverse_lazy('floor_manage')
+
+    def form_valid(self, form):
+        _log_master_audit(self.request, 'update', 'Floor', str(self.object.pk), f'Updated Floor: {self.object.name}')
+        messages.success(self.request, 'Floor updated successfully.')
+        return super().form_valid(form)
+
+
+@login_required
+@super_admin_required
+def floor_delete(request, pk):
+    obj = get_object_or_404(Floor, pk=pk)
+    name = obj.name
+    obj.delete()
+    _log_master_audit(request, 'delete', 'Floor', str(pk), f'Deleted Floor: {name}')
+    messages.success(request, f'Floor "{name}" deleted successfully.')
+    return redirect('floor_manage')
+
+
+@login_required
+@super_admin_required
+def floor_enable(request, pk):
+    obj = get_object_or_404(Floor, pk=pk)
+    obj.is_active = True
+    obj.save()
+    _log_master_audit(request, 'update', 'Floor', str(pk), f'Enabled Floor: {obj.name}')
+    messages.success(request, f'Floor "{obj.name}" enabled successfully.')
+    return redirect('floor_manage')
+
+
+@login_required
+@super_admin_required
+def floor_disable(request, pk):
+    obj = get_object_or_404(Floor, pk=pk)
+    obj.is_active = False
+    obj.save()
+    _log_master_audit(request, 'update', 'Floor', str(pk), f'Disabled Floor: {obj.name}')
+    messages.success(request, f'Floor "{obj.name}" disabled successfully.')
+    return redirect('floor_manage')
