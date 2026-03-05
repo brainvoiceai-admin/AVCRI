@@ -1,4 +1,4 @@
-from django.shortcuts import render, redirect, get_object_or_404
+﻿from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.http import JsonResponse
@@ -312,7 +312,7 @@ def module_management(request):
             name = request.POST.get('name')
             display_name = request.POST.get('display_name')
             url_name = request.POST.get('url_name')
-            icon = request.POST.get('icon', '📋')
+            icon = request.POST.get('icon', '≡ƒôï')
             try:
                 order = int(request.POST.get('order', 0))
             except (ValueError, TypeError):
@@ -345,7 +345,7 @@ def module_management(request):
             
             module.display_name = request.POST.get('display_name')
             module.url_name = request.POST.get('url_name')
-            module.icon = request.POST.get('icon', '📋')
+            module.icon = request.POST.get('icon', '≡ƒôï')
             try:
                 module.order = int(request.POST.get('order', 0))
             except (ValueError, TypeError):

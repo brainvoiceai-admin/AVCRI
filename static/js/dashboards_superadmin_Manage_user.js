@@ -1,4 +1,4 @@
-// Get CSRF token from meta tag, form input, or cookie
+﻿// Get CSRF token from meta tag, form input, or cookie
 function getCsrfToken() {
   const metaTag = document.querySelector('meta[name="csrf-token"]');
   if (metaTag && metaTag.getAttribute('content')) {

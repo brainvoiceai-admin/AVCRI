@@ -1,22 +1,24 @@
-{% load static %}
+﻿{% load static %}
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="csrf-token" content="{{ csrf_token }}">
   <title>User Management Dashboard</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-  
-    <link rel="stylesheet" href="{% static 'css/dashboards_superadmin_Manage_user.css' %}">
-    <link rel="stylesheet" href="{% static 'css/dashboards_nav.css' %}">
+
+  <link rel="stylesheet" href="{% static 'css/dashboards_superadmin_Manage_user.css' %}">
+  <link rel="stylesheet" href="{% static 'css/dashboards_nav.css' %}">
 </head>
+
 <body>
   <div class="container-fluid">
     <div class="row">
       <!-- Sidebar -->
       <div class="sidebar p-0">
-{% include 'dashboards/nav.html' %}
+        {% include 'dashboards/nav.html' %}
       </div>
 
       <!-- Main Content -->
@@ -32,12 +34,12 @@
 
         <!-- Messages -->
         {% if messages %}
-          {% for message in messages %}
-            <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
-              {{ message }}
-              <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-            </div>
-          {% endfor %}
+        {% for message in messages %}
+        <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
+          {{ message }}
+          <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+        {% endfor %}
         {% endif %}
 
         <!-- Search and Filter Section -->
@@ -47,32 +49,39 @@
               <div class="row g-3">
                 <div class="col-md-4">
                   <label for="search" class="form-label">Search</label>
-                  <input type="text" class="form-control" id="search" name="search" 
-                         placeholder="Search by username, email, name, or mobile..." 
-                         value="{{ request.GET.search|default:'' }}">
+                  <input type="text" class="form-control" id="search" name="search"
+                    placeholder="Search by username, email, name, or mobile..."
+                    value="{{ request.GET.search|default:'' }}">
                 </div>
                 <div class="col-md-3">
                   <label for="status" class="form-label">Status</label>
                   <select class="form-select" id="status" name="status">
                     <option value="">All Status</option>
                     <option value="active" {% if request.GET.status == 'active' %}selected{% endif %}>Active</option>
-                    <option value="inactive" {% if request.GET.status == 'inactive' %}selected{% endif %}>Inactive</option>
+                    <option value="inactive" {% if request.GET.status == 'inactive' %}selected{% endif %}>Inactive
+                    </option>
                   </select>
                 </div>
                 <div class="col-md-3">
                   <label for="role" class="form-label">Role</label>
                   <select class="form-select" id="role" name="role">
                     <option value="">All Roles</option>
-                    <option value="super_admin" {% if request.GET.role == 'super_admin' %}selected{% endif %}>Super Admin</option>
+                    <option value="super_admin" {% if request.GET.role == 'super_admin' %}selected{% endif %}>Super Admin
+                    </option>
                     <option value="admin" {% if request.GET.role == 'admin' %}selected{% endif %}>Admin</option>
                     <option value="doctor" {% if request.GET.role == 'doctor' %}selected{% endif %}>Doctor</option>
-                    <option value="scheduling_staff" {% if request.GET.role == 'scheduling_staff' %}selected{% endif %}>Scheduling Staff</option>
-                    <option value="therapist" {% if request.GET.role == 'therapist' %}selected{% endif %}>Therapist</option>
+                    <option value="scheduling_staff" {% if request.GET.role == 'scheduling_staff' %}selected{% endif %}>
+                      Scheduling Staff</option>
+                    <option value="therapist" {% if request.GET.role == 'therapist' %}selected{% endif %}>Therapist
+                    </option>
                     <option value="nurse" {% if request.GET.role == 'nurse' %}selected{% endif %}>Nurse</option>
                     <option value="patient" {% if request.GET.role == 'patient' %}selected{% endif %}>Patient</option>
-                    <option value="ip_pharmacy_staff" {% if request.GET.role == 'ip_pharmacy_staff' %}selected{% endif %}>IP Pharmacy Staff</option>
-                    <option value="imu_staff" {% if request.GET.role == 'imu_staff' %}selected{% endif %}>IMU Staff</option>
-                    <option value="finance_staff" {% if request.GET.role == 'finance_staff' %}selected{% endif %}>Finance Staff</option>
+                    <option value="ip_pharmacy_staff" {% if request.GET.role == 'ip_pharmacy_staff' %}selected{% endif %}>
+                      IP Pharmacy Staff</option>
+                    <option value="imu_staff" {% if request.GET.role == 'imu_staff' %}selected{% endif %}>IMU Staff
+                    </option>
+                    <option value="finance_staff" {% if request.GET.role == 'finance_staff' %}selected{% endif %}>Finance
+                      Staff</option>
                     <option value="hr" {% if request.GET.role == 'hr' %}selected{% endif %}>HR</option>
                     <option value="housekeeping_staff" {% if request.GET.role == 'housekeeping_staff' %}selected{% endif %}>Housekeeping Staff</option>
                   </select>
@@ -93,7 +102,7 @@
         <!-- User Table -->
         <div class="card">
           <div class="card-header d-flex justify-content-between align-items-center">
-            <h5 class="mb-0">System Users 
+            <h5 class="mb-0">System Users
               <span class="badge bg-primary ms-2">{{ users|length }}</span>
             </h5>
           </div>
@@ -115,7 +124,7 @@
                 </thead>
                 <tbody>
                   {% for user in users %}
-                  <tr {% if not user.is_active %}class="table-secondary" style="opacity: 0.7;"{% endif %}>
+                  <tr {% if not user.is_active %}class="table-secondary" style="opacity: 0.7;" {% endif %}>
                     <td>{{ user.username }}</td>
                     <td>{{ user.get_full_name }}</td>
                     <td>{{ user.email }}</td>
@@ -124,34 +133,37 @@
                     </td>
                     <td>
                       {% if user.custom_role %}
-                        <span class="badge bg-success">{{ user.custom_role.display_name }}</span>
+                      <span class="badge bg-success">{{ user.custom_role.display_name }}</span>
                       {% else %}
-                        <span class="text-muted">None</span>
+                      <span class="text-muted">None</span>
                       {% endif %}
                     </td>
                     <td>{{ user.mobile|default:"-" }}</td>
                     <td>
                       {% if user.role == 'patient' and user.patient_registration_number %}
-                        <span class="badge bg-info">Reg: {{ user.patient_registration_number }}</span>
+                      <span class="badge bg-info">Reg: {{ user.patient_registration_number }}</span>
                       {% elif user.role == 'therapist' and user.therapist_code %}
-                        <span class="badge bg-warning">Code: {{ user.therapist_code }}</span>
+                      <span class="badge bg-warning">Code: {{ user.therapist_code }}</span>
                       {% else %}
-                        <span class="text-muted">-</span>
+                      <span class="text-muted">-</span>
                       {% endif %}
                     </td>
                     <td>
                       {% if user.is_active %}
-                        <span class="badge bg-success">Active</span>
+                      <span class="badge bg-success">Active</span>
                       {% else %}
-                        <span class="badge bg-danger">Inactive</span>
+                      <span class="badge bg-danger">Inactive</span>
                       {% endif %}
                     </td>
                     <td>
-                      <button class="btn btn-sm btn-warning" data-bs-toggle="modal" 
-                              data-bs-target="#editUserModal{{ user.id }}">Edit</button>
-                      <button class="btn btn-sm btn-info" onclick="changeRole({{ user.id }}, '{{ user.username|escapejs }}', '{{ user.role|escapejs }}')">Change Role</button>
+                      <button class="btn btn-sm btn-warning" data-bs-toggle="modal"
+                        data-bs-target="#editUserModal{{ user.id }}">Edit</button>
+                      <button class="btn btn-sm btn-info"
+                        onclick="changeRole({{ user.id }}, '{{ user.username|escapejs }}', '{{ user.role|escapejs }}')">Change
+                        Role</button>
                       {% if user.is_active %}
-                      <form method="post" style="display:inline;" onsubmit="return confirm('Are you sure you want to deactivate user &quot;{{ user.username|escapejs }}&quot;?');">
+                      <form method="post" style="display:inline;"
+                        onsubmit="return confirm('Are you sure you want to deactivate user &quot;{{ user.username|escapejs }}&quot;?');">
                         {% csrf_token %}
                         <input type="hidden" name="action" value="toggle_user_status">
                         <input type="hidden" name="user_id" value="{{ user.id }}">
@@ -159,7 +171,8 @@
                         <button type="submit" class="btn btn-sm btn-secondary">Deactivate</button>
                       </form>
                       {% else %}
-                      <form method="post" style="display:inline;" onsubmit="return confirm('Are you sure you want to activate user &quot;{{ user.username|escapejs }}&quot;?');">
+                      <form method="post" style="display:inline;"
+                        onsubmit="return confirm('Are you sure you want to activate user &quot;{{ user.username|escapejs }}&quot;?');">
                         {% csrf_token %}
                         <input type="hidden" name="action" value="toggle_user_status">
                         <input type="hidden" name="user_id" value="{{ user.id }}">
@@ -167,7 +180,8 @@
                         <button type="submit" class="btn btn-sm btn-success">Activate</button>
                       </form>
                       {% endif %}
-                      <button class="btn btn-sm btn-danger" onclick="deleteUser({{ user.id }}, '{{ user.username|escapejs }}')">Delete</button>
+                      <button class="btn btn-sm btn-danger"
+                        onclick="deleteUser({{ user.id }}, '{{ user.username|escapejs }}')">Delete</button>
                     </td>
                   </tr>
                   {% empty %}
@@ -192,7 +206,7 @@
           <h5 class="modal-title">Add New User</h5>
           <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
         </div>
-        <form method="post">
+        <form method="post" id="addUserForm">
           {% csrf_token %}
           <input type="hidden" name="action" value="create_user">
           <div class="modal-body">
@@ -212,7 +226,7 @@
                 </div>
               </div>
             </div>
-            
+
             <div class="row">
               <div class="col-md-6">
                 <div class="mb-3">
@@ -227,12 +241,13 @@
                 </div>
               </div>
             </div>
-            
+
             <div class="row">
               <div class="col-md-6">
                 <div class="mb-3">
-                  <label for="role" class="form-label">Default Role *</label>
-                  <select class="form-select" id="role" name="role" required>
+                  <label for="add_role" class="form-label">Default Role *</label>
+                  <select class="form-select" id="add_role" name="role" required
+                    onchange="toggleRoleSpecificFields('add_role')">
                     <option value="">Select Role</option>
                     <option value="super_admin">Super Admin (IT Department)</option>
                     <option value="admin">Admin (GM / Management)</option>
@@ -261,7 +276,7 @@
                 </div>
               </div>
             </div>
-            
+
             <div class="row">
               <div class="col-md-6">
                 <div class="mb-3">
@@ -280,7 +295,7 @@
                 </div>
               </div>
             </div>
-            
+
             <div class="row">
               <div class="col-md-6">
                 <div class="mb-3">
@@ -289,13 +304,14 @@
                 </div>
               </div>
             </div>
-            
+
             <!-- Role-specific fields -->
             <div class="row" id="roleSpecificFields" style="display: none;">
               <div class="col-md-6" id="patientRegistrationField" style="display: none;">
                 <div class="mb-3">
                   <label for="patient_registration_number" class="form-label">Patient Registration Number</label>
-                  <input type="text" class="form-control" id="patient_registration_number" name="patient_registration_number">
+                  <input type="text" class="form-control" id="patient_registration_number"
+                    name="patient_registration_number">
                   <div class="form-text">Required for patient role to track therapy sessions</div>
                 </div>
               </div>
@@ -306,6 +322,7 @@
                   <div class="form-text">Required for therapist role to track sessions and schedules</div>
                 </div>
               </div>
+
               <div class="col-md-6" id="employeeCodeField" style="display: none;">
                 <div class="mb-3">
                   <label for="employee_code" class="form-label">Employee Code</label>
@@ -313,6 +330,7 @@
                   <div class="form-text">Required for therapist role for emergency leave API mapping</div>
                 </div>
               </div>
+
               <div class="col-md-6" id="pharmacyDepartmentField" style="display: none;">
                 <div class="mb-3">
                   <label for="department" class="form-label">Department *</label>
@@ -360,39 +378,40 @@
               <div class="col-md-6">
                 <div class="mb-3">
                   <label for="edit_username{{ user.id }}" class="form-label">Username *</label>
-                  <input type="text" class="form-control" id="edit_username{{ user.id }}" 
-                         name="username" value="{{ user.username }}" required>
-                  <div id="edit_username_error_{{ user.id }}" class="text-danger small mt-1" style="display: none;"></div>
+                  <input type="text" class="form-control" id="edit_username{{ user.id }}" name="username"
+                    value="{{ user.username }}" required>
+                  <div id="edit_username_error_{{ user.id }}" class="text-danger small mt-1" style="display: none;">
+                  </div>
                   <small class="text-muted">Must be unique</small>
                 </div>
               </div>
               <div class="col-md-6">
                 <div class="mb-3">
                   <label for="edit_email{{ user.id }}" class="form-label">Email *</label>
-                  <input type="email" class="form-control" id="edit_email{{ user.id }}" 
-                         name="email" value="{{ user.email }}" required>
+                  <input type="email" class="form-control" id="edit_email{{ user.id }}" name="email"
+                    value="{{ user.email }}" required>
                   <div id="edit_email_error_{{ user.id }}" class="text-danger small mt-1" style="display: none;"></div>
                 </div>
               </div>
             </div>
-            
+
             <div class="row">
               <div class="col-md-6">
                 <div class="mb-3">
                   <label for="edit_first_name{{ user.id }}" class="form-label">First Name</label>
-                  <input type="text" class="form-control" id="edit_first_name{{ user.id }}" 
-                         name="first_name" value="{{ user.first_name }}">
+                  <input type="text" class="form-control" id="edit_first_name{{ user.id }}" name="first_name"
+                    value="{{ user.first_name }}">
                 </div>
               </div>
               <div class="col-md-6">
                 <div class="mb-3">
                   <label for="edit_last_name{{ user.id }}" class="form-label">Last Name</label>
-                  <input type="text" class="form-control" id="edit_last_name{{ user.id }}" 
-                         name="last_name" value="{{ user.last_name }}">
+                  <input type="text" class="form-control" id="edit_last_name{{ user.id }}" name="last_name"
+                    value="{{ user.last_name }}">
                 </div>
               </div>
             </div>
-            
+
             <div class="row">
               <div class="col-md-6">
                 <div class="mb-3">
@@ -420,13 +439,13 @@
                 </div>
               </div>
             </div>
-            
+
             <div class="row">
               <div class="col-md-6">
                 <div class="mb-3">
                   <label for="edit_mobile{{ user.id }}" class="form-label">Mobile</label>
-                  <input type="text" class="form-control" id="edit_mobile{{ user.id }}" 
-                         name="mobile" value="{{ user.mobile }}">
+                  <input type="text" class="form-control" id="edit_mobile{{ user.id }}" name="mobile"
+                    value="{{ user.mobile }}">
                 </div>
               </div>
               <div class="col-md-6">
@@ -440,21 +459,21 @@
                 </div>
               </div>
             </div>
-            
+
             <div class="row">
               <div class="col-md-6">
                 <div class="mb-3">
                   <label for="edit_password{{ user.id }}" class="form-label">New Password (Optional)</label>
-                  <input type="password" class="form-control" id="edit_password{{ user.id }}" 
-                         name="password" placeholder="Leave blank to keep current password">
-                  <div class="form-text">Enter a new password to change it. Leave blank to keep the current password.</div>
+                  <input type="password" class="form-control" id="edit_password{{ user.id }}" name="password"
+                    placeholder="Leave blank to keep current password">
+                  <div class="form-text">Enter a new password to change it. Leave blank to keep the current password.
+                  </div>
                 </div>
               </div>
               <div class="col-md-6">
                 <div class="mb-3">
                   <div class="form-check">
-                    <input class="form-check-input" type="checkbox" id="edit_is_active{{ user.id }}" 
-                           name="is_active" {% if user.is_active %}checked{% endif %}>
+                    <input class="form-check-input" type="checkbox" id="edit_is_active{{ user.id }}" name="is_active" {% if user.is_active %}checked{% endif %}>
                     <label class="form-check-label" for="edit_is_active{{ user.id }}">
                       Active User
                     </label>
@@ -462,33 +481,36 @@
                 </div>
               </div>
             </div>
-            
+
             <!-- Role-specific fields for edit -->
             <div class="row" id="editRoleSpecificFields{{ user.id }}" style="display: none;">
               <div class="col-md-6" id="editPatientRegistrationField{{ user.id }}" style="display: none;">
                 <div class="mb-3">
-                  <label for="edit_patient_registration_number{{ user.id }}" class="form-label">Patient Registration Number</label>
-                  <input type="text" class="form-control" id="edit_patient_registration_number{{ user.id }}" 
-                         name="patient_registration_number" value="{{ user.patient_registration_number }}">
+                  <label for="edit_patient_registration_number{{ user.id }}" class="form-label">Patient Registration
+                    Number</label>
+                  <input type="text" class="form-control" id="edit_patient_registration_number{{ user.id }}"
+                    name="patient_registration_number" value="{{ user.patient_registration_number }}">
                   <div class="form-text">Required for patient role to track therapy sessions</div>
                 </div>
               </div>
               <div class="col-md-6" id="editTherapistCodeField{{ user.id }}" style="display: none;">
                 <div class="mb-3">
                   <label for="edit_therapist_code{{ user.id }}" class="form-label">Therapist Code</label>
-                  <input type="text" class="form-control" id="edit_therapist_code{{ user.id }}" 
-                         name="therapist_code" value="{% if user.therapist_profile %}{{ user.therapist_profile.therapist_code }}{% endif %}">
+                  <input type="text" class="form-control" id="edit_therapist_code{{ user.id }}" name="therapist_code"
+                    value="{% if user.therapist_profile %}{{ user.therapist_profile.therapist_code }}{% endif %}">
                   <div class="form-text">Required for therapist role to track sessions and schedules</div>
                 </div>
               </div>
+
               <div class="col-md-6" id="editEmployeeCodeField{{ user.id }}" style="display: none;">
                 <div class="mb-3">
                   <label for="edit_employee_code{{ user.id }}" class="form-label">Employee Code</label>
-                  <input type="text" class="form-control" id="edit_employee_code{{ user.id }}" 
-                         name="employee_code" value="{% if user.therapist_profile %}{{ user.therapist_profile.employee_code }}{% endif %}">
+                  <input type="text" class="form-control" id="edit_employee_code{{ user.id }}" name="employee_code"
+                    value="{% if user.therapist_profile %}{{ user.therapist_profile.employee_code }}{% endif %}">
                   <div class="form-text">Required for therapist role for emergency leave API mapping</div>
                 </div>
               </div>
+
               <div class="col-md-6" id="editPharmacyDepartmentField{{ user.id }}" style="display: none;">
                 <div class="mb-3">
                   <label for="edit_department{{ user.id }}" class="form-label">Department *</label>
@@ -515,7 +537,7 @@
   {% endfor %}
 
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-  
+
 
   <!-- Role Change Modal -->
   <div class="modal fade" id="roleChangeModal" tabindex="-1">
@@ -527,17 +549,18 @@
         </div>
         <div class="modal-body">
           <div class="alert alert-warning">
-            <strong>Warning:</strong> Changing the user role will permanently delete ALL existing profile data and dependent records. This action cannot be undone.
+            <strong>Warning:</strong> Changing the user role will permanently delete ALL existing profile data and
+            dependent records. This action cannot be undone.
           </div>
-          
+
           <div class="mb-3">
             <label class="form-label"><strong>User:</strong> <span id="roleChangeUsername"></span></label>
           </div>
-          
+
           <div class="mb-3">
             <label class="form-label"><strong>Current Role:</strong> <span id="roleChangeCurrentRole"></span></label>
           </div>
-          
+
           <div class="mb-3">
             <label for="newRole" class="form-label">New Role *</label>
             <select class="form-select" id="newRole" required>
@@ -574,18 +597,20 @@
       manageUserActionUrl: "{% url 'authentication:Manage_user' %}"
     };
   </script>
-    <script src="{% static 'js/dashboards_superadmin_Manage_user.js' %}"></script>
-    <script src="{% static 'js/dashboards_nav.js' %}"></script>
-    {% if edit_error_user_id %}
-    <script>
-      document.addEventListener('DOMContentLoaded', function() {
-        var modalEl = document.getElementById('editUserModal{{ edit_error_user_id }}');
-        if (modalEl) {
-          var modal = new bootstrap.Modal(modalEl);
-          modal.show();
-        }
-      });
-    </script>
-    {% endif %}
+  <script src="{% static 'js/dashboards_superadmin_Manage_user.js' %}"></script>
+  <script src="{% static 'js/dashboards_nav.js' %}"></script>
+  {% if edit_error_user_id %}
+  <script>
+    document.addEventListener('DOMContentLoaded', function () {
+      var modalEl = document.getElementById('editUserModal{{ edit_error_user_id }}');
+      if (modalEl) {
+        var modal = new bootstrap.Modal(modalEl);
+        modal.show();
+      }
+    });
+  </script>
+  {% endif %}
+
 </body>
+
 </html>
