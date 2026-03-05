@@ -104,27 +104,26 @@ def create_minimal_profile(user, new_role, profile_data):
         )
     
     elif new_role == 'therapist':
-        # Only mandatory fields are therapist_code and employee_code
-        therapist_profile = TherapistProfile.objects.create(
-            user=user,
-            therapist_code=profile_data.get('therapist_code', f"TH{user.id:06d}"),
-            employee_code=profile_data.get('employee_code', f"EMP{user.id:06d}"),
-            therapist_grade=profile_data.get('therapist_grade', 'Junior')
-        )
-        
-        # Create therapist master record
+        # Retrieve existing TherapistMaster record
         from masters.models import TherapistMaster
-        TherapistMaster.objects.create(
-            user=user,
-            therapist_profile=therapist_profile,
-            therapist_code=profile_data.get('therapist_code', f"TH{user.id:06d}"),
-            therapist_name=user.get_full_name() or user.username,
-            therapist_grade=profile_data.get('therapist_grade', 'Junior'),
-            employee_code=profile_data.get('employee_code', f"EMP{user.id:06d}"),
-            is_bathing_therapist=True
-        )
-        
-        return therapist_profile
+        try:
+            t_master = TherapistMaster.objects.get(therapist_code=profile_data.get('therapist_code'))
+            
+            # Create therapist profile based on master data
+            therapist_profile = TherapistProfile.objects.create(
+                user=user,
+                therapist_code=t_master.therapist_code,
+                employee_code=t_master.employee_code,
+                therapist_grade=t_master.therapist_grade.name if t_master.therapist_grade else 'Junior'
+            )
+            
+            # Map user to therapist master
+            t_master.user = user
+            t_master.therapist_profile = therapist_profile
+            t_master.save()
+            return therapist_profile
+        except TherapistMaster.DoesNotExist:
+            raise Exception("Active Therapist with provided Therapist Code does not exist in Therapist Master.")
     
     elif new_role == 'doctor':
         # Mandatory fields: doctor_id, specialization, department, qualification, experience_years
