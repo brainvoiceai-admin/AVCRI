@@ -73,6 +73,18 @@
                                 <label class="filter-label">Filter by Date</label>
                                 <input type="date" id="draft-date" value="">
                             </div>
+                            <div class="filter-group">
+                                <label class="filter-label">Search</label>
+                                <div style="display: flex; gap: 6px; align-items: center;">
+                                    <input type="text" id="draft-search" placeholder="Search patient, therapy..." style="padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px; min-width: 220px;">
+                                    <button type="button" class="btn btn-outline" id="draft-search-btn" style="padding: 8px 16px; white-space: nowrap;" onclick="draftSearchClick()">
+                                        🔍 Search
+                                    </button>
+                                    <button type="button" class="btn btn-outline" id="draft-search-clear" style="padding: 8px 12px; white-space: nowrap;" onclick="draftSearchClear()">
+                                        ✕ Clear
+                                    </button>
+                                </div>
+                            </div>
                             <button class="btn btn-primary" id="final-schedule-btn">
                                 <span>🎯</span> Final Schedule
                             </button>

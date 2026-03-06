@@ -63,6 +63,8 @@ MODULES = [
     {"name": "ingredient_master_manage",    "display_name": "Ingredient Master",          "url_path": "/Masters/ingredients/",          "url_name": "ingredient_master_manage",    "icon": "\U0001f9ea", "order": 115, "section": "masters"},
     {"name": "treatment_room_master_manage","display_name": "Treatment Room Master",      "url_path": "/Masters/treatment-rooms/",      "url_name": "treatment_room_master_manage","icon": "\U0001f6aa", "order": 116, "section": "masters"},
     {"name": "nursemaster_manage",          "display_name": "Nurse Master",               "url_path": "/Masters/nurses/",               "url_name": "nursemaster_manage",          "icon": "\U0001f468\u200d\u2695\ufe0f", "order": 117, "section": "masters"},
+    {"name": "roomname_manage",            "display_name": "Room Name Master",            "url_path": "/Masters/room-names/",           "url_name": "roomname_manage",             "icon": "\U0001f6aa", "order": 118, "section": "masters"},
+    {"name": "floor_manage",               "display_name": "Floor Master",                "url_path": "/Masters/floors/",               "url_name": "floor_manage",                "icon": "\U0001f3e2", "order": 119, "section": "masters"},
     {"name": "master_tables",              "display_name": "Master Tables",               "url_path": "/Masters/procured",              "url_name": "procured_manage",             "icon": "\U0001f4cb", "order": 18,  "section": "masters"},
 
     # --- Patient Management ---
@@ -111,7 +113,7 @@ ROLES = [
             "therapy_group_manage", "item_group_manage", "therapistgrade_manage",
             "nursetreatment_manage", "ingredient_master_manage",
             "treatment_room_master_manage", "nursemaster_manage",
-            "prescription_usage_manage",
+            "prescription_usage_manage", "roomname_manage", "floor_manage",
         ],
     },
     {

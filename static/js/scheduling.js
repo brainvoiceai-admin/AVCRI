@@ -160,6 +160,17 @@ function setupEventListeners() {
             loadTherapyData('draft', '');
         }
     });
+
+    // Draft search - Enter key
+    var draftSearchInput = document.getElementById('draft-search');
+    if (draftSearchInput) {
+        draftSearchInput.addEventListener('keydown', function (e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                draftSearchClick();
+            }
+        });
+    }
     const failedDateInput = document.getElementById('failed-date');
     if (failedDateInput) {
         failedDateInput.addEventListener('change', function () {
@@ -342,7 +353,17 @@ function updateTable(status, data) {
             }
         });
 
-        // Update therapist table
+        // Sort both arrays by patient name (then reg no) to group same-patient therapies together
+        const patientSort = (a, b) => {
+            const nameA = (a.patient_name || '').toLowerCase();
+            const nameB = (b.patient_name || '').toLowerCase();
+            if (nameA !== nameB) return nameA.localeCompare(nameB);
+            return (a.patient_reg_no || '').localeCompare(b.patient_reg_no || '');
+        };
+        therapistData.sort(patientSort);
+        nurseData.sort(patientSort);
+
+        // Render therapist table with patient grouping
         therapistTbody.innerHTML = '';
         if (therapistData.length === 0) {
             therapistTbody.innerHTML = `
@@ -354,9 +375,20 @@ function updateTable(status, data) {
                         </tr>
                     `;
         } else {
+            let prevPatient = null;
+            let groupIdx = 0;
             therapistData.forEach(item => {
+                const patientKey = (item.patient_name || '') + '|' + (item.patient_reg_no || '');
+                if (patientKey !== prevPatient) {
+                    groupIdx++;
+                    prevPatient = patientKey;
+                }
                 const displayDate = item.date || (item.from_date + ' to ' + item.to_date);
                 const row = document.createElement('tr');
+                row.className = 'draft-row' + (groupIdx % 2 === 0 ? ' patient-group-alt' : '');
+                row.setAttribute('data-patient', (item.patient_name || '').toLowerCase());
+                row.setAttribute('data-therapy', (item.therapy_name || '').toLowerCase());
+                row.setAttribute('data-regno', (item.patient_reg_no || '').toLowerCase());
                 row.innerHTML = `
                             <td>
                                 <div style="font-weight: 500;">${escapeHtml(item.patient_name)}</div>
@@ -371,7 +403,7 @@ function updateTable(status, data) {
             });
         }
 
-        // Update nurse table
+        // Render nurse table with patient grouping
         nurseTbody.innerHTML = '';
         if (nurseData.length === 0) {
             nurseTbody.innerHTML = `
@@ -383,9 +415,20 @@ function updateTable(status, data) {
                         </tr>
                     `;
         } else {
+            let prevPatient = null;
+            let groupIdx = 0;
             nurseData.forEach(item => {
+                const patientKey = (item.patient_name || '') + '|' + (item.patient_reg_no || '');
+                if (patientKey !== prevPatient) {
+                    groupIdx++;
+                    prevPatient = patientKey;
+                }
                 const displayDate = item.date || (item.from_date + ' to ' + item.to_date);
                 const row = document.createElement('tr');
+                row.className = 'draft-row' + (groupIdx % 2 === 0 ? ' patient-group-alt' : '');
+                row.setAttribute('data-patient', (item.patient_name || '').toLowerCase());
+                row.setAttribute('data-therapy', (item.therapy_name || '').toLowerCase());
+                row.setAttribute('data-regno', (item.patient_reg_no || '').toLowerCase());
                 row.innerHTML = `
                             <td>
                                 <div style="font-weight: 500;">${escapeHtml(item.patient_name)}</div>
@@ -402,6 +445,12 @@ function updateTable(status, data) {
         // Update counts
         document.getElementById('draft-therapist-count').textContent = therapistData.length;
         document.getElementById('draft-nurse-count').textContent = nurseData.length;
+
+        // Re-apply search filter if active
+        const searchVal = document.getElementById('draft-search');
+        if (searchVal && searchVal.value.trim()) {
+            filterDraftTables(searchVal.value.trim().toLowerCase());
+        }
 
         return;
     }
@@ -680,6 +729,37 @@ function updateTable(status, data) {
         }
 
         tbody.appendChild(row);
+    });
+}
+
+function draftSearchClick() {
+    var input = document.getElementById('draft-search');
+    var query = input ? input.value.trim().toLowerCase() : '';
+    filterDraftTables(query);
+}
+
+function draftSearchClear() {
+    var input = document.getElementById('draft-search');
+    if (input) input.value = '';
+    filterDraftTables('');
+}
+
+function filterDraftTables(query) {
+    ['draft-therapist-body', 'draft-nurse-body'].forEach(tbodyId => {
+        const tbody = document.getElementById(tbodyId);
+        if (!tbody) return;
+        const rows = tbody.querySelectorAll('tr.draft-row');
+        let visibleCount = 0;
+        rows.forEach(row => {
+            const patient = row.getAttribute('data-patient') || '';
+            const therapy = row.getAttribute('data-therapy') || '';
+            const regno = row.getAttribute('data-regno') || '';
+            const match = !query || patient.includes(query) || therapy.includes(query) || regno.includes(query);
+            row.style.display = match ? '' : 'none';
+            if (match) visibleCount++;
+        });
+        const countId = tbodyId === 'draft-therapist-body' ? 'draft-therapist-count' : 'draft-nurse-count';
+        document.getElementById(countId).textContent = visibleCount;
     });
 }
 

@@ -1,4 +1,4 @@
-﻿from django.shortcuts import render, redirect, get_object_or_404
+from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.http import JsonResponse
@@ -1513,6 +1513,89 @@ def Therapy_Audit_Log(request):
     }
     
     return render(request, 'dashboards/superadmin/Therapy_Audit_Log.html', context)
+
+
+@login_required
+@super_admin_required
+def therapy_audit_log_api(request):
+    """API endpoint to get all filtered therapy audit logs for Excel/PDF export"""
+    timezone.activate(_audit_display_tz())
+    therapy_actions = ['allocate_therapy', 'update_therapy', 'cancel_therapy', 'resume_therapy', 'remove_item', 'view_therapy']
+    audit_logs = AuditLog.objects.filter(action__in=therapy_actions)
+
+    action_filter = request.GET.get('action', '')
+    status_filter = request.GET.get('status', '')
+    user_filter = request.GET.get('user', '')
+    search_query = request.GET.get('search', '')
+    date_from = request.GET.get('date_from', '')
+    date_to = request.GET.get('date_to', '')
+
+    if action_filter:
+        audit_logs = audit_logs.filter(action=action_filter)
+    if status_filter:
+        audit_logs = audit_logs.filter(status=status_filter)
+    if user_filter:
+        audit_logs = audit_logs.filter(user__username__icontains=user_filter)
+    if search_query:
+        audit_logs = audit_logs.filter(
+            models.Q(description__icontains=search_query) |
+            models.Q(user__username__icontains=search_query) |
+            models.Q(object_type__icontains=search_query) |
+            models.Q(additional_data__icontains=search_query)
+        )
+    if date_from:
+        try:
+            from datetime import datetime
+            audit_logs = audit_logs.filter(timestamp__date__gte=datetime.strptime(date_from, '%Y-%m-%d').date())
+        except ValueError:
+            pass
+    if date_to:
+        try:
+            from datetime import datetime
+            audit_logs = audit_logs.filter(timestamp__date__lte=datetime.strptime(date_to, '%Y-%m-%d').date())
+        except ValueError:
+            pass
+
+    audit_tz = _audit_display_tz()
+    logs_data = []
+    for log in audit_logs.select_related('user'):
+        ts = log.timestamp.astimezone(audit_tz) if timezone.is_aware(log.timestamp) else log.timestamp
+        details = ''
+        if log.additional_data and isinstance(log.additional_data, dict):
+            d = log.additional_data
+            parts = []
+            if d.get('patient_reg_no'):
+                parts.append(f"Patient: {d['patient_reg_no']}")
+            if d.get('therapy_name'):
+                parts.append(f"Therapy: {d['therapy_name']}")
+            fr = d.get('from_date') or d.get('cancel_from') or d.get('resume_from') or ''
+            to = d.get('to_date') or d.get('cancel_to') or d.get('resume_to') or ''
+            if fr or to:
+                parts.append(f"Period: {fr} to {to}")
+            if d.get('reason'):
+                parts.append(f"Reason: {d['reason']}")
+            details = ' | '.join(parts)
+
+        object_info = log.object_type or ''
+        if log.object_id:
+            object_info += f" ({log.object_id})"
+
+        logs_data.append({
+            'id': log.id,
+            'user': log.user.username if log.user else 'System',
+            'user_role': log.user.get_role_display() if log.user else '',
+            'action': log.get_action_display(),
+            'description': (log.description or '')[:100],
+            'details': details,
+            'object': object_info,
+            'timestamp': ts.strftime('%b %d, %Y'),
+            'time': ts.strftime('%H:%M:%S'),
+            'ip_address': log.ip_address or '-',
+            'status': log.get_status_display(),
+        })
+
+    return JsonResponse({'success': True, 'data': logs_data, 'count': len(logs_data)})
+
 
 @login_required
 def view_patient_details(request):

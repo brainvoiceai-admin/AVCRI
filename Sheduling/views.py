@@ -4642,7 +4642,7 @@ def get_therapy_data_api(request):
                     'allocation__patient', 'allocation', 'timeslot', 'room'
                 ).prefetch_related(
                     'assignments__therapist'
-                )
+                ).order_by('allocation__patient__pat_name', 'allocation__patient__pat_reg_no', 'allocation__therapy_name')
                 
                 # For 'allocated' status (used by prescription scheduling PDF), we also want to
                 # include zero‑therapist (non‑nurse) therapies. They are auto-scheduled as 'scheduled'
@@ -4911,7 +4911,7 @@ def get_therapy_data_api(request):
                 'patient', 'room', 'timeslot'
             ).prefetch_related(
                 'bookings__assignments__therapist'
-            )
+            ).order_by('patient__pat_name', 'patient__pat_reg_no', 'therapy_name')
             
             if patient_name_filter:
                 allocations = allocations.filter(patient__pat_name__icontains=patient_name_filter)

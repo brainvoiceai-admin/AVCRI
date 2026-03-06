@@ -585,3 +585,10 @@
         }
 .row-rescheduled { background-color: #f3e5f5; }
 .row-rescheduled:hover { background-color: #e1bee7; }
+
+tr.patient-group-alt {
+    background-color: #f0f4ff;
+}
+tr.patient-group-alt:hover {
+    background-color: #e2eafc;
+}

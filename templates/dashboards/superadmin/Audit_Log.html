@@ -318,110 +318,173 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   
   <script>
-    // Simple client-side exports based on current table (no backend changes)
     document.addEventListener('DOMContentLoaded', function () {
       const excelBtn = document.getElementById('audit-export-excel');
       const pdfBtn = document.getElementById('audit-export-pdf');
       const refreshBtn = document.getElementById('audit-refresh-btn');
 
       if (refreshBtn) {
-        refreshBtn.addEventListener('click', function () {
-          window.location.reload();
+        refreshBtn.addEventListener('click', function () { window.location.reload(); });
+      }
+
+      // Build the API URL preserving current filters but dropping "page"
+      function getApiUrl() {
+        const params = new URLSearchParams(window.location.search);
+        params.delete('page');
+        const qs = params.toString();
+        return '/authentication/api/audit-log/' + (qs ? '?' + qs : '');
+      }
+
+      // Fetch ALL filtered rows from the backend API (no pagination)
+      function fetchAllLogs() {
+        return fetch(getApiUrl()).then(r => r.json()).then(data => {
+          if (!data.success || !data.data || data.data.length === 0) {
+            alert('No audit logs found to export.');
+            return null;
+          }
+          return data.data;
         });
       }
 
+      // ---------- EXCEL (all pages) ----------
       if (excelBtn) {
         excelBtn.addEventListener('click', function () {
-          const table = document.querySelector('.card table.table');
-          if (!table) {
-            alert('Audit log table not found.');
-            return;
-          }
+          excelBtn.disabled = true;
+          excelBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Exporting...';
 
-          const rows = [];
-          const headerRow = table.querySelector('thead tr');
-          if (!headerRow) {
-            alert('No header row found for audit log table.');
-            return;
-          }
+          fetchAllLogs().then(function (logs) {
+            excelBtn.disabled = false;
+            excelBtn.innerHTML = '<i class="fas fa-file-excel"></i> Export Excel';
+            if (!logs) return;
 
-          const headers = Array.from(headerRow.querySelectorAll('th')).map(th =>
-            (th.innerText || '').trim()
-          );
-          rows.push(headers);
+            var headers = ['ID', 'User', 'Role', 'Action', 'Description', 'Object', 'Date', 'Time', 'IP Address', 'Status'];
+            var rows = [headers];
 
-          table.querySelectorAll('tbody tr').forEach(tr => {
-            const cols = Array.from(tr.querySelectorAll('td')).map(td =>
-              (td.innerText || '').trim()
-            );
-            rows.push(cols);
+            logs.forEach(function (log) {
+              var desc = log.description || '';
+              if (log.additional_info) desc += (desc ? ' | ' : '') + log.additional_info;
+              rows.push([
+                log.id,
+                log.user,
+                log.user_role || '',
+                log.action,
+                desc,
+                log.object || '-',
+                log.timestamp,
+                log.time,
+                log.ip_address || '-',
+                log.status
+              ]);
+            });
+
+            var wb = XLSX.utils.book_new();
+            var ws = XLSX.utils.aoa_to_sheet(rows);
+
+            // Auto-size columns
+            ws['!cols'] = headers.map(function (_, i) {
+              var max = headers[i].length;
+              rows.forEach(function (r) {
+                var len = String(r[i] || '').length;
+                if (len > max) max = len;
+              });
+              return { wch: Math.min(max + 2, 50) };
+            });
+
+            XLSX.utils.book_append_sheet(wb, ws, 'Audit Logs');
+            var today = new Date().toISOString().split('T')[0];
+            XLSX.writeFile(wb, 'Audit_Logs_' + today + '.xlsx');
+          }).catch(function (err) {
+            excelBtn.disabled = false;
+            excelBtn.innerHTML = '<i class="fas fa-file-excel"></i> Export Excel';
+            alert('Error exporting: ' + err.message);
           });
-
-          if (rows.length <= 1) {
-            alert('No audit logs to export on this page.');
-            return;
-          }
-
-          const wb = XLSX.utils.book_new();
-          const ws = XLSX.utils.aoa_to_sheet(rows);
-          XLSX.utils.book_append_sheet(wb, ws, 'Audit Logs');
-
-          const today = new Date().toISOString().split('T')[0];
-          XLSX.writeFile(wb, `Audit_Logs_${today}.xlsx`);
         });
       }
 
+      // ---------- PDF (all pages) ----------
       if (pdfBtn) {
         pdfBtn.addEventListener('click', function () {
-          const table = document.querySelector('.card table.table');
-          if (!table) {
-            alert('Audit log table not found.');
+          if (!window.jspdf || !window.jspdf.jsPDF) {
+            alert('PDF library not loaded. Please refresh and try again.');
             return;
           }
 
-          const headerRow = table.querySelector('thead tr');
-          if (!headerRow) {
-            alert('No header row found for audit log table.');
-            return;
-          }
+          pdfBtn.disabled = true;
+          pdfBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Generating...';
 
-          const head = [
-            Array.from(headerRow.querySelectorAll('th')).map(th =>
-              (th.innerText || '').trim()
-            ),
-          ];
+          fetchAllLogs().then(function (logs) {
+            pdfBtn.disabled = false;
+            pdfBtn.innerHTML = '<i class="fas fa-file-pdf"></i> Export PDF';
+            if (!logs) return;
 
-          const body = [];
-          table.querySelectorAll('tbody tr').forEach(tr => {
-            const cols = Array.from(tr.querySelectorAll('td')).map(td =>
-              (td.innerText || '').trim()
-            );
-            body.push(cols);
+            var doc = new window.jspdf.jsPDF('l', 'pt', 'a4');
+            var pageW = doc.internal.pageSize.getWidth();
+
+            // Header bar
+            doc.setFillColor(37, 99, 235);
+            doc.rect(0, 0, pageW, 36, 'F');
+            doc.setTextColor(255, 255, 255);
+            doc.setFontSize(16);
+            doc.setFont(undefined, 'bold');
+            doc.text('Audit Log Report', 20, 24);
+            doc.setFontSize(10);
+            doc.setFont(undefined, 'normal');
+            doc.text('Total Records: ' + logs.length, pageW - 20, 24, { align: 'right' });
+
+            var body = logs.map(function (log) {
+              var desc = log.description || '';
+              if (log.additional_info) desc += (desc ? ' | ' : '') + log.additional_info;
+              if (desc.length > 80) desc = desc.substring(0, 77) + '...';
+              return [
+                String(log.id),
+                log.user + (log.user_role ? '\n(' + log.user_role + ')' : ''),
+                log.action,
+                desc || '-',
+                log.object || '-',
+                log.timestamp + ' ' + log.time,
+                log.ip_address || '-',
+                log.status
+              ];
+            });
+
+            doc.autoTable({
+              head: [['ID', 'User', 'Action', 'Description', 'Object', 'Timestamp', 'IP Address', 'Status']],
+              body: body,
+              startY: 46,
+              margin: { left: 20, right: 20 },
+              styles: { fontSize: 7, cellPadding: 3, overflow: 'linebreak' },
+              headStyles: { fillColor: [37, 99, 235], textColor: 255, fontStyle: 'bold', fontSize: 8 },
+              alternateRowStyles: { fillColor: [245, 247, 250] },
+              columnStyles: {
+                0: { cellWidth: 30 },
+                1: { cellWidth: 80 },
+                2: { cellWidth: 65 },
+                3: { cellWidth: 170 },
+                4: { cellWidth: 90 },
+                5: { cellWidth: 90 },
+                6: { cellWidth: 75 },
+                7: { cellWidth: 50 }
+              },
+              didDrawPage: function (data) {
+                var pg = doc.internal.getNumberOfPages();
+                doc.setFontSize(8);
+                doc.setTextColor(128);
+                doc.text(
+                  'Page ' + data.pageNumber + ' of ' + pg + '  |  Generated: ' + new Date().toLocaleString(),
+                  pageW / 2,
+                  doc.internal.pageSize.getHeight() - 10,
+                  { align: 'center' }
+                );
+              }
+            });
+
+            var today = new Date().toISOString().split('T')[0];
+            doc.save('Audit_Logs_' + today + '.pdf');
+          }).catch(function (err) {
+            pdfBtn.disabled = false;
+            pdfBtn.innerHTML = '<i class="fas fa-file-pdf"></i> Export PDF';
+            alert('Error generating PDF: ' + err.message);
           });
-
-          if (body.length === 0) {
-            alert('No audit logs to export on this page.');
-            return;
-          }
-
-          const { jsPDF } = window.jspdf || {};
-          if (!jsPDF || !window.jspdf || !window.jspdf.jsPDF) {
-            alert('PDF library not loaded.');
-            return;
-          }
-
-          const doc = new window.jspdf.jsPDF('l', 'pt', 'a4');
-
-          doc.autoTable({
-            head,
-            body,
-            styles: { fontSize: 8, cellPadding: 3 },
-            headStyles: { fillColor: [37, 99, 235] },
-            startY: 40,
-          });
-
-          const today = new Date().toISOString().split('T')[0];
-          doc.save(`Audit_Logs_${today}.pdf`);
         });
       }
     });

@@ -9,8 +9,6 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet"
         integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
-
-
     <link rel="stylesheet" href="{% static 'css/masters_treatment_room_master_form.css' %}">
     <link rel="stylesheet" href="{% static 'css/dashboards_nav.css' %}">
 </head>
@@ -55,57 +53,57 @@
                             <div class="row">
                                 <div class="col-md-6 mb-3">
                                     <label for="{{ form.room_no.id_for_label }}" class="form-label">
-                                        Room No {% if form.room_no %}<span class="text-danger">*</span>{% endif %}
+                                        Room Number <span class="text-danger">*</span>
                                     </label>
-                                    {% if form.room_no %}
                                     {{ form.room_no }}
                                     {% if form.room_no.errors %}
                                     <div class="text-danger small">
-                                        {% for error in form.room_no.errors %}
-                                        {{ error }}
-                                        {% endfor %}
+                                        {% for error in form.room_no.errors %}{{ error }}{% endfor %}
                                     </div>
                                     {% endif %}
-                                    {% else %}
-                                    <input type="text" class="form-control" value="Auto-generated" readonly>
-                                    <small class="form-text text-muted">Will be generated on save</small>
-                                    {% endif %}
-                                    <small class="form-text text-muted">Unique room identifier (e.g., TR001,
-                                        TRC-101)</small>
+                                    <small class="form-text text-muted">Unique room identifier (mandatory)</small>
                                 </div>
 
                                 <div class="col-md-6 mb-3">
-                                    <label for="{{ form.tr_code.id_for_label }}" class="form-label">
-                                        TR Code
-                                    </label>
-                                    {{ form.tr_code }}
-                                    {% if form.tr_code.errors %}
-                                    <div class="text-danger small">
-                                        {% for error in form.tr_code.errors %}
-                                        {{ error }}
-                                        {% endfor %}
-                                    </div>
+                                    <label class="form-label">TR Code</label>
+                                    {% if object %}
+                                    <input type="text" class="form-control" value="{{ object.tr_code }}" readonly disabled>
+                                    {% else %}
+                                    <input type="text" class="form-control" value="Auto-generated" readonly disabled>
                                     {% endif %}
-                                    <small class="form-text text-muted">Treatment room code (optional)</small>
+                                    <small class="form-text text-muted">Auto-generated unique code</small>
                                 </div>
                             </div>
 
                             <div class="row">
                                 <div class="col-md-6 mb-3">
-                                    <label for="{{ form.floor.id_for_label }}" class="form-label">
-                                        Floor
+                                    <label for="{{ form.room_name.id_for_label }}" class="form-label">
+                                        Room Name
                                     </label>
-                                    {{ form.floor }}
-                                    {% if form.floor.errors %}
+                                    {{ form.room_name }}
+                                    {% if form.room_name.errors %}
                                     <div class="text-danger small">
-                                        {% for error in form.floor.errors %}
-                                        {{ error }}
-                                        {% endfor %}
+                                        {% for error in form.room_name.errors %}{{ error }}{% endfor %}
                                     </div>
                                     {% endif %}
-                                    <small class="form-text text-muted">Floor number or location</small>
+                                    <small class="form-text text-muted">Select from Room Name Master</small>
                                 </div>
 
+                                <div class="col-md-6 mb-3">
+                                    <label for="{{ form.floor_master.id_for_label }}" class="form-label">
+                                        Floor
+                                    </label>
+                                    {{ form.floor_master }}
+                                    {% if form.floor_master.errors %}
+                                    <div class="text-danger small">
+                                        {% for error in form.floor_master.errors %}{{ error }}{% endfor %}
+                                    </div>
+                                    {% endif %}
+                                    <small class="form-text text-muted">Select from Floor Master</small>
+                                </div>
+                            </div>
+
+                            <div class="row">
                                 <div class="col-md-6 mb-3">
                                     <div class="form-check">
                                         {{ form.is_active }}
@@ -113,15 +111,7 @@
                                             Active
                                         </label>
                                     </div>
-                                    {% if form.is_active.errors %}
-                                    <div class="text-danger small">
-                                        {% for error in form.is_active.errors %}
-                                        {{ error }}
-                                        {% endfor %}
-                                    </div>
-                                    {% endif %}
-                                    <small class="form-text text-muted">Only active rooms appear in room
-                                        selection</small>
+                                    <small class="form-text text-muted">Only active rooms appear in room selection</small>
                                 </div>
                             </div>
 
@@ -133,13 +123,10 @@
                                     {{ form.description }}
                                     {% if form.description.errors %}
                                     <div class="text-danger small">
-                                        {% for error in form.description.errors %}
-                                        {{ error }}
-                                        {% endfor %}
+                                        {% for error in form.description.errors %}{{ error }}{% endfor %}
                                     </div>
                                     {% endif %}
-                                    <small class="form-text text-muted">Additional details about the treatment
-                                        room</small>
+                                    <small class="form-text text-muted">Additional details about the treatment room</small>
                                 </div>
                             </div>
 
@@ -167,24 +154,18 @@
                     <div class="card-body">
                         <h6>Treatment Room Master Guidelines</h6>
                         <ul class="list-unstyled small">
-                            <li><i class="fas fa-check text-success me-2"></i>Room numbers must be unique</li>
-                            <li><i class="fas fa-check text-success me-2"></i>Use clear and consistent naming</li>
-                            <li><i class="fas fa-check text-success me-2"></i>Add floor information for better
-                                organization</li>
-                            <li><i class="fas fa-check text-success me-2"></i>Only active rooms are available for
-                                booking</li>
+                            <li><i class="fas fa-check text-success me-2"></i>Room Number is mandatory and must be unique</li>
+                            <li><i class="fas fa-check text-success me-2"></i>TR Code is auto-generated</li>
+                            <li><i class="fas fa-check text-success me-2"></i>Room Name and Floor are selectable from their masters</li>
+                            <li><i class="fas fa-check text-success me-2"></i>Only active rooms are available for booking</li>
                         </ul>
 
                         <hr>
 
                         <h6>Quick Tips</h6>
                         <ul class="list-unstyled small text-muted">
-                            <li><i class="fas fa-lightbulb text-warning me-2"></i>Use descriptive room numbers (e.g.,
-                                TR001, TRC-101)</li>
-                            <li><i class="fas fa-lightbulb text-warning me-2"></i>Include floor information for easy
-                                location</li>
-                            <li><i class="fas fa-lightbulb text-warning me-2"></i>Add descriptions for special room
-                                features</li>
+                            <li><i class="fas fa-lightbulb text-warning me-2"></i>Add Room Names via <a href="{% url 'roomname_manage' %}">Room Name Master</a></li>
+                            <li><i class="fas fa-lightbulb text-warning me-2"></i>Add Floors via <a href="{% url 'floor_manage' %}">Floor Master</a></li>
                         </ul>
                     </div>
                 </div>
@@ -193,7 +174,6 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
-
     <script src="{% static 'js/masters_treatment_room_master_form.js' %}"></script>
     <script src="{% static 'js/dashboards_nav.js' %}"></script>
 </body>
