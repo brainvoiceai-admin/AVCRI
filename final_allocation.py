@@ -19,6 +19,84 @@ def daterange(start_date, end_date):
         d += timedelta(days=1)
 
 # -----------------------
+# Helper: Check if patient is active (not discharged/inactive)
+# -----------------------
+def is_patient_active(pat_reg_no):
+    """
+    Check if a patient is active by querying the external Registration / Treatment tables.
+    
+    IP patients: Registration.pat_status == 'Y' (from therapy_db)
+    OP patients: Treatment.Status == 'ON' (from iptherapy_db)
+    
+    Returns True if the patient is active and scheduling should proceed.
+    Returns True on any lookup error (fail-open: don't block scheduling if DB is unreachable).
+    """
+    if not pat_reg_no:
+        return True  # fail-open
+
+    pat_reg_no_str = str(pat_reg_no).strip()
+
+    # --- Check IP patients (Registration table) ---
+    try:
+        from MySql_Data_pull.models import Registration
+        reg = Registration.objects.using('therapy_db').filter(pat_reg_no=pat_reg_no_str).first()
+        if not reg:
+            # Try numeric lookup (Registration.pat_reg_no is BigIntegerField)
+            try:
+                reg_no_int = int(pat_reg_no_str)
+                reg = Registration.objects.using('therapy_db').filter(pat_reg_no=reg_no_int).first()
+            except (ValueError, TypeError):
+                pass
+        if reg:
+            status = (getattr(reg, 'pat_status', None) or '').strip().upper()
+            if status and status != 'Y':
+                print(f"[PATIENT STATUS] Patient {pat_reg_no_str} is INACTIVE (pat_status='{status}')")
+                return False
+            # pat_status == 'Y' or empty/null → treat as active
+            return True
+    except Exception as e:
+        print(f"[PATIENT STATUS] Error checking IP status for {pat_reg_no_str}: {e}")
+
+    # --- Check OP patients (Treatment table) ---
+    try:
+        from MySql_Data_pull.models import Treatment
+        # Check if patient has active treatment status
+        has_active = Treatment.objects.using('iptherapy_db').filter(
+            Pat_Reg_No=pat_reg_no_str,
+            Status='ON'
+        ).exists()
+        if not has_active:
+            # Try padded versions
+            for pad in [4, 5, 6]:
+                has_active = Treatment.objects.using('iptherapy_db').filter(
+                    Pat_Reg_No=pat_reg_no_str.zfill(pad),
+                    Status='ON'
+                ).exists()
+                if has_active:
+                    break
+        if not has_active:
+            # Check if any Treatment record exists at all
+            has_any = Treatment.objects.using('iptherapy_db').filter(
+                Pat_Reg_No=pat_reg_no_str
+            ).exists()
+            if not has_any:
+                for pad in [4, 5, 6]:
+                    has_any = Treatment.objects.using('iptherapy_db').filter(
+                        Pat_Reg_No=pat_reg_no_str.zfill(pad)
+                    ).exists()
+                    if has_any:
+                        break
+            if has_any and not has_active:
+                print(f"[PATIENT STATUS] OP Patient {pat_reg_no_str} is INACTIVE (Treatment.Status != 'ON')")
+                return False
+    except Exception as e:
+        print(f"[PATIENT STATUS] Error checking OP status for {pat_reg_no_str}: {e}")
+
+    # Default: treat as active (fail-open)
+    return True
+
+
+# -----------------------
 # Helper: Check if treatment requires senior tag
 # -----------------------
 def is_treatment_requiring_senior_tag(therapy_name):
@@ -1634,6 +1712,51 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
     allocation = TherapyAllocation.objects.filter(pk=therapy_allocation_id).first()
     if not allocation:
         return {"error": f"TherapyAllocation id {therapy_allocation_id} not found."}
+
+    # ----- INACTIVE PATIENT CHECK -----
+    # If the patient is inactive, mark all bookings for this date as failed
+    # and skip scheduling entirely.
+    patient_snapshot = getattr(allocation, 'patient', None)
+    pat_reg_no = getattr(patient_snapshot, 'pat_reg_no', None) if patient_snapshot else None
+    if pat_reg_no and not is_patient_active(pat_reg_no):
+        print(f"[PATIENT STATUS] Skipping scheduling for inactive patient {pat_reg_no} "
+              f"(allocation {therapy_allocation_id}, date {target_date})")
+        # Mark all bookings for this allocation+date as failed
+        inactive_bookings = Booking.objects.filter(
+            allocation_id=therapy_allocation_id,
+            date=target_date,
+            status='draft'
+        )
+        tasks = []
+        for booking in inactive_bookings:
+            booking.status = 'failed'
+            booking.failure_reason = 'Patient Inactive'
+            booking.save(update_fields=['status', 'failure_reason', 'updated_at'])
+            tasks.append({
+                "booking_id": booking.pk,
+                "allocation_id": therapy_allocation_id,
+                "date": target_date.isoformat() if hasattr(target_date, 'isoformat') else str(target_date),
+                "therapy_name": allocation.therapy_name,
+                "slot": None,
+                "status": "FAILED",
+                "reason": "Patient Inactive",
+                "room_no": None,
+                "therapists": []
+            })
+        if not tasks:
+            # No draft bookings found, but still report the inactive status
+            tasks.append({
+                "booking_id": None,
+                "allocation_id": therapy_allocation_id,
+                "date": target_date.isoformat() if hasattr(target_date, 'isoformat') else str(target_date),
+                "therapy_name": allocation.therapy_name,
+                "slot": None,
+                "status": "FAILED",
+                "reason": "Patient Inactive",
+                "room_no": None,
+                "therapists": []
+            })
+        return tasks
 
     # Check if this is a nurse treatment - if so, handle it separately
     from Sheduling.nurse_allocation import is_nurse_treatment
@@ -3772,6 +3895,36 @@ def bulk_allocate_for_date(target_date_str):
         pat = getattr(b.allocation, 'patient', None)
         pid = getattr(pat, 'id', None)
         by_patient[pid].append(b)
+
+    # ----- INACTIVE PATIENT CHECK (bulk) -----
+    # Before processing, check each patient's active status.
+    # If inactive, mark all their draft bookings as failed and remove from processing.
+    inactive_patient_ids = set()
+    inactive_failed_count = 0
+    for pid, bookings in list(by_patient.items()):
+        if not bookings:
+            continue
+        # Get pat_reg_no from the first booking's patient snapshot
+        first_pat = getattr(bookings[0].allocation, 'patient', None) if bookings[0].allocation else None
+        pat_reg_no = getattr(first_pat, 'pat_reg_no', None) if first_pat else None
+        if pat_reg_no and not is_patient_active(pat_reg_no):
+            pat_name = getattr(first_pat, 'pat_name', 'Unknown') if first_pat else 'Unknown'
+            print(f"[PATIENT STATUS] Patient {pat_reg_no} ({pat_name}) is INACTIVE - "
+                  f"marking {len(bookings)} draft bookings as failed")
+            for b in bookings:
+                try:
+                    b.status = 'failed'
+                    b.failure_reason = 'Patient Inactive'
+                    b.save(update_fields=['status', 'failure_reason', 'updated_at'])
+                    inactive_failed_count += 1
+                except Exception as e:
+                    print(f"[PATIENT STATUS] Error marking booking {b.pk} as failed: {e}")
+            inactive_patient_ids.add(pid)
+    # Remove inactive patients from the processing map
+    for pid in inactive_patient_ids:
+        del by_patient[pid]
+    if inactive_failed_count > 0:
+        print(f"[PATIENT STATUS] Total inactive patient bookings marked as failed: {inactive_failed_count}")
 
     ordered_bookings = []
     for pid, bookings in by_patient.items():

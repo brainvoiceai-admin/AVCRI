@@ -478,12 +478,16 @@ $(function () {
     const age = patient.pat_age || '—';
     const gender = patient.pat_sex || '—';
     const type = patient.patient_type || '—';
+    const doa = patient.doa || '—';
+    const team = patient.doctor_team || '—';
 
     $('#hdr-pat-reg').html(`<strong style="font-weight: bold; color: var(--primary);">${regNo}</strong>`);
     $('#hdr-pat-room').html(`<strong style="font-weight: bold; color: var(--primary);">${room}</strong>`);
     $('#hdr-pat-age').html(`<strong style="font-weight: bold; color: var(--primary);">${age}</strong>`);
     $('#hdr-pat-gender').html(`<strong style="font-weight: bold; color: var(--primary);">${gender}</strong>`);
     $('#hdr-pat-type').html(`<strong style="font-weight: bold; color: var(--primary);">${type}</strong>`);
+    $('#hdr-pat-doa').html(`<strong style="font-weight: bold; color: var(--primary);">${doa}</strong>`);
+    $('#hdr-pat-team').html(`<strong style="font-weight: bold; color: var(--primary);">${team}</strong>`);
   }
 
   function populatePatientInfo(patient) {
@@ -538,6 +542,8 @@ $(function () {
     $('#hdr-pat-age').html('—');
     $('#hdr-pat-gender').html('—');
     $('#hdr-pat-type').html('—');
+    $('#hdr-pat-doa').html('—');
+    $('#hdr-pat-team').html('—');
     addedPrescriptions = [];
     renderAll();
   }

@@ -16,7 +16,7 @@ from django.shortcuts import render, redirect, get_object_or_404
 from django.http import JsonResponse
 from django.db.models import Q
 from datetime import date
-from MySql_Data_pull.models import Registration, OPMaster, store_Therapy, store_TherapyItem, store_Prescription, store_PrescriptionItem, ItemMaster,Visit
+from MySql_Data_pull.models import Registration, OPMaster, store_Therapy, store_TherapyItem, store_Prescription, store_PrescriptionItem, ItemMaster, Visit, doctor_master, Treatment
 from masters.models import UnitNo, get_staying_room_display_number
 import json
 from .models import Repeated_Visitors, PatientHistory
@@ -120,6 +120,18 @@ def get_patient_details_api(request):
             repeated_status = "No"
         
         display_room_no = get_staying_room_display_number(patient.pat_room_no)
+        # Get doctor name from doctor_master table using doctcode
+        doctor_name = ''
+        if patient.doctcode:
+            try:
+                doctor = doctor_master.objects.using('therapy_db').filter(
+                    Doct_Code=patient.doctcode
+                ).first()
+                if doctor:
+                    doctor_name = doctor.Doct_Name or ''
+            except Exception as e:
+                print(f"Error fetching doctor name for IP: {e}")
+                
         patient_details = {
             'pat_reg_no': patient.pat_reg_no,
             'pat_name': patient.pat_name or 'Unknown',
@@ -130,8 +142,34 @@ def get_patient_details_api(request):
             'pat_room_no': display_room_no or '',
             'pat_ref_id': patient.pat_ref_id or '',
             'repeated_status': repeated_status,
-            'patient_type': 'IP'
+            'patient_type': 'IP',
+            'doctor_name': doctor_name,
+            'doctor_team': patient.dct_team or '',
+            'doa': ''
         }
+        
+        # Fetch DOA for IP - use .values() to avoid utcoffset crash on other DateTimeFields
+        try:
+            reg_no_str = str(pat_reg_no)
+            doa_row = Treatment.objects.using('iptherapy_db').filter(
+                Pat_Reg_No=reg_no_str
+            ).exclude(DOA__isnull=True).order_by('-DOA').values('DOA').first()
+            if not doa_row:
+                for pad in [4, 5, 6]:
+                    doa_row = Treatment.objects.using('iptherapy_db').filter(
+                        Pat_Reg_No=reg_no_str.zfill(pad)
+                    ).exclude(DOA__isnull=True).order_by('-DOA').values('DOA').first()
+                    if doa_row: break
+            
+            if doa_row and doa_row['DOA']:
+                doa_val = doa_row['DOA']
+                patient_details['doa'] = doa_val.strftime('%d/%m/%Y') if hasattr(doa_val, 'strftime') else str(doa_val).split(' ')[0]
+            elif patient.pat_reg_date:
+                patient_details['doa'] = patient.pat_reg_date.strftime('%d/%m/%Y') if hasattr(patient.pat_reg_date, 'strftime') else str(patient.pat_reg_date).split(' ')[0]
+        except Exception as e:
+            print(f"Error fetching DOA for IP: {e}")
+            import traceback
+            traceback.print_exc()
     except Registration.DoesNotExist:
         pass
     except Exception as e:
@@ -155,25 +193,60 @@ def get_patient_details_api(request):
                 op_room_no = ''
                 op_age = 'Unknown'
                 try:
-                    from MySql_Data_pull.models import Treatment
-                    # Try to find treatment record - Pat_Reg_No is primary key (CharField)
-                    # Only fetch Pat_Room_No and Pat_Age to avoid errors with other columns
+                    # Use .values() to avoid utcoffset crash on DateTimeFields
                     pat_reg_no_str = str(pat_reg_no)
-                    treatment = Treatment.objects.using('iptherapy_db').filter(
+                    treatment_info = Treatment.objects.using('iptherapy_db').filter(
                         Pat_Reg_No=pat_reg_no_str
-                    ).only('Pat_Reg_No', 'Pat_Room_No', 'Pat_Age').first()
+                    ).values('Pat_Room_No', 'Pat_Age').first()
                     
-                    if treatment:
-                        if treatment.Pat_Room_No:
-                            op_room_no = str(treatment.Pat_Room_No).strip()
+                    if treatment_info:
+                        if treatment_info.get('Pat_Room_No'):
+                            op_room_no = str(treatment_info['Pat_Room_No']).strip()
                             print(f"[DEBUG] OP patient {pat_reg_no} room number from Treatment: {op_room_no}")
-                        if treatment.Pat_Age:
-                            op_age = str(treatment.Pat_Age).strip()
+                        if treatment_info.get('Pat_Age'):
+                            op_age = str(treatment_info['Pat_Age']).strip()
                             print(f"[DEBUG] OP patient {pat_reg_no} age from Treatment: {op_age}")
                     else:
                         print(f"[DEBUG] No Treatment record found for OP patient {pat_reg_no}")
                 except Exception as e:
                     print(f"Error fetching OP patient details from Treatment model: {e}")
+                    import traceback
+                    traceback.print_exc()
+                
+                # Fetch DOA and Doctor for OP from Treatment table - use .values() to avoid utcoffset crash
+                op_doa = ''
+                op_team = ''
+                op_doctor_name = ''
+                try:
+                    reg_no_str = str(pat_reg_no)
+                    treatment_row = Treatment.objects.using('iptherapy_db').filter(
+                        Pat_Reg_No=reg_no_str
+                    ).exclude(DOA__isnull=True).order_by('-DOA').values('DOA', 'Treat_Doc_Code').first()
+                    
+                    if not treatment_row:
+                        # Try padded versions
+                        for pad in [4, 5, 6]:
+                            treatment_row = Treatment.objects.using('iptherapy_db').filter(
+                                Pat_Reg_No=reg_no_str.zfill(pad)
+                            ).exclude(DOA__isnull=True).order_by('-DOA').values('DOA', 'Treat_Doc_Code').first()
+                            if treatment_row: break
+                    
+                    if treatment_row:
+                        if treatment_row.get('DOA'):
+                            doa_val = treatment_row['DOA']
+                            op_doa = doa_val.strftime('%d/%m/%Y') if hasattr(doa_val, 'strftime') else str(doa_val).split(' ')[0]
+                        if treatment_row.get('Treat_Doc_Code'):
+                            # Fetch doctor name for OP using Treat_Doc_Code
+                            try:
+                                doctor = doctor_master.objects.using('therapy_db').filter(
+                                    Doct_Code=treatment_row['Treat_Doc_Code']
+                                ).first()
+                                if doctor:
+                                    op_doctor_name = doctor.Doct_Name or ''
+                            except Exception as e:
+                                print(f"Error fetching doctor name for OP: {e}")
+                except Exception as e:
+                    print(f"Error fetching treatment details for OP: {e}")
                     import traceback
                     traceback.print_exc()
                 
@@ -187,7 +260,10 @@ def get_patient_details_api(request):
                     'pat_room_no': op_room_no,  # Fetch from Treatment model
                     'pat_ref_id': '',  # OP patients don't have ref ID
                     'repeated_status': repeated_status,
-                    'patient_type': 'OP'
+                    'patient_type': 'OP',
+                    'doctor_name': op_doctor_name,
+                    'doctor_team': op_team,
+                    'doa': op_doa
                 }
         except Exception as e:
             print(f"Error searching OP patients: {e}")

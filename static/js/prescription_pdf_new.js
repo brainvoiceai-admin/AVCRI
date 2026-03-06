@@ -239,42 +239,48 @@ function generatePrescriptionPDF_NEW(prescriptionData, date) {
                 if (!gender && patient.patient_sex) gender = patient.patient_sex;
 
                 // Get doctor name and team from multiple possible sources
-                // Only use doctor name from Registration->doctor_master, not from PrescriptionScheduling
-                const doctorName = patientInfo.doctor_name || patient.doctor_name || patient.details?.doctor_name || patient.details?.patient_info?.doctor_name || '';
-                const doctorTeam = patientInfo.doctor_team || patient.doctor_team || patient.details?.doctor_team || patient.details?.patient_info?.doctor_team || '';
+                const doctorName = (patientInfo.doctor_name || patient.doctor_name || patient.details?.doctor_name || patient.details?.patient_info?.doctor_name || '').trim();
+                const doctorTeam = (patientInfo.doctor_team || patient.doctor_team || patient.details?.doctor_team || patient.details?.patient_info?.doctor_team || '').trim();
+                const rawDoa = (patientInfo.doa || patient.doa || patient.details?.patient_info?.doa || patient.details?.doa || '').trim();
+                const cleanDoa = (rawDoa && rawDoa !== '—' && rawDoa !== 'null' && rawDoa !== 'None') ? rawDoa : '';
 
-                console.log('[PDF NEW] Patient:', name, '| Age:', age, '| Gender:', gender, '| Doctor:', doctorName, '| Team:', doctorTeam);
-                console.log('[PDF NEW] Patient data structure:', {
-                    has_details: !!patient.details,
-                    has_patient_info: !!patientInfo,
-                    patient_keys: Object.keys(patient)
+                console.log(`[PDF NEW] Patient: ${name}, Doctor: ${doctorName}, Team: ${doctorTeam}, DOA: ${cleanDoa}`);
+                console.log('[PDF NEW] Data keys:', {
+                    patient: Object.keys(patient),
+                    patientInfo: patientInfo ? Object.keys(patientInfo) : 'null'
                 });
-                console.log('[PDF NEW] FULL PATIENT OBJECT:', JSON.stringify(patient, null, 2).substring(0, 500));
-                console.log('[PDF NEW] PATIENT INFO:', JSON.stringify(patientInfo, null, 2));
 
-                // Patient header
+                // ========== PATIENT HEADER - 2 LINE PROFESSIONAL LAYOUT ==========
                 doc.setFontSize(9);
                 doc.setFont(undefined, 'bold');
-                doc.text(`Room: ${roomNo}`, margin, yPos);
-                doc.text(`Name: ${name}`, margin + 50, yPos);
+
+                // Column positions for professional alignment
+                const col1 = margin;        // Room / Gender
+                const col2 = margin + 40;   // Name / Age
+                const col3 = margin + 65;   // Doctor
+                const col4 = margin + 155;  // Doctor Team
+                const col5 = margin + 215;  // DOA
+
+                // Line 1: Room and Name
+                doc.text(`Room: ${roomNo}`, col1, yPos);
+                doc.text(`Name: ${name}`, col2, yPos);
                 yPos += 5;
-                doc.text(`Gender: ${gender || 'N/A'}`, margin, yPos);
-                doc.text(`Age: ${age || 'N/A'}`, margin + 30, yPos);
-                // Display doctor and doctor team on the same line if available
-                if (doctorName && doctorTeam) {
-                    doc.text(`Doctor: ${doctorName}`, margin + 60, yPos);
-                    doc.text(`Doctor Team: ${doctorTeam}`, margin + 135, yPos);
-                    yPos += 5;
-                } else if (doctorName) {
-                    doc.text(`Doctor: ${doctorName}`, margin + 60, yPos);
-                    yPos += 5;
-                } else if (doctorTeam) {
-                    doc.text(`Doctor Team: ${doctorTeam}`, margin + 60, yPos);
-                    yPos += 5;
-                } else {
-                    yPos += 5;
+
+                // Line 2: Gender, Age, Doctor, Doctor Team, DOA
+                doc.text(`Gender: ${gender || 'N/A'}`, col1, yPos);
+                doc.text(`Age: ${age || 'N/A'}`, col2, yPos);
+                if (doctorName) {
+                    doc.text(`Doctor: ${doctorName}`, col3, yPos);
                 }
-                yPos += 3;
+                if (doctorTeam && doctorTeam !== '—') {
+                    doc.text(`Doctor Team: ${doctorTeam}`, col4, yPos);
+                }
+                if (cleanDoa) {
+                    doc.text(`DOA: ${cleanDoa}`, col5, yPos);
+                }
+                yPos += 5;
+
+                yPos += 3; // Extra gap before table
 
                 // ========== PRESCRIPTION TABLE WITH BORDERS ==========
                 const prescriptionGroups = patient.details?.prescription_groups || [];

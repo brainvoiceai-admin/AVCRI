@@ -313,13 +313,71 @@ def get_prescription_details_api(request):
         except PatientSnapshot.DoesNotExist:
             return JsonResponse({'error': 'Patient not found'}, status=404)
         
+        from MySql_Data_pull.models import Registration, doctor_master, Treatment
+        
         # Get patient info
         patient_info = {
             'name': patient.pat_name or 'Unknown',
             'registration_no': patient.pat_reg_no,
             'room_no': getattr(patient, 'pat_room_no', None),
-            'doctor_name': None  # Will be set from prescription if available
+            'doctor_name': None,
+            'doctor_team': '',
+            'doa': ''
         }
+        
+        # Fetch additional patient info from Registration and Treatment tables
+        try:
+            reg_no = patient.pat_reg_no
+            reg_no_str = str(reg_no)
+            digits_only = ''.join(c for c in reg_no_str if c.isdigit())
+            
+            if digits_only:
+                reg_no_int = int(digits_only)
+                registration = Registration.objects.using('therapy_db').filter(
+                    pat_reg_no=reg_no_int
+                ).first()
+                
+                if registration:
+                    patient_info['doctor_team'] = registration.dct_team or ''
+                    
+                    # Fetch DOA
+                    treatment = Treatment.objects.using('iptherapy_db').filter(
+                        Pat_Reg_No=digits_only
+                    ).order_by('-DOA').first()
+                    
+                    # Try with leading zeros fallback
+                    if not treatment:
+                        for pad in [4, 5, 6]:
+                            treatment = Treatment.objects.using('iptherapy_db').filter(
+                                Pat_Reg_No=digits_only.zfill(pad)
+                            ).order_by('-DOA').first()
+                            if treatment: break
+                            
+                    if treatment and treatment.DOA:
+                        if hasattr(treatment.DOA, 'strftime'):
+                            patient_info['doa'] = treatment.DOA.strftime('%d/%m/%Y')
+                        else:
+                            patient_info['doa'] = str(treatment.DOA).split(' ')[0]
+                    elif registration.pat_reg_date:
+                        if hasattr(registration.pat_reg_date, 'strftime'):
+                            patient_info['doa'] = registration.pat_reg_date.strftime('%d/%m/%Y')
+                        else:
+                            patient_info['doa'] = str(registration.pat_reg_date).split(' ')[0]
+                            
+                    # Fetch doctor name
+                    if registration.doctcode:
+                        doctor = doctor_master.objects.using('therapy_db').filter(
+                            Doct_Code=registration.doctcode
+                        ).first()
+                        if not doctor:
+                            doctor = doctor_master.objects.using('therapy_db').filter(
+                                Doct_Code=str(registration.doctcode).zfill(4)
+                            ).first()
+                        
+                        if doctor:
+                            patient_info['doctor_name'] = doctor.Doct_Name or ''
+        except Exception as e:
+            print(f"Error fetching additional patient info in procurement API: {e}")
         
         # ===== DEPARTMENT FILTERING =====
         # For super_admin: show all prescriptions (no department filter)

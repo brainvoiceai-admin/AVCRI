@@ -14,6 +14,17 @@ def daterange(start_date, end_date):
         d += timedelta(days=1)
 
 # -----------------------
+# Helper: Check if patient is active (not discharged/inactive)
+# Reuse from final_allocation to avoid duplication
+# -----------------------
+try:
+    from final_allocation import is_patient_active
+except ImportError:
+    # Fallback: if import fails, fail-open (treat all patients as active)
+    def is_patient_active(pat_reg_no):
+        return True
+
+# -----------------------
 # Helper: Check if treatment requires senior tag
 # -----------------------
 def is_treatment_requiring_senior_tag(therapy_name):
@@ -3117,6 +3128,49 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
     allocation = TherapyAllocation.objects.filter(pk=therapy_allocation_id).first()
     if not allocation:
         return {"error": f"TherapyAllocation id {therapy_allocation_id} not found."}
+
+    # ----- INACTIVE PATIENT CHECK -----
+    # If the patient is inactive, mark all bookings for this date as failed
+    # and skip rescheduling entirely.
+    patient_snapshot = getattr(allocation, 'patient', None)
+    pat_reg_no = getattr(patient_snapshot, 'pat_reg_no', None) if patient_snapshot else None
+    if pat_reg_no and not is_patient_active(pat_reg_no):
+        print(f"[PATIENT STATUS] Skipping rescheduling for inactive patient {pat_reg_no} "
+              f"(allocation {therapy_allocation_id}, date {target_date})")
+        # Mark all bookings for this allocation+date as failed
+        inactive_bookings = Booking.objects.filter(
+            allocation_id=therapy_allocation_id,
+            date=target_date,
+        ).exclude(status='failed')
+        tasks = []
+        for booking in inactive_bookings:
+            booking.status = 'failed'
+            booking.failure_reason = 'Patient Inactive'
+            booking.save(update_fields=['status', 'failure_reason', 'updated_at'])
+            tasks.append({
+                "booking_id": booking.pk,
+                "allocation_id": therapy_allocation_id,
+                "date": target_date.isoformat() if hasattr(target_date, 'isoformat') else str(target_date),
+                "therapy_name": allocation.therapy_name,
+                "slot": None,
+                "status": "FAILED",
+                "reason": "Patient Inactive",
+                "room_no": None,
+                "therapists": []
+            })
+        if not tasks:
+            tasks.append({
+                "booking_id": None,
+                "allocation_id": therapy_allocation_id,
+                "date": target_date.isoformat() if hasattr(target_date, 'isoformat') else str(target_date),
+                "therapy_name": allocation.therapy_name,
+                "slot": None,
+                "status": "FAILED",
+                "reason": "Patient Inactive",
+                "room_no": None,
+                "therapists": []
+            })
+        return tasks
 
     bookings_qs = Booking.objects.filter(allocation_id=therapy_allocation_id, date=target_date)
     if not bookings_qs.exists():

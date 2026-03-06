@@ -847,3 +847,59 @@ tr.action-cancelled td:first-child {
     gap: 8px;
   }
 }
+
+/* Patient Treatment History Table Styles */
+.history-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+  background-color: #fff;
+  border: 1px solid var(--border-light);
+}
+
+.history-table thead th {
+  background-color: var(--primary);
+  color: white;
+  padding: 12px 10px;
+  text-align: left;
+  font-weight: 600;
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  white-space: nowrap;
+}
+
+.history-table tbody td {
+  padding: 12px 10px;
+  border-bottom: 1px solid var(--border-light);
+  color: var(--text-medium);
+  vertical-align: middle;
+}
+
+.history-table tbody tr:nth-child(even) {
+  background-color: #f8fcf9;
+}
+
+.history-table tbody tr:hover {
+  background-color: #f1f8f1;
+}
+
+.history-table .col-date {
+  width: 100px;
+}
+
+.history-table .col-treatment {
+  min-width: 150px;
+}
+
+.history-table .col-therapist {
+  min-width: 200px;
+}
+
+.history-table .col-room {
+  width: 110px;
+}
+
+.history-table .col-troom {
+  width: 110px;
+}
