@@ -937,7 +937,7 @@ def allocate_therapists(
 
     def check_grade_availability(grade, gender_filter):
         """Check how many therapists of a specific grade and gender are available"""
-        candidates_qs = TherapistMaster.objects.filter(therapist_grade__name__iexact=grade)
+        candidates_qs = TherapistMaster.objects.filter(therapist_grade__name__iexact=grade, is_active=True)
         
         if gender_filter:
             candidates_qs = candidates_qs.filter(therapist_gender__istartswith=gender_filter[0])
@@ -978,9 +978,9 @@ def allocate_therapists(
         print(f"[DEBUG Continuity] Checking {len(last_therapists)} previous therapists for continuity: {last_therapists}")
         for code in last_therapists:
             try:
-                t = TherapistMaster.objects.get(therapist_code=code)
+                t = TherapistMaster.objects.get(therapist_code=code, is_active=True)
             except TherapistMaster.DoesNotExist:
-                print(f"[DEBUG Continuity] Therapist {code} not found in database - skipping")
+                print(f"[DEBUG Continuity] Therapist {code} not found or inactive in database - skipping")
                 continue
 
             t_name = getattr(t, "therapist_name", "")
@@ -1119,7 +1119,7 @@ def allocate_therapists(
         # --- END STRICT GENDER MATCHING LOGIC ---
 
         # Search for therapists with strict gender matching
-        candidates_qs = TherapistMaster.objects.filter(therapist_grade__name=current_grade_search)
+        candidates_qs = TherapistMaster.objects.filter(therapist_grade__name=current_grade_search, is_active=True)
         
         # STRICT GENDER FILTER - never remove this
         if desired_gender:
@@ -1296,7 +1296,7 @@ def assign_continuity_therapists_pass1(booking, allocation, target_date, locked_
                 patient_id=patient_id,
             ).select_related('therapist').order_by('priority', 'therapist_id')
             
-            continuity_therapists = [row.therapist for row in continuity_qs if row.therapist]
+            continuity_therapists = [row.therapist for row in continuity_qs if row.therapist and getattr(row.therapist, 'is_active', True)]
             
             if needs_bath_flag:
                 # BATHING CONTINUITY: Always prefer FIRST-DAY bathing therapist when they are available.
@@ -1323,6 +1323,8 @@ def assign_continuity_therapists_pass1(booking, allocation, target_date, locked_
                     therapists_from_start = []
                     for prev_bath_booking in prev_bath_bookings:
                         if not prev_bath_booking.therapist:
+                            continue
+                        if not getattr(prev_bath_booking.therapist, 'is_active', True):
                             continue
                         tid = prev_bath_booking.therapist.pk
                         if tid not in seen_therapist_ids:
@@ -1360,7 +1362,7 @@ def assign_continuity_therapists_pass1(booking, allocation, target_date, locked_
                             print(f"[CONTINUITY PASS1] ✓ Added first-day bathing therapist {original_bathing_therapist.therapist_code} to continuity_therapists so they get assigned")
                         print(f"[CONTINUITY PASS1] ✓ Using bathing therapist {previous_bathing_therapist.therapist_code} (first available from start of therapy)")
                     else:
-                        bath_row = next((row for row in continuity_qs if row.is_bathing and getattr(row.therapist, 'is_bathing_therapist', False)), None)
+                        bath_row = next((row for row in continuity_qs if row.is_bathing and getattr(row.therapist, 'is_bathing_therapist', False) and getattr(row.therapist, 'is_active', True)), None)
                         if most_recent_bathing_therapist and most_recent_bathing_therapist in continuity_therapists:
                             previous_bathing_therapist = most_recent_bathing_therapist
                             print(f"[CONTINUITY PASS1] ⚠ All from start on leave; using most recent {most_recent_bathing_therapist.therapist_code}")
@@ -1369,18 +1371,18 @@ def assign_continuity_therapists_pass1(booking, allocation, target_date, locked_
                             print(f"[CONTINUITY PASS1] ⚠ Using plan bath_row {previous_bathing_therapist.therapist_code} (no one from start available)")
                         else:
                             for t in continuity_therapists:
-                                if getattr(t, 'is_bathing_therapist', False):
+                                if getattr(t, 'is_bathing_therapist', False) and getattr(t, 'is_active', True):
                                     previous_bathing_therapist = t
                                     print(f"[CONTINUITY PASS1] ⚠ Using fallback bathing therapist: {t.therapist_code}")
                                     break
                 except Exception as e:
                     print(f"[CONTINUITY PASS1] Error finding previous bathing therapist: {e}")
-                    bath_row = next((row for row in continuity_qs if row.is_bathing and getattr(row.therapist, 'is_bathing_therapist', False)), None)
+                    bath_row = next((row for row in continuity_qs if row.is_bathing and getattr(row.therapist, 'is_bathing_therapist', False) and getattr(row.therapist, 'is_active', True)), None)
                     if bath_row:
                         previous_bathing_therapist = bath_row.therapist
                     else:
                         for t in continuity_therapists:
-                            if getattr(t, 'is_bathing_therapist', False):
+                            if getattr(t, 'is_bathing_therapist', False) and getattr(t, 'is_active', True):
                                 previous_bathing_therapist = t
                                 break
             
@@ -1460,6 +1462,11 @@ def assign_continuity_therapists_pass1(booking, allocation, target_date, locked_
     for t in continuity_therapists:
         if len(assigned_continuity) >= req_total:
             break
+        
+        # Skip inactive therapists
+        if not getattr(t, 'is_active', True):
+            print(f"[CONTINUITY PASS1] Therapist {t.therapist_code} is INACTIVE - skipping")
+            continue
         
         # Check if therapist is already locked by another booking
         lock_key = (t.id, slot_master.id)
@@ -2112,6 +2119,8 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                         for b in prev_bath_list:
                             if not b.therapist:
                                 continue
+                            if not getattr(b.therapist, 'is_active', True):
+                                continue
                             if b.therapist.pk not in seen_b:
                                 seen_b.add(b.therapist.pk)
                                 therapists_from_start.append(b.therapist)
@@ -2133,22 +2142,22 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                                 break
                         if not previous_bathing_therapist and therapists_from_start:
                             # Fallback: use plan or first from group
-                            bath_row = next((row for row in continuity_qs if row.is_bathing and getattr(row.therapist, 'is_bathing_therapist', False)), None)
+                            bath_row = next((row for row in continuity_qs if row.is_bathing and getattr(row.therapist, 'is_bathing_therapist', False) and getattr(row.therapist, 'is_active', True)), None)
                             if bath_row:
                                 previous_bathing_therapist = bath_row.therapist
                             else:
                                 for t in previous_therapist_group:
-                                    if getattr(t, 'is_bathing_therapist', False):
+                                    if getattr(t, 'is_bathing_therapist', False) and getattr(t, 'is_active', True):
                                         previous_bathing_therapist = t
                                         break
                     except Exception as e:
                         print(f"[CONTINUITY ASSIGN] Error resolving bathing from start: {e}")
-                        bath_row = next((row for row in continuity_qs if row.is_bathing and getattr(row.therapist, 'is_bathing_therapist', False)), None)
+                        bath_row = next((row for row in continuity_qs if row.is_bathing and getattr(row.therapist, 'is_bathing_therapist', False) and getattr(row.therapist, 'is_active', True)), None)
                         if bath_row:
                             previous_bathing_therapist = bath_row.therapist
                         else:
                             for t in previous_therapist_group:
-                                if getattr(t, 'is_bathing_therapist', False):
+                                if getattr(t, 'is_bathing_therapist', False) and getattr(t, 'is_active', True):
                                     previous_bathing_therapist = t
                                     break
 
@@ -2202,6 +2211,8 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                             seen = set()
                             for tb in from_start_qs:
                                 if not tb.therapist:
+                                    continue
+                                if not getattr(tb.therapist, 'is_active', True):
                                     continue
                                 code = getattr(tb.therapist, 'therapist_code', None)
                                 if code and code not in seen and code not in assigned_codes:
@@ -2352,12 +2363,13 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                                                 
                                                 try:
                                                     therapist = TherapistMaster.objects.filter(
-                                                        therapist_code=therapist_code
+                                                        therapist_code=therapist_code,
+                                                        is_active=True
                                                     ).first()
                                                     
                                                     if not therapist:
-                                                        print(f"[CONTINUITY FROM PATIENT HISTORY MODEL]   ✗ Therapist {therapist_code} NOT FOUND in TherapistMaster - skipping")
-                                                        unavailable_therapists.append((therapist_code, "Not found in TherapistMaster"))
+                                                        print(f"[CONTINUITY FROM PATIENT HISTORY MODEL]   ✗ Therapist {therapist_code} NOT FOUND or INACTIVE in TherapistMaster - skipping")
+                                                        unavailable_therapists.append((therapist_code, "Not found or inactive in TherapistMaster"))
                                                         continue
                                                     
                                                     therapist_name = getattr(therapist, 'therapist_name', 'Unknown')
@@ -2508,7 +2520,7 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                 from Patient.models import TherapistBooking
                 # Count therapists with 6 sessions on this date
                 from django.db.models import Count, Q
-                therapists_with_6_sessions = TherapistMaster.objects.annotate(
+                therapists_with_6_sessions = TherapistMaster.objects.filter(is_active=True).annotate(
                     session_count=Count(
                         'therapistbooking',
                         filter=Q(
@@ -2518,7 +2530,7 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                     )
                 ).filter(session_count__gte=6).count()
                 
-                total_therapists = TherapistMaster.objects.count()
+                total_therapists = TherapistMaster.objects.filter(is_active=True).count()
                 
                 # If all therapists have 6 sessions, show specific error
                 if total_therapists > 0 and therapists_with_6_sessions == total_therapists:
@@ -2560,7 +2572,7 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                     if int(therapy_req.get(grade_key,0) or 0) > 0:
                         # Match grade text against stored therapist_grade name
                         grade_text = grade_key.replace('_',' ')
-                        pool = TherapistMaster.objects.filter(therapist_grade__name__icontains=grade_text)
+                        pool = TherapistMaster.objects.filter(therapist_grade__name__icontains=grade_text, is_active=True)
                         available = 0
                         # Use query_slot (resolved SlotMaster) for exact slot match when checking bookings
                         for t in pool:
@@ -2819,7 +2831,8 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                         day_of_week = target_date.weekday()
                         
                         alternative_seniors = TherapistMaster.objects.filter(
-                            therapist_grade__name__in=['Senior Therapist', 'Super Senior Therapist']
+                            therapist_grade__name__in=['Senior Therapist', 'Super Senior Therapist'],
+                            is_active=True
                         ).exclude(
                             therapist_code=senior_therapist.therapist_code
                         )
@@ -4022,11 +4035,12 @@ def bulk_allocate_for_date(target_date_str):
                     for tb in from_start_qs:
                         if not tb.therapist:
                             continue
+                        if not getattr(tb.therapist, 'is_active', True):
+                            continue
                         tid = getattr(tb.therapist, 'id', None)
                         if tid is None or tid in seen_from_start:
                             continue
                         seen_from_start.add(tid)
-                        # Priority -1000, -999, ... so first-appearance order is preserved (first-day therapist gets -1000 and is tried first)
                         continuity_rows.append({
                             "therapist": tb.therapist,
                             "is_bathing": bool(getattr(tb, 'is_bathing', False)),
@@ -4080,6 +4094,9 @@ def bulk_allocate_for_date(target_date_str):
                 for tb in prev_qs:
                     if not tb.therapist:
                         print(f"[CONTINUITY PLAN]   Skipping TherapistBooking {tb.pk} - no therapist")
+                        continue
+                    if not getattr(tb.therapist, 'is_active', True):
+                        print(f"[CONTINUITY PLAN]   Skipping TherapistBooking {tb.pk} - therapist {tb.therapist.therapist_code} is INACTIVE")
                         continue
                     # CRITICAL FIX: Only mark as bathing if the TherapistBooking record actually has is_bathing=True
                     # Do NOT use therapist.is_bathing_therapist attribute - that just means they CAN be a bathing therapist,
@@ -4143,6 +4160,9 @@ def bulk_allocate_for_date(target_date_str):
                     for tb in prev_any_qs:
                         if not tb.therapist:
                             print(f"[CONTINUITY PLAN]   DEBUG: Skipping TherapistBooking {tb.pk} - no therapist")
+                            continue
+                        if not getattr(tb.therapist, 'is_active', True):
+                            print(f"[CONTINUITY PLAN]   DEBUG: Skipping TherapistBooking {tb.pk} - therapist {tb.therapist.therapist_code} is INACTIVE")
                             continue
                         # CRITICAL FIX: Only mark as bathing if the TherapistBooking record actually has is_bathing=True
                         # Do NOT use therapist.is_bathing_therapist attribute - that just means they CAN be a bathing therapist,
