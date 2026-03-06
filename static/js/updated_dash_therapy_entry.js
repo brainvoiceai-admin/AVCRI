@@ -64,10 +64,19 @@ $(function () {
   const $therapySelect = $('#therapy-select'), $slotSelect = $('#slot-select'), $fromDate = $('#from-date-input'), $toDate = $('#to-date-input'), $daysInput = $('#days-input');
 
   // From date: allow only today or future (no past dates)
-  (function setFromDateMin() {
+  // After 5:30 PM, default to tomorrow but still allow today
+  function _todayStr() {
     const d = new Date();
-    const todayStr = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
-    $fromDate.attr('min', todayStr);
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  }
+  function _defaultFromDate() {
+    const now = new Date();
+    const cutoff = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 5, 30, 0);
+    const target = now >= cutoff ? new Date(now.getTime() + 86400000) : now;
+    return target.getFullYear() + '-' + String(target.getMonth() + 1).padStart(2, '0') + '-' + String(target.getDate()).padStart(2, '0');
+  }
+  (function setFromDateMin() {
+    $fromDate.attr('min', _todayStr());
   })();
   const $therapyUsageInput = $('#therapy-usage-input');
   const $procuredSelect = $('#procured-select');
@@ -461,9 +470,9 @@ $(function () {
     $therapySelect.val(null).trigger('change').prop('disabled', false);
     $slotSelect.val('').prop('disabled', false);
     $('#ext-int-select').val('').prop('value', '');
-    // Set from date to current date
-    const today = new Date().toISOString().split('T')[0];
-    $fromDate.val(today).prop('value', today).prop('disabled', false);
+    // Set from date: tomorrow after 5:30 PM, otherwise today
+    var _defDate = _defaultFromDate();
+    $fromDate.val(_defDate).prop('value', _defDate).prop('disabled', false);
     $toDate.val('').prop('value', '').prop('disabled', false);
     $daysInput.val('').prop('value', '');
     $therapyUsageInput.val('').prop('value', '');
@@ -2044,9 +2053,9 @@ $(function () {
     $slotSelect.val('').prop('disabled', false);
     $('#ext-int-select').val('');
 
-    // Clear date fields explicitly - set from date to current date
-    const today = new Date().toISOString().split('T')[0];
-    $fromDate.val(today).prop('value', today).prop('disabled', false);
+    // Clear date fields - set from date: tomorrow after 5:30 PM, otherwise today
+    var _defDate2 = _defaultFromDate();
+    $fromDate.val(_defDate2).prop('value', _defDate2).prop('disabled', false);
     $toDate.val('').prop('value', '').prop('disabled', false);
     $daysInput.val('').prop('value', '');
 
@@ -2458,9 +2467,8 @@ $(function () {
   // Initialize UnitNo dropdown
   loadUnitNumbers();
 
-  // Set from date to current date on page load
-  const today = new Date().toISOString().split('T')[0];
-  $fromDate.val(today);
+  // Set from date: tomorrow after 5:30 PM, otherwise today
+  $fromDate.val(_defaultFromDate());
 
   // Clear form button
   $('#clear-form').on('click', function () {

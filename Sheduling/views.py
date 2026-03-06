@@ -4017,11 +4017,14 @@ def scheduling_dashboard(request):
             ).distinct().select_related('patient', 'room', 'timeslot').prefetch_related('bookings__assignments__therapist')
 
         # Failed: show allocations that have failed bookings for the effective date (query date or today)
+        # Exclude bookings failed due to 'Patient Inactive' — those are not actionable
         failed_allocations = TherapyAllocation.objects.filter(
             from_date__lte=filter_date,
             to_date__gte=filter_date,
             bookings__date=filter_date,
             bookings__status='failed'
+        ).exclude(
+            bookings__failure_reason='Patient Inactive'
         ).distinct().select_related('patient', 'room', 'timeslot').prefetch_related('bookings__assignments__therapist')
         
         # Filter out therapies with zero therapist requirements
@@ -4030,6 +4033,7 @@ def scheduling_dashboard(request):
         # Failed bookings for this date (one row per booking) so template can show exact failure_reason
         failed_bookings = list(
             Booking.objects.filter(date=filter_date, status='failed')
+            .exclude(failure_reason='Patient Inactive')
             .select_related('allocation__patient', 'allocation', 'timeslot', 'room')
             .order_by('allocation_id', 'timeslot_id')
         )
@@ -4053,6 +4057,8 @@ def scheduling_dashboard(request):
         
         failed_allocations = TherapyAllocation.objects.filter(
             bookings__status='failed'
+        ).exclude(
+            bookings__failure_reason='Patient Inactive'
         ).distinct().select_related('patient', 'room', 'timeslot').prefetch_related('bookings__assignments__therapist')
         
         # Filter out therapies with zero therapist requirements
@@ -4657,6 +4663,9 @@ def get_therapy_data_api(request):
                     'assignments__therapist'
                 ).order_by('allocation__patient__pat_name', 'allocation__patient__pat_reg_no', 'allocation__therapy_name')
                 
+                if status_filter in ('failed', 'all'):
+                    base_bookings_qs = base_bookings_qs.exclude(failure_reason='Patient Inactive')
+                
                 # For 'allocated' status (used by prescription scheduling PDF), we also want to
                 # include zero‑therapist (non‑nurse) therapies. They are auto-scheduled as 'scheduled'
                 # after Final Schedule, but we need to include them in the prescription PDF.
@@ -5246,9 +5255,12 @@ def reschedule_all_failed_api(request):
             }, status=400)
         # Get failed bookings for the target date and order them per patient by therapy start date,
         # so that for the same patient, earlier-started therapies get continuity first.
+        # Exclude bookings failed due to 'Patient Inactive' — they are not reschedulable.
         failed_bookings_qs = Booking.objects.filter(
             date=filter_date,
             status='failed'
+        ).exclude(
+            failure_reason='Patient Inactive'
         ).select_related('allocation', 'allocation__patient')
         
         if not failed_bookings_qs.exists():
