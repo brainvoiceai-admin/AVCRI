@@ -37,6 +37,55 @@ def _schedule_lock_upto_date():
     return lock_upto, first_editable
 
 
+def get_room_sort_key(room_no):
+    """
+    Returns a sort key tuple (priority, number, original_string) based on hospital room hierarchy:
+    1. Deluxe Suite (DS)
+    2. Normal Rooms (NR)
+    3. Cottages (CT)
+    4. General Ward Male (MG)
+    5. General Ward Female (FG)
+    6. Cabins (CB)
+    """
+    if not room_no:
+        return (99, 999999, "")  # Put empty rooms at the end
+        
+    s = str(room_no).strip().upper()
+    
+    # Define priorities
+    priorities = {
+        'DS': 1,
+        'NR': 2,
+        'CT': 3,
+        'MG': 4,
+        'FG': 5,
+        'CB': 6
+    }
+    
+    import re
+    # Match prefix and number: find first consecutive letters as prefix, then first consecutive digits as number
+    prefix_match = re.search(r'([A-Z]{2,})', s)
+    num_match = re.search(r'([0-9]+)', s)
+    
+    if prefix_match:
+        prefix = prefix_match.group(1)
+        priority = priorities.get(prefix, 90)
+        num = int(num_match.group(1)) if num_match else 0
+        return (priority, num, s)
+    
+    # Fallback to single letter prefixes
+    prefix_match = re.search(r'([A-Z])', s)
+    if prefix_match:
+        prefix = prefix_match.group(1)
+        priority = priorities.get(prefix, 90)
+        num = int(num_match.group(1)) if num_match else 0
+        return (priority, num, s)
+    
+    return (95, 0, s)
+    
+    return (95, 0, s)  # Non-matching formats
+
+
 def generate_debug_pdf(debug_output, title="Debug Output", date=None):
     """
     Generate a PDF from debug output text.
@@ -4137,6 +4186,23 @@ def scheduling_dashboard(request):
                 nurse_bookings_list.append(booking)
             else:
                 therapist_bookings_list.append(booking)
+    # Apply strict room-based sorting to the template lists
+    def dashboard_sort_key(booking):
+        # 1. Room Hierarchy (STRICT)
+        room_no = get_staying_room_display_number(booking.allocation.patient.pat_room_no)
+        room_key = get_room_sort_key(room_no)
+        # 2. Timeslot
+        ts = booking.timeslot.slot_time.strftime('%H:%M') if booking.timeslot else '23:59'
+        # 3. Patient Name
+        name = (booking.allocation.patient.pat_name or '').lower()
+        # 4. Patient Reg No
+        reg_no = (booking.allocation.patient.pat_reg_no or '').lower()
+        return (room_key, ts, name, reg_no)
+
+    if therapist_bookings_list:
+        therapist_bookings_list.sort(key=dashboard_sort_key)
+    if nurse_bookings_list:
+        nurse_bookings_list.sort(key=dashboard_sort_key)
     
     context = {
         'draft_allocations': draft_allocations,
@@ -4275,10 +4341,33 @@ def user_therapy_entry_dashboard(request):
             nurse_bookings_list.append(booking)
         else:
             therapist_bookings_list.append(booking)
+            
+    # Apply strict room-based sorting to all lists
+    def user_booking_sort_key(booking):
+        # 1. Room Hierarchy (STRICT)
+        room_no = get_staying_room_display_number(booking.allocation.patient.pat_room_no)
+        room_key = get_room_sort_key(room_no)
+        # 2. Timeslot
+        ts = booking.timeslot.slot_time.strftime('%H:%M') if booking.timeslot else '23:59'
+        # 3. Patient Name
+        name = (booking.allocation.patient.pat_name or '').lower()
+        # 4. Patient Reg No
+        reg_no = (booking.allocation.patient.pat_reg_no or '').lower()
+        return (room_key, ts, name, reg_no)
+
+    # Convert querysets to lists and sort
+    draft_bookings = list(draft_bookings)
+    draft_bookings.sort(key=user_booking_sort_key)
+    
+    failed_bookings = list(failed_bookings)
+    failed_bookings.sort(key=user_booking_sort_key)
+    
+    therapist_bookings_list.sort(key=user_booking_sort_key)
+    nurse_bookings_list.sort(key=user_booking_sort_key)
 
     stats = {
-        'draft_count': draft_bookings.count(),
-        'failed_count': failed_bookings.count(),
+        'draft_count': len(draft_bookings),
+        'failed_count': len(failed_bookings),
         'scheduled_count': scheduled_bookings.count(),
     }
 
@@ -4946,155 +5035,166 @@ def get_therapy_data_api(request):
                 # Skip therapies with zero therapist requirements (only for failed status)
                 if status_filter == 'failed' and therapist_requirements(allocation).get("total", 1) == 0:
                     continue
-                    # Check if this treatment requires special senior tag handling
-                    requires_senior_tag = False
-                    if allocation and allocation.therapy_name:
-                        requires_senior_tag = is_treatment_requiring_senior_tag(allocation.therapy_name)
-                    
-                    # Get all therapist codes for this allocation to fetch TherapistMaster records
-                    therapist_codes = []
-                    for booking in allocation.bookings.all():
-                        for assignment in booking.assignments.all():
-                            therapist_codes.append(assignment.therapist.therapist_code)
-                    
-                    # Get all TherapistMaster records for this allocation
-                    from masters.models import TherapistMaster
-                    from Patient.models import TherapistBooking
-                    therapist_masters_dict = {}
-                    if therapist_codes:
-                        therapist_masters_dict = {tm.therapist_code: tm for tm in TherapistMaster.objects.filter(
-                            therapist_code__in=therapist_codes
-                        )}
-                    
-                    # Pre-fetch TherapistBooking records to check bathing status
-                    # Group by booking date and time_slot to get correct is_bathing flags per booking
-                    therapist_bookings_dict = {}
-                    if allocation and therapist_masters_dict:
-                        # Get all bookings for this allocation to process each separately
-                        for booking in allocation.bookings.all():
-                            booking_date = booking.date
-                            booking_timeslot = booking.timeslot
-                            if not booking_date or not booking_timeslot:
-                                continue
-                            # Get TherapistBooking records for this specific booking (date + time_slot)
-                            tb_list = TherapistBooking.objects.filter(
-                                visit=allocation,
-                                therapist__in=therapist_masters_dict.values(),
-                                date=booking_date,  # Filter by booking date
-                                time_slot=booking_timeslot,  # Filter by booking time_slot
-                                status='BOOKED'
-                            ).select_related('therapist', 'time_slot')
-                            # Create a map: (therapist_code, booking_date, booking_timeslot) -> is_bathing
-                            # This ensures we get the correct is_bathing flag for each booking
-                            for tb in tb_list:
-                                if tb.therapist:
-                                    therapist_code = tb.therapist.therapist_code
-                                    # Use a composite key to handle multiple bookings for same therapist
-                                    key = (therapist_code, booking_date, booking_timeslot.id if booking_timeslot else None)
-                                    therapist_bookings_dict[key] = tb.is_bathing
-                    
-                    # First pass: collect all therapists and identify seniors who are not bathing
-                    therapist_data_list = []
-                    senior_non_bathing_therapist_code = None
-                    
+                
+                # Check if this treatment requires special senior tag handling
+                requires_senior_tag = False
+                if allocation and allocation.therapy_name:
+                    requires_senior_tag = is_treatment_requiring_senior_tag(allocation.therapy_name)
+                
+                # Get all therapist codes for this allocation to fetch TherapistMaster records
+                therapist_codes = []
+                for booking in allocation.bookings.all():
+                    for assignment in booking.assignments.all():
+                        therapist_codes.append(assignment.therapist.therapist_code)
+                
+                # Get all TherapistMaster records for this allocation
+                from masters.models import TherapistMaster
+                from Patient.models import TherapistBooking
+                therapist_masters_dict = {}
+                if therapist_codes:
+                    therapist_masters_dict = {tm.therapist_code: tm for tm in TherapistMaster.objects.filter(
+                        therapist_code__in=therapist_codes
+                    )}
+                
+                # Pre-fetch TherapistBooking records to check bathing status
+                therapist_bookings_dict = {}
+                if allocation and therapist_masters_dict:
                     for booking in allocation.bookings.all():
                         booking_date = booking.date
                         booking_timeslot = booking.timeslot
-                        for assignment in booking.assignments.all():
-                            therapist_code = assignment.therapist.therapist_code
-                            # Get TherapistMaster to check grade (use TherapistMaster, not Patient.models.Therapist)
-                            therapist_master = therapist_masters_dict.get(therapist_code)
-                            
-                            # Get is_bathing flag using composite key (therapist_code, date, time_slot)
-                            key = (therapist_code, booking_date, booking_timeslot.id if booking_timeslot else None)
-                            is_bathing = therapist_bookings_dict.get(key, False)
-                            
-                            # Check if this therapist is senior
-                            is_senior_grade = False
-                            if therapist_master and therapist_master.therapist_grade:
-                                grade_name = getattr(therapist_master.therapist_grade, 'name', '')
-                                if grade_name and 'Senior' in grade_name:
-                                    is_senior_grade = True
-                            
-                            grade_display = ''
-                            if therapist_master and therapist_master.therapist_grade:
-                                grade_display = getattr(therapist_master.therapist_grade, 'name', '')
-                            
-                            therapist_data_list.append({
-                                'code': therapist_code,
-                                'name': assignment.therapist.therapist_name or therapist_code,
-                                'grade': grade_display,
-                                'is_bathing': is_bathing,
-                                'is_senior_grade': is_senior_grade
-                            })
-                            
-                            # For special treatments: identify the first senior who is NOT bathing
-                            if requires_senior_tag and is_senior_grade and not is_bathing and senior_non_bathing_therapist_code is None:
-                                senior_non_bathing_therapist_code = therapist_code
-                    
-                    # Second pass: mark only one senior (non-bathing) with senior tag
-                    therapists = []
-                    for therapist_data in therapist_data_list:
-                        is_senior = False
-                        if requires_senior_tag:
-                            # Only mark the first senior who is not bathing
-                            if therapist_data['code'] == senior_non_bathing_therapist_code:
-                                is_senior = True
+                        if not booking_date or not booking_timeslot:
+                            continue
+                        tb_list = TherapistBooking.objects.filter(
+                            visit=allocation,
+                            therapist__in=therapist_masters_dict.values(),
+                            date=booking_date,
+                            time_slot=booking_timeslot,
+                            status='BOOKED'
+                        ).select_related('therapist', 'time_slot')
+                        for tb in tb_list:
+                            if tb.therapist:
+                                therapist_code = tb.therapist.therapist_code
+                                key = (therapist_code, booking_date, booking_timeslot.id if booking_timeslot else None)
+                                therapist_bookings_dict[key] = tb.is_bathing
+                
+                # First pass: collect all therapists and identify seniors who are not bathing
+                therapist_data_list = []
+                senior_non_bathing_therapist_code = None
+                
+                for booking in allocation.bookings.all():
+                    booking_date = booking.date
+                    booking_timeslot = booking.timeslot
+                    for assignment in booking.assignments.all():
+                        therapist_code = assignment.therapist.therapist_code
+                        therapist_master = therapist_masters_dict.get(therapist_code)
+                        key = (therapist_code, booking_date, booking_timeslot.id if booking_timeslot else None)
+                        is_bathing = therapist_bookings_dict.get(key, False)
                         
-                        therapists.append({
-                            'code': therapist_data['code'],
-                            'name': therapist_data['name'],
-                            'grade': therapist_data['grade'],
-                            'is_senior': is_senior
+                        is_senior_grade = False
+                        if therapist_master and therapist_master.therapist_grade:
+                            grade_name = getattr(therapist_master.therapist_grade, 'name', '')
+                            if grade_name and 'Senior' in grade_name:
+                                is_senior_grade = True
+                        
+                        grade_display = ''
+                        if therapist_master and therapist_master.therapist_grade:
+                            grade_display = getattr(therapist_master.therapist_grade, 'name', '')
+                        
+                        therapist_data_list.append({
+                            'code': therapist_code,
+                            'name': assignment.therapist.therapist_name or therapist_code,
+                            'grade': grade_display,
+                            'is_bathing': is_bathing,
+                            'is_senior_grade': is_senior_grade
                         })
+                        if requires_senior_tag and is_senior_grade and not is_bathing and senior_non_bathing_therapist_code is None:
+                            senior_non_bathing_therapist_code = therapist_code
+                
+                # Second pass: mark only one senior (non-bathing) with senior tag
+                therapists = []
+                for therapist_data in therapist_data_list:
+                    is_senior = False
+                    if requires_senior_tag:
+                        if therapist_data['code'] == senior_non_bathing_therapist_code:
+                            is_senior = True
                     
-                    # Get assigned nurses from all bookings
-                    nurses = []
-                    for booking in allocation.bookings.all():
-                        for nurse_assignment in booking.nurse_assignments.filter(status='assigned'):
-                            nurses.append({
-                                'code': nurse_assignment.nurse.nurse_code,
-                                'name': nurse_assignment.nurse.nurse_name or nurse_assignment.nurse.nurse_code
-                            })
-                    
-                    # Check if this is a nurse treatment
-                    try:
-                        is_nurse_treatment_flag = is_nurse_treatment(allocation.therapy_code, allocation.therapy_name) is not None
-                    except Exception:
-                        is_nurse_treatment_flag = False
-                    
-                    # Get patient room number (staying room) - mapped from StayingRoom
-                    patient_room_no = None
-                    if allocation.patient.pat_room_no:
-                        # Use the global import from line 15
-                        patient_room_no = get_staying_room_display_number(allocation.patient.pat_room_no)
-                    
-                    data.append({
-                        'id': allocation.id,
-                        'patient_id': allocation.patient.id,
-                        'patient_name': allocation.patient.pat_name,
-                        'patient_reg_no': allocation.patient.pat_reg_no,
-                        'therapy_name': allocation.therapy_name,
-                        'therapy_code': allocation.therapy_code,
-                        'from_date': allocation.from_date.isoformat(),
-                        'to_date': allocation.to_date.isoformat(),
-                        'status': allocation.status,  # Keep allocation status but filter was based on booking
-                        'room_no': allocation.room.room_no if allocation.room else None,
-                        'patient_room_no': patient_room_no,
-                        'timeslot': allocation.timeslot.slot_time.strftime('%H:%M') if allocation.timeslot else None,
-                        'therapists': therapists,
-                        'nurses': nurses,
-                        'is_nurse_treatment': is_nurse_treatment_flag,
-                        'created_at': allocation.created_at.isoformat(),
-                        'allocated_by': allocation.allocated_by.username if allocation.allocated_by else None,
-                        'usage': allocation.usage or '',
-                        'usage_array': allocation.usage_array if hasattr(allocation, 'usage_array') and allocation.usage_array else [],
-                        'items_groups': allocation.items_groups if allocation.items_groups else [],
-                        'items': allocation.items if hasattr(allocation, 'items') and allocation.items else [],
-                        'dosage': allocation.dosage if hasattr(allocation, 'dosage') else '',
-                        'uno': allocation.uno if hasattr(allocation, 'uno') else '',
-                        'oil_class': allocation.oil_class or ''
+                    therapists.append({
+                        'code': therapist_data['code'],
+                        'name': therapist_data['name'],
+                        'grade': therapist_data['grade'],
+                        'is_senior': is_senior
                     })
+                
+                # Get assigned nurses from all bookings
+                nurses = []
+                for booking in allocation.bookings.all():
+                    for nurse_assignment in booking.nurse_assignments.filter(status='assigned'):
+                        nurses.append({
+                            'code': nurse_assignment.nurse.nurse_code,
+                            'name': nurse_assignment.nurse.nurse_name or nurse_assignment.nurse.nurse_code
+                        })
+                
+                # Check if this is a nurse treatment
+                try:
+                    is_nurse_treatment_flag = is_nurse_treatment(allocation.therapy_code, allocation.therapy_name) is not None
+                except Exception:
+                    is_nurse_treatment_flag = False
+                
+                # Get patient room number (staying room)
+                patient_room_no = None
+                if allocation.patient.pat_room_no:
+                    patient_room_no = get_staying_room_display_number(allocation.patient.pat_room_no)
+                
+                data.append({
+                    'id': allocation.id,
+                    'patient_id': allocation.patient.id,
+                    'patient_name': allocation.patient.pat_name,
+                    'patient_reg_no': allocation.patient.pat_reg_no,
+                    'therapy_name': allocation.therapy_name,
+                    'therapy_code': allocation.therapy_code,
+                    'from_date': allocation.from_date.isoformat(),
+                    'to_date': allocation.to_date.isoformat(),
+                    'status': allocation.status,
+                    'room_no': allocation.room.room_no if allocation.room else None,
+                    'patient_room_no': patient_room_no,
+                    'timeslot': allocation.timeslot.slot_time.strftime('%H:%M') if allocation.timeslot else None,
+                    'therapists': therapists,
+                    'nurses': nurses,
+                    'is_nurse_treatment': is_nurse_treatment_flag,
+                    'created_at': allocation.created_at.isoformat(),
+                    'allocated_by': allocation.allocated_by.username if allocation.allocated_by else None,
+                    'usage': allocation.usage or '',
+                    'usage_array': allocation.usage_array if hasattr(allocation, 'usage_array') and allocation.usage_array else [],
+                    'items_groups': allocation.items_groups if allocation.items_groups else [],
+                    'items': allocation.items if hasattr(allocation, 'items') and allocation.items else [],
+                    'dosage': allocation.dosage if hasattr(allocation, 'dosage') else '',
+                    'uno': allocation.uno if hasattr(allocation, 'uno') else '',
+                    'oil_class': allocation.oil_class or ''
+                })
+        
+        # Apply strict room-based sorting to the final dataset
+        # Sorting criteria:
+        # 1. Timeslot (ascending)
+        # 2. Room Hierarchy (DS -> NR -> CT -> MG -> FG -> CB)
+        # 3. Patient Name
+        # 4. Patient Reg No
+        
+        def final_sort_key(item):
+            # 1. Room Hierarchy (STRICT)
+            room_key = get_room_sort_key(item.get('patient_room_no'))
+            
+            # 2. Timeslot
+            ts = item.get('timeslot') or '23:59'
+            
+            # 3. Patient Name
+            name = (item.get('patient_name') or '').lower()
+            
+            # 4. Patient Reg No
+            reg_no = (item.get('patient_reg_no') or '').lower()
+            
+            return (room_key, ts, name, reg_no)
+            
+        data.sort(key=final_sort_key)
         
         return JsonResponse({
             'success': True,

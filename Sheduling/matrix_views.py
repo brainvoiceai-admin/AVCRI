@@ -6,8 +6,9 @@ from django.utils.dateparse import parse_date
 from django.views.decorators.http import require_http_methods
 from .decorators import api_access_required, scheduling_access_required
 from Patient.models import TherapistBooking
-from masters.models import TherapistLeaveMaster, EmergencyLeave
+from masters.models import TherapistLeaveMaster, EmergencyLeave, get_staying_room_display_number
 from Sheduling.models import PatientSnapshot
+from .views import get_room_sort_key
 
 @api_access_required
 def continuity_matrix_api(request):
@@ -186,19 +187,25 @@ def continuity_matrix_api(request):
                     patient_info[pat_key] = {
                         'id': pat_key,
                         'name': b.visit.patient.pat_name or f"ID {pat_key}",
-                        'reg_no': b.visit.patient.pat_reg_no or str(pat_key)
+                        'reg_no': b.visit.patient.pat_reg_no or str(pat_key),
+                        'room_no': b.visit.patient.pat_room_no or '—'
                     }
                 elif b.patient_id:
                     try:
                         s = PatientSnapshot.objects.filter(id=b.patient_id).first()
                         if s:
-                            patient_info[pat_key] = {'id': pat_key, 'name': s.pat_name or f"ID {pat_key}", 'reg_no': s.pat_reg_no or str(pat_key)}
+                            patient_info[pat_key] = {
+                                'id': pat_key, 
+                                'name': s.pat_name or f"ID {pat_key}", 
+                                'reg_no': s.pat_reg_no or str(pat_key),
+                                'room_no': s.pat_room_no or '—'
+                            }
                         else:
-                            patient_info[pat_key] = {'id': pat_key, 'name': f"ID {pat_key}", 'reg_no': str(pat_key)}
+                            patient_info[pat_key] = {'id': pat_key, 'name': f"ID {pat_key}", 'reg_no': str(pat_key), 'room_no': '—'}
                     except:
-                        patient_info[pat_key] = {'id': pat_key, 'name': f"ID {pat_key}", 'reg_no': str(pat_key)}
+                        patient_info[pat_key] = {'id': pat_key, 'name': f"ID {pat_key}", 'reg_no': str(pat_key), 'room_no': '—'}
                 else:
-                    patient_info[pat_key] = {'id': pat_key, 'name': f"ID {pat_key}", 'reg_no': str(pat_key)}
+                    patient_info[pat_key] = {'id': pat_key, 'name': f"ID {pat_key}", 'reg_no': str(pat_key), 'room_no': '—'}
 
             t_id = b.therapist.id
             # Normalize therapy name to prevent fragmentation
@@ -253,7 +260,17 @@ def continuity_matrix_api(request):
             curr += timedelta(days=1)
             
         # Sort patient keys by name for consistent grouping and display
-        sorted_pat_keys = sorted(schedule_map.keys(), key=lambda pk: patient_info[pk]['name'].lower())
+        # Sort patient keys by room hierarchy, then name, then reg_no
+        def pat_matrix_sort_key(pk):
+            p = patient_info[pk]
+            # Use display number for hierarchy consistent with other views
+            room_no = get_staying_room_display_number(p.get('room_no'))
+            room_key = get_room_sort_key(room_no)
+            name = (p.get('name') or '').lower()
+            reg_no = (p.get('reg_no') or '').lower()
+            return (room_key, name, reg_no)
+            
+        sorted_pat_keys = sorted(schedule_map.keys(), key=pat_matrix_sort_key)
         
         for pat_key in sorted_pat_keys:
             therapies_data = schedule_map[pat_key]
