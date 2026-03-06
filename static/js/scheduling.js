@@ -325,6 +325,52 @@ function format12Hour(time24) {
     return `${hours}:${minutes} ${period}`;
 }
 
+// Helper to get sort key for room hierarchy
+function getRoomSortKey(roomNo) {
+    if (!roomNo) return [99, 999999, ""];
+    
+    const s = String(roomNo).trim().toUpperCase();
+    const priorities = {
+        'DS': 1,
+        'NR': 2,
+        'CT': 3,
+        'MG': 4,
+        'FG': 5,
+        'CB': 6
+    };
+    
+    // Match prefix (letters) and number (digits) separately for robustness
+    const prefixMatch = s.match(/([A-Z]{2,})/);
+    const numMatch = s.match(/([0-9]+)/);
+    
+    if (prefixMatch) {
+        const prefix = prefixMatch[1];
+        const priority = priorities[prefix] || 90;
+        const num = numMatch ? parseInt(numMatch[1], 10) : 0;
+        return [priority, num, s];
+    }
+    
+    // Fallback for single letter codes
+    const singleMatch = s.match(/([A-Z])/);
+    if (singleMatch) {
+        const prefix = singleMatch[1];
+        const priority = priorities[prefix] || 90;
+        const num = numMatch ? parseInt(numMatch[1], 10) : 0;
+        return [priority, num, s];
+    }
+    return [95, 0, s];
+}
+
+// Comparison function for rooms
+function compareRooms(a, b) {
+    const keyA = getRoomSortKey(a);
+    const keyB = getRoomSortKey(b);
+    
+    if (keyA[0] !== keyB[0]) return keyA[0] - keyB[0];
+    if (keyA[1] !== keyB[1]) return keyA[1] - keyB[1];
+    return keyA[2].localeCompare(keyB[2]);
+}
+
 function updateTable(status, data) {
     // For draft status, separate into therapist and nurse treatments
     if (status === 'draft') {
@@ -353,15 +399,29 @@ function updateTable(status, data) {
             }
         });
 
-        // Sort both arrays by patient name (then reg no) to group same-patient therapies together
-        const patientSort = (a, b) => {
+        // Sort both arrays by room hierarchy (STRICT), then timeslot, then name
+        const draftSort = (a, b) => {
+            // 1. Room Hierarchy
+            const roomA = a.patient_room_no || '';
+            const roomB = b.patient_room_no || '';
+            const roomCompare = compareRooms(roomA, roomB);
+            if (roomCompare !== 0) return roomCompare;
+
+            // 2. Timeslot (preferred)
+            const timeA = a.timeslot || '23:59';
+            const timeB = b.timeslot || '23:59';
+            if (timeA !== timeB) return timeA.localeCompare(timeB);
+
+            // 3. Patient Name
             const nameA = (a.patient_name || '').toLowerCase();
             const nameB = (b.patient_name || '').toLowerCase();
             if (nameA !== nameB) return nameA.localeCompare(nameB);
+            
+            // 4. Reg No
             return (a.patient_reg_no || '').localeCompare(b.patient_reg_no || '');
         };
-        therapistData.sort(patientSort);
-        nurseData.sort(patientSort);
+        therapistData.sort(draftSort);
+        nurseData.sort(draftSort);
 
         // Render therapist table with patient grouping
         therapistTbody.innerHTML = '';
@@ -397,7 +457,7 @@ function updateTable(status, data) {
                             <td>${escapeHtml(item.therapy_name)}</td>
                             <td>${displayDate}</td>
                             <td>${format12Hour(item.timeslot) || '—'}</td>
-                            <td>${item.room_no || '—'}</td>
+                            <td>${item.patient_room_no || '—'}</td>
                         `;
                 therapistTbody.appendChild(row);
             });
@@ -490,6 +550,25 @@ function updateTable(status, data) {
                 therapistData.push(item);
             }
         });
+
+        // Sort both arrays: 1. Timeslot (Chronological), 2. Room Hierarchy (STRICT), 3. Name
+        const scheduledSort = (a, b) => {
+            // 1. Timeslot (Chronological)
+            const timeA = a.timeslot || '23:59';
+            const timeB = b.timeslot || '23:59';
+            if (timeA !== timeB) return timeA.localeCompare(timeB);
+
+            // 2. Room Hierarchy
+            const roomA = a.patient_room_no || '';
+            const roomB = b.patient_room_no || '';
+            const roomCompare = compareRooms(roomA, roomB);
+            if (roomCompare !== 0) return roomCompare;
+
+            // 3. Patient Name
+            return (a.patient_name || '').toLowerCase().localeCompare((b.patient_name || '').toLowerCase());
+        };
+        therapistData.sort(scheduledSort);
+        nurseData.sort(scheduledSort);
 
         // Update therapist table
         therapistTbody.innerHTML = '';
@@ -766,7 +845,7 @@ function filterDraftTables(query) {
 function updateStats(data) {
     const draftCount = data.filter(item => item.status === 'draft').length;
     const failedCount = data.filter(item => item.status === 'failed').length;
-    const scheduledCount = data.filter(item => item.status === 'allocated').length;
+    const scheduledCount = data.filter(item => item.status === 'allocated' || item.status === 'scheduled').length;
 
     document.getElementById('draft-count').textContent = draftCount;
     document.getElementById('failed-count').textContent = failedCount;
@@ -1435,9 +1514,16 @@ function generateTherapyPDF(therapyData, date) {
             return minutesA - minutesB;
         });
 
-        // Sort treatments within each slot by patient name
+        // Sort treatments within each slot by room hierarchy, then patient name
         sortedSlots.forEach(slot => {
             slotGroups[slot].sort((a, b) => {
+                // 1. Room Hierarchy
+                const roomA = a.patient_room_no || '';
+                const roomB = b.patient_room_no || '';
+                const roomCompare = compareRooms(roomA, roomB);
+                if (roomCompare !== 0) return roomCompare;
+
+                // 2. Patient Name
                 return (a.patient_name || '').localeCompare(b.patient_name || '');
             });
         });
