@@ -793,7 +793,7 @@ def allocate_therapists(date, time_slot, therapy_requirements, last_therapists=N
     if last_therapists:
         for code in last_therapists:
             try:
-                t = TherapistMaster.objects.get(therapist_code=code)
+                t = TherapistMaster.objects.get(therapist_code=code, is_active=True)
             except TherapistMaster.DoesNotExist:
                 continue
             therapist_grade_name = get_therapist_grade_name(t)
@@ -891,7 +891,7 @@ def allocate_therapists(date, time_slot, therapy_requirements, last_therapists=N
             # ensuring we satisfy the required number of trainee slots with Junior staff.
         # --- END NEW LOGIC ---
 
-        candidates_qs = TherapistMaster.objects.filter(therapist_grade__name=current_grade_search)
+        candidates_qs = TherapistMaster.objects.filter(therapist_grade__name=current_grade_search, is_active=True)
         
         # STRICT GENDER FILTER - apply in query for efficiency
         if desired_gender:
@@ -1049,7 +1049,7 @@ def allocate_therapists_with_grade_substitution(date, time_slot, therapy_require
     if last_therapists:
         for code in last_therapists:
             try:
-                t = TherapistMaster.objects.get(therapist_code=code)
+                t = TherapistMaster.objects.get(therapist_code=code, is_active=True)
             except TherapistMaster.DoesNotExist:
                 continue
             therapist_grade_name = get_therapist_grade_name(t)
@@ -1142,7 +1142,7 @@ def allocate_therapists_with_grade_substitution(date, time_slot, therapy_require
             if needed <= 0:
                 break
             
-            candidates_qs = TherapistMaster.objects.filter(therapist_grade__name=search_grade)
+            candidates_qs = TherapistMaster.objects.filter(therapist_grade__name=search_grade, is_active=True)
             
             if desired_gender:
                 candidates_qs = candidates_qs.filter(therapist_gender__istartswith=desired_gender[0])
@@ -1339,7 +1339,8 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
             seen_therapist_ids = set()
             for prev_booking in prev_bookings:
                 if prev_booking.therapist:
-                    # prev_booking.therapist is already a TherapistMaster object
+                    if not getattr(prev_booking.therapist, 'is_active', True):
+                        continue
                     therapist_id = prev_booking.therapist.pk
                     if therapist_id not in seen_therapist_ids:
                         previous_therapist_masters.append(prev_booking.therapist)
@@ -1407,6 +1408,8 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
                     for b in prev_bath_list:
                         if not b.therapist:
                             continue
+                        if not getattr(b.therapist, 'is_active', True):
+                            continue
                         if b.therapist.pk not in seen_b:
                             seen_b.add(b.therapist.pk)
                             therapists_from_start.append(b.therapist)
@@ -1426,7 +1429,7 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
                             break
                     if not previous_bathing_therapist:
                         for prev_tm in previous_therapist_group:
-                            if getattr(prev_tm, 'is_bathing_therapist', False):
+                            if getattr(prev_tm, 'is_bathing_therapist', False) and getattr(prev_tm, 'is_active', True):
                                 previous_bathing_therapist = prev_tm
                                 break
             else:
@@ -1448,6 +1451,8 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
                     therapists_from_start = []
                     for b in prev_bath_list:
                         if not b.therapist:
+                            continue
+                        if not getattr(b.therapist, 'is_active', True):
                             continue
                         if b.therapist.pk not in seen_b:
                             seen_b.add(b.therapist.pk)
@@ -1505,6 +1510,8 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
                         seen = set()
                         for tb in from_start_qs:
                             if not tb.therapist:
+                                continue
+                            if not getattr(tb.therapist, 'is_active', True):
                                 continue
                             code = getattr(tb.therapist, 'therapist_code', None)
                             if code and code not in seen and code not in assigned_codes:
@@ -1619,7 +1626,8 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
                                     for therapist_code in therapist_codes_from_date:
                                         try:
                                             therapist = TherapistMaster.objects.filter(
-                                                therapist_code=therapist_code
+                                                therapist_code=therapist_code,
+                                                is_active=True
                                             ).first()
                                             
                                             if therapist:
@@ -1788,7 +1796,7 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
             grade_availability = {}
             for grade, needed in therapy_req.items():
                 if grade in ("super_senior","senior","junior","trainee") and int(therapy_req.get(grade,0) or 0) > 0:
-                    pool = TherapistMaster.objects.filter(therapist_grade__name__icontains=grade.replace('_',' '))
+                    pool = TherapistMaster.objects.filter(therapist_grade__name__icontains=grade.replace('_',' '), is_active=True)
                     available = 0
                     for t in pool:
                         if desired_gender and _tg(t) != desired_gender:
@@ -2018,14 +2026,16 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
                 # When grade substitution is used, also consider Super Senior therapists
                 if use_grade_substitution:
                     alternative_seniors = TherapistMaster.objects.filter(
-                        therapist_grade__name__in=['Senior Therapist', 'Super Senior Therapist']
+                        therapist_grade__name__in=['Senior Therapist', 'Super Senior Therapist'],
+                        is_active=True
                     ).exclude(
                         therapist_code=senior_therapist.therapist_code
                     )
                     print(f"[DEBUG] Grade substitution active: Also considering Super Senior therapists as alternatives")
                 else:
                     alternative_seniors = TherapistMaster.objects.filter(
-                        therapist_grade__name='Senior Therapist'
+                        therapist_grade__name='Senior Therapist',
+                        is_active=True
                     ).exclude(
                         therapist_code=senior_therapist.therapist_code
                     )
@@ -2612,7 +2622,7 @@ def assign_continuity_therapists_pass1(booking, allocation, target_date, locked_
                 patient_id=patient_id,
             ).select_related('therapist').order_by('priority', 'therapist_id')
             
-            continuity_therapists = [row.therapist for row in continuity_qs if row.therapist]
+            continuity_therapists = [row.therapist for row in continuity_qs if row.therapist and getattr(row.therapist, 'is_active', True)]
             
             if needs_bath_flag:
                 # BATHING: Always prefer first-day bathing therapist when available (this allocation + slot only).
@@ -2635,6 +2645,8 @@ def assign_continuity_therapists_pass1(booking, allocation, target_date, locked_
                     therapists_from_start = []
                     for b in prev_bath_list:
                         if not b.therapist:
+                            continue
+                        if not getattr(b.therapist, 'is_active', True):
                             continue
                         if b.therapist.pk not in seen_b:
                             seen_b.add(b.therapist.pk)
@@ -2665,7 +2677,7 @@ def assign_continuity_therapists_pass1(booking, allocation, target_date, locked_
                             print(f"[RESCHEDULE PASS1] ✓ Added first-day bathing therapist {original_bathing_therapist.therapist_code} to continuity_therapists")
                         print(f"[RESCHEDULE PASS1] ✓ Using bathing therapist {previous_bathing_therapist.therapist_code} (from start of therapy)")
                     else:
-                        bath_row = next((row for row in continuity_qs if row.is_bathing and getattr(row.therapist, 'is_bathing_therapist', False)), None)
+                        bath_row = next((row for row in continuity_qs if row.is_bathing and getattr(row.therapist, 'is_bathing_therapist', False) and getattr(row.therapist, 'is_active', True)), None)
                         if most_recent_bathing_therapist and most_recent_bathing_therapist in continuity_therapists:
                             previous_bathing_therapist = most_recent_bathing_therapist
                         elif bath_row:
@@ -2678,12 +2690,12 @@ def assign_continuity_therapists_pass1(booking, allocation, target_date, locked_
                                     break
                 except Exception as e:
                     print(f"[RESCHEDULE PASS1] Error finding bathing from start: {e}")
-                    bath_row = next((row for row in continuity_qs if row.is_bathing and getattr(row.therapist, 'is_bathing_therapist', False)), None)
+                    bath_row = next((row for row in continuity_qs if row.is_bathing and getattr(row.therapist, 'is_bathing_therapist', False) and getattr(row.therapist, 'is_active', True)), None)
                     if bath_row:
                         previous_bathing_therapist = bath_row.therapist
                     else:
                         for t in continuity_therapists:
-                            if getattr(t, 'is_bathing_therapist', False):
+                            if getattr(t, 'is_bathing_therapist', False) and getattr(t, 'is_active', True):
                                 previous_bathing_therapist = t
                                 break
             
@@ -2721,6 +2733,8 @@ def assign_continuity_therapists_pass1(booking, allocation, target_date, locked_
                 seen_therapist_ids = set()
                 for prev_booking in prev_bookings:
                     if prev_booking.therapist:
+                        if not getattr(prev_booking.therapist, 'is_active', True):
+                            continue
                         therapist_id = prev_booking.therapist.pk
                         if therapist_id not in seen_therapist_ids:
                             previous_therapist_masters.append(prev_booking.therapist)
@@ -2744,6 +2758,8 @@ def assign_continuity_therapists_pass1(booking, allocation, target_date, locked_
                             therapists_from_start = []
                             for tb in from_start_qs:
                                 if not tb.therapist:
+                                    continue
+                                if not getattr(tb.therapist, 'is_active', True):
                                     continue
                                 tid = getattr(tb.therapist, 'id', None)
                                 if tid is None or tid in seen_fs:
@@ -2781,6 +2797,8 @@ def assign_continuity_therapists_pass1(booking, allocation, target_date, locked_
                         therapists_from_start = []
                         for prev_bath_booking in prev_bath_bookings:
                             if not prev_bath_booking.therapist:
+                                continue
+                            if not getattr(prev_bath_booking.therapist, 'is_active', True):
                                 continue
                             tid = prev_bath_booking.therapist.pk
                             if tid not in seen_therapist_ids:
@@ -2901,6 +2919,11 @@ def assign_continuity_therapists_pass1(booking, allocation, target_date, locked_
     for t in continuity_therapists:
         if len(assigned_continuity) >= req_total:
             break
+        
+        # Skip inactive therapists
+        if not getattr(t, 'is_active', True):
+            print(f"[RESCHEDULE PASS1] Therapist {t.therapist_code} is INACTIVE - skipping")
+            continue
         
         # Check if therapist is already locked by another booking
         lock_key = (t.id, slot_master.id)

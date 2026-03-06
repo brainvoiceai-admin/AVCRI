@@ -518,7 +518,7 @@ def available_candidates_by_level_and_bathing(target_date, time_slot, level, req
                 except Exception:
                     pass
         
-        qs = TherapistMaster.objects.filter(therapist_grade=search_level)
+        qs = TherapistMaster.objects.filter(therapist_grade=search_level, is_active=True)
         
         # STRICT GENDER FILTER
         if desired_gender:
@@ -657,6 +657,8 @@ def get_continuity_therapists_from_plan(allocation, patient_id, target_date, slo
             if not row.therapist:
                 continue
             t = row.therapist
+            if not getattr(t, 'is_active', True):
+                continue
             if getattr(t, 'pk', None) in em_therapist_ids or getattr(t, 'employee_code', None) in em_emp_codes:
                 continue
             if therapist_has_weekly_leave_on(t, target_date):
@@ -701,6 +703,8 @@ def find_bathing_therapist_from_start_of_therapy(booking, allocation, target_dat
             if not prev_bath_booking.therapist:
                 continue
             t = prev_bath_booking.therapist
+            if not getattr(t, 'is_active', True):
+                continue
             tid = getattr(t, 'pk', None)
             if tid in seen:
                 continue
@@ -748,6 +752,8 @@ def find_previous_therapist_from_start_of_therapy(booking, allocation, target_da
             if not prev_booking.therapist:
                 continue
             t = prev_booking.therapist
+            if not getattr(t, 'is_active', True):
+                continue
             tid = getattr(t, 'pk', None)
             if tid in seen:
                 continue
@@ -809,6 +815,8 @@ def find_previous_bathing_therapist_for_patient(booking, target_date, em_therapi
 
         if prev_bath_booking and prev_bath_booking.therapist:
             cand = prev_bath_booking.therapist
+            if not getattr(cand, 'is_active', True):
+                return None
             if getattr(cand, 'pk', None) in (em_therapist_ids or set()) or getattr(cand, 'employee_code', None) in (em_emp_codes or set()):
                 return None
             if therapist_has_weekly_leave_on(cand, target_date):
@@ -899,6 +907,8 @@ def find_previous_assigned_therapist_for_booking_patient_only(booking, needs_bat
     if not prev or not prev.therapist:
         return None
     cand = prev.therapist
+    if not getattr(cand, 'is_active', True):
+        return None
 
     if same_level and booking.therapist:
         old_grade = get_therapist_grade_name(booking.therapist)

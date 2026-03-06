@@ -263,7 +263,7 @@ def allocate_therapists(date, time_slot, therapy_requirements, last_therapists=N
     if last_therapists:
         for code in last_therapists:
             try:
-                t = TherapistMaster.objects.get(therapist_code=code)
+                t = TherapistMaster.objects.get(therapist_code=code, is_active=True)
             except TherapistMaster.DoesNotExist:
                 continue
 
@@ -283,7 +283,7 @@ def allocate_therapists(date, time_slot, therapy_requirements, last_therapists=N
         if needed <= 0:
             continue
         # base queryset for grade
-        candidates_qs = TherapistMaster.objects.filter(therapist_grade=grade)
+        candidates_qs = TherapistMaster.objects.filter(therapist_grade=grade, is_active=True)
         if needs_bathing:
             candidates_qs = candidates_qs.filter(is_bathing_therapist=True)
 
