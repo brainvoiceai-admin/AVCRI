@@ -143,6 +143,11 @@ def continuity_matrix_api(request):
                 
         populate_leave_cache(from_date, to_date)
         
+        from masters.models import TherapistMaster
+        therapist_bathing_map = dict(
+            TherapistMaster.objects.values_list('id', 'is_bathing_therapist')
+        )
+        
         # 3. Process Bookings to Map
         for b in bookings:
             d_str = b.date.strftime('%Y-%m-%d')
@@ -373,14 +378,16 @@ def continuity_matrix_api(request):
                             
                         # Determine which therapists are missing from the reference
                         missing_set = reference_set - curr_set
-                        has_unexcused_loss = False
-                        if missing_set:
-                            leaves_today = leave_cache.get(date_obj, set())
-                            for m_id in missing_set:
-                                if m_id not in leaves_today:
-                                    has_unexcused_loss = True
-                                    break
-                                    
+                        leaves_today = leave_cache.get(date_obj, set())
+                        
+                        excused_missing = missing_set & leaves_today
+                        excused_bathing_count = sum(1 for m_id in excused_missing if therapist_bathing_map.get(m_id, False))
+                        excused_normal_count = len(excused_missing) - excused_bathing_count
+                        
+                        unexcused_missing = missing_set - leaves_today
+                        unexcused_bathing_count = sum(1 for m_id in unexcused_missing if therapist_bathing_map.get(m_id, False))
+                        unexcused_normal_count = len(unexcused_missing) - unexcused_bathing_count
+                        
                         therapist_list = []
                         # Sort by therapist_id for consistent display order
                         for t_id in sorted(curr_objs.keys()):
@@ -388,12 +395,50 @@ def continuity_matrix_api(request):
                             if t_id in reference_set:
                                 t_data['status'] = 'green'   # Same therapist as reference
                             else:
-                                if has_unexcused_loss:
-                                    t_data['status'] = 'red'   # Different therapist (unexcused change)
-                                elif missing_set:
-                                    t_data['status'] = 'gray'  # Different (on leave — excused)
-                                else:
-                                    t_data['status'] = 'green'  # New therapist (no prior reference)
+                                is_b = therapist_bathing_map.get(t_id, False)
+                                assigned = False
+                                
+                                # 1. Try exact match for excused
+                                if is_b and excused_bathing_count > 0:
+                                    t_data['status'] = 'gray'
+                                    excused_bathing_count -= 1
+                                    assigned = True
+                                elif not is_b and excused_normal_count > 0:
+                                    t_data['status'] = 'gray'
+                                    excused_normal_count -= 1
+                                    assigned = True
+                                    
+                                # 2. Try exact match for unexcused
+                                if not assigned:
+                                    if is_b and unexcused_bathing_count > 0:
+                                        t_data['status'] = 'red'
+                                        unexcused_bathing_count -= 1
+                                        assigned = True
+                                    elif not is_b and unexcused_normal_count > 0:
+                                        t_data['status'] = 'red'
+                                        unexcused_normal_count -= 1
+                                        assigned = True
+                                        
+                                # 3. Fallback for excused (mismatched type)
+                                if not assigned:
+                                    if excused_bathing_count > 0 or excused_normal_count > 0:
+                                        t_data['status'] = 'gray'
+                                        if excused_bathing_count > 0: excused_bathing_count -= 1
+                                        else: excused_normal_count -= 1
+                                        assigned = True
+                                        
+                                # 4. Fallback for unexcused (mismatched type)
+                                if not assigned:
+                                    if unexcused_bathing_count > 0 or unexcused_normal_count > 0:
+                                        t_data['status'] = 'red'
+                                        if unexcused_bathing_count > 0: unexcused_bathing_count -= 1
+                                        else: unexcused_normal_count -= 1
+                                        assigned = True
+                                        
+                                # 5. Excess additions
+                                if not assigned:
+                                    t_data['status'] = 'green'
+                                    
                             therapist_list.append(t_data)
     
                         row['cells'][d_str] = {
