@@ -129,8 +129,8 @@ def continuity_matrix_api(request):
                         leave_cache[curr].add(l.therapist_id)
                     curr += timedelta(days=1)
                     
-            # Weekly leaves
-            weekly = TherapistLeaveMaster.objects.all().values('therapist_id', 'leave_day')
+            # Weekly leaves (only active ones)
+            weekly = TherapistLeaveMaster.objects.filter(is_active=True).values('therapist_id', 'leave_day')
             dow_map = defaultdict(set)
             for w in weekly:
                 dow_map[w['leave_day']].add(w['therapist_id'])
@@ -320,77 +320,13 @@ def continuity_matrix_api(request):
                         reference_set = set()
                         
                         if baseline_set is None:
-                            # DAY 1 LOGIC: Find the most recent previous date for this same visit/allocation
-                            # Use visit_id to scope history to this exact allocation
-                            if isinstance(visit_key, int):
-                                query = TherapistBooking.objects.filter(
-                                    visit_id=visit_key,
-                                    date__lt=date_obj
-                                ).exclude(
-                                    status__icontains='cancel'
-                                ).exclude(
-                                    status__icontains='fail'
-                                )
-                                # Only compare same slot if slot is consistent
-                                if curr_time_slot_id:
-                                    query = query.filter(time_slot_id=curr_time_slot_id)
-                            else:
-                                # Fallback for bookings without visit_id
-                                query = TherapistBooking.objects.filter(
-                                    therapy_name=t_name,
-                                    date__lt=date_obj
-                                ).exclude(
-                                    status__icontains='cancel'
-                                ).exclude(
-                                    status__icontains='fail'
-                                )
-                                if raw_patient_id is not None:
-                                    query = query.filter(patient_id=raw_patient_id)
-                                else:
-                                    query = query.filter(visit__patient__id=pat_key)
-                                if curr_time_slot_id:
-                                    query = query.filter(time_slot_id=curr_time_slot_id)
-                            
-                            last_booking = query.order_by('-date').first()
-                            
-                            if last_booking:
-                                # Get all therapists from that previous date (same visit + slot)
-                                # CRITICAL: Also filter by actual BookingAssignments using Exists
-                                # This prevents ghost therapists from previous dates from bloating the reference set
-                                
-                                valid_assignments_sub_prev = BookingAssignment.objects.filter(
-                                    booking__allocation_id=OuterRef('visit_id'),
-                                    booking__date=OuterRef('date'),
-                                    booking__timeslot_id=OuterRef('time_slot_id'),
-                                    therapist__therapist_code=OuterRef('therapist__therapist_code'),
-                                    status='assigned'
-                                ).exclude(
-                                    booking__status__icontains='cancel'
-                                ).exclude(
-                                    booking__status__icontains='fail'
-                                )
-
-                                prev_query = TherapistBooking.objects.filter(
-                                    visit_id=last_booking.visit_id,
-                                    date=last_booking.date,
-                                    time_slot_id=last_booking.time_slot_id
-                                ).exclude(
-                                    status__icontains='cancel'
-                                ).exclude(
-                                    status__icontains='fail'
-                                ).annotate(
-                                    has_valid_assignment=Exists(valid_assignments_sub_prev)
-                                ).filter(
-                                    has_valid_assignment=True
-                                )
-                                
-                                reference_set = set(prev_query.values_list('therapist_id', flat=True))
-                            else:
-                                reference_set = set()
-                                
+                            # DAY 1 of visibility for this course — establishing the baseline.
+                            # The user explicitly wants the first day to be "original" (green) 
+                            # and serve as the reference for all subsequent days.
+                            reference_set = set() # Empty reference means everything is 'New' (Green)
                             baseline_set = curr_set
                         else:
-                            # Day 2+ — compare against the FIRST day's therapists (baseline)
+                            # Day 2+ — compare against the established baseline from Day 1.
                             reference_set = baseline_set
                             
                         # Determine which therapists are missing from the reference
@@ -409,8 +345,20 @@ def continuity_matrix_api(request):
                         # Sort by therapist_id for consistent display order
                         for t_id in sorted(curr_objs.keys()):
                             t_data = curr_objs[t_id].copy()
-                            if t_id in reference_set:
-                                t_data['status'] = 'green'   # Same therapist as reference
+                            
+                            # Determine if this therapist was on leave during the baseline period
+                            first_day_str = date_cols[0]
+                            first_day_obj = parse_date(first_day_str)
+                            was_on_leave_at_start = t_id in leave_cache.get(first_day_obj, set())
+
+                            if not reference_set:
+                                # No prior booking exists for this treatment — this IS the first session.
+                                # There is no continuity violation; all therapists are original.
+                                t_data['status'] = 'green'
+                            elif t_id in reference_set or was_on_leave_at_start:
+                                # Either the same therapist, OR the original therapist returning from leave.
+                                # Both cases are considered "Green" continuity.
+                                t_data['status'] = 'green'
                             else:
                                 is_b = therapist_bathing_map.get(t_id, False)
                                 assigned = False
@@ -452,7 +400,7 @@ def continuity_matrix_api(request):
                                         else: unexcused_normal_count -= 1
                                         assigned = True
                                         
-                                # 5. Excess additions
+                                # 5. Excess additions (new therapist added beyond reference set)
                                 if not assigned:
                                     t_data['status'] = 'green'
                                     

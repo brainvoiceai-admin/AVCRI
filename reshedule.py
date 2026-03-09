@@ -395,7 +395,7 @@ def get_treatment_rooms_for_staying_room(patient_staying_room):
     # No match found
     return []
 
-def allocate_treatment_room(date, time_slot, last_room=None, therapy_name=None, patient_id=None, patient_staying_room=None, patient=None):
+def allocate_treatment_room(date, time_slot, last_room=None, therapy_name=None, patient_id=None, patient_staying_room=None, patient=None, exclude_booking_id=None):
     """
     Allocate treatment room based on patient staying room rules.
     
@@ -438,13 +438,39 @@ def allocate_treatment_room(date, time_slot, last_room=None, therapy_name=None, 
             # Strictly exclude TRC rooms for OP patients
             if exclude_trc and room_no.upper().startswith('TRC'):
                 return None
-            if not RoomBooking.objects.filter(
+            
+            # Check RoomBooking (Patient app)
+            rb_qs = RoomBooking.objects.filter(
                 room=room,
                 date=date,
                 time_slot=time_slot,
                 status='BOOKED'
-            ).exists():
-                return room
+            )
+            # When rescheduling, exclude the room booking linked to this specific Booking instance or TherapyAllocation
+            # Note: RoomBooking.visit is the Booking instance
+            if exclude_booking_id:
+                rb_qs = rb_qs.exclude(visit_id=exclude_booking_id)
+            
+            if rb_qs.exists():
+                return None
+
+            # Check core Booking (Sheduling app) to avoid master record conflicts
+            try:
+                from Sheduling.models import Booking
+                b_qs = Booking.objects.filter(
+                    room=room,
+                    date=date,
+                    timeslot=time_slot
+                )
+                if exclude_booking_id:
+                    b_qs = b_qs.exclude(pk=exclude_booking_id)
+                
+                if b_qs.exists():
+                    return None
+            except Exception:
+                pass
+                
+            return room
         except TreatmentRoom.DoesNotExist:
             pass
         return None
@@ -1192,9 +1218,91 @@ def allocate_therapists_with_grade_substitution(date, time_slot, therapy_require
     return allocated
 
 # -----------------------
+# FINAL FALLBACK: Therapist allocation with ANY same-gender therapist
+# Ignores all grade requirements and only enforces gender + bathing (if required)
+# -----------------------
+def allocate_therapists_final_gender_fallback(date, time_slot, therapy_requirements, needs_bathing=False, patient_gender=None):
+    """
+    Final fallback allocation function for rescheduling.
+    Allocates any available therapist of the same gender, ignoring grade requirements.
+    """
+    from masters.models import TherapistMaster, TherapistLeaveMaster, EmergencyLeave
+    from Patient.models import TherapistBooking
+
+    day_of_week = date.weekday()
+    allocated = []
+
+    # Normalize patient gender
+    desired_gender = None
+    try:
+        if patient_gender:
+            g = str(patient_gender).strip().lower()
+            if g.startswith('f'):
+                desired_gender = 'female'
+            else:
+                desired_gender = 'male'
+    except Exception:
+        desired_gender = 'male'
+
+    req_total = int(therapy_requirements.get("total", 1) or 1)
+
+    # Preload emergency leaves
+    try:
+        em_leaves_qs = EmergencyLeave.objects.filter(from_date__lte=date, to_date__gte=date)
+        emergency_leave_ids = set(em_leaves_qs.exclude(therapist__isnull=True).values_list('therapist_id', flat=True))
+        emergency_leave_codes = set(em_leaves_qs.exclude(employee_code__isnull=True).values_list('employee_code', flat=True))
+    except Exception:
+        emergency_leave_ids = set()
+        emergency_leave_codes = set()
+
+    def is_on_leave(t):
+        if TherapistLeaveMaster.objects.filter(therapist=t, leave_day=day_of_week).exists():
+            return True
+        if t.id in emergency_leave_ids:
+            return True
+        if t.employee_code and t.employee_code in emergency_leave_codes:
+            return True
+        return False
+
+    # Get all active therapists of matching gender
+    candidates_qs = TherapistMaster.objects.filter(is_active=True)
+    if desired_gender:
+        candidates_qs = candidates_qs.filter(therapist_gender__istartswith=desired_gender[0])
+    
+    # Still respect bathing requirement if needed
+    if needs_bathing:
+        candidates_qs = candidates_qs.filter(is_bathing_therapist=True)
+    
+    candidates_list = list(candidates_qs)
+    scored = []
+    
+    for t in candidates_list:
+        if is_on_leave(t):
+            continue
+        if TherapistBooking.objects.filter(therapist=t, date=date, time_slot=time_slot, status='BOOKED').exists():
+            continue
+        
+        # Session limit check
+        session_count = TherapistBooking.objects.filter(therapist=t, date=date, status='BOOKED').count()
+        if session_count >= 6:
+            continue
+            
+        scored.append((t, session_count))
+
+    # Prefer therapists with fewer sessions
+    scored.sort(key=lambda x: (x[1], getattr(x[0], "id", 0) or 0))
+    
+    for t, _ in scored:
+        if len(allocated) >= req_total:
+            break
+        allocated.append(t)
+        
+    return allocated
+
+# -----------------------
 # Helper: attempt to allocate for a single canonical slot (returns task dict)
 # -----------------------
-def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req, needs_room_flag, needs_bath_flag, used_slots, create_bookings, patient_id, last_allocation, AllocationAttempt):
+def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req, needs_room_flag, needs_bath_flag, used_slots, create_bookings, patient_id, last_allocation, AllocationAttempt, gender_fallback=False):
     """
     Try to allocate room + therapists for this canonical_slot.
     Returns (task_dict, success_bool, reason_if_failed)
@@ -1736,7 +1844,19 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
 
     req_total = int(therapy_req.get("total", 1) or 1)
     
-    # FALLBACK: If normal allocation failed, try with aggressive grade substitution
+    # FINAL GENDER FALLBACK: If requested, use ANY same-gender therapist (ignoring grades)
+    if gender_fallback and len(candidate_therapists) < req_total:
+        print(f"[RESCHEDULE FINAL FALLBACK] Attempting same-gender fallback for slot {requested_slot_value}")
+        candidate_therapists = allocate_therapists_final_gender_fallback(
+            date,
+            canonical_slot,
+            therapy_req,
+            needs_bathing=needs_bath_flag,
+            patient_gender=pat_sex
+        )
+        if len(candidate_therapists) >= req_total:
+            print(f"[RESCHEDULE FINAL FALLBACK] ✓ Fallback successful: found {len(candidate_therapists)} same-gender therapists")
+            
     use_grade_substitution = False
     if len(candidate_therapists) < req_total:
         print(f"[RESCHEDULE FALLBACK] Normal allocation failed: found {len(candidate_therapists)}/{req_total} therapists")
@@ -2194,7 +2314,8 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
                 therapy_name=therapy_name,
                 patient_id=patient_id,
                 patient_staying_room=patient_staying_room,
-                patient=patient_obj
+                patient=patient_obj,
+                exclude_booking_id=booking_id
             )
         except Exception:
             room_candidate = None
@@ -2402,6 +2523,12 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
                     if use_grade_substitution:
                         extra_data["grade_substitution_used"] = True
                         extra_data["substitution_note"] = "Senior/Super Senior therapists used to fill Junior/Trainee requirements"
+                    
+                    # Add gender fallback flag if used
+                    if gender_fallback and len(assigned_therapists) >= req_total:
+                         extra_data["gender_fallback_used"] = True
+                         extra_data["fallback_note"] = "Allocated to same-gender therapists ignoring grade requirements"
+
                     AllocationAttempt.objects.create(visit=None, therapy=None, date=date,
                                                      requested_time_slot=canonical_slot, requested_time_slot_value=requested_slot_value or '',
                                                      status='SUCCESS', reason='slot_booked', extra=extra_data)
@@ -2417,8 +2544,10 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
                 booking.room = room_candidate or booking.room
                 booking.status = 'scheduled'
                 booking.save()
-            except Exception:
-                pass
+            except Exception as bse:
+                # Log error but raise it so transaction rolls back and we don't return success fake task
+                print(f"[RESCHEDULE] ✗ Critical error updating master Booking record: {bse}")
+                raise RuntimeError(f"booking_record_update_failed: {str(bse)}")
 
             # ensure UI-visible assignments are created for scheduled bookings
             if create_bookings:
@@ -2475,6 +2604,12 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
             if use_grade_substitution:
                 task["grade_substitution_used"] = True
                 task["substitution_note"] = "Senior/Super Senior therapists used to fill Junior/Trainee requirements"
+            
+            # Add gender fallback flag if used
+            if gender_fallback and len(assigned_therapists) >= req_total:
+                task["gender_fallback_used"] = True
+                task["fallback_note"] = "Allocated to same-gender therapists ignoring grade requirements"
+            
             return (task, True, None)
     except RuntimeError as rte:
         reason = str(rte)
@@ -3424,6 +3559,7 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
         
         if success:
             tasks.append(task)
+            used_slots.append(canonical_pref)
             any_success = True
             # update last allocation info: attempt to extract room/therapists from task
             try:
@@ -3511,6 +3647,7 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                             task2["preferred_slot"] = pref_val
                             task2["continuity_maintained"] = True
                             tasks.append(task2)
+                            used_slots.append(canonical_slot)
                             any_success = True
                             allocated_here = True
                             print(f"[DEBUG Reschedule] ✓ Successfully allocated to alternate slot {sv} WITH continuity (preferred was {pref_val})")
@@ -3551,6 +3688,7 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                         task2["preferred_slot"] = pref_val
                         task2["continuity_maintained"] = False
                         tasks.append(task2)
+                        used_slots.append(canonical_slot)
                         any_success = True
                         allocated_here = True
                         print(f"[DEBUG Reschedule] ✓ Successfully allocated to alternate slot {sv} WITHOUT continuity (preferred was {pref_val})")
@@ -3561,8 +3699,58 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                 if allocated_here:
                     continue
                 else:
-                    print(f"[DEBUG Reschedule] ✗ All alternate slots failed (both WITH and WITHOUT continuity). Original failure reason: {reason}")
-                # else fall through to return original failure reason task
+                    # TIER 3: FINAL FALLBACK - Try ALL slots with ANY therapist of same gender
+                    # This only happens if standard and grade-substitution attempts failed for all slots
+                    print(f"[RESCHEDULE] ⚡ TIER 3: FINAL FALLBACK - Trying all slots with ANY same-gender therapist for booking {booking_id}")
+                    
+                    # 1. Try preferred slot with final fallback
+                    if canonical_pref:
+                        print(f"[RESCHEDULE] TIER 3: Trying PREFERRED slot {pref_val} with final fallback")
+                        task3, success3, reason3 = attempt_allocate_slot(allocation, booking, target_date, canonical_pref, therapy_req, needs_room_flag, needs_bath_flag, used_slots, create_bookings, patient_id, last_allocation, AllocationAttempt, gender_fallback=True)
+                        if success3:
+                            task3["gender_fallback_used"] = True
+                            tasks.append(task3)
+                            used_slots.append(canonical_pref)
+                            any_success = True
+                            allocated_here = True
+                            print(f"[RESCHEDULE] ✓ TIER 3: Successfully allocated to PREFERRED slot {pref_val} with final gender fallback")
+                            
+                    # 2. Try alternate slots with final fallback if preferred failed
+                    if not allocated_here:
+                        # try ALL general slots as a last resort
+                        for sv in ["06:30", "08:30", "10:00", "11:30", "14:30", "16:00", "17:30"]:
+                            if sv == pref_val:
+                                continue # already tried preferred above
+                            
+                            try:
+                                parsed_time = datetime.strptime(sv, "%H:%M").time()
+                                canonical_slot = SlotMaster.objects.filter(slot_time=parsed_time).first()
+                            except Exception:
+                                canonical_slot = None
+                            if not canonical_slot:
+                                continue
+                            
+                            print(f"[RESCHEDULE] TIER 3: Trying alternate slot {sv} with final fallback")
+                            task3, success3, reason3 = attempt_allocate_slot(allocation, booking, target_date, canonical_slot, therapy_req, needs_room_flag, needs_bath_flag, used_slots, create_bookings, patient_id, last_allocation, AllocationAttempt, gender_fallback=True)
+                            if success3:
+                                task3["slot_changed"] = True
+                                task3["preferred_slot"] = pref_val
+                                task3["gender_fallback_used"] = True
+                                tasks.append(task3)
+                                used_slots.append(canonical_slot)
+                                any_success = True
+                                allocated_here = True
+                                print(f"[RESCHEDULE] ✓ TIER 3: Successfully allocated to alternate slot {sv} with final gender fallback")
+                                break
+                    
+                    if allocated_here:
+                        continue
+                    else:
+                        print(f"[RESCHEDULE] ✗ TIER 3: All slots failed even with final gender fallback. Original failure reason: {reason}")
+                        # Update task reason to reflect that all slots were tried
+                        task["reason"] = f"Failed in all slots even with gender fallback. Original: {reason}"
+
+                # Preferred failed and no fallback succeeded -> include the failure task (task contains reason)
             # Preferred failed and no fallback succeeded -> include the failure task (task contains reason)
             tasks.append(task)
 
