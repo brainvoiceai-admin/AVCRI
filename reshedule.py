@@ -662,6 +662,9 @@ def get_allowed_slot_values(patient_type, therapy_category, used_slots=None, the
 
     # If therapy category requires excluding OP-only slots for 'hard'/'special'
     if therapy_category and str(therapy_category).lower() in ["hard","special"]:
+        # STRICT RESTRICTION: hard treatments are restricted in 11.30 and 17.30
+        # We use general_slots here to allow Hard treatments to move to IP slots if needed,
+        # but ALWAYS exclude the restricted 11:30 and 17:30 slots.
         allowed_slots = [s for s in general_slots if s not in ["11:30","17:30"]]
 
     # NEW: allow IP 'easy'/'medium' therapies to use OP slots (11:30/17:30)
@@ -3547,13 +3550,28 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
         needs_room_flag = therapy_needs_room(allocation)
         needs_bath_flag = therapy_needs_bath(allocation)
 
-        # If preferred slot was rejected for Lepam (canonical_pref is None), skip attempting it
+        # RESTRICTION: Check if preferred slot is restricted for Hard treatments
+        if therapy_req.get("therapy_category", "").lower() in ["hard", "special"]:
+            try:
+                pref_time = getattr(canonical_pref, 'slot_time', None) or getattr(canonical_pref, 'start_time', None)
+                if pref_time:
+                    pref_slot_str = pref_time.strftime("%H:%M") if hasattr(pref_time, 'strftime') else str(pref_time)
+                    if pref_slot_str in ["11:30", "17:30"]:
+                        print(f"[SLOT RESTRICTION] Hard/Special treatment cannot use {pref_slot_str} slot. Rejecting preferred and trying alternatives.")
+                        canonical_pref = None  # Force fallback to automatic slot allocation
+                        reason = "hard_treatment_slot_restriction"
+            except Exception as e:
+                print(f"[SLOT RESTRICTION] Error checking preferred slot for Hard treatment: {e}")
+
+        # If preferred slot was rejected (canonical_pref is None), skip attempting it
         if not canonical_pref:
             # Force fallback to automatic slot allocation
             task = None
             success = False
-            reason = "lepam_cannot_use_0630_slot"
-            print(f"[SLOT RESTRICTION] Lepam treatment: Preferred slot 06:30 rejected. Will try alternate slots.")
+            # reason might have been set above by Lepam check or Hard check
+            if not reason:
+                reason = "slot_restriction"
+            print(f"[SLOT RESTRICTION] Preferred slot rejected due to restriction. Will try alternate slots.")
         else:
             task, success, reason = attempt_allocate_slot(allocation, booking, target_date, canonical_pref, therapy_req, needs_room_flag, needs_bath_flag, used_slots, create_bookings, patient_id, last_allocation, AllocationAttempt)
         
@@ -3717,8 +3735,14 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                             
                     # 2. Try alternate slots with final fallback if preferred failed
                     if not allocated_here:
-                        # try ALL general slots as a last resort
-                        for sv in ["06:30", "08:30", "10:00", "11:30", "14:30", "16:00", "17:30"]:
+                        # TIER 3: FINAL FALLBACK - try all slots with ANY therapist, but still respect HARD and LEPAM rules
+                        fallback_slots = ["06:30", "08:30", "10:00", "11:30", "14:30", "16:00", "17:30"]
+                        if therapy_req.get("therapy_category", "").lower() in ["hard", "special"]:
+                            fallback_slots = [s for s in fallback_slots if s not in ["11:30", "17:30"]]
+                        if therapy_name and 'lepam' in str(therapy_name).lower():
+                            fallback_slots = [s for s in fallback_slots if s != "06:30"]
+                        
+                        for sv in fallback_slots:
                             if sv == pref_val:
                                 continue # already tried preferred above
                             

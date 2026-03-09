@@ -756,8 +756,8 @@ $(function () {
     const therapy = selectedTherapy[0];
     const therapyCategory = therapy.therapy_category || '';
 
-    // If therapy difficulty is "Hard", filter out 5:30 PM and 11:30 AM slots
-    if (therapyCategory.toLowerCase() === 'hard') {
+    // If therapy difficulty is "Hard" or "Special", filter out 5:30 PM (17:30) and 11:30 AM slots
+    if (therapyCategory.toLowerCase() === 'hard' || therapyCategory.toLowerCase() === 'special') {
       // Exclude 17:30 (5:30 PM) and 11:30 (11:30 AM) in HH:MM format
       return populateSlots(['17:30', '11:30']);
     } else {
