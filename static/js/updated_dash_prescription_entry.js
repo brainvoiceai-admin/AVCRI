@@ -145,6 +145,8 @@ $(function () {
   const $resumeModal = $('#resume-modal-backdrop');
   const $resumeCloseBtn = $('#resume-modal-close'), $resumeModalInfo = $('#resume-modal-info');
 
+  const $statusModal = $('#status-modal-backdrop'), $statusCloseBtn = $('#status-modal-close'), $statusModalInfo = $('#status-modal-info'), $statusDatesList = $('#status-dates-list');
+
   // --- Confirmation Modal Logic ---
   const $confirmModal = $('#confirmation-modal-backdrop');
   const $confirmTitle = $('#confirmation-modal-title');
@@ -1356,13 +1358,15 @@ $(function () {
 
   function buildActionBadge(actionClass) {
     const labelMap = {
-      'action-added': 'Added (today)',
-      'action-updated': 'Updated (today)',
-      'action-resumed': 'Resumed (today)',
-      'action-cancelled': 'Cancelled (today)'
+      'action-added': 'Added',
+      'action-updated': 'Updated',
+      'action-resumed': 'Resumed',
+      'action-cancelled': 'Cancelled'
     };
     if (!actionClass || !labelMap[actionClass]) return '';
-    return `<span class="action-pill ${actionClass}">${labelMap[actionClass]}</span>`;
+    // User requested: "pls remove that status added button i dont need this"
+    if (actionClass === 'action-added') return '';
+    return `<div class="action-status-badge ${actionClass}">${labelMap[actionClass]}</div>`;
   }
 
   // render prescriptions table
@@ -1371,7 +1375,7 @@ $(function () {
     if (!addedPrescriptions.length) {
       $prescriptionsTableBody.append(`
         <tr>
-          <td colspan="9">
+          <td colspan="11">
             <div class="empty-state">
               <i class="fas fa-prescription-bottle"></i>
               <h3>No Prescriptions Found</h3>
@@ -1518,10 +1522,18 @@ $(function () {
         <td>${formatDate(p.from_date)}</td>
         <td>${formatDate(p.to_date)}</td>
         <td>${esc(p.days || '')}</td>
-        <td>${statusHtml}</td>
+        <td>
+          <div style="display: flex; flex-direction: column; gap: 4px;">
+            ${actionClass ? buildActionBadge(actionClass) : ''}
+            ${statusHtml}
+          </div>
+        </td>
         <td>
           <button class="edit-prescription action-btn btn btn-outline" data-i="${i}">
             <i class="fas fa-edit"></i> Edit
+          </button>
+          <button class="status-prescription action-btn btn btn-outline" data-i="${i}" style="border-color: var(--primary); color: var(--primary);">
+            <i class="fas fa-info-circle"></i> Status
           </button>
           <button class="update-prescription action-btn btn btn-success" data-i="${i}" style="display:none">
             <i class="fas fa-sync-alt"></i> Update
@@ -1635,6 +1647,82 @@ $(function () {
     itemGroups = loadedGroups;
     renderItemGroups();
     $allocateBtn.hide(); $updateBtn.show(); window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  // Status Modal logic
+  $statusCloseBtn.on('click', () => $statusModal.hide());
+
+  $prescriptionsTableBody.on('click', '.status-prescription', function () {
+    const i = $(this).data('i');
+    openStatusModal(i);
+  });
+
+  function openStatusModal(index) {
+    const p = addedPrescriptions[index];
+    if (!p) return;
+
+    $statusModalInfo.html(`
+      <strong style="color:var(--primary);">${esc(p.prescription_name || 'Prescription')}</strong> | 
+      Dates: <strong>${formatDate(p.from_date)}</strong> - <strong>${formatDate(p.to_date)}</strong>
+    `);
+
+    $statusDatesList.html('<div style="padding:40px; text-align:center;"><i class="fas fa-spinner fa-spin fa-2x" style="color:var(--primary);"></i><p style="margin-top:10px;">Loading date-wise status report...</p></div>');
+    $statusModal.show();
+
+    // Use current allocation id
+    ajax({ action: 'allocation_status', allocation_id: p.id || p.allocation_id }).then(res => {
+      if (res.status === 'ok' && res.bookings) {
+        $statusDatesList.empty();
+        if (res.bookings.length === 0) {
+          $statusDatesList.html('<div style="padding:20px; text-align:center;">No scheduling records found for this range.</div>');
+          return;
+        }
+
+        res.bookings.forEach(b => {
+          const itemsRaw = b.items_groups || [];
+          const itemsHtml = itemsRaw.map(g => {
+            return `<div style="margin-bottom:6px; padding:4px 0; border-bottom:1px dashed #f0f0f0;">
+                <div style="font-weight:600; color:#333;">${(g.items || []).map(it => esc(it.item_name)).join(', ')}</div>
+                ${g.ingredients ? `<div style="font-size:0.75rem; color:#666;">Ingr: ${esc(g.ingredients)}</div>` : ''}
+             </div>`;
+          }).join('');
+
+          const dosageHtml = itemsRaw.map(g => {
+            let d = g.dosage || '';
+            let u = g.uno || '';
+            let t = g.time || '';
+            return `<div style="margin-bottom:6px; padding:4px 0; font-size:0.85rem; color:#444;">
+                ${d} ${u} ${t ? `<br><small style="color:#888;">${t}</small>` : ''}
+             </div>`;
+          }).join('');
+
+          const usageHtml = `<div style="font-size:0.85rem; color:#444;">${esc(b.usage || '')}</div>`;
+
+          let statusClass = 'status-draft';
+          if (b.status === 'dispatched') statusClass = 'status-active';
+          if (b.status === 'cancelled') statusClass = 'status-cancelled';
+          if (b.status === 'scheduled') statusClass = 'status-mixed';
+
+          const statusBadge = `<span class="status-pill ${statusClass}" style="width:100%; text-align:center; font-size:0.7rem;">${b.status.toUpperCase()}</span>`;
+
+          const row = $(`
+            <div class="status-date-row" style="display:flex; gap:8px; padding:12px; border-bottom:1px solid #eee; align-items: flex-start;">
+              <div style="width:120px; font-weight:700; color:#1a202c;">${formatDate(b.date)}</div>
+              <div style="flex:1">${itemsHtml || '<span style="color:#999;">—</span>'}</div>
+              <div style="width:150px">${dosageHtml || '<span style="color:#999;">—</span>'}</div>
+              <div style="width:180px">${usageHtml || '<span style="color:#999;">—</span>'}</div>
+              <div style="width:120px">${statusBadge}</div>
+            </div>
+          `);
+          $statusDatesList.append(row);
+        });
+      } else {
+        $statusDatesList.html('<div style="padding:20px; text-align:center; color:var(--danger);">Failed to load status records.</div>');
+      }
+    }).catch(err => {
+      console.error('Status Modal Error:', err);
+      $statusDatesList.html('<div style="padding:20px; text-align:center; color:var(--danger);">Error loading data: ' + err.message + '</div>');
+    });
   }
   $updateBtn.on('click', function () {
     if (editPrescriptionIndex === null) { alert('No prescription in edit mode'); return; }

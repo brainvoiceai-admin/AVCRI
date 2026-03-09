@@ -459,6 +459,18 @@ tr:hover {
   border: 1px solid transparent;
 }
 
+.action-status-badge {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 20px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  margin-bottom: 4px;
+  text-align: center;
+}
+
 /* Row color legend (today only):
        Added   -> Blue
        Updated -> Yellow

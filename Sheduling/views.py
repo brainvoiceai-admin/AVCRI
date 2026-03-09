@@ -2794,56 +2794,105 @@ def prescription_entry_page(request):
     from .models import PrescriptionAllocation, PrescriptionScheduling, PrescriptionChangeLog, PatientSnapshot
 
     def _get_updated_prescriptions(p_id_input, reg_no=None):
-        """Helper to fetch and format prescription list for a patient using explicit ID or RegNo"""
+        """Helper to fetch and format prescription list, merging contiguous segments with the same name into a single UI row."""
         p_id = p_id_input
         if hasattr(p_id, 'id'): p_id = p_id.id
         
-        # Build query: filter by patient_id OR registration number if provided
         q_obj = Q(patient_id=p_id)
         if reg_no:
             q_obj |= Q(patient__pat_reg_no=str(reg_no))
             
         plist = list(PrescriptionAllocation.objects.filter(q_obj).order_by('from_date', 'created_at').distinct())
-        res_list = []
+        
+        # 1. First format all records individually
+        formatted_list = []
         for p in plist:
             sc = {'draft': 0, 'scheduled': 0, 'dispatched': 0, 'active': 0, 'cancelled': 0, 'failed': 0}
             if p.from_date and p.to_date:
-                # Use patient_id from the allocation record
                 recs = PrescriptionScheduling.objects.filter(
                     patient_id=p.patient_id, prescription_date__gte=p.from_date, prescription_date__lte=p.to_date
                 )
                 for rec in recs:
                     if rec.status in sc: sc[rec.status] += 1
             
-            summary = {k: v for k, v in sc.items() if v > 0}
-            
             igs = p.items_groups
             if isinstance(igs, str):
-                try: igs = _json.loads(igs)
+                try: igs = json.loads(igs)
                 except: igs = []
             if not isinstance(igs, list): igs = []
 
-            res_list.append({
+            formatted_list.append({
                 'id': p.id,
                 'allocation_id': p.id,
-                'prescription_name': (p.prescription_name or 'Prescription'),
+                'prescription_name': (p.prescription_name or 'Prescription').strip(),
                 'items_groups': igs,
                 'procured_from': p.procured_from,
                 'scope': getattr(p, 'scope', ''),
                 'usage': getattr(p, 'usage', ''),
+                'usage_array': p.usage.split(', ') if getattr(p, 'usage', '') else [],
                 'from_date': p.from_date.isoformat() if p.from_date else None,
                 'to_date': p.to_date.isoformat() if p.to_date else None,
                 'days': p.days,
                 'status': p.status,
                 'status_counts': sc,
-                'status_summary': summary,
+                'cancelled_at': p.cancelled_at.isoformat() if p.cancelled_at else None,
                 'cancelled_date_from': p.cancelled_date_from.isoformat() if p.cancelled_date_from else None,
                 'cancelled_date_to': p.cancelled_date_to.isoformat() if p.cancelled_date_to else None,
                 'resumed_at': p.resumed_at.isoformat() if p.resumed_at else None,
                 'created_at': p.created_at.isoformat() if p.created_at else None,
-                'updated_at': p.updated_at.isoformat() if p.updated_at else None
+                'updated_at': (p.updated_at or p.created_at).isoformat()
             })
-        return res_list
+
+        # 2. Merge logic: contiguous segments with same name/patient
+        merged_res = []
+        for p in formatted_list:
+            attached = False
+            if merged_res:
+                last = merged_res[-1]
+                try:
+                    # Using date objects for precise comparison (safe even if strings)
+                    last_to_str = last.get('to_date')
+                    p_from_str = p.get('from_date')
+                    
+                    if last_to_str and p_from_str:
+                        l_to = dt_date.fromisoformat(last_to_str) if hasattr(dt_date, 'fromisoformat') else parse_date(last_to_str)
+                        p_fr = dt_date.fromisoformat(p_from_str) if hasattr(dt_date, 'fromisoformat') else parse_date(p_from_str)
+                        
+                        # Comparison logic: Same name (stripped, lowercase) and contiguous dates
+                        name_match = last['prescription_name'].strip().lower() == p['prescription_name'].strip().lower()
+                        date_match = (l_to + timedelta(days=1)) == p_fr
+                        
+                        if name_match and date_match:
+                            # Merge into the existing chain entry
+                            last['to_date'] = p['to_date']
+                            last['days'] += p.get('days', 0)
+                            
+                            # Accumulate status counts
+                            for k, v in p.get('status_counts', {}).items():
+                                last['status_counts'][k] = last['status_counts'].get(k, 0) + v
+                            last['status_summary'] = {k: v for k, v in last['status_counts'].items() if v > 0}
+                            
+                            # Use IDs of the LATEST part (for editing/updating)
+                            last['id'] = p['id']
+                            last['allocation_id'] = p['id']
+                            
+                            # Update status to latest or escalated (if any is 'dispatched', keep 'dispatched' count)
+                            # If individual status is 'dispatched', the summary handles it.
+                            # For the row highlighting/action, use the latest segment's status
+                            last['status'] = p['status']
+                            
+                            # Always show latest items_groups in the unified row
+                            last['items_groups'] = p['items_groups']
+                            attached = True
+                except Exception as e:
+                    print(f"Merge error: {e}")
+                    pass # Fallback to separate rows on weird errors
+            
+            if not attached:
+                p['status_summary'] = {k: v for k, v in p['status_counts'].items() if v > 0}
+                merged_res.append(p)
+                
+        return merged_res
 
     # Handle POST actions (allocate, cancel, resume, update)
     if request.method == 'POST':
@@ -3168,48 +3217,50 @@ def prescription_entry_page(request):
             try:
                 with transaction.atomic():
                     allocation_id = payload.get('allocation_id')
-                    prescription_name = payload.get('prescription_name', '')
+                    prescription_name = payload.get('prescription_name', '').strip()
                     items_groups = payload.get('items_groups', [])
-                    procured_from = payload.get('procured_from', '')
-                    scope = payload.get('scope', '')
-                    usage = payload.get('usage', '')
+                    procured_from = payload.get('procured_from', '').strip()
+                    scope = payload.get('scope', '').strip()
+                    usage = payload.get('usage', '').strip()
                     from_date = payload.get('from_date')
                     to_date = payload.get('to_date')
                     days = payload.get('days', 1)
-                    notes = payload.get('notes', '')
+                    notes = payload.get('notes', '').strip()
 
                     if not allocation_id:
                         return JsonResponse({'error': 'missing_allocation_id'}, status=400)
 
                     allocation = PrescriptionAllocation.objects.get(id=allocation_id)
                     patient_id = allocation.patient_id
-                    
                     # Today's local date
                     today = timezone.localtime(timezone.now()).date()
+                    effective_date = today # Default for sync start
+
+                    # Determine split point based on dispatching.
+                    # Fallback rule: If some days were dispatched, preserve them in old allocation record.
+                    dispatch_recs = PrescriptionScheduling.objects.filter(
+                        patient_id=patient_id, 
+                        prescription_date__range=(allocation.from_date, today),
+                        status='dispatched'
+                    ).order_by('-prescription_date')
                     
-                    # Check today's dispatch status
-                    today_scheduling = PrescriptionScheduling.objects.filter(
-                        patient_id=patient_id,
-                        prescription_date=today
-                    ).first()
+                    last_dispatched = dispatch_recs.first()
+                    should_split = False
+                    if last_dispatched:
+                        # Split at the day after the last dispatch.
+                        effective_date = last_dispatched.prescription_date + timedelta(days=1)
+                        if effective_date > allocation.from_date and effective_date <= allocation.to_date:
+                            should_split = True
                     
-                    is_today_dispatched = (today_scheduling and today_scheduling.status == 'dispatched')
-                    
-                    # Determine effective date 
-                    effective_date = today + timedelta(days=1) if is_today_dispatched else today
-                    if allocation.from_date > effective_date:
-                        effective_date = allocation.from_date
-                    
-                    should_split = effective_date > allocation.from_date
                     split_occurred = should_split
 
                     # Capture old state for audit
                     old_items_groups = allocation.items_groups
                     if isinstance(old_items_groups, str):
-                        try: old_items_groups = _json.loads(old_items_groups)
+                        try: old_items_groups = json.loads(old_items_groups)
                         except: old_items_groups = []
 
-                    # Cleanup new items_groups
+                    # Cleanup new items_groups...
                     if items_groups and isinstance(items_groups, list):
                         cleaned_groups = []
                         for group in items_groups:
@@ -3227,16 +3278,15 @@ def prescription_entry_page(request):
                         items_groups = old_items_groups
 
                     if should_split:
-                        # 1. Shorten old
-                        original_to_date = allocation.to_date
+                        # 1. Shorten current (Past) record to before split
+                        original_to = allocation.to_date
                         allocation.to_date = effective_date - timedelta(days=1)
                         allocation.days = (allocation.to_date - allocation.from_date).days + 1
                         allocation.save()
                         
-                        # 2. Create New
-                        new_to_val = parse_date(to_date) if to_date else original_to_date
-                        if not new_to_val or new_to_val < effective_date:
-                            new_to_val = effective_date
+                        # 2. Create New (Updated) record for remaining duration
+                        new_to = parse_date(to_date) if to_date else original_to
+                        if not new_to or new_to < effective_date: new_to = effective_date
                         
                         allocation = PrescriptionAllocation.objects.create(
                             patient_id=patient_id,
@@ -3246,14 +3296,14 @@ def prescription_entry_page(request):
                             usage=usage or getattr(allocation, 'usage', ''),
                             scope=scope or getattr(allocation, 'scope', ''),
                             from_date=effective_date,
-                            to_date=new_to_val,
-                            days=(new_to_val - effective_date).days + 1,
+                            to_date=new_to,
+                            days=(new_to - effective_date).days + 1,
                             allocated_by=request.user if request.user.is_authenticated else None,
                             notes=notes or allocation.notes,
-                            status='draft'
+                            status='draft' # Per requirement: "if we changed after dispatch it should show in draft"
                         )
                     else:
-                        # Update in place
+                        # No split needed (nothing dispatched yet): update in place
                         if prescription_name: allocation.prescription_name = prescription_name
                         if items_groups: allocation.items_groups = items_groups
                         if procured_from: allocation.procured_from = procured_from
@@ -3368,6 +3418,77 @@ def prescription_entry_page(request):
         else:
             print("ItemMaster model not found - check if masters app is installed")
         return JsonResponse(results, safe=False)
+    
+    # allocation status report (Date-wise medicine report)
+    if action == 'allocation_status':
+        allocation_id = request.GET.get('allocation_id')
+        if not allocation_id:
+            return JsonResponse({'error': 'missing_allocation_id'}, status=400)
+        
+        try:
+            p_ref = PrescriptionAllocation.objects.get(id=allocation_id)
+            target_name = (p_ref.prescription_name or '').strip().lower()
+            
+            # Find all potential segments for this patient/name
+            all_segments = list(PrescriptionAllocation.objects.filter(
+                patient=p_ref.patient
+            ).order_by('from_date'))
+            
+            # Filter to those with same name (case-insensitive)
+            matches = [s for s in all_segments if (s.prescription_name or '').strip().lower() == target_name]
+            
+            # Build the specific contiguous chain containing p_ref
+            chain = [p_ref]
+            
+            # Search backwards
+            current = p_ref
+            while True:
+                prev = next((s for s in matches if s.to_date == current.from_date - timedelta(days=1)), None)
+                if prev and prev not in chain:
+                    chain.insert(0, prev)
+                    current = prev
+                else: break
+                
+            # Search forwards
+            current = p_ref
+            while True:
+                nxt = next((s for s in matches if s.from_date == current.to_date + timedelta(days=1)), None)
+                if nxt and nxt not in chain:
+                    chain.append(nxt)
+                    current = nxt
+                else: break
+            
+            bookings = []
+            for alloc in chain:
+                schedulings = PrescriptionScheduling.objects.filter(
+                    patient=alloc.patient,
+                    prescription_date__range=(alloc.from_date, alloc.to_date)
+                ).order_by('prescription_date')
+                
+                items_groups = alloc.items_groups
+                if isinstance(items_groups, str):
+                    try: items_groups = json.loads(items_groups)
+                    except: items_groups = []
+                
+                for s in schedulings:
+                    bookings.append({
+                        'booking_id': s.id,
+                        'date': s.prescription_date.isoformat(),
+                        'status': s.status,
+                        'is_dispatched': s.status == 'dispatched',
+                        'items_groups': items_groups,
+                        'usage': alloc.usage,
+                        'dosage': items_groups[0].get('dosage', '') if items_groups and len(items_groups) > 0 else ''
+                    })
+            
+            return JsonResponse({
+                'status': 'ok',
+                'allocation_id': p_ref.id,
+                'allocation_name': p_ref.prescription_name,
+                'bookings': bookings
+            })
+        except PrescriptionAllocation.DoesNotExist:
+            return JsonResponse({'error': 'not_found'}, status=404)
     
     # masters lookup
     if action == 'masters':

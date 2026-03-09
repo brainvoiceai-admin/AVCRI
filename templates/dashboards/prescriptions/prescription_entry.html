@@ -331,6 +331,33 @@
       </div>
     </div>
   </div>
+
+  <!-- Status Modal (Date-wise Report) -->
+  <div id="status-modal-backdrop" class="modal-backdrop">
+    <div class="modal" role="dialog" aria-modal="true" style="max-width: 1000px; max-height: 90vh; display: flex; flex-direction: column;">
+      <div class="modal-header" style="display: flex; justify-content: space-between; align-items: center; padding: 16px; border-bottom: 1px solid #eee;">
+        <div>
+          <h3 style="margin:0"><i class="fas fa-info-circle text-primary"></i> Allocation Status Report</h3>
+          <div id="status-modal-info" class="small-muted" style="margin-top: 4px;"></div>
+        </div>
+        <button id="status-modal-close" class="btn btn-outline btn-sm">
+          <i class="fas fa-times"></i>
+        </button>
+      </div>
+      <div class="modal-body" style="flex: 1; overflow-y: auto; padding: 20px;">
+        <div class="status-table-header" style="display:flex; gap:8px; font-weight:bold; padding:12px; border-bottom:2px solid #eee; background:#f8f9fa; border-radius: 8px 8px 0 0;">
+          <div style="width:120px">Date</div>
+          <div style="flex:1">Medications</div>
+          <div style="width:150px">Dosage</div>
+          <div style="width:180px">Usage</div>
+          <div style="width:120px">Status</div>
+        </div>
+        <div id="status-dates-list" style="margin-top: 0;">
+          <!-- Date-wise report rows will be injected here -->
+        </div>
+      </div>
+    </div>
+  </div>
   </div>
 
   <!-- Prescription History Modal -->
