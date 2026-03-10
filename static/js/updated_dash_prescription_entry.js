@@ -10,6 +10,30 @@ $(function () {
     return fetch(url).then(r => { if (!r.ok) throw new Error('Network'); return r.json(); });
   }
   function esc(s) { return String(s || ''); }
+  function formatIngredients(ingredients) {
+    if (!ingredients) return '';
+    let arr = [];
+    if (Array.isArray(ingredients)) {
+      arr = ingredients;
+    } else if (typeof ingredients === 'object' && ingredients !== null) {
+      // If it looks like a single ingredient object, wrap it in an array
+      if (ingredients.ingredient_name || ingredients.text || ingredients.name) {
+        arr = [ingredients];
+      } else {
+        // Might be an associative array/object from backend { "0": {...} }
+        arr = Object.values(ingredients);
+      }
+    } else {
+      return esc(ingredients);
+    }
+    return arr.map(ing => {
+      if (typeof ing === 'string') return esc(ing);
+      if (typeof ing === 'object' && ing !== null) {
+        return esc(ing.ingredient_name || ing.text || ing.name || '');
+      }
+      return esc(ing);
+    }).filter(Boolean).join(', ');
+  }
   // Format date as DD/MM/YYYY
   function formatDate(dateStr) {
     if (!dateStr) return '';
@@ -1008,20 +1032,8 @@ $(function () {
     // Show each group separately with edit/remove buttons, but in the same format as final display
     itemGroups.forEach((g, i) => {
       const itemNames = (g.items || []).map(it => esc(it.item_name)).join(', ');
-      // Handle ingredients - can be array of objects, array of strings, or a single string
-      let ingredientsDisplay = '—';
-      if (g.ingredients) {
-        if (Array.isArray(g.ingredients) && g.ingredients.length > 0) {
-          // Array format (old or new)
-          ingredientsDisplay = g.ingredients.map(ing => {
-            if (typeof ing === 'string') return esc(ing);
-            return esc(ing.ingredient_name || ing.text || '');
-          }).filter(Boolean).join(', ');
-        } else if (typeof g.ingredients === 'string' && g.ingredients.trim()) {
-          // String format (new free text)
-          ingredientsDisplay = esc(g.ingredients);
-        }
-      }
+      // Handle ingredients using helper
+      const ingredientsDisplay = formatIngredients(g.ingredients) || '—';
       const timeDisplay = g.time ? esc(g.time) : '—';
       const oilClassDisplay = g.oil_class ? esc(g.oil_class) : '—';
       const procuredFromDisplay = g.procured_from ? esc(g.procured_from) : '—';
@@ -1414,18 +1426,8 @@ $(function () {
           doseDisplay = unoRaw;
         }
 
-        // Ingredients - handle both array and string formats
-        let ingredientsDisplay = '';
-        if (g.ingredients) {
-          if (Array.isArray(g.ingredients) && g.ingredients.length > 0) {
-            ingredientsDisplay = g.ingredients.map(ing => {
-              if (typeof ing === 'string') return esc(ing);
-              return esc(ing.ingredient_name || ing.text || '');
-            }).filter(Boolean).join(', ');
-          } else if (typeof g.ingredients === 'string' && g.ingredients.trim()) {
-            ingredientsDisplay = esc(g.ingredients);
-          }
-        }
+        // Ingredients using helper
+        const ingredientsDisplay = formatIngredients(g.ingredients);
 
         const time = g.time ? esc(g.time) : '';
         const extInt = g.internal_external ? esc(g.internal_external) : '';
@@ -1683,7 +1685,7 @@ $(function () {
           const itemsHtml = itemsRaw.map(g => {
             return `<div style="margin-bottom:6px; padding:4px 0; border-bottom:1px dashed #f0f0f0;">
                 <div style="font-weight:600; color:#333;">${(g.items || []).map(it => esc(it.item_name)).join(', ')}</div>
-                ${g.ingredients ? `<div style="font-size:0.75rem; color:#666;">Ingr: ${esc(g.ingredients)}</div>` : ''}
+                ${g.ingredients ? `<div style="font-size:0.75rem; color:#666;">Ingr: ${formatIngredients(g.ingredients)}</div>` : ''}
              </div>`;
           }).join('');
 
