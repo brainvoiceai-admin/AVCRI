@@ -163,7 +163,20 @@ def create_master_item(request):
         master_type = data.get('type', '')
         
         if master_type == 'therapy':
-            # Get therapy_group if provided
+            # Validate required fields (all except therapy_group)
+            required = ['therapy_code', 'therapy_name', 'therapy_category', 'therapy_duration',
+                        'bathing_required', 'treatment_room_required', 'cost_of_therapy']
+            missing = []
+            for f in required:
+                val = data.get(f)
+                if f == 'cost_of_therapy':
+                    if val is None or val == '':
+                        missing.append(f)
+                elif not val:
+                    missing.append(f)
+            if missing:
+                return JsonResponse({'error': f'Missing required fields: {", ".join(missing)}'}, status=400)
+            # Get therapy_group if provided (optional)
             therapy_group = None
             if data.get('therapy_group'):
                 try:
@@ -178,11 +191,11 @@ def create_master_item(request):
                 therapy_code=data['therapy_code'],
                 therapy_name=data['therapy_name'],
                 therapy_group=therapy_group,
-                therapy_category=data.get('therapy_category', ''),
-                therapy_duration=data.get('therapy_duration', ''),
-                bathing_required=data.get('bathing_required', ''),
-                treatment_room_required=data.get('treatment_room_required', ''),
-                cost_of_therapy=data.get('cost_of_therapy', 0)
+                therapy_category=data['therapy_category'],
+                therapy_duration=data['therapy_duration'],
+                bathing_required=data['bathing_required'],
+                treatment_room_required=data['treatment_room_required'],
+                cost_of_therapy=data.get('cost_of_therapy', 0) or 0
             )
         elif master_type == 'item':
             # Get item_group if provided
@@ -1505,8 +1518,11 @@ class TherapyMasterManagementView(ListView):
         # Bulk upload context
         context['master_type'] = 'therapy'
         context['master_name'] = 'Therapy Master'
-        context['required_fields'] = ['therapy_code', 'therapy_name']
-        context['optional_fields'] = ['therapy_group', 'therapy_category', 'therapy_duration', 'bathing_required', 'treatment_room_required', 'cost_of_therapy', 'no_of_super_senior_therapist', 'no_of_senior_therapist', 'no_of_junior_therapist', 'no_of_trainee_therapist', 'is_active']
+        context['required_fields'] = ['therapy_code', 'therapy_name', 'therapy_category', 'therapy_duration',
+                                     'bathing_required', 'treatment_room_required', 'cost_of_therapy', 'patient_type',
+                                     'no_of_super_senior_therapist', 'no_of_senior_therapist',
+                                     'no_of_junior_therapist', 'no_of_trainee_therapist', 'is_active']
+        context['optional_fields'] = ['therapy_group']
         return context
 
 class TherapyMasterCreateView(CreateView):
@@ -1520,11 +1536,19 @@ class TherapyMasterCreateView(CreateView):
         # Make therapy_code read-only/hidden since it's auto-generated
         if 'therapy_code' in form.fields:
             form.fields['therapy_code'].widget.attrs['readonly'] = True
-        # Filter therapy_group to show only active groups
+        # Filter therapy_group to show only active groups - keep optional (only non-required field)
         if 'therapy_group' in form.fields:
             form.fields['therapy_group'].queryset = TherapyGroup.objects.filter(is_active=True).order_by('name')
             form.fields['therapy_group'].empty_label = '-- Select Group --'
             form.fields['therapy_group'].widget.attrs['class'] = 'form-control'
+            form.fields['therapy_group'].required = False
+        # Make all other fields required (except therapy_group)
+        for field_name in ['therapy_name', 'therapy_category', 'therapy_duration', 'bathing_required',
+                           'treatment_room_required', 'cost_of_therapy', 'patient_type',
+                           'no_of_super_senior_therapist', 'no_of_senior_therapist',
+                           'no_of_junior_therapist', 'no_of_trainee_therapist']:
+            if field_name in form.fields:
+                form.fields[field_name].required = True
         # Update therapy_category to use dropdown with Medium, Hard, Easy
         if 'therapy_category' in form.fields:
             form.fields['therapy_category'].widget = forms.Select(choices=[
@@ -1532,7 +1556,7 @@ class TherapyMasterCreateView(CreateView):
                 ('Medium', 'Medium'),
                 ('Hard', 'Hard'),
                 ('Easy', 'Easy'),
-            ])
+            ], attrs={'class': 'form-select'})
         return form
     
     def form_valid(self, form):
@@ -1588,7 +1612,7 @@ class TherapyMasterUpdateView(UpdateView):
         # Make therapy_code read-only since it shouldn't be changed
         if 'therapy_code' in form.fields:
             form.fields['therapy_code'].widget.attrs['readonly'] = True
-        # Filter therapy_group to show only active groups (and current group if inactive)
+        # Filter therapy_group to show only active groups (and current group if inactive) - keep optional
         if 'therapy_group' in form.fields:
             current_group = self.object.therapy_group
             if current_group:
@@ -1600,6 +1624,14 @@ class TherapyMasterUpdateView(UpdateView):
                 form.fields['therapy_group'].queryset = TherapyGroup.objects.filter(is_active=True).order_by('name')
             form.fields['therapy_group'].empty_label = '-- Select Group --'
             form.fields['therapy_group'].widget.attrs['class'] = 'form-control'
+            form.fields['therapy_group'].required = False
+        # Make all other fields required (except therapy_group)
+        for field_name in ['therapy_name', 'therapy_category', 'therapy_duration', 'bathing_required',
+                           'treatment_room_required', 'cost_of_therapy', 'patient_type',
+                           'no_of_super_senior_therapist', 'no_of_senior_therapist',
+                           'no_of_junior_therapist', 'no_of_trainee_therapist']:
+            if field_name in form.fields:
+                form.fields[field_name].required = True
         # Update therapy_category to use dropdown with Medium, Hard, Easy
         if 'therapy_category' in form.fields:
             form.fields['therapy_category'].widget = forms.Select(choices=[
@@ -1607,7 +1639,7 @@ class TherapyMasterUpdateView(UpdateView):
                 ('Medium', 'Medium'),
                 ('Hard', 'Hard'),
                 ('Easy', 'Easy'),
-            ])
+            ], attrs={'class': 'form-select'})
         return form
     
     def form_valid(self, form):
@@ -2769,11 +2801,11 @@ def download_master_template(request, master_type):
             template_data = {
                 'columns': ['therapy_code', 'therapy_name', 'therapy_group', 'therapy_category', 
                            'therapy_duration', 'bathing_required', 'treatment_room_required', 
-                           'cost_of_therapy', 'no_of_super_senior_therapist', 'no_of_senior_therapist',
-                           'no_of_junior_therapist', 'no_of_trainee_therapist', 'is_active'],
+                           'cost_of_therapy', 'patient_type', 'no_of_super_senior_therapist',
+                           'no_of_senior_therapist', 'no_of_junior_therapist', 'no_of_trainee_therapist', 'is_active'],
                 'example_rows': [
-                    ['THEB001', 'Abhyanga', 'Panchakarma', 'Medium', '45 min', 'Yes', 'Yes', '500.00', 1, 0, 0, 0, 'true'],
-                    ['THEB002', 'Dhara', 'Panchakarma', 'Hard', '60 min', 'Yes', 'Yes', '800.00', 0, 1, 1, 0, 'true'],
+                    ['THEB001', 'Abhyanga', 'Panchakarma', 'Medium', '45 min', 'Yes', 'Yes', '500.00', 'IP', 1, 0, 0, 0, 'true'],
+                    ['THEB002', 'Dhara', 'Panchakarma', 'Hard', '60 min', 'Yes', 'Yes', '800.00', 'IP', 0, 1, 1, 0, 'true'],
                 ]
             }
         elif master_type == 'item' or master_type == 'itemmaster':
@@ -2979,18 +3011,37 @@ def bulk_upload_master(request):
         # Process based on master type
         with transaction.atomic():
             if master_type == 'therapymaster' or master_type == 'therapy':
-                # Required: therapy_code, therapy_name
-                if 'therapy_code' not in df.columns or 'therapy_name' not in df.columns:
-                    return JsonResponse({'success': False, 'error': 'Required columns missing: therapy_code, therapy_name'}, status=400)
+                # Required columns: all except therapy_group
+                required_cols = ['therapy_code', 'therapy_name', 'therapy_category', 'therapy_duration',
+                                 'bathing_required', 'treatment_room_required', 'cost_of_therapy', 'patient_type']
+                missing_cols = [c for c in required_cols if c not in df.columns]
+                if missing_cols:
+                    return JsonResponse({'success': False, 'error': f'Required columns missing: {", ".join(missing_cols)}'}, status=400)
                 
                 for idx, row in df.iterrows():
                     try:
                         therapy_code = str(row.get('therapy_code', '')).strip()
                         therapy_name = str(row.get('therapy_name', '')).strip()
+                        therapy_category = str(row.get('therapy_category', '')).strip()
+                        therapy_duration = str(row.get('therapy_duration', '')).strip()
+                        bathing_required = str(row.get('bathing_required', '')).strip()
+                        treatment_room_required = str(row.get('treatment_room_required', '')).strip()
+                        cost_val = row.get('cost_of_therapy')
+                        cost_provided = cost_val is not None and cost_val != ''
+                        patient_type = str(row.get('patient_type', '')).strip()
                         
-                        if not therapy_code or not therapy_name:
+                        if not therapy_code or not therapy_name or not therapy_category or not therapy_duration or not bathing_required or not treatment_room_required or not cost_provided or not patient_type:
+                            missing = []
+                            if not therapy_code: missing.append('therapy_code')
+                            if not therapy_name: missing.append('therapy_name')
+                            if not therapy_category: missing.append('therapy_category')
+                            if not therapy_duration: missing.append('therapy_duration')
+                            if not bathing_required: missing.append('bathing_required')
+                            if not treatment_room_required: missing.append('treatment_room_required')
+                            if not cost_provided: missing.append('cost_of_therapy')
+                            if not patient_type: missing.append('patient_type')
                             error_count += 1
-                            errors.append(f'Row {idx+2}: Missing required fields (therapy_code, therapy_name)')
+                            errors.append(f'Row {idx+2}: Missing required fields ({", ".join(missing)})')
                             continue
                         
                         # Parse boolean fields
@@ -3011,11 +3062,12 @@ def bulk_upload_master(request):
                             defaults={
                                 'therapy_name': therapy_name,
                                 'therapy_group': therapy_group_obj,
-                                'therapy_category': str(row.get('therapy_category', '')).strip() or None,
-                                'therapy_duration': str(row.get('therapy_duration', '')).strip() or None,
-                                'bathing_required': str(row.get('bathing_required', '')).strip() or None,
-                                'treatment_room_required': str(row.get('treatment_room_required', '')).strip() or None,
-                                'cost_of_therapy': _parse_decimal(row.get('cost_of_therapy')),
+                                'therapy_category': therapy_category,
+                                'therapy_duration': therapy_duration,
+                                'bathing_required': bathing_required,
+                                'treatment_room_required': treatment_room_required,
+                                'cost_of_therapy': _parse_decimal(row.get('cost_of_therapy')) or 0,
+                                'patient_type': patient_type if patient_type in ('IP', 'OP') else 'IP',
                                 'no_of_super_senior_therapist': _parse_int(row.get('no_of_super_senior_therapist', 0)),
                                 'no_of_senior_therapist': _parse_int(row.get('no_of_senior_therapist', 0)),
                                 'no_of_junior_therapist': _parse_int(row.get('no_of_junior_therapist', 0)),
@@ -3029,11 +3081,12 @@ def bulk_upload_master(request):
                             # Update existing
                             therapy.therapy_name = therapy_name
                             therapy.therapy_group = therapy_group_obj
-                            therapy.therapy_category = str(row.get('therapy_category', '')).strip() or None
-                            therapy.therapy_duration = str(row.get('therapy_duration', '')).strip() or None
-                            therapy.bathing_required = str(row.get('bathing_required', '')).strip() or None
-                            therapy.treatment_room_required = str(row.get('treatment_room_required', '')).strip() or None
-                            therapy.cost_of_therapy = _parse_decimal(row.get('cost_of_therapy'))
+                            therapy.therapy_category = therapy_category
+                            therapy.therapy_duration = therapy_duration
+                            therapy.bathing_required = bathing_required
+                            therapy.treatment_room_required = treatment_room_required
+                            therapy.cost_of_therapy = _parse_decimal(row.get('cost_of_therapy')) or 0
+                            therapy.patient_type = patient_type if patient_type in ('IP', 'OP') else 'IP'
                             therapy.no_of_super_senior_therapist = _parse_int(row.get('no_of_super_senior_therapist', 0))
                             therapy.no_of_senior_therapist = _parse_int(row.get('no_of_senior_therapist', 0))
                             therapy.no_of_junior_therapist = _parse_int(row.get('no_of_junior_therapist', 0))

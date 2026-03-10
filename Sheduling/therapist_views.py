@@ -435,7 +435,10 @@ def get_therapist_difficulty_data(request):
     therapy_categories = {}
     if therapy_codes:
         for tm in TherapyMaster.objects.filter(therapy_code__in=therapy_codes):
-            category = (tm.therapy_category or tm.therapy_group or 'Uncategorized').strip() or 'Uncategorized'
+            # therapy_group is FK (TherapyGroup obj); use .name for string
+            grp = tm.therapy_group
+            cat_str = tm.therapy_category or (grp.name if grp else None) or 'Uncategorized'
+            category = (cat_str if isinstance(cat_str, str) else str(cat_str)).strip() or 'Uncategorized'
             therapy_categories[tm.therapy_code] = category
         missing_codes = therapy_codes - set(therapy_categories.keys())
         if missing_codes:
@@ -587,8 +590,10 @@ def get_therapist_difficulty_data(request):
                 if not therapy_master:
                     continue
                 
-                # Get category
-                category = (therapy_master.therapy_category or therapy_master.therapy_group or 'Uncategorized').strip() or 'Uncategorized'
+                # Get category (therapy_group is FK; use .name for string)
+                grp = therapy_master.therapy_group
+                cat_str = therapy_master.therapy_category or (grp.name if grp else None) or 'Uncategorized'
+                category = (cat_str if isinstance(cat_str, str) else str(cat_str)).strip() or 'Uncategorized'
                 category = category.title()
                 
                 # Normalize to Easy/Medium/Hard/Uncategorized

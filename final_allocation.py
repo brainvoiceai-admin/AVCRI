@@ -247,8 +247,11 @@ def get_therapist_grade_name(therapist):
 def therapist_requirements(allocation_or_therapy_obj):
     name = getattr(allocation_or_therapy_obj, 'therapy_name', None)
     details = get_therapy_details(name) if name else None
+    # When therapy is NOT found in TherapyMaster, default total=1 (require at least 1 therapist).
+    # Previously total=0 caused therapies with unknown names to be auto-scheduled without running
+    # the allocation algorithm, resulting in "allocated" status but no therapist assigned.
     if not details:
-        return {"super_senior":0, "senior":0, "junior":0, "trainee":0, "total":0, "therapy_code": None, "therapy_category": None}
+        return {"super_senior":0, "senior":0, "junior":0, "trainee":0, "total":1, "therapy_code": None, "therapy_category": None}
     return {
         "super_senior": int(getattr(details, 'no_of_super_senior_therapist', 0) or 0),
         "senior": int(getattr(details, 'no_of_senior_therapist', 0) or 0),

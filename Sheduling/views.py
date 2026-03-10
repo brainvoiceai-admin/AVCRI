@@ -4798,12 +4798,23 @@ def get_therapy_data_api(request):
                         from masters.models import TherapistMaster
                         # Get allocation (visit) for this booking
                         allocation = booking.allocation
-                        # Get all therapist codes for this booking
+                        # Get all therapist codes from BookingAssignment first
                         therapist_codes = [a.therapist.therapist_code for a in booking.assignments.all()]
+                        # FALLBACK: If no BookingAssignment but TherapistBooking exists (e.g. PASS 1 continuity
+                        # locked therapists but allocation failed before creating BookingAssignment), show those
+                        # to avoid "allocated but no therapist" confusion.
+                        if not therapist_codes and allocation and booking.date and booking.timeslot:
+                            tb_fallback = TherapistBooking.objects.filter(
+                                visit=allocation,
+                                date=booking.date,
+                                time_slot=booking.timeslot,
+                                status='BOOKED'
+                            ).select_related('therapist').order_by('therapist_id')
+                            therapist_codes = [tb.therapist.therapist_code for tb in tb_fallback if tb.therapist]
                         # Get all TherapistMaster records
                         therapist_masters = {tm.therapist_code: tm for tm in TherapistMaster.objects.filter(
                             therapist_code__in=therapist_codes
-                        )}
+                        )} if therapist_codes else {}
                         # Get all TherapistBooking records for this visit, therapists, date, and time_slot
                         # IMPORTANT: Must filter by date and time_slot to get the correct records for this specific booking
                         if therapist_masters and allocation:
@@ -4846,8 +4857,16 @@ def get_therapy_data_api(request):
                     therapist_data_list = []
                     senior_non_bathing_therapist_code = None
                     
-                    for assignment in booking.assignments.all():
-                        therapist_code = assignment.therapist.therapist_code
+                    # Use BookingAssignment (primary) or therapist_codes from TherapistBooking fallback
+                    assignments_iter = list(booking.assignments.all())
+                    if assignments_iter:
+                        iter_items = [(a.therapist.therapist_code, a.therapist.therapist_name or a.therapist.therapist_code) for a in assignments_iter]
+                    elif therapist_codes:
+                        iter_items = [(tc, (getattr(therapist_masters.get(tc), 'therapist_name', None) or tc)) for tc in therapist_codes]
+                    else:
+                        iter_items = []
+                    
+                    for therapist_code, therapist_name_src in iter_items:
                         # Get is_bathing flag from pre-fetched data
                         is_bathing = therapist_bookings.get(therapist_code, False)
                         
@@ -4861,7 +4880,7 @@ def get_therapy_data_api(request):
                             if grade_name and 'Senior' in grade_name:
                                 is_senior_grade = True
                         
-                        therapist_name = assignment.therapist.therapist_name or therapist_code
+                        therapist_name = (therapist_master.therapist_name if therapist_master else None) or therapist_name_src or therapist_code
                         grade_display = ''
                         if therapist_master and therapist_master.therapist_grade:
                             grade_display = getattr(therapist_master.therapist_grade, 'name', '')
