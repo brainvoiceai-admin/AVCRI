@@ -177,11 +177,11 @@ class TherapyMaster(models.Model):
     therapy_code = models.CharField(max_length=20, unique=True, verbose_name="Therapy Code")
     therapy_name = models.CharField(max_length=255, verbose_name="Therapy Name")
     therapy_group = models.ForeignKey('TherapyGroup', on_delete=models.SET_NULL, null=True, blank=True, verbose_name="Therapy Group")
-    therapy_category = models.CharField(max_length=100, null=True, blank=True, verbose_name="Therapy Category")
-    therapy_duration = models.CharField(max_length=50, null=True, blank=True, verbose_name="Duration")
-    bathing_required = models.CharField(max_length=10, null=True, blank=True, verbose_name="Bathing Required")
-    treatment_room_required = models.CharField(max_length=10, null=True, blank=True, verbose_name="Room Required")
-    cost_of_therapy = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, verbose_name="Cost")
+    therapy_category = models.CharField(max_length=100, verbose_name="Therapy Category")
+    therapy_duration = models.CharField(max_length=50, verbose_name="Duration")
+    bathing_required = models.CharField(max_length=10, verbose_name="Bathing Required")
+    treatment_room_required = models.CharField(max_length=10, verbose_name="Room Required")
+    cost_of_therapy = models.DecimalField(max_digits=10, decimal_places=2, default=0, verbose_name="Cost")
     
     # Patient type field (IP or OP)
     patient_type = models.CharField(

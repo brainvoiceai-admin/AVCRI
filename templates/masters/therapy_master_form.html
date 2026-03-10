@@ -78,8 +78,9 @@
                         {% endif %}
                     </div>
                     <div class="col-md-6 mb-3">
-                        <label for="id_therapy_category" class="form-label">Therapy Category</label>
+                        <label for="id_therapy_category" class="form-label">Therapy Category *</label>
                         {{ form.therapy_category }}
+                        <div class="invalid-feedback">Please select a therapy category.</div>
                     </div>
                 </div>
             </div>
@@ -91,16 +92,18 @@
                 </h5>
                 <div class="row">
                     <div class="col-md-6 mb-3">
-                        <label for="id_therapy_duration" class="form-label">Duration</label>
+                        <label for="id_therapy_duration" class="form-label">Duration *</label>
                         <input type="text" class="form-control" id="id_therapy_duration" name="therapy_duration" 
                                value="{{ form.therapy_duration.value|default:'' }}" 
-                               placeholder="e.g., 45 minutes, 1 hour">
+                               placeholder="e.g., 45 minutes, 1 hour" required>
+                        <div class="invalid-feedback">Please provide the therapy duration.</div>
                     </div>
                     <div class="col-md-6 mb-3">
-                        <label for="id_cost_of_therapy" class="form-label">Cost (₹)</label>
+                        <label for="id_cost_of_therapy" class="form-label">Cost (₹) *</label>
                         <input type="number" class="form-control" id="id_cost_of_therapy" name="cost_of_therapy" 
                                value="{{ form.cost_of_therapy.value|default:'' }}" 
-                               step="0.01" min="0" placeholder="0.00">
+                               step="0.01" min="0" placeholder="0.00" required>
+                        <div class="invalid-feedback">Please provide the cost of therapy.</div>
                     </div>
                 </div>
                 <div class="row">
@@ -122,22 +125,24 @@
                 </h5>
                 <div class="row">
                     <div class="col-md-6 mb-3">
-                        <label for="id_bathing_required" class="form-label">Bathing Required</label>
-                        <select class="form-select" id="id_bathing_required" name="bathing_required">
+                        <label for="id_bathing_required" class="form-label">Bathing Required *</label>
+                        <select class="form-select" id="id_bathing_required" name="bathing_required" required>
                             <option value="">Select Option</option>
                             <option value="Yes" {% if form.bathing_required.value == 'Yes' %}selected{% endif %}>Yes</option>
                             <option value="No" {% if form.bathing_required.value == 'No' %}selected{% endif %}>No</option>
                             <option value="Optional" {% if form.bathing_required.value == 'Optional' %}selected{% endif %}>Optional</option>
                         </select>
+                        <div class="invalid-feedback">Please select whether bathing is required.</div>
                     </div>
                     <div class="col-md-6 mb-3">
-                        <label for="id_treatment_room_required" class="form-label">Treatment Room Required</label>
-                        <select class="form-select" id="id_treatment_room_required" name="treatment_room_required">
+                        <label for="id_treatment_room_required" class="form-label">Treatment Room Required *</label>
+                        <select class="form-select" id="id_treatment_room_required" name="treatment_room_required" required>
                             <option value="">Select Option</option>
                             <option value="Yes" {% if form.treatment_room_required.value == 'Yes' %}selected{% endif %}>Yes</option>
                             <option value="No" {% if form.treatment_room_required.value == 'No' %}selected{% endif %}>No</option>
                             <option value="Optional" {% if form.treatment_room_required.value == 'Optional' %}selected{% endif %}>Optional</option>
                         </select>
+                        <div class="invalid-feedback">Please select whether treatment room is required.</div>
                     </div>
                 </div>
             </div>
@@ -149,32 +154,36 @@
                 </h5>
                 <div class="row">
                     <div class="col-md-3 mb-3">
-                        <label for="id_no_of_super_senior_therapist" class="form-label">Super Senior Therapists</label>
+                        <label for="id_no_of_super_senior_therapist" class="form-label">Super Senior Therapists *</label>
                         <input type="number" class="form-control" id="id_no_of_super_senior_therapist" 
                                name="no_of_super_senior_therapist" 
                                value="{{ form.no_of_super_senior_therapist.value|default:0 }}" 
-                               min="0" placeholder="0">
+                               min="0" placeholder="0" required>
+                        <div class="invalid-feedback">Please enter the number (0 if none).</div>
                     </div>
                     <div class="col-md-3 mb-3">
-                        <label for="id_no_of_senior_therapist" class="form-label">Senior Therapists</label>
+                        <label for="id_no_of_senior_therapist" class="form-label">Senior Therapists *</label>
                         <input type="number" class="form-control" id="id_no_of_senior_therapist" 
                                name="no_of_senior_therapist" 
                                value="{{ form.no_of_senior_therapist.value|default:0 }}" 
-                               min="0" placeholder="0">
+                               min="0" placeholder="0" required>
+                        <div class="invalid-feedback">Please enter the number (0 if none).</div>
                     </div>
                     <div class="col-md-3 mb-3">
-                        <label for="id_no_of_junior_therapist" class="form-label">Junior Therapists</label>
+                        <label for="id_no_of_junior_therapist" class="form-label">Junior Therapists *</label>
                         <input type="number" class="form-control" id="id_no_of_junior_therapist" 
                                name="no_of_junior_therapist" 
                                value="{{ form.no_of_junior_therapist.value|default:0 }}" 
-                               min="0" placeholder="0">
+                               min="0" placeholder="0" required>
+                        <div class="invalid-feedback">Please enter the number (0 if none).</div>
                     </div>
                     <div class="col-md-3 mb-3">
-                        <label for="id_no_of_trainee_therapist" class="form-label">Trainee Therapists</label>
+                        <label for="id_no_of_trainee_therapist" class="form-label">Trainee Therapists *</label>
                         <input type="number" class="form-control" id="id_no_of_trainee_therapist" 
                                name="no_of_trainee_therapist" 
                                value="{{ form.no_of_trainee_therapist.value|default:0 }}" 
-                               min="0" placeholder="0">
+                               min="0" placeholder="0" required>
+                        <div class="invalid-feedback">Please enter the number (0 if none).</div>
                     </div>
                 </div>
                 <div class="row">
