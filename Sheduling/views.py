@@ -752,10 +752,15 @@ def therapy_entry(request):
                                 tasks = expand_therapies_for_visit(allocation.id, d.strftime('%Y-%m-%d'), create_bookings=True)
                                 print(f"Resume allocation {allocation.id} for date {d}: algorithm returned {tasks}")
                                 
-                                if isinstance(tasks, list) and any(t.get('status') == 'BOOKED' for t in tasks):
+                                if isinstance(tasks, list):
+                                    booked_tasks = [t for t in tasks if t.get('status') == 'BOOKED']
+                                    failed_tasks = [t for t in tasks if t.get('status') == 'FAILED']
+                                if isinstance(tasks, list) and booked_tasks and not failed_tasks:
                                     any_success = True
-                                    Booking.objects.filter(allocation=allocation, date=d).update(status='scheduled')
-                                    BookingItem.objects.filter(booking__allocation=allocation, booking__date=d).update(status='scheduled')
+                                    # Exclude bookings marked as 'failed' by the algorithm
+                                    # (e.g. insufficient therapists) — do NOT override their status
+                                    Booking.objects.filter(allocation=allocation, date=d).exclude(status='failed').update(status='scheduled')
+                                    BookingItem.objects.filter(booking__allocation=allocation, booking__date=d).exclude(status='failed').update(status='scheduled')
                                 else:
                                     reason = None
                                     if isinstance(tasks, list):
@@ -1084,8 +1089,8 @@ def therapy_entry(request):
                             BookingAssignment.objects.filter(booking__in=day_bookings).update(status='released')
                             # cancel external TherapistBooking/RoomBooking
                             from Patient.models import TherapistBooking as TB, RoomBooking as RB
-                            # Get the timeslot for this date
-                            day_timeslot = allocation.timeslot
+                            # Get the OLD timeslot for this date to properly cancel previous external bookings
+                            day_timeslot = old_slot or allocation.timeslot
                             if day_timeslot:
                                 # Cancel TherapistBooking: filter by visit (TherapyAllocation FK) or patient_id + date + timeslot
                                 TB.objects.filter(
@@ -1193,8 +1198,9 @@ def therapy_entry(request):
                                 failed_tasks = [t for t in tasks if t.get('status') == 'FAILED']
                                 if booked_tasks and not failed_tasks:
                                     any_success = True
-                                    Booking.objects.filter(allocation=allocation, date=d).update(status='scheduled')
-                                    BookingItem.objects.filter(booking__allocation=allocation, booking__date=d).update(status='scheduled')
+                                    # Exclude bookings marked as 'failed' by the algorithm
+                                    Booking.objects.filter(allocation=allocation, date=d).exclude(status='failed').update(status='scheduled')
+                                    BookingItem.objects.filter(booking__allocation=allocation, booking__date=d).exclude(status='failed').update(status='scheduled')
                                 elif failed_tasks:
                                     # If any failed, mark as failed and store exact reason for dashboard
                                     reason = failed_tasks[0].get('reason', 'unknown')
@@ -1357,8 +1363,9 @@ def therapy_entry(request):
                                     failed_tasks = [t for t in tasks if t.get('status') == 'FAILED']
                                     if booked_tasks and not failed_tasks:
                                         date_change_success = True
-                                        Booking.objects.filter(allocation=allocation, date=d).update(status='scheduled')
-                                        BookingItem.objects.filter(booking__allocation=allocation, booking__date=d).update(status='scheduled')
+                                        # Exclude bookings marked as 'failed' by the algorithm
+                                        Booking.objects.filter(allocation=allocation, date=d).exclude(status='failed').update(status='scheduled')
+                                        BookingItem.objects.filter(booking__allocation=allocation, booking__date=d).exclude(status='failed').update(status='scheduled')
                                         
                                         # Allocate nurses for nurse treatments
                                         try:

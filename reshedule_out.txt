@@ -1,0 +1,22 @@
+[RESCHEDULE] 🧹 Cleared existing bookings/assignments for allocation 3068 on 2026-03-11 to prevent ghost therapists
+[RESCHEDULE PASS1] Booking 21724: Found 0 continuity therapists from TherapistContinuityPlan
+[RESCHEDULE PASS1] Built booking_continuity_map with 0 continuity assignments
+[RESCHEDULE PASS2] booking_continuity_map has 1 entries (from PASS 1)
+[RESCHEDULE PASS2] Booking 21724: Using 0 continuity therapists from PASS 1: []
+[RESCHEDULE PASS2] Using 0 continuity therapists from PASS 1: []
+[RESCHEDULE PASS2] ========== CHECKING PATIENT HISTORY FOR BOOKING 21724 ==========
+[RESCHEDULE PASS2] Patient: BARINDRA PATEL (Reg No: 114042025)
+[RESCHEDULE PASS2] Target Date: 2026-03-11, Slot: 7
+[RESCHEDULE PASS2] ✗ Patient is NOT a repeated visitor - Skipping PatientHistory check
+[RESCHEDULE PASS2] ========== END PATIENT HISTORY CHECK (Not a repeated visitor) ==========
+[RESCHEDULE PASS2] ========== END PATIENT HISTORY CHECK ==========
+[DEBUG Allocation] Male Trainee required (needed=1). Substituting search grade to Junior Therapist.
+[RESCHEDULE FALLBACK] Normal allocation failed: found 0/3 therapists
+[RESCHEDULE FALLBACK] Attempting allocation with grade substitution (Senior/Super Senior can fill Junior/Trainee slots)
+[FALLBACK Grade Substitution] Assigned Super Senior Therapist THP1117 to fill Trainee Therapist requirement (substitution)
+[FALLBACK Grade Substitution] Assigned Super Senior Therapist THP1004 to fill Junior Therapist requirement (substitution)
+[FALLBACK Grade Substitution] Assigned Super Senior Therapist THP1206 to fill Senior Therapist requirement (substitution)
+[RESCHEDULE FALLBACK] ✓ Grade substitution successful: found 3/3 therapists
+[RESCHEDULE] Using first assigned bathing therapist THP1117 for patient 742 (no continuity available)
+[DEBUG create_therapist_booking_safe] Cleared is_bathing for other therapists in visit 3068 on 2026-03-11 at Slot 2: 08:30 AM
+RESULT: [{'booking_id': 21724, 'allocation_id': 3068, 'date': '2026-03-11', 'therapy_name': 'Full body Sudhikalpana Dhara (3T)', 'slot': '08:30', 'status': 'BOOKED', 'reason': None, 'room_no': 'TRC-12', 'therapists': [{'therapist_code': 'THP1117', 'is_bathing': True}, {'therapist_code': 'THP1004', 'is_bathing': False}, {'therapist_code': 'THP1206', 'is_bathing': False}], 'grade_substitution_used': True, 'substitution_note': 'Senior/Super Senior therapists used to fill Junior/Trainee requirements'}]

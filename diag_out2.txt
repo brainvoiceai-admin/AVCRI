@@ -1,0 +1,79 @@
+=== Booking 21093 ===
+status=scheduled, failure_reason=insufficient_therapists_available (required=5, found=4, gender=female)
+date=2026-03-13, timeslot=Slot 1: 06:30 AM
+allocation_id=2985
+
+
+=== Therapist Session Counts on 2026-03-13 (all active female) ===
+Total active female therapists: 50
+  Damayanthi (THP1058): 5 sessions  grade=Senior Therapist
+  Kavitha Murugasan (THP1229): 5 sessions  grade=Junior Therapist
+  Sathyapriya N K (THP1240): 6 sessions  grade=Super Senior Therapist
+  Sikkandrammal.D (THP1061): 5 sessions  grade=Senior Therapist
+  Sujisha S (THP1265): 5 sessions  grade=Junior Therapist
+  Vijayalakshmi.S (THP1230): 5 sessions  grade=Junior Therapist
+
+=== Booking 19334 ===
+status=scheduled, failure_reason=
+date=2026-03-13, timeslot=Slot 1: 06:30 AM
+allocation_id=2725
+BA count: 1
+  BA therapist=Poongodi Senthil Kumar (THP1155), date=2026-03-13, slot=Slot 1: 06:30 AM
+TB count: 1
+  TB therapist=Poongodi Senthil Kumar (THP1155), slot=Slot 1: 06:30 AM
+
+=== Available therapists at Slot 1 for date 2026-03-13 (male) ===
+Patient gender: Female
+Slot 1: Slot 1: 06:30 AM
+Total active male therapists: 51
+  AVAILABLE: Anoop (THP1280) sessions=4 grade=Junior Therapist
+  AVAILABLE: Ashok Kumar.C.V (THP1274) sessions=0 grade=Super Senior Therapist
+  AVAILABLE: Babu P M (THP1204) sessions=2 grade=Super Senior Therapist
+  BOOKED AT SLOT: Babu.M (THP1213) sessions=3 grade=Senior Therapist
+  AVAILABLE: Balaji (THP1243) sessions=0 grade=Junior Therapist
+  AVAILABLE: Balasubramanian P.M. (THP1093) sessions=3 grade=Senior Therapist
+  AVAILABLE: Bhaskaran. R. (THP1025) sessions=1 grade=Super Senior Therapist
+  AVAILABLE: Bhoopathi. S. (THP1016) sessions=2 grade=Super Senior Therapist
+  AVAILABLE: Bijesh K (THP1139) sessions=0 grade=Senior Therapist
+  AVAILABLE: Bijoy S. Anand (THP1276) sessions=1 grade=Super Senior Therapist
+  AVAILABLE: Deepu E.K (THP1051) sessions=0 grade=Senior Therapist
+  AVAILABLE: Dilesh Kumar M (THP1249) sessions=0 grade=Super Senior Therapist
+  BOOKED AT SLOT: Dino Issac (THP1002) sessions=3 grade=Senior Therapist
+  AVAILABLE: Gopalakrishnan .P.T (THP1210) sessions=0 grade=Super Senior Therapist
+  AVAILABLE: Harikrishnan M (THP1314) sessions=3 grade=Senior Therapist
+  AVAILABLE: Jayaprakasan P V (THP1020) sessions=1 grade=Super Senior Therapist
+  AVAILABLE: Jayarajan T (THP1022) sessions=2 grade=Super Senior Therapist
+  AVAILABLE: Jisso Thomas (THP1247) sessions=0 grade=Junior Therapist
+  AVAILABLE: Kannankutty V (THP1077) sessions=0 grade=Senior Therapist
+  AVAILABLE: Manikandan M S (THP1075) sessions=0 grade=Senior Therapist
+  AVAILABLE: Manoj Kumar T (THP1303) sessions=1 grade=Super Senior Therapist
+  AVAILABLE: Mariappan (THP1190) sessions=3 grade=Senior Therapist
+  AVAILABLE: Mohanan.V (THP1178) sessions=0 grade=Super Senior Therapist
+  AVAILABLE: Nagaraj S (THP1287) sessions=4 grade=Senior Therapist
+  AVAILABLE: Narayanan Kutty (THP1100) sessions=1 grade=Super Senior Therapist
+  AVAILABLE: Narayanankutty K (THP1117) sessions=1 grade=Super Senior Therapist
+  AVAILABLE: Radha Krishnan.V (THP1201) sessions=0 grade=Super Senior Therapist
+  AVAILABLE: Radhakrishnan K V (THP1313) sessions=3 grade=Senior Therapist
+  AVAILABLE: Rajesh.S (THP1300) sessions=4 grade=Senior Therapist
+  AVAILABLE: Raju.V (THP1199) sessions=0 grade=Super Senior Therapist
+  AVAILABLE: Sajeesh. P. (THP1078) sessions=0 grade=Senior Therapist
+  AVAILABLE: Saji Mathew (THP1278) sessions=0 grade=Super Senior Therapist
+  AVAILABLE: Sangameshwaran.P (THP1238) sessions=0 grade=Junior Therapist
+  AVAILABLE: Sanjay Kumar.K (THP1168) sessions=1 grade=Super Senior Therapist
+  AVAILABLE: Sasidharan.B (THP1218) sessions=3 grade=Senior Therapist
+  AVAILABLE: Satheesh K (THP1081) sessions=3 grade=Senior Therapist
+  AVAILABLE: Senthil Kumar.C.K (THP1010) sessions=1 grade=Super Senior Therapist
+  AVAILABLE: Shanoj (THP1228) sessions=0 grade=Super Senior Therapist
+  AVAILABLE: Shijoy. C. (THP1055) sessions=3 grade=Senior Therapist
+  AVAILABLE: Sivan (THP1325) sessions=2 grade=Senior Therapist
+  AVAILABLE: Sreekumar K V (THP1209) sessions=1 grade=Super Senior Therapist
+  AVAILABLE: Sreenivasan T M (THP1248) sessions=1 grade=Super Senior Therapist
+  AVAILABLE: Sunil Kumar.C (THP1145) sessions=0 grade=Senior Therapist
+  AVAILABLE: Sunil Kumar.T (THP1232) sessions=1 grade=Super Senior Therapist
+  AVAILABLE: Suraj P M (THP1272) sessions=3 grade=Senior Therapist
+  AVAILABLE: Suresh  B (THP1119) sessions=1 grade=Super Senior Therapist
+  AVAILABLE: Suresh K.C (THP1004) sessions=1 grade=Super Senior Therapist
+  BOOKED AT SLOT: Swapnesh PP (THP1246) sessions=4 grade=Junior Therapist
+  AVAILABLE: Venugopalan C (THP1206) sessions=0 grade=Super Senior Therapist
+  AVAILABLE: Viju K (THP1179) sessions=0 grade=Super Senior Therapist
+  AVAILABLE: Vinu M (THP1017) sessions=3 grade=Senior Therapist
