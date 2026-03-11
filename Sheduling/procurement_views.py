@@ -6,10 +6,11 @@ from django.contrib.auth.decorators import login_required
 from django.utils import timezone
 from django.db import transaction
 from django.utils.dateparse import parse_date
+from django.db.models import Q
 from .models import PrescriptionScheduling, PrescriptionChangeLog, PrescriptionItem, PrescriptionDispatch
 from .decorators import procurement_access_required, procurement_api_access_required
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 
 @login_required
 @procurement_access_required
@@ -121,20 +122,34 @@ def get_procurement_prescriptions_api(request):
                     else:
                         relevant_allocations = list(allocation_query)
                     
-                    # Helper to reconstruct historic items_groups
+                    # Helper to reconstruct historic items_groups reliably by working backward
                     def get_effective_items_groups(alloc, target_date):
-                        from .models import PrescriptionChangeLog
-                        logs_for_date = PrescriptionChangeLog.objects.filter(
-                            patient_id=alloc.patient_id,
-                            prescription_date=target_date,
-                            action='update',
-                            after_values__allocation_id=alloc.id
-                        ).order_by('-timestamp').first()
+                        # Pre-fetch logs for this specific allocation
+                        logs = PrescriptionChangeLog.objects.filter(
+                            Q(after_values__allocation_id=alloc.id) |
+                            Q(before_values__allocation_id=alloc.id)
+                        ).order_by('-timestamp')
                         
-                        if logs_for_date and logs_for_date.after_values:
-                            return logs_for_date.after_values.get('items_groups')
+                        date_logs = {}
+                        for log in logs:
+                            if log.prescription_date not in date_logs:
+                                date_logs[log.prescription_date] = log
                         
-                        return alloc.items_groups
+                        running_items = alloc.items_groups
+                        temp_date = alloc.to_date
+                        
+                        # Reconstruct backwards from CURRENT state to find target_date's state
+                        while temp_date >= target_date:
+                            log = date_logs.get(temp_date)
+                            if temp_date == target_date:
+                                return log.after_values.get('items_groups', running_items) if log else running_items
+                            
+                            if log:
+                                running_items = log.before_values.get('items_groups', running_items)
+                                
+                            temp_date -= timedelta(days=1)
+                        
+                        return running_items
 
                     # Process ALL relevant allocations
                     for allocation in relevant_allocations:
@@ -505,19 +520,34 @@ def get_prescription_details_api(request):
                 if allocation.cancelled_date_from <= filter_date <= allocation.cancelled_date_to:
                     is_cancelled_for_this_date = True
             
-            # Helper to reconstruct historic items_groups
+            # Helper to reconstruct historic items_groups reliably by working backward
             def get_effective_items_groups(alloc, target_date):
-                from .models import PrescriptionChangeLog
-                logs_for_date = PrescriptionChangeLog.objects.filter(
-                    patient_id=alloc.patient_id,
-                    prescription_date=target_date,
-                    action='update',
-                    after_values__allocation_id=alloc.id
-                ).order_by('-timestamp').first()
-                if logs_for_date and logs_for_date.after_values:
-                    return logs_for_date.after_values.get('items_groups')
+                # Pre-fetch logs for this specific allocation
+                logs = PrescriptionChangeLog.objects.filter(
+                    Q(after_values__allocation_id=alloc.id) |
+                    Q(before_values__allocation_id=alloc.id)
+                ).order_by('-timestamp')
                 
-                return alloc.items_groups
+                date_logs = {}
+                for log in logs:
+                    if log.prescription_date not in date_logs:
+                        date_logs[log.prescription_date] = log
+                
+                running_items = alloc.items_groups
+                temp_date = alloc.to_date
+                
+                # Reconstruct backwards from CURRENT state to find target_date's state
+                while temp_date >= target_date:
+                    log = date_logs.get(temp_date)
+                    if temp_date == target_date:
+                        return log.after_values.get('items_groups', running_items) if log else running_items
+                    
+                    if log:
+                        running_items = log.before_values.get('items_groups', running_items)
+                        
+                    temp_date -= timedelta(days=1)
+                
+                return running_items
 
             raw_groups = get_effective_items_groups(allocation, filter_date)
             if raw_groups:
