@@ -752,10 +752,15 @@ def therapy_entry(request):
                                 tasks = expand_therapies_for_visit(allocation.id, d.strftime('%Y-%m-%d'), create_bookings=True)
                                 print(f"Resume allocation {allocation.id} for date {d}: algorithm returned {tasks}")
                                 
-                                if isinstance(tasks, list) and any(t.get('status') == 'BOOKED' for t in tasks):
+                                if isinstance(tasks, list):
+                                    booked_tasks = [t for t in tasks if t.get('status') == 'BOOKED']
+                                    failed_tasks = [t for t in tasks if t.get('status') == 'FAILED']
+                                if isinstance(tasks, list) and booked_tasks and not failed_tasks:
                                     any_success = True
-                                    Booking.objects.filter(allocation=allocation, date=d).update(status='scheduled')
-                                    BookingItem.objects.filter(booking__allocation=allocation, booking__date=d).update(status='scheduled')
+                                    # Exclude bookings marked as 'failed' by the algorithm
+                                    # (e.g. insufficient therapists) — do NOT override their status
+                                    Booking.objects.filter(allocation=allocation, date=d).exclude(status='failed').update(status='scheduled')
+                                    BookingItem.objects.filter(booking__allocation=allocation, booking__date=d).exclude(status='failed').update(status='scheduled')
                                 else:
                                     reason = None
                                     if isinstance(tasks, list):
@@ -1193,8 +1198,9 @@ def therapy_entry(request):
                                 failed_tasks = [t for t in tasks if t.get('status') == 'FAILED']
                                 if booked_tasks and not failed_tasks:
                                     any_success = True
-                                    Booking.objects.filter(allocation=allocation, date=d).update(status='scheduled')
-                                    BookingItem.objects.filter(booking__allocation=allocation, booking__date=d).update(status='scheduled')
+                                    # Exclude bookings marked as 'failed' by the algorithm
+                                    Booking.objects.filter(allocation=allocation, date=d).exclude(status='failed').update(status='scheduled')
+                                    BookingItem.objects.filter(booking__allocation=allocation, booking__date=d).exclude(status='failed').update(status='scheduled')
                                 elif failed_tasks:
                                     # If any failed, mark as failed and store exact reason for dashboard
                                     reason = failed_tasks[0].get('reason', 'unknown')
@@ -1357,8 +1363,9 @@ def therapy_entry(request):
                                     failed_tasks = [t for t in tasks if t.get('status') == 'FAILED']
                                     if booked_tasks and not failed_tasks:
                                         date_change_success = True
-                                        Booking.objects.filter(allocation=allocation, date=d).update(status='scheduled')
-                                        BookingItem.objects.filter(booking__allocation=allocation, booking__date=d).update(status='scheduled')
+                                        # Exclude bookings marked as 'failed' by the algorithm
+                                        Booking.objects.filter(allocation=allocation, date=d).exclude(status='failed').update(status='scheduled')
+                                        BookingItem.objects.filter(booking__allocation=allocation, booking__date=d).exclude(status='failed').update(status='scheduled')
                                         
                                         # Allocate nurses for nurse treatments
                                         try:

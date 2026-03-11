@@ -1,0 +1,57 @@
+
+=== SURAJ (521082006) ===
+Alloc id=2844 therapy=Dhara & Pizhichil (6) status=draft
+  TherapyMaster: total=6 senior=2 junior=1 ss=2 trainee=1
+  TB count: 0
+Alloc id=2985 therapy=KKGPK(8) (5 T) status=allocated
+  TherapyMaster: total=5 senior=1 junior=2 ss=0 trainee=2
+  Booking id=21093 status=scheduled timeslot=Slot 1: 06:30 AM fail=insufficient_therapists_available (required=5, found=4, gender=female)
+  BA count: 4
+    BA id=16391 therapist=Kavitha Murugasan (THP1229) status=assigned
+    BA id=16477 therapist=Vijayalakshmi.S (NK) (THP1305) status=assigned
+    BA id=16519 therapist=Sikkandrammal.D (THP1061) status=assigned
+    BA id=16520 therapist=Sheela. M.B. (THP1046) status=assigned
+  TB count: 8
+    TB id=16870 therapist=Kavitha Murugasan (THP1229) slot=Slot 1: 06:30 AM bath=True
+    TB id=16965 therapist=Vijayalakshmi.S (NK) (THP1305) slot=Slot 1: 06:30 AM bath=True
+    TB id=17020 therapist=Kavitha Murugasan (THP1229) slot=Slot 6: 04:00 PM bath=True
+    TB id=17021 therapist=Vijayalakshmi.S (NK) (THP1305) slot=Slot 6: 04:00 PM bath=False
+    TB id=17022 therapist=Sikkandrammal.D (THP1061) slot=Slot 6: 04:00 PM bath=False
+    TB id=17023 therapist=Sheela. M.B. (THP1046) slot=Slot 6: 04:00 PM bath=False
+    TB id=17024 therapist=Sikkandrammal.D (THP1061) slot=Slot 1: 06:30 AM bath=False
+    TB id=17025 therapist=Sheela. M.B. (THP1046) slot=Slot 1: 06:30 AM bath=False
+Alloc id=2986 therapy=Mathra Vasthi status=draft
+  TherapyMaster: total=0 senior=0 junior=0 ss=0 trainee=0
+  Booking id=21101 status=scheduled timeslot=None fail=
+  BA count: 0
+  TB count: 0
+Alloc id=2987 therapy=Vasthi/ Kashayavasthi status=allocated
+  TherapyMaster: total=1 senior=1 junior=0 ss=0 trainee=0
+  TB count: 0
+Alloc id=2988 therapy=Vasthi/ Kashayavasthi status=allocated
+  TherapyMaster: total=1 senior=1 junior=0 ss=0 trainee=0
+  TB count: 0
+Alloc id=2989 therapy=Kashaya vasthi status=draft
+  TherapyMaster: total=1 senior=1 junior=0 ss=0 trainee=0
+  TB count: 0
+Alloc id=3022 therapy=Kashaya vasthi status=draft
+  TherapyMaster: total=1 senior=1 junior=0 ss=0 trainee=0
+  TB count: 0
+
+=== MUTHUALAGU (408072021) ===
+Alloc id=2724 therapy=Dhara & Pizhichil (6) status=draft
+  TherapyMaster: total=6 senior=2 junior=1 ss=2 trainee=1
+  TB count: 0
+Alloc id=2725 therapy=ABHY & SPL NK (2) status=allocated
+  TherapyMaster: total=2 senior=1 junior=1 ss=0 trainee=0
+  Booking id=19334 status=scheduled timeslot=Slot 1: 06:30 AM fail=
+  BA count: 1
+    BA id=16334 therapist=Poongodi Senthil Kumar (THP1155) status=assigned
+  TB count: 1
+    TB id=16839 therapist=Poongodi Senthil Kumar (THP1155) slot=Slot 1: 06:30 AM bath=False
+Alloc id=2726 therapy=Lepam status=draft
+  TherapyMaster: total=1 senior=0 junior=0 ss=1 trainee=0
+  TB count: 0
+Alloc id=2878 therapy=Virechanam status=draft
+  TherapyMaster: total=0 senior=0 junior=0 ss=0 trainee=0
+  TB count: 0

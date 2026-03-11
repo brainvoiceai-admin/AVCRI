@@ -29,7 +29,7 @@
         <div class="container">
             <header>
                 <h1>Therapy Scheduling Dashboard</h1>
-                <div class="subtitle">Manage draft, failed, and scheduled therapy allocations with therapist assignments
+                <div class="subtitle">Manage draft, reschedule, and scheduled therapy allocations with therapist assignments
                 </div>
             </header>
 
@@ -40,7 +40,7 @@
                 </div>
                 <div class="stat-card stat-failed">
                     <div class="stat-value" id="failed-count">{{ stats.failed_count }}</div>
-                    <div class="stat-label">Failed Schedules</div>
+                    <div class="stat-label">To Reschedule</div>
                 </div>
                 <div class="stat-card stat-allocated">
                     <div class="stat-value" id="allocated-count">{{ stats.scheduled_count }}</div>
@@ -52,7 +52,7 @@
                 <div class="card">
                     <div class="tabs">
                         <button class="tab active" data-tab="draft">Draft Therapies</button>
-                        <button class="tab" data-tab="failed">Failed Schedules</button>
+                        <button class="tab" data-tab="failed">To Reschedule</button>
                         <button class="tab" data-tab="scheduled">Scheduled Therapies</button>
                         <button class="tab" data-tab="continuity">Continuity Matrix</button>
                     </div>
@@ -161,14 +161,14 @@
                         </div>
                     </div>
 
-                    <!-- Failed Schedules Tab -->
+                    <!-- Reschedule Tab -->
                     <div id="failed" class="tab-content">
                         <div class="card-header">
                             <div>
-                                <div class="card-title">Failed Schedules</div>
-                                <div class="card-subtitle">Therapies that failed scheduling (exact reason shown when
+                                <div class="card-title">Therapies to Reschedule</div>
+                                <div class="card-subtitle">Therapies that need rescheduling (original reason shown when
                                     date is selected). Use date
-                                    filter to view failures for specific dates. Click "Reschedule" to move back to
+                                    filter to view these therapies. Click "Reschedule" to move back to
                                     draft.</div>
                             </div>
                         </div>
@@ -179,7 +179,7 @@
                                 <input type="date" id="failed-date" value="{{ date_filter }}">
                             </div>
                             <button class="btn btn-secondary" id="reschedule-all">
-                                <span>🔄</span> Reschedule All Failed
+                                <span>🔄</span> Reschedule All
                             </button>
                         </div>
 
@@ -195,7 +195,7 @@
                                         <th>Therapy</th>
                                         <th>Time Slot</th>
                                         <th>Room No</th>
-                                        <th>Failure Reason</th>
+                                        <th>Reschedule Reason</th>
                                         <th>Recommendation</th>
                                         <th>Actions</th>
                                     </tr>
@@ -265,7 +265,7 @@
                                     <tr>
                                         <td colspan="7" class="empty-state">
                                             <div class="empty-state-icon">⚠️</div>
-                                            <div>No failed schedules found. Failed therapies will appear here after
+                                            <div>No therapies currently need rescheduling. Therapies that cannot be scheduled will appear here after
                                                 scheduling attempts.</div>
                                         </td>
                                     </tr>

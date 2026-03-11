@@ -1,0 +1,53 @@
+=== Booking 21093 ===
+status=scheduled
+failure_reason=insufficient_therapists_available (required=5, found=4, gender=female)
+timeslot=Slot 1: 06:30 AM
+room=TRC-2 (1020)
+updated_at=2026-03-11 10:08:16.510699+00:00
+created_at=2026-03-09 05:01:48.408771+00:00
+
+=== All BookingAssignment for these therapists on 2026-03-13 ===
+BA id=16391, therapist=Kavitha Murugasan (THP1229), booking_id=21093, date=2026-03-13, slot=Slot 1: 06:30 AM
+  OTHER BA: id=16325, booking_id=19105, slot=Slot 2: 08:30 AM, status=assigned
+  OTHER BA: id=16357, booking_id=19827, slot=Slot 3: 10:00 AM, status=assigned
+  OTHER BA: id=16476, booking_id=21587, slot=Slot 5: 02:30 PM, status=assigned
+BA id=16477, therapist=Vijayalakshmi.S (NK) (THP1305), booking_id=21093, date=2026-03-13, slot=Slot 1: 06:30 AM
+  OTHER BA: id=16425, booking_id=21112, slot=Slot 2: 08:30 AM, status=assigned
+BA id=16519, therapist=Sikkandrammal.D (THP1061), booking_id=21093, date=2026-03-13, slot=Slot 1: 06:30 AM
+  OTHER BA: id=16499, booking_id=21675, slot=Slot 2: 08:30 AM, status=assigned
+  OTHER BA: id=16517, booking_id=20906, slot=Slot 3: 10:00 AM, status=assigned
+  OTHER BA: id=16478, booking_id=21600, slot=Slot 5: 02:30 PM, status=assigned
+BA id=16520, therapist=Sheela. M.B. (THP1046), booking_id=21093, date=2026-03-13, slot=Slot 1: 06:30 AM
+  OTHER BA: id=16353, booking_id=19827, slot=Slot 3: 10:00 AM, status=assigned
+  OTHER BA: id=16371, booking_id=20406, slot=Slot 4: 11:30 AM, status=assigned
+
+=== Booking 19334 ===
+status=scheduled
+failure_reason=
+timeslot=Slot 1: 06:30 AM
+updated_at=2026-03-11 10:06:40.924340+00:00
+
+TherapyAllocation id=2725
+therapy_name=ABHY & SPL NK (2)
+status=allocated
+patient=408072021 - MUTHUALAGU.M
+pat_sex=Female
+
+All bookings for alloc 2725 on 2026-03-13: 1
+  Booking id=19334, status=scheduled, timeslot=Slot 1: 06:30 AM, fail=
+  BA count: 1
+
+=== Check for the same code path issue ===
+
+Failed bookings for alloc 2725: 0
+
+=== Alloc 2985 (SURAJ KKGPK) ===
+status=allocated
+All bookings: 7
+  id=21090, date=2026-03-10, status=scheduled, fail=insufficient_therapists_available (required=5, found=3, gender=female), BA=0, TB=2
+  id=21091, date=2026-03-11, status=failed, fail=insufficient_therapists_available (required=5, found=4, gender=female), BA=0, TB=0
+  id=21092, date=2026-03-12, status=scheduled, fail=insufficient_therapists_available (required=5, found=4, gender=female), BA=5, TB=5
+  id=21093, date=2026-03-13, status=scheduled, fail=insufficient_therapists_available (required=5, found=4, gender=female), BA=4, TB=12
+  id=21094, date=2026-03-14, status=draft, fail=, BA=0, TB=0
+  id=21095, date=2026-03-15, status=draft, fail=, BA=0, TB=0
+  id=21096, date=2026-03-16, status=draft, fail=, BA=0, TB=0

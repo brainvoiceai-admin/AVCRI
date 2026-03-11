@@ -19,7 +19,7 @@
             <header>
                 <h1>User Therapy Entry Dashboard</h1>
                 <div class="subtitle">
-                    View draft, failed and scheduled therapies that <strong>you</strong> have entered, with the same layout as the scheduling dashboard.
+                    View draft, reschedule-needed and scheduled therapies that <strong>you</strong> have entered, with the same layout as the scheduling dashboard.
                 </div>
             </header>
 
@@ -30,7 +30,7 @@
                 </div>
                 <div class="stat-card stat-failed">
                     <div class="stat-value" id="failed-count">{{ stats.failed_count }}</div>
-                    <div class="stat-label">Failed Schedules</div>
+                    <div class="stat-label">To Reschedule</div>
                 </div>
                 <div class="stat-card stat-allocated">
                     <div class="stat-value" id="allocated-count">{{ stats.scheduled_count }}</div>
@@ -42,7 +42,7 @@
                 <div class="card">
                     <div class="tabs">
                         <button class="tab active" data-tab="draft">Draft Therapies</button>
-                        <button class="tab" data-tab="failed">Failed Schedules</button>
+                        <button class="tab" data-tab="failed">To Reschedule</button>
                         <button class="tab" data-tab="scheduled">Scheduled Therapies</button>
                     </div>
 
@@ -115,13 +115,13 @@
                         </div>
                     </div>
 
-                    <!-- Failed Schedules Tab -->
+                    <!-- Reschedule Tab -->
                     <div id="failed" class="tab-content">
                         <div class="card-header">
                             <div>
-                                <div class="card-title">Failed Schedules</div>
+                                <div class="card-title">Therapies to Reschedule</div>
                                 <div class="card-subtitle">
-                                    Therapies you entered that failed scheduling. Use date filter to view failures for specific dates.
+                                    Therapies you entered that need rescheduling. Use date filter to view these therapies and see the original reason.
                                 </div>
                             </div>
                         </div>
@@ -141,7 +141,7 @@
                                         <th>Therapy</th>
                                         <th>Time Slot</th>
                                         <th>Room No</th>
-                                        <th>Failure Reason</th>
+                                        <th>Reschedule Reason</th>
                                         <th>Recommendation</th>
                                         <th>Entered By</th>
                                     </tr>
@@ -175,7 +175,7 @@
                                         <tr>
                                             <td colspan="7" class="empty-state">
                                                 <div class="empty-state-icon">⚠️</div>
-                                                <div>No failed schedules found for this date/user.</div>
+                                                <div>No therapies needing reschedule found for this date/user.</div>
                                             </td>
                                         </tr>
                                     {% endif %}

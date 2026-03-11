@@ -12,7 +12,7 @@
     <div class="container">
         <header>
             <h1>Therapy Scheduling Dashboard</h1>
-            <div class="subtitle">Manage draft, failed, and finalized therapy schedules with therapist assignments</div>
+            <div class="subtitle">Manage draft, reschedule, and finalized therapy schedules with therapist assignments</div>
         </header>
         
         <div class="stats">
@@ -22,7 +22,7 @@
             </div>
             <div class="stat-card stat-failed">
                 <div class="stat-value" id="failed-count">0</div>
-                <div class="stat-label">Failed Schedules</div>
+                <div class="stat-label">To Reschedule</div>
             </div>
             <div class="stat-card stat-finalized">
                 <div class="stat-value" id="finalized-count">0</div>
@@ -34,7 +34,7 @@
             <div class="card">
                 <div class="tabs">
                     <button class="tab active" data-tab="draft">Draft Therapies</button>
-                    <button class="tab" data-tab="failed">Failed Schedules</button>
+                    <button class="tab" data-tab="failed">To Reschedule</button>
                     <button class="tab" data-tab="final">Finalized Schedules</button>
                 </div>
                 
@@ -76,12 +76,12 @@
                     </div>
                 </div>
                 
-                <!-- Failed Schedules Tab -->
+                <!-- Reschedule Tab -->
                 <div id="failed" class="tab-content">
                     <div class="card-header">
                         <div>
-                            <div class="card-title">Failed Schedules</div>
-                            <div class="card-subtitle">Review and reschedule failed therapy allocations</div>
+                            <div class="card-title">Therapies to Reschedule</div>
+                            <div class="card-subtitle">Review therapy allocations that need rescheduling</div>
                         </div>
                     </div>
                     
@@ -91,7 +91,7 @@
                             <input type="date" id="failed-date">
                         </div>
                         <button class="btn btn-secondary" id="reschedule-all">
-                            <span>🔄</span> Reschedule All Failed
+                            <span>🔄</span> Reschedule All
                         </button>
                     </div>
                     
@@ -102,7 +102,7 @@
                                     <th>Patient</th>
                                     <th>Therapy</th>
                                     <th>Time Slot</th>
-                                    <th>Failure Reason</th>
+                                    <th>Reschedule Reason</th>
                                     <th>Recommendation</th>
                                     <th>Actions</th>
                                 </tr>

@@ -3384,7 +3384,7 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                                 raise RuntimeError(f"Therapist object has no PK: {therapist_obj}")
                             print(f"[CONTINUITY PASS2] Therapist object verified: pk={therapist_obj.pk}, code={t.therapist_code}")
                             
-                            # Check if assignment already exists
+                            # Check if assignment already exists for THIS booking
                             existing = BookingAssignment.objects.filter(booking=booking, therapist=therapist_obj).first()
                             if existing:
                                 ba_obj = existing
@@ -3392,36 +3392,49 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                                 print(f"[CONTINUITY PASS2] BookingAssignment already exists: pk={ba_obj.pk} for therapist {t.therapist_code}")
                                 ba_success_count += 1
                             else:
-                                # Create BookingAssignment to link therapist to booking
-                                # Explicitly set booking_timeslot to slot_master to avoid FK constraint issues
-                                # IMPORTANT: Ensure booking is fully saved and refreshed before creating BookingAssignment
-                                print(f"[CONTINUITY PASS2] Creating BookingAssignment for therapist {t.therapist_code}")
-                                print(f"[CONTINUITY PASS2]   - booking={booking} (pk={booking.pk}, timeslot_id={booking.timeslot_id})")
-                                print(f"[CONTINUITY PASS2]   - slot_master={slot_master} (pk={slot_master.pk})")
-                                print(f"[CONTINUITY PASS2]   - therapist={therapist_obj} (pk={therapist_obj.pk})")
-                                
-                                # Create BookingAssignment - use create() then save() to ensure FK is set correctly
-                                ba_obj = BookingAssignment(
-                                    booking=booking,
+                                # CRITICAL FIX: Check for stale/released BookingAssignment for same
+                                # therapist + date + timeslot (from a cancelled/released booking).
+                                # The UNIQUE constraint on (therapist, booking_date, booking_timeslot)
+                                # would cause IntegrityError if we try to create a new one while the
+                                # stale record exists.  Overwrite it instead.
+                                stale = BookingAssignment.objects.filter(
                                     therapist=therapist_obj,
-                                    booking_item=None,
                                     booking_date=target_date,
-                                    booking_timeslot=slot_master,  # Explicitly set to avoid FK constraint issues
-                                    role=get_therapist_grade_name(t),
-                                    assigned_for='booking',
-                                    status='assigned'
-                                )
-                                # Save explicitly to trigger any save() logic
-                                ba_obj.save()
-                                print(f"[CONTINUITY PASS2] ✓ BookingAssignment created successfully: pk={ba_obj.pk} for therapist {t.therapist_code}")
-                                print(f"[CONTINUITY PASS2]   FK IDs: therapist_id={ba_obj.therapist_id}, booking_id={ba_obj.booking_id}, booking_timeslot_id={ba_obj.booking_timeslot_id}")
-                                ba_created = True
-                                ba_success_count += 1
+                                    booking_timeslot=slot_master,
+                                ).exclude(booking=booking).first()
+                                if stale:
+                                    print(f"[CONTINUITY PASS2] Found stale BookingAssignment pk={stale.pk} for therapist {t.therapist_code} "
+                                          f"(old booking={stale.booking_id}, status={stale.status}) — overwriting")
+                                    stale.booking = booking
+                                    stale.booking_item = None
+                                    stale.role = get_therapist_grade_name(t)
+                                    stale.assigned_for = 'booking'
+                                    stale.status = 'assigned'
+                                    stale.save()
+                                    ba_obj = stale
+                                    ba_created = True
+                                    print(f"[CONTINUITY PASS2] ✓ Stale BookingAssignment overwritten: pk={ba_obj.pk} for therapist {t.therapist_code}")
+                                    ba_success_count += 1
+                                else:
+                                    # No stale record — safe to create a new one
+                                    print(f"[CONTINUITY PASS2] Creating BookingAssignment for therapist {t.therapist_code}")
+                                    ba_obj = BookingAssignment(
+                                        booking=booking,
+                                        therapist=therapist_obj,
+                                        booking_item=None,
+                                        booking_date=target_date,
+                                        booking_timeslot=slot_master,
+                                        role=get_therapist_grade_name(t),
+                                        assigned_for='booking',
+                                        status='assigned'
+                                    )
+                                    ba_obj.save()
+                                    print(f"[CONTINUITY PASS2] ✓ BookingAssignment created successfully: pk={ba_obj.pk} for therapist {t.therapist_code}")
+                                    ba_created = True
+                                    ba_success_count += 1
                         except Exception as e:
                             # Any exception here means the current DB transaction is now in an error state
                             # (e.g. UNIQUE constraint on BookingAssignment or other IntegrityError).
-                            # If we continue the loop and perform more ORM queries, Django will raise:
-                            # "TransactionManagementError: An error occurred in the current transaction..."
                             error_msg = f"Error creating BookingAssignment for {getattr(t, 'therapist_code', 'unknown')}: {e}"
                             print(f"[CONTINUITY PASS2] ❌ {error_msg}")
                             import traceback
