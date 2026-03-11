@@ -1084,8 +1084,8 @@ def therapy_entry(request):
                             BookingAssignment.objects.filter(booking__in=day_bookings).update(status='released')
                             # cancel external TherapistBooking/RoomBooking
                             from Patient.models import TherapistBooking as TB, RoomBooking as RB
-                            # Get the timeslot for this date
-                            day_timeslot = allocation.timeslot
+                            # Get the OLD timeslot for this date to properly cancel previous external bookings
+                            day_timeslot = old_slot or allocation.timeslot
                             if day_timeslot:
                                 # Cancel TherapistBooking: filter by visit (TherapyAllocation FK) or patient_id + date + timeslot
                                 TB.objects.filter(

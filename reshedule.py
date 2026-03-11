@@ -2439,25 +2439,31 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
                                     is_bathing_therapist=bool(getattr(t, 'is_bathing_therapist', False))
                                 )
 
-                            # avoid duplicates by checking therapist+date+slot
+                            # avoid duplicates and unique constraint failures from stale/released assignments
                             existing = BookingAssignment.objects.filter(
                                 therapist=pt,
                                 booking_date=date,
-                                booking_timeslot=canonical_slot,
-                                booking=booking,
-                                status='assigned'
+                                booking_timeslot=canonical_slot
                             ).first()
-                            if not existing:
+                            
+                            if existing:
+                                existing.booking = booking
+                                existing.status = 'assigned'
+                                existing.assigned_for = 'booking'
+                                existing.save()
+                            else:
                                 BookingAssignment.objects.create(
                                     booking=booking,
                                     therapist=pt,
                                     assigned_for='booking',
                                     status='assigned'
                                 )
-                        except Exception:
+                        except Exception as e:
+                            print(f"[ERROR BookingAssignment] Failed for therapist {getattr(t, 'therapist_code', str(t))}: {e}")
                             continue
-                except Exception:
+                except Exception as e:
                     # If BookingAssignment model isn't available or fails, continue; UI may fall back to related bookings
+                    print(f"[ERROR BookingAssignment] Fatal error in creating assignments: {e}")
                     pass
 
             task = {
