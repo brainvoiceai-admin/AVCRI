@@ -16,6 +16,11 @@
 
   <link rel="stylesheet" href="{% static 'css/updated_dash_prescription_entry.css' %}?v=3.5">
   <link rel="stylesheet" href="{% static 'css/dashboards_nav.css' %}">
+  <style>
+    .modal-backdrop.show {
+      display: flex !important;
+    }
+  </style>
 </head>
 
 <body>
@@ -368,6 +373,39 @@
         <div id="history-list" class="history-list">
           <!-- History items will be injected here -->
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Status Modal (Day-by-Day History) -->
+  <div id="status-modal-backdrop" class="modal-backdrop">
+    <div class="modal card" style="max-width: 800px; width: 90%;">
+      <div class="modal-header">
+        <div>
+          <h3 style="margin: 0; display:flex; align-items:center; gap:8px;">
+            <i class="fas fa-calendar-alt" style="color:var(--primary);"></i>
+            Prescription Day-by-Day Status
+          </h3>
+          <div id="status-modal-info" class="small-muted" style="margin-top: 8px;"></div>
+        </div>
+        <button id="status-modal-close" class="btn btn-outline btn-sm">
+          <i class="fas fa-times"></i>
+        </button>
+      </div>
+      <div class="modal-body" style="padding: 16px;">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Medicine</th>
+              <th style="width: 25%;">Ingredients</th>
+              <th>Usage</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody id="status-modal-tbody">
+          </tbody>
+        </table>
       </div>
     </div>
   </div>

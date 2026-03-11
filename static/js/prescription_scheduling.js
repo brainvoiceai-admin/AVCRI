@@ -43,6 +43,35 @@ function setupEventListeners() {
         loadPrescriptionData('dispatched', this.value);
     });
 
+    // Search functionality
+    ['draft', 'scheduled', 'dispatched'].forEach(status => {
+        const searchInput = document.getElementById(`${status}-search`);
+        const searchBtn = document.getElementById(`btn-search-${status}`);
+        const clearBtn = document.getElementById(`btn-clear-${status}`);
+        const dateInput = document.getElementById(`${status}-date`);
+
+        if (searchBtn) {
+            searchBtn.addEventListener('click', () => {
+                loadPrescriptionData(status, dateInput.value, searchInput.value);
+            });
+        }
+
+        if (clearBtn) {
+            clearBtn.addEventListener('click', () => {
+                searchInput.value = '';
+                loadPrescriptionData(status, dateInput.value, '');
+            });
+        }
+
+        if (searchInput) {
+            searchInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    loadPrescriptionData(status, dateInput.value, searchInput.value);
+                }
+            });
+        }
+    });
+
     // Print to PDF button
     document.getElementById('print-prescription-pdf').addEventListener('click', function () {
         printPrescriptionScheduleToPDF();
@@ -62,17 +91,40 @@ function setupEventListeners() {
     }
 }
 
-function loadPrescriptionData(status, date) {
-    const url = `/sheduling/prescription/api/prescription-data/?status=${status}&date=${date}`;
+function loadPrescriptionData(status, date, search = '') {
+    let url = `/sheduling/prescription/api/prescription-data/?status=${status}&date=${date}`;
+    if (search) {
+        url += `&search=${encodeURIComponent(search)}`;
+    }
 
     fetch(url)
-        .then(response => response.json())
+        .then(response => {
+            const contentType = response.headers.get('content-type');
+            if (contentType && contentType.includes('application/json')) {
+                return response.json();
+            } else if (response.status === 401 || response.status === 403 || response.status === 400) {
+                // If it's a known error status but not JSON, it's likely a session timeout or Django error page
+                throw new Error('Session might have expired or server error occurred. Please refresh the page.');
+            } else {
+                return response.text().then(text => {
+                    throw new Error('Unexpected response from server. If this persists, please re-login.');
+                });
+            }
+        })
         .then(data => {
             if (data.success) {
                 updateTable(status, data.data, date);
                 updateStats(data.data, status);
+                
+                // Update final schedule button state if in draft tab
+                if (status === 'draft') {
+                    updateFinalScheduleButtonState(data.final_schedule_generated);
+                }
             } else {
                 console.error('API Error:', data.error);
+                if (status === 'scheduled') {
+                    alert('Error: ' + (data.error || 'Failed to load data'));
+                }
             }
         })
         .catch(error => {
@@ -205,6 +257,27 @@ function getStatusLabel(status) {
     return labels[status] || status;
 }
 
+function updateFinalScheduleButtonState(isGenerated) {
+    const btn = document.getElementById('send-final-prescription');
+    if (!btn) return;
+    
+    if (isGenerated) {
+        btn.disabled = true;
+        btn.classList.remove('btn-primary');
+        btn.classList.add('btn-secondary');
+        btn.style.opacity = '1';
+        btn.title = 'Final Schedule has already been generated for this date';
+        btn.innerHTML = '<span>✔️</span> Final Schedule (Already Run)';
+    } else {
+        btn.disabled = false;
+        btn.classList.add('btn-primary');
+        btn.classList.remove('btn-secondary');
+        btn.style.opacity = '1';
+        btn.title = '';
+        btn.innerHTML = '<span>📤</span> Send Final Prescription';
+    }
+}
+
 function sendFinalPrescription() {
     const date = document.getElementById('draft-date').value;
     if (!date) {
@@ -227,7 +300,14 @@ function sendFinalPrescription() {
             date: date
         })
     })
-        .then(response => response.json())
+        .then(response => {
+            const contentType = response.headers.get('content-type');
+            if (contentType && contentType.includes('application/json')) {
+                return response.json();
+            } else {
+                throw new Error('Session expired or server error. Please refresh and login again.');
+            }
+        })
         .then(data => {
             hideLoading('draft');
             if (data.success) {
@@ -248,7 +328,14 @@ function sendFinalPrescription() {
 
 function viewPrescriptionDetails(patientId, date) {
     fetch(`/sheduling/prescription/api/prescription-details/?patient_id=${patientId}&date=${date}`)
-        .then(response => response.json())
+        .then(response => {
+            const contentType = response.headers.get('content-type');
+            if (contentType && contentType.includes('application/json')) {
+                return response.json();
+            } else {
+                throw new Error('Session expired. Please refresh and login again.');
+            }
+        })
         .then(data => {
             if (data.success) {
                 showPrescriptionModal(data.patient_info, data.prescription_groups || [], data.therapy_items || []);
@@ -594,7 +681,14 @@ function showPrescriptionModal(patientInfo, prescriptionGroups, therapyItems) {
 
 function viewChangeLog(patientId, date) {
     fetch(`/sheduling/prescription/api/change-log/?patient_id=${patientId}&date=${date}`)
-        .then(response => response.json())
+        .then(response => {
+            const contentType = response.headers.get('content-type');
+            if (contentType && contentType.includes('application/json')) {
+                return response.json();
+            } else {
+                throw new Error('Session expired. Please refresh and login again.');
+            }
+        })
         .then(data => {
             if (data.success) {
                 showChangeLogModal(data.change_log);
@@ -804,7 +898,14 @@ function printPrescriptionScheduleToPDF() {
     console.log('[PDF] Fetching prescription data...');
     // Fetch prescription data
     fetch(`/sheduling/prescription/api/prescription-data/?status=scheduled&date=${selectedDate}`)
-        .then(response => response.json())
+        .then(response => {
+            const contentType = response.headers.get('content-type');
+            if (contentType && contentType.includes('application/json')) {
+                return response.json();
+            } else {
+                throw new Error('Session expired or server connection lost. Please refresh the page and login again.');
+            }
+        })
         .then(data => {
             console.log('[PDF] Prescription data received:', data.success, 'patients:', data.data?.length || 0);
             // Also fetch therapy data to get ALL scheduled therapies (with therapists, nurse treatments, and zero-therapist)
@@ -816,9 +917,9 @@ function printPrescriptionScheduleToPDF() {
             console.log('[PDF]   - Scheduled:', `/sheduling/scheduling/api/therapy-data/?status=scheduled&date=${selectedDate}&include_zero_therapist=true`);
 
             Promise.all([
-                fetch(`/sheduling/scheduling/api/therapy-data/?status=allocated&date=${selectedDate}&include_zero_therapist=true`).then(r => r.json()),
-                fetch(`/sheduling/scheduling/api/therapy-data/?status=scheduled&date=${selectedDate}&include_zero_therapist=true`).then(r => r.json()),
-                fetch(`/sheduling/scheduling/api/therapy-data/?status=draft&date=${selectedDate}&include_zero_therapist=true`).then(r => r.json())
+                fetch(`/sheduling/scheduling/api/therapy-data/?status=allocated&date=${selectedDate}&include_zero_therapist=true`).then(r => r.headers.get('content-type').includes('json') ? r.json() : Promise.reject('Session expired')),
+                fetch(`/sheduling/scheduling/api/therapy-data/?status=scheduled&date=${selectedDate}&include_zero_therapist=true`).then(r => r.headers.get('content-type').includes('json') ? r.json() : Promise.reject('Session expired')),
+                fetch(`/sheduling/scheduling/api/therapy-data/?status=draft&date=${selectedDate}&include_zero_therapist=true`).then(r => r.headers.get('content-type').includes('json') ? r.json() : Promise.reject('Session expired'))
             ]).then(([allocatedData, scheduledData, draftData]) => {
                 console.log('[PDF] Therapy API Response - Allocated:', allocatedData.success, 'count:', allocatedData.data?.length || 0);
                 console.log('[PDF] Therapy API Response - Scheduled:', scheduledData.success, 'count:', scheduledData.data?.length || 0);
@@ -894,7 +995,7 @@ function printPrescriptionScheduleToPDF() {
 
                     if (patientId) {
                         return fetch(`/sheduling/prescription/api/prescription-details/?patient_id=${patientId}&date=${selectedDate}`)
-                            .then(res => res.json())
+                            .then(res => res.headers.get('content-type').includes('json') ? res.json() : Promise.reject('Session expired'))
                             .then(detailData => {
                                 if (detailData.success && detailData.patient_info) {
                                     return {
@@ -1083,7 +1184,7 @@ function printPrescriptionScheduleToPDF() {
                         const patientPromises = allPatients.map(item => {
                             // We trigger a fresh fetch for everyone to guarantee consistency
                             return fetch(`/sheduling/prescription/api/prescription-details/?patient_id=${item.patient_id}&date=${selectedDate}`)
-                                .then(res => res.json())
+                                .then(res => res.headers.get('content-type').includes('json') ? res.json() : Promise.reject('Session expired'))
                                 .then(detailData => {
                                     const merged = { ...item };
                                     if (detailData.success && detailData.patient_info) {

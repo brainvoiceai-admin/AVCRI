@@ -118,13 +118,17 @@ def prescription_scheduling_dashboard(request):
 def get_prescription_data_api(request):
     """
     API endpoint to fetch prescription data for the scheduling dashboard.
-    Works with PrescriptionAllocation similar to how therapy dashboard works with TherapyAllocation.
+    Optimized for performance with bulk fetching and room-wise sorting.
     """
     try:
-        from .models import PrescriptionAllocation
+        from .models import PrescriptionAllocation, PrescriptionScheduling, PrescriptionChangeLog
+        from MySql_Data_pull.models import Registration, doctor_master, Treatment
+        from collections import defaultdict
+        from .views import get_room_sort_key
         
         status = request.GET.get('status', 'draft')
         date = request.GET.get('date')
+        search_query = request.GET.get('search', '').strip().lower()
         
         if not date:
             return JsonResponse({'error': 'Date is required'}, status=400)
@@ -133,211 +137,184 @@ def get_prescription_data_api(request):
         if not filter_date:
             return JsonResponse({'error': 'Invalid date format'}, status=400)
         
-        # Get PrescriptionScheduling records for the specific date (per-date processing)
-        prescriptions = PrescriptionScheduling.objects.filter(
+        # Get PrescriptionScheduling records with basic optimization
+        prescriptions_qs = PrescriptionScheduling.objects.filter(
             prescription_date=filter_date,
-            status=status  # Use status directly (draft, scheduled, dispatched)
-        ).select_related('patient', 'doctor')
+            status=status
+        ).select_related('patient', 'doctor', 'scheduled_by').order_by('patient__pat_room_no')
         
-        data = []
-        for prescription_scheduling in prescriptions:
+        if not prescriptions_qs.exists():
+            # Check for FinalScheduleRun
+            from .models import FinalScheduleRun
+            is_locked = FinalScheduleRun.objects.filter(run_date=filter_date).exists()
+            return JsonResponse({'success': True, 'data': [], 'count': 0, 'final_schedule_generated': is_locked})
+
+        # --- BULK DATA FETCHING FOR PERFORMANCE ---
+        
+        # 1. Collect all registration numbers
+        patient_reg_map = {} # reg_no_str -> patient_snapshot_id
+        reg_to_digits = {} # reg_no_str -> digits_only
+        
+        for ps in prescriptions_qs:
+            reg_str = str(ps.patient.pat_reg_no).strip()
+            patient_reg_map[reg_str] = ps.patient.id
+            reg_to_digits[reg_str] = ''.join(ch for ch in reg_str if ch.isdigit())
+        
+        all_digits = [d for d in reg_to_digits.values() if d]
+        all_ints = []
+        for d in all_digits:
             try:
-                # Get patient details
-                patient = prescription_scheduling.patient
-                
-                # Handle potential None values
-                patient_name = patient.pat_name or 'Unknown'
-                doa = ''
-                
-                # Get doctor information from Registration and doctor_master tables
-                doctor_name = ''
-                doctor_team = ''
-                try:
-                    from MySql_Data_pull.models import Registration, doctor_master
-                    
-                    # Extract numeric digits from pat_reg_no (handle string format)
-                    reg_no_str = str(patient.pat_reg_no).strip()
-                    digits_only = ''.join(ch for ch in reg_no_str if ch.isdigit())
-                    
-                    # Check if patient is OP (5 digits) - OP patients are not in Registration table
-                    is_op = len(digits_only) == 5
-                    
-                    if not is_op and digits_only:
-                        # IP patient - convert to integer for querying Registration table
-                        try:
-                            reg_no_int = int(digits_only)
-                            # Use the therapy_db connection for Registration table
-                            registration = Registration.objects.using('therapy_db').filter(
-                                pat_reg_no=reg_no_int
-                            ).first()
-                            
-                            if registration:
-                                # Get doctor team from Registration table
-                                doctor_team = registration.dct_team or ''
-                                
-                                # Get doctor name from doctor_master table using doctcode
-                                if registration.doctcode:
-                                    doctor = doctor_master.objects.using('therapy_db').filter(
-                                        Doct_Code=registration.doctcode
-                                    ).first()
-                                    if doctor:
-                                        doctor_name = doctor.Doct_Name or ''
-                                        
-                                # Fetch DOA - Date of Admission (use .values() to avoid utcoffset crash)
-                                doa = ''
-                                try:
-                                    from MySql_Data_pull.models import Treatment
-                                    # Try various formats for Pat_Reg_No
-                                    for v in [reg_no_str, digits_only]:
-                                        if not v: continue
-                                        for pad in [0, 4, 5, 6]:
-                                            val = v.zfill(pad) if pad > 0 else v
-                                            doa_row = Treatment.objects.using('iptherapy_db').filter(
-                                                Pat_Reg_No=val
-                                            ).exclude(DOA__isnull=True).order_by('-DOA').values('DOA').first()
-                                            if doa_row and doa_row['DOA']:
-                                                doa_val = doa_row['DOA']
-                                                doa = doa_val.strftime('%d/%m/%Y') if hasattr(doa_val, 'strftime') else str(doa_val).split(' ')[0]
-                                                break
-                                        if doa: break
-                                    
-                                    # Fallback to Registration date for IP
-                                    if not doa and registration.pat_reg_date:
-                                        doa = registration.pat_reg_date.strftime('%d/%m/%Y')
-                                except Exception as e:
-                                    print(f"Error fetching DOA in Data API: {e}")
-                        except (ValueError, TypeError) as e:
-                            print(f"Error converting registration number to integer: {e}")
-                    else:
-                        # OP patient or registration not found - try Treatment table directly to find DOA
-                        try:
-                            from MySql_Data_pull.models import Treatment
-                            for v in [reg_no_str, digits_only]:
-                                if not v: continue
-                                for pad in [0, 4, 5, 6]:
-                                    val = v.zfill(pad) if pad > 0 else v
-                                    doa_row = Treatment.objects.using('iptherapy_db').filter(
-                                        Pat_Reg_No=val
-                                    ).exclude(DOA__isnull=True).order_by('-DOA').values('DOA').first()
-                                    if doa_row and doa_row['DOA']:
-                                        doa_val = doa_row['DOA']
-                                        doa = doa_val.strftime('%d/%m/%Y') if hasattr(doa_val, 'strftime') else str(doa_val).split(' ')[0]
-                                        break
-                                if doa: break
-                        except Exception as e:
-                            print(f"Error fetching DOA for OP in Data API: {e}")
-                except Exception as e:
-                    # If there's an error fetching from Registration/doctor_master, show empty
-                    print(f"Error fetching doctor info from Registration: {e}")
-                    doctor_name = ''
-                    doctor_team = ''
-                
-                # Get room_no - fallback to PatientSnapshot.pat_room_no
-                room_no = getattr(patient, 'pat_room_no', None)
-                
-                # Get ALL prescription allocations for this patient and date
-                # Exclude only cancelled prescriptions for this specific date
-                allocations = PrescriptionAllocation.objects.filter(
-                    patient=patient,
-                    from_date__lte=filter_date,
-                    to_date__gte=filter_date
-                ).select_related('allocated_by')
-                
-                # Filter out allocations that are cancelled for this specific date
-                active_allocations = []
-                for alloc in allocations:
-                    # Skip if allocation is cancelled and the filter_date falls within the cancelled date range
-                    if alloc.status == 'cancelled' and alloc.cancelled_date_from and alloc.cancelled_date_to:
-                        if alloc.cancelled_date_from <= filter_date <= alloc.cancelled_date_to:
-                            # This prescription is cancelled for this date, skip it
-                            continue
-                    active_allocations.append(alloc)
-                
-                # If no active allocations (all are cancelled for this date), skip this patient entry
-                if not active_allocations:
+                # IPs are usually longer than 5 digits
+                if len(d) > 5:
+                    all_ints.append(int(d))
+            except: pass
+            
+        # 2. Bulk fetch Registration data (therapy_db)
+        registrations_cache = {}
+        if all_ints:
+            regs = Registration.objects.using('therapy_db').filter(pat_reg_no__in=all_ints)
+            for r in regs:
+                registrations_cache[r.pat_reg_no] = {
+                    'team': r.dct_team or '',
+                    'doctcode': r.doctcode,
+                    'reg_date': r.pat_reg_date
+                }
+        
+        # 3. Bulk fetch Doctor info (therapy_db)
+        doctor_cache = {}
+        doctcodes = list(set(r['doctcode'] for r in registrations_cache.values() if r['doctcode']))
+        if doctcodes:
+            docs = doctor_master.objects.using('therapy_db').filter(Doct_Code__in=doctcodes)
+            for d in docs:
+                doctor_cache[d.Doct_Code] = d.Doct_Name or ''
+        
+        # 4. Fetch DOA (iptherapy_db) - Still hard to bulk due to trial/padding logic
+        # but we can try to minimize it or just keep it for now if we optimize others.
+        doa_cache = {}
+        
+        # 5. Fetch all active allocations for the date in one query
+        patient_ids = [ps.patient_id for ps in prescriptions_qs]
+        all_allocations = PrescriptionAllocation.objects.filter(
+            patient_id__in=patient_ids,
+            from_date__lte=filter_date,
+            to_date__gte=filter_date
+        ).select_related('allocated_by')
+        
+        allocations_by_patient = defaultdict(list)
+        for alloc in all_allocations:
+            # Check cancellation for this date
+            if alloc.status == 'cancelled' and alloc.cancelled_date_from and alloc.cancelled_date_to:
+                if alloc.cancelled_date_from <= filter_date <= alloc.cancelled_date_to:
                     continue
-                
-                # Count items from all active allocations
-                prescription_count = 0
-                prescription_names = []
-                
-                for allocation in active_allocations:
-                    if allocation.prescription_name:
-                        prescription_names.append(allocation.prescription_name)
-                    
-                    # Normalize items_groups to a list of groups
-                    raw_groups = allocation.items_groups
-                    groups = []
-                    if isinstance(raw_groups, str):
-                        try:
-                            groups = json.loads(raw_groups)
-                        except Exception:
-                            groups = []
-                    elif isinstance(raw_groups, list):
-                        groups = raw_groups
-                    elif isinstance(raw_groups, dict):
-                        groups = [raw_groups]
-                    else:
-                        groups = []
+            allocations_by_patient[alloc.patient_id].append(alloc)
+            
+        # 6. Pre-check for changes (bulk might be hard if we need per-patient)
+        change_logs_patients = PrescriptionChangeLog.objects.filter(
+            patient_id__in=patient_ids,
+            prescription_date=filter_date,
+            action='update'
+        ).values_list('patient_id', flat=True).distinct()
+        change_set = set(change_logs_patients)
 
-                    # Count total items across groups for this allocation
-                    for grp in groups:
-                        items = grp.get('items', []) if isinstance(grp, dict) else []
-                        prescription_count += len(items)
-                
-                # Use first prescription name or default
-                prescription_name = prescription_names[0] if prescription_names else 'Prescription'
-                if len(prescription_names) > 1:
-                    prescription_name += f' (+{len(prescription_names) - 1} more)'
-                
-                # Check for changes if scheduled or dispatched
-                has_changes = False
-                if prescription_scheduling.status in ['scheduled', 'dispatched']:
-                    # We check if there's any 'update' action log for this patient and date
-                    # that happened AFTER the most recent 'status_change' to 'scheduled'
-                    # For simplicity and performance in the list view, we just check if ANY 'update' log exists
-                    # since usually update logs only happen when something actually changes.
-                    # A more precise check is done in the details view.
-                    has_changes = PrescriptionChangeLog.objects.filter(
-                        patient_id=patient.id,
-                        prescription_date=filter_date,
-                        action='update'
-                    ).exists()
-
-                data.append({
-                    'patient_id': patient.id,
-                    'scheduling_id': prescription_scheduling.id,
-                    'patient_name': patient_name,
-                    'patient_id_display': patient.pat_reg_no,
-                    'registration_no': patient.pat_reg_no,
-                    'room_no': room_no,
-                    'doctor_name': doctor_name,
-                    'doctor_team': doctor_team,
-                    'doa': doa if 'doa' in locals() else '',
-                    'prescription_count': prescription_count,
-                    'status': prescription_scheduling.status,
-                    'has_changes': has_changes,
-                    'prescription_name': prescription_name,
-                    'prescription_date': prescription_scheduling.prescription_date.isoformat(),
-                    'entered_by': (active_allocations[0].allocated_by.get_full_name() or active_allocations[0].allocated_by.username) if active_allocations and active_allocations[0].allocated_by else '-',
-                    'scheduled_by': (prescription_scheduling.scheduled_by.get_full_name() or prescription_scheduling.scheduled_by.username) if prescription_scheduling.scheduled_by else '-',
-                    'sent_to': prescription_scheduling.sent_to,
-                    'dispatched_from': prescription_scheduling.dispatched_from,
-                    'dispatched_at': prescription_scheduling.dispatched_at.isoformat() if prescription_scheduling.dispatched_at else None,
-                    'created_at': prescription_scheduling.created_at.isoformat(),
-                    'updated_at': prescription_scheduling.updated_at.isoformat()
-                })
-            except Exception as item_error:
+        # --- PROCESS RESULTS ---
+        data = []
+        for ps in prescriptions_qs:
+            patient = ps.patient
+            patient_id = patient.id
+            active_allocs = allocations_by_patient.get(patient_id, [])
+            
+            if not active_allocs:
                 continue
+                
+            reg_str = str(patient.pat_reg_no).strip()
+            digits = reg_to_digits.get(reg_str, '')
+            
+            # Use Cache for Doctor/Team
+            doctor_name = ''
+            doctor_team = ''
+            doa = ''
+            
+            try:
+                reg_int = int(digits) if digits and len(digits) > 5 else None
+                if reg_int in registrations_cache:
+                    rc = registrations_cache[reg_int]
+                    doctor_team = rc['team']
+                    doctor_name = doctor_cache.get(rc['doctcode'], '')
+                    if rc['reg_date']:
+                        doa = rc['reg_date'].strftime('%d/%m/%Y')
+            except: pass
+            
+            # Basic search filter
+            if search_query:
+                combined_text = f"{patient.pat_name} {reg_str} {patient.pat_room_no} {doctor_name} {active_allocs[0].prescription_name}".lower()
+                if search_query not in combined_text:
+                    continue
+
+            # Prescription Details
+            prescription_count = 0
+            prescription_names = []
+            for alloc in active_allocs:
+                if alloc.prescription_name:
+                    prescription_names.append(alloc.prescription_name)
+                
+                # Count items
+                groups = alloc.items_groups
+                if isinstance(groups, str):
+                    try: groups = json.loads(groups)
+                    except: groups = []
+                if isinstance(groups, list):
+                    for g in groups:
+                        if isinstance(g, dict):
+                            prescription_count += len(g.get('items', []))
+                elif isinstance(groups, dict):
+                    prescription_count += len(groups.get('items', []))
+
+            p_name_display = prescription_names[0] if prescription_names else 'Prescription'
+            if len(prescription_names) > 1:
+                p_name_display += f' (+{len(prescription_names) - 1} more)'
+
+            data.append({
+                'patient_id': patient_id,
+                'scheduling_id': ps.id,
+                'patient_name': patient.pat_name or 'Unknown',
+                'patient_id_display': patient.pat_reg_no,
+                'registration_no': patient.pat_reg_no,
+                'room_no': patient.pat_room_no or '-',
+                'doctor_name': doctor_name,
+                'doctor_team': doctor_team,
+                'doa': doa,
+                'prescription_count': prescription_count,
+                'status': ps.status,
+                'has_changes': patient_id in change_set,
+                'prescription_name': p_name_display,
+                'prescription_date': ps.prescription_date.isoformat(),
+                'entered_by': (active_allocs[0].allocated_by.get_full_name() or active_allocs[0].allocated_by.username) if active_allocs and active_allocs[0].allocated_by else '-',
+                'scheduled_by': (ps.scheduled_by.get_full_name() or ps.scheduled_by.username) if ps.scheduled_by else '-',
+                'sent_to': ps.sent_to,
+                'dispatched_from': ps.dispatched_from,
+                'dispatched_at': ps.dispatched_at.isoformat() if ps.dispatched_at else None,
+            })
+
+        # --- SORT BY ROOM WISE ---
+        data.sort(key=lambda x: get_room_sort_key(x['room_no']))
+
+        # Check for Final ScheduleRun
+        from .models import FinalScheduleRun
+        is_locked = FinalScheduleRun.objects.filter(run_date=filter_date).exists()
         
         return JsonResponse({
             'success': True,
             'data': data,
-            'count': len(data)
+            'count': len(data),
+            'final_schedule_generated': is_locked
         })
         
     except Exception as e:
+        import traceback
+        print(f"Error in optimized get_prescription_data_api: {e}")
+        traceback.print_exc()
         return JsonResponse({'error': str(e)}, status=500)
+        
 
 @csrf_exempt
 @require_http_methods(["GET"])
@@ -639,10 +616,44 @@ def get_prescription_details_api(request):
         # ===== PRESCRIPTION ITEMS =====
         prescription_groups = []  # List of groups with items
         
-        # Process all active allocations and use items_groups exactly as stored
+        def get_effective_items_groups(allocation, target_date):
+            from .models import PrescriptionChangeLog
+            from django.db.models import Q
+            
+            # Try to fetch log specifically for this allocation
+            log = PrescriptionChangeLog.objects.filter(
+                patient_id=allocation.patient_id,
+                prescription_date=target_date,
+                action='update'
+            ).filter(
+                Q(after_values__allocation_id=allocation.id) |
+                Q(after_values__items_groups=allocation.items_groups) # Fallback
+            ).order_by('-timestamp').first()
+            
+            if log and log.after_values:
+                return log.after_values.get('items_groups')
+            
+            # Search for first ever update log for this allocation to see 'Original' state
+            first_alloc_log = PrescriptionChangeLog.objects.filter(
+                patient_id=allocation.patient_id,
+                action='update',
+                after_values__allocation_id=allocation.id
+            ).order_by('timestamp').first()
+            
+            if first_alloc_log:
+                if target_date < first_alloc_log.prescription_date:
+                    return first_alloc_log.before_values.get('items_groups')
+                else:
+                    return allocation.items_groups # Current state
+            
+            # Final fallback: return current items_groups
+            return allocation.items_groups
+
+        # Process all active allocations and use items_groups
         for allocation in active_allocations:
-            if allocation.items_groups:
-                raw_groups = allocation.items_groups
+            # We use get_effective_items_groups to retrieve the correct historic data for the filter_date
+            raw_groups = get_effective_items_groups(allocation, filter_date)
+            if raw_groups:
                 groups = []
                 if isinstance(raw_groups, str):
                     try:
@@ -979,6 +990,14 @@ def send_final_prescription_api(request):
         if not filter_date:
             return JsonResponse({'error': 'Invalid date format'}, status=400)
         
+        # Check if Final Schedule has already been run for this date
+        from .models import FinalScheduleRun
+        if FinalScheduleRun.objects.filter(run_date=filter_date).exists():
+            return JsonResponse({
+                'error': f'Final Schedule has already been generated for this date ({filter_date}).',
+                'already_run': True
+            }, status=400)
+
         # Get all draft PrescriptionScheduling records for the specific date (per-date processing)
         draft_prescriptions = PrescriptionScheduling.objects.filter(
             prescription_date=filter_date,
@@ -1029,6 +1048,24 @@ def send_final_prescription_api(request):
                     updated_count += 1
                     if department not in sent_to_departments:
                         sent_to_departments.append(department)
+            
+            # Create/Update run marker for Final Schedule to lock it for this date
+            try:
+                FinalScheduleRun.objects.update_or_create(
+                    run_date=filter_date,
+                    defaults={
+                        'status': 'success',
+                        'ran_by': request.user if request.user.is_authenticated else None,
+                        'message': f'Prescription Final Schedule generated for {updated_count} prescriptions.',
+                        'stats': {
+                            'updated_count': updated_count,
+                            'departments': sent_to_departments,
+                            'source': 'prescription_scheduling'
+                        }
+                    }
+                )
+            except Exception as e:
+                print(f"Error creating FinalScheduleRun marker: {e}")
         
         return JsonResponse({
             'success': True,

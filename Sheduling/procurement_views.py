@@ -111,53 +111,55 @@ def get_procurement_prescriptions_api(request):
                         to_date__gte=filter_date
                     )
                     
-                    # If not super_admin, filter allocation by procured_from or sent_to
+                    relevant_allocations = []
                     if request.user.role != 'super_admin' and user_department:
-                        # Normalize user department for case-insensitive comparison
-                        user_dept_normalized = user_department.strip().lower() if user_department else ''
-                        
-                        # Filter allocations: procured_from must match OR be empty (then rely on sent_to)
-                        filtered_allocs = []
+                        user_dept_normalized = user_department.strip().lower()
                         for alloc in allocation_query:
-                            procured_from = alloc.procured_from.strip() if alloc.procured_from else ''
-                            has_procured_from = bool(procured_from)
-                            procured_from_normalized = procured_from.lower() if procured_from else ''
-                            procured_from_matches = procured_from_normalized == user_dept_normalized
-                            
-                            # Include if procured_from matches (case-insensitive), or if procured_from is empty (sent_to already filtered)
-                            if (has_procured_from and procured_from_matches) or not has_procured_from:
-                                filtered_allocs.append(alloc)
-                        
-                        if filtered_allocs:
-                            allocation = filtered_allocs[0]
-                        else:
-                            allocation = None
+                            procured_from = alloc.procured_from.strip().lower() if alloc.procured_from else ''
+                            if procured_from == user_dept_normalized or not procured_from:
+                                relevant_allocations.append(alloc)
                     else:
-                        allocation = allocation_query.first()
+                        relevant_allocations = list(allocation_query)
                     
-                    if allocation and allocation.items_groups:
-                        raw_groups = allocation.items_groups
-                        groups = []
-                        if isinstance(raw_groups, str):
-                            try:
-                                groups = json.loads(raw_groups)
-                            except Exception:
-                                groups = []
-                        elif isinstance(raw_groups, list):
-                            groups = raw_groups
-                        elif isinstance(raw_groups, dict):
-                            groups = [raw_groups]
-                        for grp in groups:
-                            items = grp.get('items', []) if isinstance(grp, dict) else []
-                            for it in items:
-                                items_preview.append({
-                                    'item_name': it.get('item_name', ''),
-                                    'dose': grp.get('dosage', ''),
-                                    'quantity': it.get('quantity', ''),
-                                    'time': grp.get('time', ''),
-                                    'notes': grp.get('uno', '')
-                                })
-                        prescription_count = len(items_preview)
+                    # Helper to reconstruct historic items_groups
+                    def get_effective_items_groups(alloc, target_date):
+                        from .models import PrescriptionChangeLog
+                        logs_for_date = PrescriptionChangeLog.objects.filter(
+                            patient_id=alloc.patient_id,
+                            prescription_date=target_date,
+                            action='update',
+                            after_values__allocation_id=alloc.id
+                        ).order_by('-timestamp').first()
+                        
+                        if logs_for_date and logs_for_date.after_values:
+                            return logs_for_date.after_values.get('items_groups')
+                        
+                        return alloc.items_groups
+
+                    # Process ALL relevant allocations
+                    for allocation in relevant_allocations:
+                        raw_groups = get_effective_items_groups(allocation, filter_date)
+
+                        if raw_groups:
+                            groups = []
+                            if isinstance(raw_groups, str):
+                                try: groups = json.loads(raw_groups)
+                                except: groups = []
+                            elif isinstance(raw_groups, list): groups = raw_groups
+                            elif isinstance(raw_groups, dict): groups = [raw_groups]
+                            
+                            for grp in groups:
+                                items = grp.get('items', []) if isinstance(grp, dict) else []
+                                for it in items:
+                                    if not it: continue
+                                    items_preview.append({
+                                        'item_name': it.get('item_name', ''),
+                                        'dose': grp.get('dosage', ''),
+                                        'quantity': it.get('quantity', ''),
+                                        'time': grp.get('time', ''),
+                                        'notes': grp.get('uno', '')
+                                    })
+                    prescription_count = len(items_preview)
                 except Exception:
                     pass
             else:
@@ -492,7 +494,7 @@ def get_prescription_details_api(request):
             non_cancel_statuses = [a.status for a in allocations if a.status != 'cancelled']
             prescription_status = non_cancel_statuses[0] if non_cancel_statuses else 'cancelled'
         
-        # Process all allocations and use items_groups exactly as stored
+        # Process all allocations and use items_groups
         for allocation in allocations:
             # Check if this allocation is cancelled for the current date
             # An allocation is cancelled for a date only if:
@@ -503,9 +505,22 @@ def get_prescription_details_api(request):
                 if allocation.cancelled_date_from <= filter_date <= allocation.cancelled_date_to:
                     is_cancelled_for_this_date = True
             
-            # Use the original items_groups structure from allocation - exactly as stored
-            if allocation.items_groups:
-                raw_groups = allocation.items_groups
+            # Helper to reconstruct historic items_groups
+            def get_effective_items_groups(alloc, target_date):
+                from .models import PrescriptionChangeLog
+                logs_for_date = PrescriptionChangeLog.objects.filter(
+                    patient_id=alloc.patient_id,
+                    prescription_date=target_date,
+                    action='update',
+                    after_values__allocation_id=alloc.id
+                ).order_by('-timestamp').first()
+                if logs_for_date and logs_for_date.after_values:
+                    return logs_for_date.after_values.get('items_groups')
+                
+                return alloc.items_groups
+
+            raw_groups = get_effective_items_groups(allocation, filter_date)
+            if raw_groups:
                 groups = []
                 if isinstance(raw_groups, str):
                     try:

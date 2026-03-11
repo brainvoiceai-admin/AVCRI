@@ -66,7 +66,7 @@ function generatePrescriptionPDF_NEW(prescriptionData, date) {
         }
 
         function checkNewPage(requiredHeight) {
-            if (yPos + requiredHeight > pageHeight - 15) {
+            if (yPos + requiredHeight > pageHeight - margin) {
                 doc.addPage();
                 yPos = margin;
                 return true;
@@ -74,28 +74,55 @@ function generatePrescriptionPDF_NEW(prescriptionData, date) {
             return false;
         }
 
+        // Chronological Time Order Scores
+        const TIME_ORDER_MAP = {
+            'M': 1, 'ABF': 2, 'BL': 3, 'AL': 4, 'E': 5, 'BD': 6, 'AD': 7, 'BT': 8, 'NT': 9
+        };
+
+        function getTimeScore(text) {
+            if (!text || text === '—') return 1000;
+            const upperText = String(text).toUpperCase();
+
+            // Head and Body must be at the absolute end
+            if (upperText.includes('HEAD') || upperText.includes('BODY')) {
+                return 2000;
+            }
+
+            const keys = Object.keys(TIME_ORDER_MAP);
+            let minScore = 999;
+            for (const key of keys) {
+                // Match standard codes or common variants like N&T for NT
+                const regex = new RegExp(`\\b${key}\\b`);
+                if (regex.test(upperText) || (key === 'NT' && upperText.includes('N&T'))) {
+                    if (TIME_ORDER_MAP[key] < minScore) minScore = TIME_ORDER_MAP[key];
+                }
+            }
+            return minScore;
+        }
+
         // ========== HEADER ==========
         doc.setFontSize(12);
         doc.setFont(undefined, 'bold');
         doc.text('THE ARYA VAIDA CHIKITSALAYAM AND RESEARCH INSTITUTE', pageWidth / 2, yPos, { align: 'center' });
-        yPos += 6;
+        yPos += 5;
 
         doc.setFontSize(10);
         const formattedDate = formatDateDDMMYYYY(date);
         doc.text(`PRESCRIPTIONS AS ON ${formattedDate}        PHYSICIAN / PHARMACY / RESEARCH`, pageWidth / 2, yPos, { align: 'center' });
-        yPos += 8;
+        yPos += 6;
 
         doc.setDrawColor(0, 0, 0);
         doc.setLineWidth(0.5);
         doc.line(margin, yPos, pageWidth - margin, yPos);
-        yPos += 6;
+        yPos += 5;
 
         // ========== TIME LEGEND ==========
         doc.setFontSize(8);
         doc.setFont(undefined, 'bold');
         doc.text('TIME LEGEND:', margin, yPos);
-        yPos += 5;
+        yPos += 4;
 
+        doc.setFontSize(8.5);
         doc.setFont(undefined, 'normal');
         // 3-column layout for better readability
         const legendRows = [
@@ -109,16 +136,16 @@ function generatePrescriptionPDF_NEW(prescriptionData, date) {
         const col3X = margin + 170;
 
         legendRows.forEach((row, rowIdx) => {
-            const rowY = yPos + (rowIdx * 4);
+            const rowY = yPos + (rowIdx * 3.5);
             doc.text(row[0], col1X, rowY);
             doc.text(row[1], col2X, rowY);
             doc.text(row[2], col3X, rowY);
         });
 
-        yPos += 14;
+        yPos += 11;
 
         doc.line(margin, yPos, pageWidth - margin, yPos);
-        yPos += 8;
+        yPos += 6;
 
         // ========== PROCESS PATIENTS ==========
         // Group patients by room
@@ -169,7 +196,7 @@ function generatePrescriptionPDF_NEW(prescriptionData, date) {
                         doc.setFontSize(11);
                         doc.setFont(undefined, 'bold');
                         doc.text(section.title, margin, yPos);
-                        yPos += 8;
+                        yPos += 6;
                         doc.line(margin, yPos - 3, pageWidth - margin, yPos - 3);
                         sectionHeaderPrinted = true;
                     }
@@ -210,7 +237,7 @@ function generatePrescriptionPDF_NEW(prescriptionData, date) {
                     doc.setFontSize(11);
                     doc.setFont(undefined, 'bold');
                     doc.text('OTHER ROOMS', margin, yPos);
-                    yPos += 8;
+                    yPos += 6;
                     doc.line(margin, yPos - 3, pageWidth - margin, yPos - 3);
                     sectionHeaderPrinted = true;
                 }
@@ -251,20 +278,20 @@ function generatePrescriptionPDF_NEW(prescriptionData, date) {
                 });
 
                 // ========== PATIENT HEADER - 2 LINE PROFESSIONAL LAYOUT ==========
-                doc.setFontSize(9);
+                doc.setFontSize(10);
                 doc.setFont(undefined, 'bold');
 
                 // Column positions for professional alignment
                 const col1 = margin;        // Room / Gender
                 const col2 = margin + 40;   // Name / Age
-                const col3 = margin + 65;   // Doctor
-                const col4 = margin + 155;  // Doctor Team
-                const col5 = margin + 215;  // DOA
+                const col3 = margin + 70;   // Doctor
+                const col4 = margin + 160;  // Doctor Team
+                const col5 = margin + 220;  // DOA
 
                 // Line 1: Room and Name
                 doc.text(`Room: ${roomNo}`, col1, yPos);
                 doc.text(`Name: ${name}`, col2, yPos);
-                yPos += 5;
+                yPos += 4.5;
 
                 // Line 2: Gender, Age, Doctor, Doctor Team, DOA
                 doc.text(`Gender: ${gender || 'N/A'}`, col1, yPos);
@@ -278,9 +305,9 @@ function generatePrescriptionPDF_NEW(prescriptionData, date) {
                 if (cleanDoa) {
                     doc.text(`DOA: ${cleanDoa}`, col5, yPos);
                 }
-                yPos += 5;
+                yPos += 4.5;
 
-                yPos += 3; // Extra gap before table
+                yPos += 2; // Extra gap before table
 
                 // ========== PRESCRIPTION TABLE WITH BORDERS ==========
                 const prescriptionGroups = patient.details?.prescription_groups || [];
@@ -289,6 +316,7 @@ function generatePrescriptionPDF_NEW(prescriptionData, date) {
                     // Group by allocation
                     const groupsByAllocation = {};
                     prescriptionGroups.forEach(group => {
+                        if (group.is_cancelled || group.is_canceled) return;
                         let allocationId = 'unknown';
                         const groupMatch = group.group_id.match(/prescription_group_(\d+)_/);
                         if (groupMatch) {
@@ -424,6 +452,13 @@ function generatePrescriptionPDF_NEW(prescriptionData, date) {
                         ]);
                     });
 
+                    // CHRONOLOGICAL SORTING FOR MEDICINE ROWS
+                    tableData.sort((a, b) => {
+                        const scoreA = getTimeScore(a[0]);
+                        const scoreB = getTimeScore(b[0]);
+                        return scoreA - scoreB;
+                    });
+
                     // Draw prescription table using autoTable
                     doc.autoTable({
                         startY: yPos,
@@ -431,7 +466,7 @@ function generatePrescriptionPDF_NEW(prescriptionData, date) {
                         body: tableData,
                         theme: 'grid',
                         styles: {
-                            fontSize: 8,
+                            fontSize: 9,
                             cellPadding: 2,
                             lineColor: [0, 0, 0],
                             lineWidth: 0.1
@@ -452,7 +487,7 @@ function generatePrescriptionPDF_NEW(prescriptionData, date) {
                         tableWidth: 'auto'
                     });
 
-                    yPos = doc.lastAutoTable.finalY + 5;
+                    yPos = doc.lastAutoTable.finalY + 4;
                 }
 
                 // ========== THERAPY TABLE WITH BORDERS ==========
@@ -471,6 +506,7 @@ function generatePrescriptionPDF_NEW(prescriptionData, date) {
 
                     // Regular therapies
                     allTherapyItems.forEach((therapyItem, index) => {
+                        if (therapyItem.booking_is_cancelled || therapyItem.is_cancelled || therapyItem.is_canceled) return;
                         const therapyName = therapyItem.therapy_name || 'Unknown Therapy';
                         const timeslot24 = therapyItem.timeslot || therapyItem.time || '—';
                         const timeslot = convertTo12Hour(timeslot24);
@@ -629,6 +665,7 @@ function generatePrescriptionPDF_NEW(prescriptionData, date) {
 
                     // Zero-therapist therapies
                     zeroTherapistTherapies.forEach(therapy => {
+                        if (therapy.is_cancelled || therapy.is_canceled) return;
                         const therapyName = therapy.therapy_name || 'Unknown Therapy';
                         const timeslot24 = therapy.timeslot || '—';
                         const timeslot = convertTo12Hour(timeslot24);
@@ -731,6 +768,29 @@ function generatePrescriptionPDF_NEW(prescriptionData, date) {
                         }
                     });
 
+                    // CHRONOLOGICAL SORTING FOR THERAPY ROWS
+                    therapyTableData.sort((a, b) => {
+                        // For therapy, usage is in index 1, therapy name in 0
+                        // Prefer sorting by usage if it contains M, BL, etc.
+                        let scoreA = getTimeScore(a[1]);
+                        let scoreB = getTimeScore(b[1]);
+                        
+                        // Fallback to timeslot (index 4) if usage doesn't have codes
+                        if (scoreA === 999 && a[4] && a[4] !== '—') {
+                            // Extract hour for simple numeric sort
+                            const hA = parseInt(a[4].split(':')[0]);
+                            const isPM_A = a[4].includes('PM');
+                            scoreA = (hA % 12 + (isPM_A ? 12 : 0)) * 100;
+                        }
+                        if (scoreB === 999 && b[4] && b[4] !== '—') {
+                            const hB = parseInt(b[4].split(':')[0]);
+                            const isPM_B = b[4].includes('PM');
+                            scoreB = (hB % 12 + (isPM_B ? 12 : 0)) * 100;
+                        }
+
+                        return scoreA - scoreB;
+                    });
+
                     if (therapyTableData.length > 0) {
                         checkNewPage(30);
 
@@ -740,7 +800,7 @@ function generatePrescriptionPDF_NEW(prescriptionData, date) {
                             body: therapyTableData,
                             theme: 'grid',
                             styles: {
-                                fontSize: 8,
+                                fontSize: 9,
                                 cellPadding: 2,
                                 lineColor: [0, 0, 0],
                                 lineWidth: 0.1
@@ -770,11 +830,11 @@ function generatePrescriptionPDF_NEW(prescriptionData, date) {
                 }
 
                 // Separator between patients
-                yPos += 5;
+                yPos += 3;
                 doc.setDrawColor(200, 200, 200);
                 doc.setLineWidth(0.3);
                 doc.line(margin, yPos, pageWidth - margin, yPos);
-                yPos += 10;
+                yPos += 6;
             }
         }
 
