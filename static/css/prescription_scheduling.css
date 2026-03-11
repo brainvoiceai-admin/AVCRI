@@ -196,6 +196,13 @@ select {
     font-size: 13px;
 }
 
+.btn-disabled {
+    background: #cbd5e1 !important;
+    cursor: not-allowed !important;
+    color: #64748b !important;
+    opacity: 0.7;
+}
+
 .table-container {
     overflow-x: auto;
 }

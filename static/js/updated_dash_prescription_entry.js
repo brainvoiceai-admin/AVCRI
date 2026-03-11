@@ -7,7 +7,15 @@ $(function () {
   // --- helpers ---
   function ajax(params) {
     const url = API_URL + '?' + $.param(params);
-    return fetch(url).then(r => { if (!r.ok) throw new Error('Network'); return r.json(); });
+    return fetch(url).then(r => {
+      if (!r.ok) throw new Error('Network error (' + r.status + ')');
+      const contentType = r.headers.get('content-type');
+      if (contentType && contentType.includes('application/json')) {
+        return r.json();
+      } else {
+        throw new Error('Session expired or server error. Please refresh the page.');
+      }
+    });
   }
   function esc(s) { return String(s || ''); }
   // Format date as DD/MM/YYYY
@@ -31,7 +39,10 @@ $(function () {
   // Load UnitNo options from master table
   function loadUnitNumbers() {
     fetch('/unit_numbers/')
-      .then(response => response.json())
+      .then(response => {
+        const ct = response.headers.get('content-type');
+        return (ct && ct.includes('json')) ? response.json() : Promise.reject('Invalid response');
+      })
       .then(data => {
         const $unitSelect = $('#item-builder-uno');
         $unitSelect.find('option').not(':first').remove(); // Keep first option
@@ -348,7 +359,10 @@ $(function () {
     $('#search-results').html('<div style="padding:10px;color:#666;">Searching...</div>').show();
 
     fetch('/authentication/api/search-patients-by-room/?room=' + encodeURIComponent(roomNumber))
-      .then(response => response.json())
+      .then(response => {
+        const ct = response.headers.get('content-type');
+        return (ct && ct.includes('json')) ? response.json() : Promise.reject('Invalid response (Session Timeout?)');
+      })
       .then(data => {
         const patients = data.patients || [];
         displaySearchResults(patients);
@@ -367,7 +381,10 @@ $(function () {
       : '/authentication/api/search-patients/?q=' + encodeURIComponent(query);
 
     fetch(url)
-      .then(response => response.json())
+      .then(response => {
+        const ct = response.headers.get('content-type');
+        return (ct && ct.includes('json')) ? response.json() : Promise.reject('Invalid response (Session Timeout?)');
+      })
       .then(data => {
         // Handle both response formats: {patients: [...]} or [...]
         const patients = data.patients || data || [];
@@ -433,7 +450,10 @@ $(function () {
     $('#search-results').hide();
 
     fetch('/get-patient-details/?pat_reg_no=' + encodeURIComponent(regNo))
-      .then(response => response.json())
+      .then(response => {
+        const ct = response.headers.get('content-type');
+        return (ct && ct.includes('json')) ? response.json() : Promise.reject('Invalid response (Session Timeout?)');
+      })
       .then(data => {
         if (data.pat_name) {
           selectedPatient = data;
@@ -1548,6 +1568,10 @@ $(function () {
                 <i class="fas fa-ban"></i> Cancel
               </button>`;
           }
+          // Show Status button to view day-by-day history
+          buttons += `<button class="status-prescription action-btn btn btn-outline" data-i="${i}" style="border:1px solid var(--primary); color:var(--primary);">
+              <i class="fas fa-list"></i> Status
+            </button>`;
           return buttons;
         })()}
         </td>
@@ -2565,4 +2589,70 @@ $(function () {
 
   // expose for debug
   window._prescriptionApp = { addedPrescriptions, itemGroups, renderAll };
+
+  // ========== STATUS MODAL LOGIC ==========
+  const $statusModalBackdrop = $('#status-modal-backdrop');
+  $('#status-modal-close').on('click', () => $statusModalBackdrop.hide().removeClass('show'));
+
+  $prescriptionsTableBody.on('click', '.status-prescription', function () {
+    const rx = addedPrescriptions[$(this).data('i')];
+    if (!rx) return;
+    const allocationId = rx.allocation_id || rx.id;
+    if (!allocationId) {
+      alert('Cannot fetch status for unsaved prescription.');
+      return;
+    }
+    
+    // Set info text
+    const patientName = selectedPatient ? (selectedPatient.pat_name || '') : '';
+    $('#status-modal-info').html(`
+      <strong>Patient:</strong> ${esc(patientName)} &bull; 
+      <strong>Medicine:</strong> ${esc(rx.prescription_name || 'Prescription')}
+    `);
+    
+    const $tbody = $('#status-modal-tbody');
+    $tbody.html('<tr><td colspan="5" style="text-align:center;"><i class="fas fa-spinner fa-spin"></i> Loading day-by-day history...</td></tr>');
+    $statusModalBackdrop.show().addClass('show');
+    
+    ajax({ action: 'status_history', allocation_id: allocationId }).then(res => {
+      if (res.status === 'ok' && res.history) {
+        $tbody.empty();
+        if (res.history.length === 0) {
+          $tbody.html('<tr><td colspan="5" style="text-align:center;">No history found.</td></tr>');
+          return;
+        }
+        res.history.forEach(item => {
+          // Format date as DD-MM-YYYY
+          const dateParts = item.date.split('-');
+          const displayDate = dateParts.length === 3 ? `${dateParts[2]}-${dateParts[1]}-${dateParts[0]}` : item.date;
+          
+          let statusBadgeClass = '';
+          const s = item.status || 'Original';
+          if (s.includes('Original')) statusBadgeClass = 'status-active';
+          else if (s.includes('Updated')) statusBadgeClass = 'status-draft';
+          else if (s.includes('Cancelled')) statusBadgeClass = 'status-cancelled';
+          else if (s.includes('Dispatched')) statusBadgeClass = 'status-active';
+          else statusBadgeClass = 'status-draft';
+          
+          // Render row with combined medicine and ingredients
+          $tbody.append(`
+            <tr>
+              <td style="white-space:nowrap;">${esc(displayDate)}</td>
+              <td style="line-height:1.4; font-weight:500; color:var(--primary);">${item.medicine}</td>
+              <td style="font-size:0.85em; color:#666;">${esc(item.ingredients || '—')}</td>
+              <td>${esc(item.usage || '')}</td>
+              <td><span class="status-pill ${statusBadgeClass}">${esc(s)}</span></td>
+            </tr>
+          `);
+        });
+      } else {
+        $tbody.html(`<tr><td colspan="5" style="text-align:center;color:red;">Failed to load history: ${esc(res.error || 'Unknown error')}</td></tr>`);
+      }
+
+    }).catch(err => {
+      $tbody.html(`<tr><td colspan="5" style="text-align:center;color:red;">Error fetching history</td></tr>`);
+      console.error(err);
+    });
+  });
+
 });

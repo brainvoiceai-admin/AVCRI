@@ -2342,365 +2342,6 @@ def therapy_entry(request):
     return render(request, 'dashboards/prescriptions/therapy_entry.html', context={'masters': masters_context})
 
 
-def prescription_entry_page(request):
-    """
-    Single endpoint for prescription entry:
-      - GET: render template or handle lookups by ?action=...
-      - POST: perform allocate/cancel/resume/update via ?action=...
-    """
-    
-    # --- POST actions (allocate, cancel, resume, update) ---
-    if request.method == 'POST':
-        action_post = (request.GET.get('action') or '').strip().lower()
-        try:
-            payload = json.loads(request.body.decode('utf-8') or '{}')
-        except Exception:
-            return JsonResponse({'error': 'invalid_json'}, status=400)
-
-        # ---------- allocate prescription ----------
-        if action_post == 'allocate':
-            patient_reg_no = payload.get('patient_reg_no')
-            prescription_name = payload.get('prescription_name', 'Prescription')
-            items_groups = payload.get('items_groups', [])
-            procured_from = payload.get('procured_from', '')
-            scope = payload.get('scope', '') or ''
-            usage = payload.get('usage', '') or ''
-            from_date = parse_date(payload.get('from_date'))
-            to_date = parse_date(payload.get('to_date'))
-            notes = payload.get('notes', '')
-            
-            if not patient_reg_no or not from_date or not to_date:
-                return JsonResponse({'error': 'missing_required_fields'}, status=400)
-            
-            if from_date > to_date:
-                return JsonResponse({'error': 'invalid_date_range'}, status=400)
-            
-            try:
-                # Get or create patient snapshot
-                raw_room_no = payload.get('patient_room_no', '')
-                resolved_room_no = get_staying_room_display_number(raw_room_no) if raw_room_no else ''
-                ps, created = PatientSnapshot.objects.get_or_create(
-                    pat_reg_no=str(patient_reg_no),
-                    defaults={
-                        'pat_name': payload.get('patient_name', ''),
-                        'pat_age': payload.get('patient_age', ''),
-                        'pat_sex': payload.get('patient_sex', ''),
-                        'pat_room_no': resolved_room_no,
-                        'pat_ref_id': payload.get('patient_ref_id', ''),
-                    }
-                )
-                
-                # Update patient info if changed
-                changed = False
-                if payload.get('patient_name') and ps.pat_name != payload.get('patient_name'):
-                    ps.pat_name = payload.get('patient_name'); changed = True
-                if payload.get('patient_age') and ps.pat_age != payload.get('patient_age'):
-                    ps.pat_age = payload.get('patient_age'); changed = True
-                if payload.get('patient_sex') and ps.pat_sex != payload.get('patient_sex'):
-                    ps.pat_sex = payload.get('patient_sex'); changed = True
-                if resolved_room_no and ps.pat_room_no != resolved_room_no:
-                    ps.pat_room_no = resolved_room_no; changed = True
-                if payload.get('patient_ref_id') and ps.pat_ref_id != payload.get('patient_ref_id'):
-                    ps.pat_ref_id = payload.get('patient_ref_id'); changed = True
-                
-                if changed:
-                    ps.save()
-
-                # Create prescription allocation
-                allocation = PrescriptionAllocation.objects.create(
-                    patient=ps,
-                    prescription_name=prescription_name,
-                    items_groups=items_groups,
-                    procured_from=procured_from,
-                    usage=usage,
-                    scope=scope,
-                    from_date=from_date,
-                    to_date=to_date,
-                    days=(to_date - from_date).days + 1,
-                    allocated_by=request.user if request.user.is_authenticated else None,
-                    notes=notes,
-                    status='draft'  # Default to draft
-                )
-                
-                # Create PrescriptionScheduling records for each date in the range (similar to Booking for therapies)
-                from .models import PrescriptionScheduling
-
-                current_date = from_date
-                while current_date <= to_date:
-                    # Get or create PrescriptionScheduling for this date
-                    PrescriptionScheduling.objects.get_or_create(
-                        patient=ps,
-                        prescription_date=current_date,
-                        defaults={
-                            'doctor': request.user if request.user.is_authenticated else None,
-                            'status': 'draft'
-                        }
-                    )
-                    current_date += timedelta(days=1)
-                
-                # Create notification - COMMENTED OUT TEMPORARILY DUE TO NETWORK ERRORS
-                # create_prescription_notification(allocation, 'prescription_allocated', request.user, {
-                #     'bookings_created': (to_date - from_date).days + 1
-                # })
-                
-                # Log audit
-                log_prescription_audit(request.user, 'allocate_prescription', 'PrescriptionAllocation', str(allocation.id), {
-                    'patient_reg_no': patient_reg_no,
-                    'prescription_name': prescription_name,
-                    'from_date': str(from_date),
-                    'to_date': str(to_date)
-                })
-                
-                return JsonResponse({'status': 'ok', 'allocation_id': allocation.id})
-                
-            except Exception as e:
-                return JsonResponse({'error': str(e)}, status=500)
-
-        # ---------- cancel prescription ----------
-        if action_post == 'cancel_prescription':
-            allocation_id = payload.get('allocation_id')
-            cancel_from = payload.get('cancel_from')
-            cancel_to = payload.get('cancel_to')
-            reason = payload.get('reason', '')
-            
-            if not allocation_id or not cancel_from or not cancel_to or not reason:
-                return JsonResponse({'error': 'missing_fields'}, status=400)
-            
-            try:
-                allocation = PrescriptionAllocation.objects.get(id=allocation_id)
-                allocation.status = 'cancelled'
-                allocation.cancelled_by = request.user if request.user.is_authenticated else None
-                allocation.cancelled_at = timezone.now()
-                allocation.cancelled_date_from = parse_date(cancel_from)
-                allocation.cancelled_date_to = parse_date(cancel_to)
-                allocation.cancellation_reason = reason
-                allocation.save()
-                
-                # Create notification - COMMENTED OUT TEMPORARILY DUE TO NETWORK ERRORS
-                # create_prescription_notification(allocation, 'prescription_cancelled', request.user, {
-                #     'cancel_from': cancel_from,
-                #     'cancel_to': cancel_to,
-                #     'reason': reason
-                # })
-                
-                # Log audit
-                log_prescription_audit(request.user, 'cancel_prescription', 'PrescriptionAllocation', str(allocation.id), {
-                    'cancel_from': cancel_from,
-                    'cancel_to': cancel_to,
-                    'reason': reason
-                })
-                
-                return JsonResponse({'status': 'ok', 'message': 'Prescription cancelled successfully'})
-            except PrescriptionAllocation.DoesNotExist:
-                return JsonResponse({'error': 'allocation_not_found'}, status=404)
-            except Exception as e:
-                return JsonResponse({'error': str(e)}, status=500)
-
-        # ---------- resume prescription ----------
-        # NOTE: The resume_prescription handler has been moved to the second POST section (around line 2767)
-        # to support single date resume (resume_date) for middle dates
-        # This old handler is kept commented out for reference but should not be used
-        # if action_post == 'resume_prescription':
-        #     ... (old implementation removed - see line 2767 for new implementation)
-
-        # ---------- update prescription ----------
-        if action_post == 'update_prescription':
-            allocation_id = payload.get('allocation_id')
-            prescription_name = payload.get('prescription_name')
-            items_groups = payload.get('items_groups', [])
-            procured_from = payload.get('procured_from', '')
-            scope = payload.get('scope', '')
-            usage = payload.get('usage', '')
-            notes = payload.get('notes', '')
-            
-            if not allocation_id:
-                return JsonResponse({'error': 'missing_allocation_id'}, status=400)
-            
-            try:
-                allocation = PrescriptionAllocation.objects.get(id=allocation_id)
-                old_data = {
-                    'prescription_name': allocation.prescription_name,
-                    'items_groups': allocation.items_groups,
-                    'procured_from': allocation.procured_from,
-                    'usage': allocation.usage,
-                    'scope': allocation.scope,
-                    'notes': allocation.notes
-                }
-                
-                # Update fields
-                items_changed = False
-                if prescription_name:
-                    allocation.prescription_name = prescription_name
-                if items_groups:
-                    # Compare old and new items_groups to detect changes
-                    old_items_groups = old_data.get('items_groups', [])
-                    import json
-                    # Normalize for comparison
-                    old_normalized = json.dumps(old_items_groups, sort_keys=True) if old_items_groups else ''
-                    new_normalized = json.dumps(items_groups, sort_keys=True) if items_groups else ''
-                    if old_normalized != new_normalized:
-                        items_changed = True
-                    allocation.items_groups = items_groups
-                if procured_from is not None:
-                    allocation.procured_from = procured_from
-                if scope is not None:
-                    allocation.scope = scope or ''
-                if usage is not None:
-                    allocation.usage = usage or ''
-                if notes is not None:
-                    allocation.notes = notes
-                
-                allocation.save()
-                
-                # Create notification - COMMENTED OUT TEMPORARILY DUE TO NETWORK ERRORS
-                # create_prescription_notification(allocation, 'prescription_updated', request.user, {
-                #     'changes': 'Prescription details updated'
-                # })
-                
-                # Log audit
-                log_prescription_audit(request.user, 'update_prescription', 'PrescriptionAllocation', str(allocation.id), {
-                    'old_data': old_data,
-                    'new_data': {
-                        'prescription_name': allocation.prescription_name,
-                        'items_groups': allocation.items_groups,
-                        'procured_from': allocation.procured_from,
-                        'usage': allocation.usage,
-                        'scope': allocation.scope,
-                        'notes': allocation.notes
-                    }
-                })
-                
-                # Create PrescriptionChangeLog entry for item updates
-                if items_changed:
-                    from .models import PrescriptionChangeLog
-                    from django.utils import timezone as tz
-                    
-                    # Get all dates in the allocation range
-                    date_range = []
-                    current_date = allocation.from_date
-                    while current_date <= allocation.to_date:
-                        date_range.append(current_date)
-                        current_date += timedelta(days=1)
-                    
-                    # Create change log entries for each date in the range
-                    for date in date_range:
-                        PrescriptionChangeLog.objects.create(
-                            patient=allocation.patient,
-                            prescription_date=date,
-                            action='update',
-                            changed_by=request.user if request.user.is_authenticated else None,
-                            before_values={'items_groups': old_data.get('items_groups', [])},
-                            after_values={'items_groups': items_groups},
-                            description=f'Prescription items updated for {allocation.prescription_name}'
-                        )
-                
-                return JsonResponse({'status': 'ok', 'message': 'Prescription updated successfully'})
-            except PrescriptionAllocation.DoesNotExist:
-                return JsonResponse({'error': 'allocation_not_found'}, status=404)
-            except Exception as e:
-                return JsonResponse({'error': str(e)}, status=500)
-
-    # --- GET actions (lookups, masters, patient prescriptions) ---
-    action = (request.GET.get('action') or '').strip().lower()
-    
-    # search items (external DB)
-    if action == 'search_items':
-        q = (request.GET.get('q') or '').strip()
-        results = []
-        if ItemMaster is not None:
-            try:
-                try:
-                    qs = ItemMaster.objects.filter(is_active=True).select_related('procured_from', 'umo').all()
-                except Exception:
-                    qs = ItemMaster.objects.filter(is_active=True).all()
-                
-                if q:
-                    qs = qs.filter(Q(item_name__icontains=q) | Q(item_code__icontains=q))
-                qs = qs[:50]
-                for i in qs:
-                    procured_from_name = ''
-                    try:
-                        if hasattr(i, 'procured_from') and i.procured_from:
-                            procured_from_name = i.procured_from.name if hasattr(i.procured_from, 'name') else str(i.procured_from)
-                    except Exception:
-                        pass
-                    item_uom = ''
-                    if getattr(i, 'umo', None) and hasattr(i.umo, 'unit_name'):
-                        item_uom = (i.umo.unit_name or '').strip()
-                    results.append({
-                        'item_code': getattr(i, 'item_code', ''),
-                        'item_name': getattr(i, 'item_name', ''),
-                        'item_uom': item_uom,
-                        'procured_from': procured_from_name
-                    })
-            except Exception as e:
-                print(f"Error in search_items: {e}")
-                import traceback
-                traceback.print_exc()
-                results = []
-        else:
-            print("ItemMaster model not found - check if masters app is installed")
-        return JsonResponse(results, safe=False)
-    
-    # masters lookup
-    if action == 'masters':
-        master_type = request.GET.get('type', '').strip()
-        results = []
-        
-        if master_type == 'procured':
-            if Procured is not None:
-                try:
-                    for p in Procured.objects.filter(is_active=True).order_by('name')[:200]:
-                        results.append({'name': getattr(p, 'name', '')})
-                except Exception:
-                    pass
-        elif master_type == 'oil':
-            if OilClass is not None:
-                try:
-                    for o in OilClass.objects.filter(is_active=True).order_by('name')[:200]:
-                        results.append({'name': getattr(o, 'name', '')})
-                except Exception:
-                    pass
-        elif master_type == 'usage':
-            if UsageType is not None:
-                try:    
-                    for u in UsageType.objects.filter(is_active=True).order_by('name')[:200]:
-                        results.append({'name': getattr(u, 'name', '')})
-                except Exception:
-                    pass
-        elif master_type in ('prescriptiontime', 'ptime'):
-            if PrescriptionTime is not None:
-                try:
-                    for t in PrescriptionTime.objects.filter(is_active=True).order_by('name')[:200]:
-                        results.append({'name': getattr(t, 'name', '')})
-                except Exception:
-                    pass
-        elif master_type in ('prescriptionscope', 'scope'):
-            if PrescriptionScope is not None:
-                try:
-                    for s in PrescriptionScope.objects.filter(is_active=True).order_by('name')[:200]:
-                        results.append({'name': getattr(s, 'name', '')})
-                except Exception:
-                    pass
-        elif master_type == 'ingredient':
-            if IngredientMaster is not None:
-                try:
-                    for ing in IngredientMaster.objects.filter(is_active=True).order_by('ingredient_name')[:200]:
-                        results.append({
-                            'id': ing.id,
-                            'ingredient_name': getattr(ing, 'ingredient_name', ''),
-                            'ingredient_code': getattr(ing, 'ingredient_code', '')
-                        })
-                except Exception:
-                    pass
-        
-        return JsonResponse(results, safe=False)
-    
-    
-    # Default: render template
-    return render(request, 'dashboards/prescriptions/prescription_entry.html')
-
-
 def create_prescription_notification(prescription_allocation, action, user, additional_data=None):
     """Create prescription notification for relevant staff"""
     try:
@@ -2771,16 +2412,43 @@ def create_prescription_notification(prescription_allocation, action, user, addi
         print(f"Prescription notification creation error: {e}")
 
 
-def log_prescription_audit(user, action, obj_type, obj_id, data):
-    """Log prescription audit event"""
+def log_prescription_audit(user, action, obj_type, obj_id, additional_data=None):
+    """Log prescription-related audit events using AuthAuditLog if available"""
     try:
-        if AuditLog:
+        from authentication.models import AuditLog as AuthAuditLog
+        from django.utils import timezone
+        
+        # Prepare audit data
+        audit_data = {
+            'action': action,
+            'user_id': user.id if user else None,
+            'username': user.username if user else 'Anonymous',
+            'timestamp': timezone.now().isoformat(),
+        }
+        
+        if additional_data:
+            audit_data.update(additional_data)
+        
+        # Create AuthAuditLog entry
+        AuthAuditLog.objects.create(
+            user=user,
+            action=action,
+            description=f"Prescription {action} by {user.username if user else 'Anonymous'}",
+            status='success',
+            object_type=obj_type,
+            object_id=obj_id,
+            additional_data=audit_data
+        )
+        
+        # Also log to local Sheduling AuditLog if available
+        from .models import AuditLog
+        if AuditLog is not None:
             AuditLog.objects.create(
                 user=user,
                 action=action,
                 obj_type=obj_type,
                 obj_id=obj_id,
-                data=data
+                data=additional_data
             )
     except Exception as e:
         print(f"Audit logging error: {e}")
@@ -2793,11 +2461,13 @@ def log_prescription_audit(user, action, obj_type, obj_id, data):
 
 @csrf_exempt
 def prescription_entry_page(request):
-    import json as _json, time as _time, traceback
+    import time as _time, traceback
     from datetime import date as dt_date, timedelta
     from django.db import transaction, connection
     from django.db.models import Q
     from django.utils import timezone
+    from django.utils.dateparse import parse_date
+    from django.utils.html import escape
     from .models import PrescriptionAllocation, PrescriptionScheduling, PrescriptionChangeLog, PatientSnapshot
 
     def _get_updated_prescriptions(p_id_input, reg_no=None):
@@ -2826,7 +2496,7 @@ def prescription_entry_page(request):
             
             igs = p.items_groups
             if isinstance(igs, str):
-                try: igs = _json.loads(igs)
+                try: igs = json.loads(igs)
                 except: igs = []
             if not isinstance(igs, list): igs = []
 
@@ -2952,16 +2622,38 @@ def prescription_entry_page(request):
                 from .models import PrescriptionScheduling
 
                 current_date = from_date_parsed
+                from .models import FinalScheduleRun
+                from .prescription_views import determine_procurement_department_from_allocation
                 while current_date <= to_date_parsed:
+                    # Check if Final Schedule was already run for this date
+                    target_status = 'draft'
+                    target_sent_to = None
+                    target_scheduled_by = None
+                    
+                    if FinalScheduleRun.objects.filter(run_date=current_date).exists():
+                        target_status = 'scheduled'
+                        target_sent_to = determine_procurement_department_from_allocation(allocation)
+                        target_scheduled_by = request.user if request.user.is_authenticated else None
+
                     # Get or create PrescriptionScheduling for this date
-                    PrescriptionScheduling.objects.get_or_create(
+                    ps_rec, created = PrescriptionScheduling.objects.get_or_create(
                         patient=ps,
                         prescription_date=current_date,
                         defaults={
                             'doctor': request.user if request.user.is_authenticated else None,
-                            'status': 'draft'
+                            'status': target_status,
+                            'sent_to': target_sent_to,
+                            'scheduled_by': target_scheduled_by
                         }
                     )
+                    
+                    # If it already existed but Final Schedule was run, update it to scheduled
+                    if not created and target_status == 'scheduled' and ps_rec.status == 'draft':
+                        ps_rec.status = 'scheduled'
+                        ps_rec.sent_to = target_sent_to
+                        ps_rec.scheduled_by = target_scheduled_by
+                        ps_rec.save()
+
                     current_date += timedelta(days=1)
                 
                 # Update patient snapshot
@@ -3126,20 +2818,35 @@ def prescription_entry_page(request):
                 allocation.resumed_at = timezone.now()
                 allocation.save()
                 
-                # Ensure PrescriptionScheduling record exists for the resumed date and update status to 'draft'
-                from .models import PrescriptionScheduling
+                # Ensure PrescriptionScheduling record exists for the resumed date and update status based on Final Schedule marker
+                from .models import PrescriptionScheduling, FinalScheduleRun
+                from .prescription_views import determine_procurement_department_from_allocation
                 resume_date_obj = parse_date(resume_from)
+                
+                target_status = 'draft'
+                target_sent_to = None
+                target_scheduled_by = None
+                
+                if FinalScheduleRun.objects.filter(run_date=resume_date_obj).exists():
+                    target_status = 'scheduled'
+                    target_sent_to = determine_procurement_department_from_allocation(allocation)
+                    target_scheduled_by = request.user if request.user.is_authenticated else None
+
                 ps_record, created = PrescriptionScheduling.objects.get_or_create(
                     patient=allocation.patient,
                     prescription_date=resume_date_obj,
                     defaults={
                         'doctor': request.user if request.user.is_authenticated else None,
-                        'status': 'draft'
+                        'status': target_status,
+                        'sent_to': target_sent_to,
+                        'scheduled_by': target_scheduled_by
                     }
                 )
-                # Update status to 'draft' even if record already existed (was cancelled)
+                # Update status even if record already existed (was cancelled)
                 if not created:
-                    ps_record.status = 'draft'
+                    ps_record.status = target_status
+                    ps_record.sent_to = target_sent_to
+                    ps_record.scheduled_by = target_scheduled_by
                     ps_record.save()
                 
                 # Create notification - COMMENTED OUT TEMPORARILY DUE TO NETWORK ERRORS
@@ -3207,13 +2914,13 @@ def prescription_entry_page(request):
                     if allocation.from_date > effective_date:
                         effective_date = allocation.from_date
                     
-                    should_split = effective_date > allocation.from_date
-                    split_occurred = should_split
+                    should_split = False
+                    split_occurred = False
 
-                    # Capture old state for audit
-                    old_items_groups = allocation.items_groups
+                    # Capture old state for audit (deep copy to avoid reference sharing)
+                    old_items_groups = json.loads(json.dumps(allocation.items_groups)) if allocation.items_groups else []
                     if isinstance(old_items_groups, str):
-                        try: old_items_groups = _json.loads(old_items_groups)
+                        try: old_items_groups = json.loads(old_items_groups)
                         except: old_items_groups = []
 
                     # Cleanup new items_groups
@@ -3232,68 +2939,85 @@ def prescription_entry_page(request):
                         items_groups = cleaned_groups
                     else:
                         items_groups = old_items_groups
-
-                    if should_split:
-                        # 1. Shorten old
-                        original_to_date = allocation.to_date
-                        allocation.to_date = effective_date - timedelta(days=1)
+                    # Update in place
+                    if prescription_name: allocation.prescription_name = prescription_name
+                    if items_groups: allocation.items_groups = items_groups
+                    if procured_from: allocation.procured_from = procured_from
+                    allocation.scope = scope or ''
+                    allocation.usage = usage or ''
+                    if to_date: allocation.to_date = parse_date(to_date)
+                    allocation.notes = notes or ''
+                    if allocation.from_date and allocation.to_date:
                         allocation.days = (allocation.to_date - allocation.from_date).days + 1
-                        allocation.save()
-                        
-                        # 2. Create New
-                        new_to_val = parse_date(to_date) if to_date else original_to_date
-                        if not new_to_val or new_to_val < effective_date:
-                            new_to_val = effective_date
-                        
-                        allocation = PrescriptionAllocation.objects.create(
-                            patient_id=patient_id,
-                            prescription_name=prescription_name or allocation.prescription_name,
-                            items_groups=items_groups,
-                            procured_from=procured_from or allocation.procured_from,
-                            usage=usage or getattr(allocation, 'usage', ''),
-                            scope=scope or getattr(allocation, 'scope', ''),
-                            from_date=effective_date,
-                            to_date=new_to_val,
-                            days=(new_to_val - effective_date).days + 1,
-                            allocated_by=request.user if request.user.is_authenticated else None,
-                            notes=notes or allocation.notes,
-                            status='draft'
-                        )
-                    else:
-                        # Update in place
-                        if prescription_name: allocation.prescription_name = prescription_name
-                        if items_groups: allocation.items_groups = items_groups
-                        if procured_from: allocation.procured_from = procured_from
-                        allocation.scope = scope or ''
-                        allocation.usage = usage or ''
-                        if to_date: allocation.to_date = parse_date(to_date)
-                        allocation.notes = notes or ''
-                        if allocation.from_date and allocation.to_date:
-                            allocation.days = (allocation.to_date - allocation.from_date).days + 1
-                        allocation.save()
+                    allocation.save()
 
                     result_allocation_id = allocation.id
 
                     # Sync Scheduling
                     cd = effective_date
+                    active_user = request.user if (request.user and request.user.is_authenticated) else None
+                    if not active_user:
+                        try:
+                            from authentication.models import CustomUser
+                            active_user = CustomUser.objects.filter(is_active=True).first()
+                        except: pass
+
+                    from .models import FinalScheduleRun
+                    from .prescription_views import determine_procurement_department_from_allocation
                     while cd and allocation.to_date and cd <= allocation.to_date:
-                        PrescriptionScheduling.objects.get_or_create(
+                        target_status = 'draft'
+                        target_sent_to = None
+                        target_scheduled_by = None
+                        
+                        if FinalScheduleRun.objects.filter(run_date=cd).exists():
+                            target_status = 'scheduled'
+                            target_sent_to = determine_procurement_department_from_allocation(allocation)
+                            target_scheduled_by = active_user
+
+                        ps_rec, created = PrescriptionScheduling.objects.get_or_create(
                             patient_id=patient_id, prescription_date=cd,
-                            defaults={'doctor': request.user if request.user.is_authenticated else None, 'status': 'draft'}
+                            defaults={
+                                'doctor': active_user, 
+                                'status': target_status,
+                                'sent_to': target_sent_to,
+                                'scheduled_by': target_scheduled_by
+                            }
                         )
+                        # If it already existed but Final Schedule was run, update it to scheduled
+                        if not created and target_status == 'scheduled' and ps_rec.status == 'draft':
+                            ps_rec.status = 'scheduled'
+                            ps_rec.sent_to = target_sent_to
+                            ps_rec.scheduled_by = target_scheduled_by
+                            ps_rec.save()
+
                         cd += timedelta(days=1)
 
                     # Log audit/change
                     log_prescription_audit(request.user, 'update_prescription', 'PrescriptionAllocation', str(allocation.id), {'split': should_split})
                     
-                    cd = allocation.from_date
+                    # Log date-wise changes for history tracking
+                    cd = effective_date
+                    current_snapshot = {
+                        'items_groups': allocation.items_groups,
+                        'allocation_id': allocation.id,
+                        'usage': allocation.usage,
+                        'scope': allocation.scope,
+                        'prescription_name': allocation.prescription_name
+                    }
+                    before_snapshot = {
+                        'items_groups': old_items_groups,
+                        'allocation_id': allocation.id
+                    }
+                    
                     while cd and allocation.to_date and cd <= allocation.to_date:
                         PrescriptionChangeLog.objects.create(
                             patient_id=patient_id, prescription_date=cd, action='update',
-                            changed_by=request.user if request.user.is_authenticated else None, before_values={'items_groups': old_items_groups},
-                            after_values={'items_groups': allocation.items_groups}
+                            changed_by=active_user, 
+                            before_values=before_snapshot,
+                            after_values=current_snapshot
                         )
                         cd += timedelta(days=1)
+
 
                 # TRANSACTION ENDS HERE (COMMITTED)
 
@@ -3328,11 +3052,17 @@ def prescription_entry_page(request):
                 return JsonResponse({'error': 'allocation_not_found'}, status=404)
             except Exception as e:
                 import traceback
+                error_traceback = traceback.format_exc()
                 print(f"Error in update_prescription: {e}")
-                traceback.print_exc()
+                print(error_traceback)
                 # Ensure patient_id is available for error logging if it was set
                 error_patient_id = patient_id if patient_id else 'unknown'
-                return JsonResponse({'error': str(e), 'patient_id_at_error': error_patient_id}, status=500)
+                return JsonResponse({
+                    'status': 'error',
+                    'error': str(e),
+                    'detail': error_traceback.splitlines()[-1] if error_traceback else 'Unknown error',
+                    'patient_id_at_error': error_patient_id
+                }, status=500)
 
     # Handle GET actions (search_items, masters)
     action = (request.GET.get('action') or '').strip().lower()
@@ -3523,123 +3253,155 @@ def prescription_entry_page(request):
             
             return JsonResponse(results, safe=False)
         except PatientSnapshot.DoesNotExist:
-            return JsonResponse({'error': 'patient_not_found'}, status=404)
+            return JsonResponse([], safe=False)
+
+    # status history for prescription
+    if action == 'status_history':
+        allocation_id = request.GET.get('allocation_id')
+        if not allocation_id:
+            return JsonResponse({'error': 'missing_allocation_id'}, status=400)
+            
+        try:
+            allocation = PrescriptionAllocation.objects.get(id=allocation_id)
+            history = []
+            
+            # Pre-fetch all logs for this allocation to avoid N+1
+            logs = PrescriptionChangeLog.objects.filter(
+                Q(after_values__allocation_id=allocation.id) |
+                Q(before_values__allocation_id=allocation.id)
+            ).order_by('-timestamp')
+            
+            # Map date -> latest log for that date
+            date_logs = {}
+            for log in logs:
+                if log.prescription_date not in date_logs:
+                    date_logs[log.prescription_date] = log
+            
+            res_items_by_date = {}
+            res_display_status_by_date = {}
+            
+            temp_date = allocation.to_date
+            running_items = allocation.items_groups
+            
+            # Temporary storage for reconstruction (work backwards)
+            while temp_date >= allocation.from_date:
+                log = date_logs.get(temp_date)
+                if log:
+                    res_items_by_date[temp_date] = log.after_values.get('items_groups', running_items)
+                    res_display_status_by_date[temp_date] = 'Updated'
+                    # Propagate backwards: the state BEFORE this date's log
+                    running_items = log.before_values.get('items_groups', running_items)
+                else:
+                    res_items_by_date[temp_date] = running_items
+                    res_display_status_by_date[temp_date] = 'Original'
+                
+                temp_date -= timedelta(days=1)
+
+            # Now build the history list forward
+            current_date = allocation.from_date
+            while current_date <= allocation.to_date:
+                items_groups = res_items_by_date.get(current_date)
+                display_status = res_display_status_by_date.get(current_date, 'Original')
+                
+                # Check scheduling status
+                sched = PrescriptionScheduling.objects.filter(patient_id=allocation.patient_id, prescription_date=current_date).first()
+                sched_status = (sched.status if sched else 'draft').capitalize()
+                
+                # Check cancellation
+                is_cancelled = False
+                if allocation.status == 'cancelled' and allocation.cancelled_date_from and allocation.cancelled_date_to:
+                    if allocation.cancelled_date_from <= current_date <= allocation.cancelled_date_to:
+                        is_cancelled = True
+                
+                # Determine final status badge text
+                if is_cancelled:
+                    final_status = 'Cancelled'
+                else:
+                    # Priority: scheduling status (Dispatched, Scheduled, Draft)
+                    # If edited, show "Updated" too
+                    if display_status == 'Updated':
+                        final_status = f"Updated ({sched_status})"
+                    else:
+                        final_status = sched_status
+
+                groups_list = []
+                if isinstance(items_groups, str):
+                    try: groups_list = json.loads(items_groups)
+                    except: pass
+                elif isinstance(items_groups, list):
+                    groups_list = items_groups
+                elif isinstance(items_groups, dict):
+                    groups_list = [items_groups]
+                
+                if not groups_list:
+                    history.append({
+                        'date': current_date.isoformat(),
+                        'medicine': '—',
+                        'ingredients': '—',
+                        'usage': '—',
+                        'status': final_status
+                    })
+                else:
+                    med_parts = []
+                    all_ingredients = []
+                    
+                    for grp in groups_list:
+                        items = grp.get('items', [])
+                        if not items: continue
+                        
+                        # Medicine names in this group
+                        item_names = []
+                        for it in items:
+                            name = it.get('item_name') or it.get('text') or 'Unknown'
+                            item_names.append(escape(name))
+                        
+                        combined_meds = "+".join(item_names)
+                        
+                        # Dosage and UOM for this group
+                        dosage = items[0].get('dosage') or grp.get('dosage') or grp.get('dose') or ''
+                        uom = items[0].get('uno') or items[0].get('uom') or grp.get('uno') or grp.get('uom') or ''
+                        
+                        dosage_str = f"{dosage}{uom}" if dosage or uom else ""
+                        med_parts.append(f"[{combined_meds}]{dosage_str}")
+                        
+                        # Collect ingredients
+                        ingredients = grp.get('ingredients', [])
+                        if isinstance(ingredients, list):
+                            for ing in ingredients:
+                                ing_name = ing.get('ingredient_name') or ing.get('item_name') or ing.get('text')
+                                if ing_name:
+                                    all_ingredients.append(escape(ing_name))
+                                    
+                    final_med_display = " + ".join(med_parts)
+                    final_ingredients = ", ".join(list(dict.fromkeys(all_ingredients))) or "—"
+                    
+                    # Use the first group's usage or allocation level usage
+                    usage_display = groups_list[0].get('usage') or groups_list[0].get('time') or allocation.usage or '—'
+                    
+                    history.append({
+                        'date': current_date.isoformat(),
+                        'medicine': final_med_display,
+                        'ingredients': final_ingredients,
+                        'usage': usage_display,
+                        'status': final_status
+                    })
+                
+                current_date += timedelta(days=1)
+
+                
+            return JsonResponse({'status': 'ok', 'history': history})
+        except PrescriptionAllocation.DoesNotExist:
+            return JsonResponse({'error': 'allocation_not_found'}, status=404)
         except Exception as e:
+            import traceback
+            print(f"Status history error: {traceback.format_exc()}")
             return JsonResponse({'error': str(e)}, status=500)
+
     
     # Default: render the template
     return render(request, 'dashboards/prescriptions/prescription_entry.html')
 
 
-def create_prescription_notification(prescription_allocation, action, user, additional_data=None):
-    """Create prescription notification for relevant staff"""
-    try:
-        from .models import PrescriptionNotification
-        
-        # Map actions to notification types
-        notification_mapping = {
-            'prescription_allocated': ('prescription_allocated', 'New Prescription Allocated', 'high'),
-            'prescription_cancelled': ('prescription_cancelled', 'Prescription Cancelled', 'urgent'),
-            'prescription_resumed': ('prescription_resumed', 'Prescription Resumed', 'medium'),
-            'prescription_updated': ('prescription_updated', 'Prescription Updated', 'medium'),
-        }
-        
-        if action not in notification_mapping:
-            return
-        
-        notification_type, title_prefix, priority = notification_mapping[action]
-        
-        # Create notification title and message
-        patient_name = prescription_allocation.patient.pat_name or 'Unknown Patient'
-        prescription_name = prescription_allocation.prescription_name
-        
-        title = f"{title_prefix}: {prescription_name}"
-        message = f"Patient: {patient_name} ({prescription_allocation.patient.pat_reg_no})\n"
-        message += f"Prescription: {prescription_name}\n"
-        message += f"Period: {prescription_allocation.from_date} to {prescription_allocation.to_date}\n"
-        
-        if action == 'prescription_cancelled' and additional_data:
-            message += f"Cancelled: {additional_data.get('cancel_from')} to {additional_data.get('cancel_to')}\n"
-            message += f"Reason: {additional_data.get('reason', 'No reason provided')}\n"
-        elif action == 'prescription_resumed' and additional_data:
-            message += f"Resumed: {additional_data.get('resume_from')} to {additional_data.get('resume_to')}\n"
-        
-        # Create notification
-        notification = PrescriptionNotification.objects.create(
-            prescription_allocation=prescription_allocation,
-            notification_type=notification_type,
-            title=title,
-            message=message,
-            priority=priority,
-            created_by=user,
-            additional_data=additional_data or {}
-        )
-        
-        # Determine target roles based on action
-        if action == 'prescription_allocated':
-            # Notify pharmacy, admin
-            target_roles = ['pharmacy', 'admin', 'super_admin']
-        elif action == 'prescription_cancelled':
-            # Notify admin, doctors, pharmacy
-            target_roles = ['admin', 'super_admin', 'doctor', 'doctor_admin', 'pharmacy']
-        elif action == 'prescription_resumed':
-            # Notify pharmacy and admin
-            target_roles = ['pharmacy', 'admin', 'super_admin']
-        elif action == 'prescription_updated':
-            # Notify pharmacy and admin
-            target_roles = ['pharmacy', 'admin', 'super_admin']
-        else:
-            target_roles = ['admin', 'super_admin']
-        
-        # Send notification to target roles - COMMENTED OUT DUE TO WEBSOCKET ERRORS
-        # notification.send_to_roles(target_roles)
-        
-    except Exception as e:
-        print(f"Prescription notification creation error: {e}")
-
-
-def log_prescription_audit(user, action, obj_type, obj_id, additional_data=None):
-    """Log prescription-related audit events"""
-    try:
-        ip_address = None
-        user_agent = ''
-        
-        # Prepare audit data
-        audit_data = {
-            'action': action,
-            'user_id': user.id if user else None,
-            'username': user.username if user else 'Anonymous',
-            'timestamp': timezone.now().isoformat(),
-        }
-        
-        if additional_data:
-            audit_data.update(additional_data)
-        
-        # Create audit log entry
-        AuthAuditLog.objects.create(
-            user=user,
-            action=action,
-            description=f"Prescription {action} by {user.username if user else 'Anonymous'}",
-            ip_address=ip_address,
-            user_agent=user_agent,
-            status='success',
-            object_type=obj_type,
-            object_id=obj_id,
-            additional_data=audit_data
-        )
-        
-        # Also create Sheduling audit log for backward compatibility
-        AuditLog.objects.create(
-            user=user,
-            action=action,
-            obj_type=obj_type,
-            obj_id=obj_id,
-            data=audit_data
-        )
-            
-    except Exception as e:
-        # Don't let audit logging break the main functionality
-        print(f"Prescription audit logging error: {e}")
 
 
 
