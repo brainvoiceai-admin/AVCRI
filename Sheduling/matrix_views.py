@@ -42,9 +42,9 @@ def continuity_matrix_api(request):
         valid_bookings_qs = Booking.objects.filter(
             date__range=[from_date, to_date]
         ).exclude(
-            status__icontains='cancel'
+            status='cancelled'
         ).exclude(
-            status__icontains='fail'
+            status='failed'
         ).values_list('allocation_id', 'date', 'timeslot_id')
         
         # Fast lookup: {(allocation_id, date, timeslot_id), ...}
@@ -56,9 +56,9 @@ def continuity_matrix_api(request):
             booking__date__range=[from_date, to_date],
             status='assigned'
         ).exclude(
-            booking__status__icontains='cancel'
+            booking__status='cancelled'
         ).exclude(
-            booking__status__icontains='fail'
+            booking__status='failed'
         ).values_list('booking__allocation_id', 'booking__date', 'booking__timeslot_id', 'therapist_id')
         
         # therapist_id here is the string therapist_code (PK of Patient.Therapist)
@@ -80,23 +80,23 @@ def continuity_matrix_api(request):
             therapist__therapist_code=OuterRef('therapist__therapist_code'),
             status='assigned'
         ).exclude(
-            booking__status__icontains='cancel'
+            booking__status='cancelled'
         ).exclude(
-            booking__status__icontains='fail'
+            booking__status='failed'
         )
 
         bookings = TherapistBooking.objects.filter(
             date__range=[from_date, to_date]
         ).exclude(
-            status__icontains='cancel'
-        ).exclude(
             status__icontains='fail'
         ).annotate(
             has_valid_assignment=Exists(valid_assignments_subquery)
         ).filter(
-            # For records with a visit (allocation), enforce assignment check.
-            # For records without a visit (rare), we show them if they aren't explicitly cancelled.
-            Q(visit_id__isnull=True) | Q(has_valid_assignment=True)
+            # Primary filter: if it has an 'assigned' assignment, it's valid regardless of status.
+            # (Allows for cases where status is incorrectly 'CANCELLED' but assignment is active)
+            Q(has_valid_assignment=True) |
+            # Fallback for records without a visit/allocation (rare): only show if NOT cancelled.
+            (Q(visit_id__isnull=True) & ~Q(status__icontains='cancel'))
         ).select_related('therapist', 'visit__patient', 'time_slot').order_by('date')
         
         # 2. Build Caches
@@ -150,7 +150,13 @@ def continuity_matrix_api(request):
         )
         
         # 3. Process Bookings to Map
+        # Build Occupation Map: (date, slot_id, therapist_id) -> set of visit_keys
+        # This helps identify if a missing therapist is busy elsewhere (Violet status)
+        therapist_occupation_map = defaultdict(lambda: defaultdict(lambda: defaultdict(set)))
+        
         for b in bookings:
+            v_key = b.visit_id if b.visit_id is not None else f"no_visit_{b.patient_id}_{b.therapy_name}"
+            therapist_occupation_map[b.date][b.time_slot_id][b.therapist_id].add(v_key)
             d_str = b.date.strftime('%Y-%m-%d')
 
             # Skip TherapistBooking rows that don't match a valid Booking.
@@ -388,9 +394,14 @@ def continuity_matrix_api(request):
                             else:
                                 reference_set = set()
                                 
+                            # For the very first day of data for this allocation, we establish the baseline.
+                            # We mark it as successful continuity (green) unless there is a very specific 
+                            # reason to compare against history before the matrix start.
+                            # The user requested that the 1st treatment itself should not be marked in red.
                             baseline_set = curr_set
+                            reference_set = curr_set
                         else:
-                            # Day 2+ — compare against the FIRST day's therapists (baseline)
+                            # Day 2+ — compare against the baseline set (the first day encountered)
                             reference_set = baseline_set
                             
                         # Determine which therapists are missing from the reference
@@ -402,8 +413,24 @@ def continuity_matrix_api(request):
                         excused_normal_count = len(excused_missing) - excused_bathing_count
                         
                         unexcused_missing = missing_set - leaves_today
-                        unexcused_bathing_count = sum(1 for m_id in unexcused_missing if therapist_bathing_map.get(m_id, False))
-                        unexcused_normal_count = len(unexcused_missing) - unexcused_bathing_count
+                        
+                        # Sub-categorize unexcused missing into: Busy Elsewhere (Violet) vs Available (Red)
+                        busy_missing = set()
+                        available_missing = set()
+                        
+                        for m_id in unexcused_missing:
+                            # A therapist is busy elsewhere if they are assigned to a DIFFERENT visit at this time
+                            others = therapist_occupation_map.get(date_obj, {}).get(curr_time_slot_id, {}).get(m_id, set())
+                            if len(others - {visit_key}) > 0:
+                                busy_missing.add(m_id)
+                            else:
+                                available_missing.add(m_id)
+                                
+                        busy_bathing_count = sum(1 for m_id in busy_missing if therapist_bathing_map.get(m_id, False))
+                        busy_normal_count = len(busy_missing) - busy_bathing_count
+                        
+                        available_bathing_count = sum(1 for m_id in available_missing if therapist_bathing_map.get(m_id, False))
+                        available_normal_count = len(available_missing) - available_bathing_count
                         
                         therapist_list = []
                         # Sort by therapist_id for consistent display order
@@ -425,31 +452,42 @@ def continuity_matrix_api(request):
                                     excused_normal_count -= 1
                                     assigned = True
                                     
-                                # 2. Try exact match for unexcused
+                                # 2. Try exact match for Busy elsewhere (Violet)
                                 if not assigned:
-                                    if is_b and unexcused_bathing_count > 0:
-                                        t_data['status'] = 'red'
-                                        unexcused_bathing_count -= 1
+                                    if is_b and busy_bathing_count > 0:
+                                        t_data['status'] = 'violet'
+                                        busy_bathing_count -= 1
                                         assigned = True
-                                    elif not is_b and unexcused_normal_count > 0:
+                                    elif not is_b and busy_normal_count > 0:
+                                        t_data['status'] = 'violet'
+                                        busy_normal_count -= 1
+                                        assigned = True
+
+                                # 3. Try exact match for unexcused/available (Red)
+                                if not assigned:
+                                    if is_b and available_bathing_count > 0:
                                         t_data['status'] = 'red'
-                                        unexcused_normal_count -= 1
+                                        available_bathing_count -= 1
+                                        assigned = True
+                                    elif not is_b and available_normal_count > 0:
+                                        t_data['status'] = 'red'
+                                        available_normal_count -= 1
                                         assigned = True
                                         
-                                # 3. Fallback for excused (mismatched type)
+                                # 4. Fallback for Busy (mismatched type)
                                 if not assigned:
-                                    if excused_bathing_count > 0 or excused_normal_count > 0:
-                                        t_data['status'] = 'gray'
-                                        if excused_bathing_count > 0: excused_bathing_count -= 1
-                                        else: excused_normal_count -= 1
+                                    if busy_bathing_count > 0 or busy_normal_count > 0:
+                                        t_data['status'] = 'violet'
+                                        if busy_bathing_count > 0: busy_bathing_count -= 1
+                                        else: busy_normal_count -= 1
                                         assigned = True
-                                        
-                                # 4. Fallback for unexcused (mismatched type)
+
+                                # 5. Fallback for unexcused (mismatched type)
                                 if not assigned:
-                                    if unexcused_bathing_count > 0 or unexcused_normal_count > 0:
+                                    if available_bathing_count > 0 or available_normal_count > 0:
                                         t_data['status'] = 'red'
-                                        if unexcused_bathing_count > 0: unexcused_bathing_count -= 1
-                                        else: unexcused_normal_count -= 1
+                                        if available_bathing_count > 0: available_bathing_count -= 1
+                                        else: available_normal_count -= 1
                                         assigned = True
                                         
                                 # 5. Excess additions
