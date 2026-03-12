@@ -144,9 +144,9 @@ def get_prescription_data_api(request):
         ).select_related('patient', 'doctor', 'scheduled_by').order_by('patient__pat_room_no')
         
         if not prescriptions_qs.exists():
-            # Check for FinalScheduleRun
-            from .models import FinalScheduleRun
-            is_locked = FinalScheduleRun.objects.filter(run_date=filter_date).exists()
+            # Check for prescription-specific FinalScheduleRun (separate from therapy FinalScheduleRun)
+            from .models import PrescriptionFinalScheduleRun
+            is_locked = PrescriptionFinalScheduleRun.objects.filter(run_date=filter_date).exists()
             return JsonResponse({'success': True, 'data': [], 'count': 0, 'final_schedule_generated': is_locked})
 
         # --- BULK DATA FETCHING FOR PERFORMANCE ---
@@ -298,9 +298,9 @@ def get_prescription_data_api(request):
         # --- SORT BY ROOM WISE ---
         data.sort(key=lambda x: get_room_sort_key(x['room_no']))
 
-        # Check for Final ScheduleRun
-        from .models import FinalScheduleRun
-        is_locked = FinalScheduleRun.objects.filter(run_date=filter_date).exists()
+        # Check for prescription Final Schedule run (separate marker from therapy scheduling)
+        from .models import PrescriptionFinalScheduleRun
+        is_locked = PrescriptionFinalScheduleRun.objects.filter(run_date=filter_date).exists()
         
         return JsonResponse({
             'success': True,
@@ -990,11 +990,11 @@ def send_final_prescription_api(request):
         if not filter_date:
             return JsonResponse({'error': 'Invalid date format'}, status=400)
         
-        # Check if Final Schedule has already been run for this date
-        from .models import FinalScheduleRun
-        if FinalScheduleRun.objects.filter(run_date=filter_date).exists():
+        # Check if prescription Final Schedule has already been run for this date
+        from .models import PrescriptionFinalScheduleRun
+        if PrescriptionFinalScheduleRun.objects.filter(run_date=filter_date).exists():
             return JsonResponse({
-                'error': f'Final Schedule has already been generated for this date ({filter_date}).',
+                'error': f'Prescription Final Schedule has already been generated for this date ({filter_date}).',
                 'already_run': True
             }, status=400)
 
@@ -1049,9 +1049,9 @@ def send_final_prescription_api(request):
                     if department not in sent_to_departments:
                         sent_to_departments.append(department)
             
-            # Create/Update run marker for Final Schedule to lock it for this date
+            # Create/Update run marker for prescription Final Schedule to lock it for this date
             try:
-                FinalScheduleRun.objects.update_or_create(
+                PrescriptionFinalScheduleRun.objects.update_or_create(
                     run_date=filter_date,
                     defaults={
                         'status': 'success',
@@ -1065,7 +1065,7 @@ def send_final_prescription_api(request):
                     }
                 )
             except Exception as e:
-                print(f"Error creating FinalScheduleRun marker: {e}")
+                print(f"Error creating PrescriptionFinalScheduleRun marker: {e}")
         
         return JsonResponse({
             'success': True,
