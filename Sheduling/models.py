@@ -680,3 +680,27 @@ class FinalScheduleRun(models.Model):
 
     def __str__(self) -> str:
         return f"FinalScheduleRun {self.run_date} ({self.status})"
+
+
+# -----------------------------------------------------------------------------
+# Prescription Final Schedule Run marker (per-date, for prescription dashboard)
+# -----------------------------------------------------------------------------
+class PrescriptionFinalScheduleRun(models.Model):
+    class Status(models.TextChoices):
+        SUCCESS = "success", _("Success")
+        FAILED = "failed", _("Failed")
+
+    run_date = models.DateField(unique=True, db_index=True)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.SUCCESS)
+    ran_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL)
+    ran_at = models.DateTimeField(auto_now_add=True)
+    message = models.TextField(blank=True)
+    stats = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ["-run_date"]
+        verbose_name = "Prescription Final Schedule Run"
+        verbose_name_plural = "Prescription Final Schedule Runs"
+
+    def __str__(self) -> str:
+        return f"PrescriptionFinalScheduleRun {self.run_date} ({self.status})"
