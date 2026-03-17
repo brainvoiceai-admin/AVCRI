@@ -164,7 +164,7 @@
                     </div>
                     <div class="patient-meds">
                         <span class="meds-count">${patient.prescription_count} medicines</span>
-                        <span>${getPreparedCount(patient)}/${patient.prescription_count} prepared</span>
+                        <span>${patient.status === 'dispatched' ? patient.prescription_count : (patient.prepared_count || 0)}/${patient.prescription_count} prepared</span>
                     </div>
                     ${Array.isArray(patient.items_preview) && patient.items_preview.length ? `
                     <div class="patient-details" style="margin-top:6px; display:block;">
@@ -193,13 +193,8 @@
         }
         
         function getPreparedCount(patient) {
-            // Count how many medicines are marked as prepared for this patient
-            let count = 0;
-            const patientKey = `${patient.patient_id}_${currentDate}`;
-            if (preparedMedicines.has(patientKey)) {
-                count = preparedMedicines.get(patientKey).size;
-            }
-            return count;
+            if (patient.status === 'dispatched') return patient.prescription_count;
+            return patient.prepared_count || 0;
         }
         
         function selectPatient(patient) {
@@ -362,31 +357,51 @@
                 const allocationIds = Object.keys(groupsByAllocation);
                 allocationIds.forEach((allocationId, entryIndex) => {
                     const allocationGroups = groupsByAllocation[allocationId];
-                    const allocationIsCancelled = allocationGroups.every(g => g.is_cancelled);
-                    
-                    // Entry number header (one per PrescriptionAllocation)
-                    const entryHeader = document.createElement('div');
-                    entryHeader.style.fontSize = '14px';
-                    entryHeader.style.fontWeight = '600';
-                    entryHeader.style.color = '#333';
-                    entryHeader.style.marginBottom = '12px';
-                    entryHeader.style.paddingBottom = '8px';
-                    entryHeader.style.borderBottom = '2px solid #2c7be5';
-                    entryHeader.innerHTML = `Entry ${entryIndex + 1}`;
-                    if (allocationIsCancelled) {
-                        entryHeader.innerHTML += ' <span style="color: #e63757; font-weight: bold; margin-left: 8px;">[CANCELLED]</span>';
-                    }
-                    prescriptionSection.appendChild(entryHeader);
                     
                     // Single container for this allocation: per-group lines with items highlighted and details below
                     const allocationDiv = document.createElement('div');
                     allocationDiv.style.marginBottom = '25px';
-                    allocationDiv.style.border = allocationIsCancelled ? '2px solid #e63757' : '1px solid #e3ebf6';
+                    // Update border and background based on dispatch status
+                    const isAllocationDispatched = allocationGroups[0]?.is_dispatched;
+                    allocationDiv.style.border = (isAllocationDispatched ? '1px solid #d1fae5' : '1px solid #e3ebf6');
                     allocationDiv.style.borderRadius = '8px';
                     allocationDiv.style.padding = '15px';
-                    allocationDiv.style.backgroundColor = allocationIsCancelled ? '#fff5f5' : '#f9fafd';
-                    if (allocationIsCancelled) {
-                        allocationDiv.style.opacity = '0.7';
+                    allocationDiv.style.backgroundColor = (isAllocationDispatched ? '#f0fdf4' : '#f9fafd');
+                    
+                    // Header row with checkbox for dispatch
+                    const headerRow = document.createElement('div');
+                    headerRow.style.display = 'flex';
+                    headerRow.style.justifyContent = 'space-between';
+                    headerRow.style.alignItems = 'center';
+                    headerRow.style.marginBottom = '12px';
+                    headerRow.style.paddingBottom = '8px';
+                    headerRow.style.borderBottom = '2px solid #2c7be5';
+
+                    headerRow.innerHTML = `
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <input type="checkbox" class="allocation-dispatch-checkbox" 
+                                data-allocation-id="${allocationId}" 
+                                ${isAllocationDispatched ? 'checked disabled' : ''} 
+                                style="width: 18px; height: 18px; cursor: pointer;">
+                            <span style="font-size: 14px; font-weight: 600; color: #333;">Entry ${entryIndex + 1}</span>
+                            ${isAllocationDispatched ? '<span style="color: #059669; font-weight: bold; margin-left: 8px;">[DISPATCHED]</span>' : ''}
+                        </div>
+                    `;
+                    
+                    allocationDiv.appendChild(headerRow);
+
+                    // Add listener to individual checkbox
+                    const checkbox = headerRow.querySelector('.allocation-dispatch-checkbox');
+                    if (!isAllocationDispatched) {
+                        checkbox.addEventListener('change', function() {
+                            if (this.checked) {
+                                if (confirm('Are you sure you want to dispatch this medicine?')) {
+                                    dispatchPrescription(allocationId);
+                                } else {
+                                    this.checked = false;
+                                }
+                            }
+                        });
                     }
                     
                     // Common usage/ext-int for this allocation (from first group)
@@ -444,7 +459,7 @@
                         
                         const itemCard = document.createElement('div');
                         itemCard.className = 'medicine-card';
-                        itemCard.style.borderLeft = allocationIsCancelled ? '4px solid #e63757' : '4px solid #2c7be5';
+                        itemCard.style.borderLeft = '4px solid #2c7be5';
                         itemCard.style.marginBottom = '8px';
                         itemCard.style.padding = '12px';
                         itemCard.style.backgroundColor = '#fff';
@@ -711,10 +726,8 @@
             const checkboxes = document.querySelectorAll('#pv_content input[type="checkbox"]');
             
             checkboxes.forEach(checkbox => {
-                if (!checkbox.checked) {
+                if (!checkbox.checked && !checkbox.disabled) {
                     checkbox.checked = true;
-                    const medicineId = checkbox.id.replace('med-', '');
-                    preparedMedicines.add(medicineId);
                 }
             });
             
@@ -730,20 +743,27 @@
             updateStatistics();
         }
         
-        function dispatchPrescription() {
+        function dispatchPrescription(allocationId = null) {
             if (!currentPatient) return;
             
             // Call the mark as dispatched API
+            const body = {
+                patient_id: currentPatient.patient_id,
+                date: currentDate
+            };
+            
+            if (allocationId) {
+                // If it's a numeric ID (as string), send it. If it contains "item_", handle accordingly or just send.
+                body.allocation_id = allocationId;
+            }
+
             fetch('/sheduling/procurement/api/mark-dispatched/', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                     'X-CSRFToken': getCookie('csrftoken')
                 },
-                body: JSON.stringify({
-                    patient_id: currentPatient.patient_id,
-                    date: currentDate
-                })
+                body: JSON.stringify(body)
             })
             .then(response => response.json())
             .then(data => {
@@ -1076,32 +1096,10 @@
         
         function saveChanges() {
             if (!currentPatient) return;
-            
-            // Save individual medicine preparation status
-            const checkboxes = document.querySelectorAll('#pv_content input[type="checkbox"]');
-            const preparedMedicines = [];
-            
-            checkboxes.forEach(checkbox => {
-                if (checkbox.checked) {
-                    const medicineId = checkbox.id.replace('med-', '');
-                    preparedMedicines.push(medicineId);
-                }
-            });
-            
-            // In a real implementation, this would save to the database
-            // For now, we'll just update the local state and show feedback
-            console.log('Saving preparation status for medicines:', preparedMedicines);
-            
-            // Update the prepared medicines set
-            preparedMedicines.forEach(medicineId => {
-                preparedMedicines.add(medicineId);
-            });
-            
-            // Update UI
-            renderPatients();
-            updateStatistics();
-            
-            showAlert('success', `Preparation status saved for ${preparedMedicines.length} medicines!`);
+            // Immediate dispatch is handled by checkboxes now. 
+            // We can treat this button as a way to verify everything is done and refresh.
+            loadPatients();
+            showAlert('success', 'Refresh completed.');
         }
         
         function exportPatientCSV() {
