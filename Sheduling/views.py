@@ -2468,7 +2468,8 @@ def prescription_entry_page(request):
     from django.utils import timezone
     from django.utils.dateparse import parse_date
     from django.utils.html import escape
-    from .models import PrescriptionAllocation, PrescriptionScheduling, PrescriptionChangeLog, PatientSnapshot
+    from .models import PrescriptionAllocation, PrescriptionScheduling, PrescriptionChangeLog, PatientSnapshot, PrescriptionFinalScheduleRun
+    from .prescription_views import determine_procurement_department_from_allocation
 
     def _get_updated_prescriptions(p_id_input, reg_no=None):
         """Helper to fetch and format prescription list for a patient using explicit ID or RegNo"""
@@ -2481,6 +2482,59 @@ def prescription_entry_page(request):
             q_obj |= Q(patient__pat_reg_no=str(reg_no))
             
         plist = list(PrescriptionAllocation.objects.filter(q_obj).order_by('from_date', 'created_at').distinct())
+        
+        # --- Automatic Discharge Cancellation Logic ---
+        try:
+            from MySql_Data_pull.models import Treatment
+            # Fetch search_reg_no if not provided
+            search_reg_no = str(reg_no) if reg_no else None
+            if not search_reg_no:
+                # Get from first allocation or snapshot
+                if plist:
+                    p_obj = plist[0].patient
+                    search_reg_no = p_obj.pat_reg_no
+            
+            if search_reg_no:
+                # Get the absolute LATEST treatment record for this patient
+                # Using .values() to ensure we get a dict for safe .get() access
+                latest_treatment = Treatment.objects.using('therapy_db').filter(
+                    Pat_Reg_No=search_reg_no
+                ).order_by('-DOA').values('Pat_DoD').first()
+                
+                # Only auto-cancel if they have been discharged in their most recent stay
+                if latest_treatment and latest_treatment.get('Pat_DoD'):
+                    dod_raw = latest_treatment['Pat_DoD']
+                    # Handle both datetime and date objects safely
+                    dod = dod_raw.date() if hasattr(dod_raw, 'date') else dod_raw
+                    
+                    # Log if we find a discharge date and prescriptions need cancellation
+                    for p_rec in plist:
+                        # If prescription ends after discharge, cancel from dod+1
+                        if p_rec.to_date and p_rec.to_date > dod:
+                            # Calculate effective cancel_from
+                            cancel_from = max(dod + timedelta(days=1), p_rec.from_date)
+                            
+                            # Only update if not already cancelled from this date
+                            if cancel_from <= p_rec.to_date and (not p_rec.cancelled_date_from or p_rec.cancelled_date_from > cancel_from):
+                                p_rec.cancelled_date_from = cancel_from
+                                p_rec.cancelled_date_to = p_rec.to_date
+                                p_rec.status = 'cancelled'
+                                p_rec.cancellation_reason = f"Automatically cancelled due to patient discharge on {dod}"
+                                p_rec.save()
+                                
+                                # Sync scheduling
+                                # Already imported at top
+                                PrescriptionScheduling.objects.filter(
+                                    patient_id=p_rec.patient_id,
+                                    prescription_date__range=(cancel_from, p_rec.to_date)
+                                ).exclude(status='dispatched').update(status='cancelled')
+                                
+                                print(f"[INFO] Auto-cancelled prescription {p_rec.id} for patient {search_reg_no} due to discharge on {dod}")
+        except Exception as e:
+            print(f"[ERROR] Discharge sync error: {e}")
+            import traceback
+            traceback.print_exc()
+
         res_list = []
         for p in plist:
             sc = {'draft': 0, 'scheduled': 0, 'dispatched': 0, 'active': 0, 'cancelled': 0, 'failed': 0}
@@ -2490,7 +2544,10 @@ def prescription_entry_page(request):
                     patient_id=p.patient_id, prescription_date__gte=p.from_date, prescription_date__lte=p.to_date
                 )
                 for rec in recs:
-                    if rec.status in sc: sc[rec.status] += 1
+                    if p.cancelled_date_from and p.cancelled_date_to and p.cancelled_date_from <= rec.prescription_date <= p.cancelled_date_to:
+                        sc['cancelled'] += 1
+                    elif rec.status in sc:
+                        sc[rec.status] += 1
             
             summary = {k: v for k, v in sc.items() if v > 0}
             
@@ -2546,140 +2603,142 @@ def prescription_entry_page(request):
                 return JsonResponse({'error': 'missing_required_fields'}, status=400)
             
             try:
-                # Get or create patient snapshot
-                raw_room_no = payload.get('patient_room_no', '')
-                resolved_room_no = get_staying_room_display_number(raw_room_no) if raw_room_no else ''
-                ps, created = PatientSnapshot.objects.get_or_create(
-                    pat_reg_no=str(patient_reg_no),
-                    defaults={
-                        'pat_name': payload.get('patient_name', ''),
-                        'pat_age': payload.get('patient_age', ''),
-                        'pat_sex': payload.get('patient_sex', ''),
-                        'pat_room_no': resolved_room_no,
-                        'pat_ref_id': payload.get('patient_ref_id', ''),
-                    }
-                )
-                
-                # Update patient info if changed
-                changed = False
-                if payload.get('patient_name') and ps.pat_name != payload.get('patient_name'):
-                    ps.pat_name = payload.get('patient_name'); changed = True
-                if payload.get('patient_age') and ps.pat_age != payload.get('patient_age'):
-                    ps.pat_age = payload.get('patient_age'); changed = True
-                if payload.get('patient_sex') and ps.pat_sex != payload.get('patient_sex'):
-                    ps.pat_sex = payload.get('patient_sex'); changed = True
-                if resolved_room_no and ps.pat_room_no != resolved_room_no:
-                    ps.pat_room_no = resolved_room_no; changed = True
-                if payload.get('patient_ref_id') and ps.pat_ref_id != payload.get('patient_ref_id'):
-                    ps.pat_ref_id = payload.get('patient_ref_id'); changed = True
-                if changed: ps.save()
-                
-                # Deduplicate items WITHIN each group only
-                # Same medicine can exist in different groups
-                cleaned_groups = []
-                
-                for group in items_groups:
-                    seen_in_group = set()
-                    unique_items = []
-                    
-                    for item in group.get('items', []):
-                        item_code = item.get('item_code')
-                        if item_code and item_code in seen_in_group:
-                            # Skip duplicate item within THIS group
-                            print(f"Backend: Duplicate item removed within group: {item.get('item_name')} ({item_code})")
-                            continue
-                        if item_code:
-                            seen_in_group.add(item_code)
-                        unique_items.append(item)
-                    
-                    # Only add group if it has items after deduplication
-                    if unique_items:
-                        cleaned_group = {**group, 'items': unique_items}
-                        cleaned_groups.append(cleaned_group)
-                
-                # Use cleaned groups
-                items_groups = cleaned_groups
-                
-                # Create prescription allocation
-                from_date_parsed = parse_date(from_date)
-                to_date_parsed = parse_date(to_date)
-                
-                allocation = PrescriptionAllocation.objects.create(
-                    patient=ps,
-                    prescription_name=prescription_name,
-                    items_groups=items_groups,
-                    procured_from=procured_from,
-                    usage=usage,
-                    scope=scope,
-                    from_date=from_date_parsed,
-                    to_date=to_date_parsed,
-                    days=days,
-                    allocated_by=request.user if request.user.is_authenticated else None,
-                    status='draft'  # Default status
-                )
-                
-                # Create PrescriptionScheduling records for each date in the range (similar to Booking for therapies)
-                from .models import PrescriptionScheduling
-
-                current_date = from_date_parsed
-                from .models import FinalScheduleRun
-                from .prescription_views import determine_procurement_department_from_allocation
-                while current_date <= to_date_parsed:
-                    # Check if Final Schedule was already run for this date
-                    target_status = 'draft'
-                    target_sent_to = None
-                    target_scheduled_by = None
-                    
-                    if FinalScheduleRun.objects.filter(run_date=current_date).exists():
-                        target_status = 'scheduled'
-                        target_sent_to = determine_procurement_department_from_allocation(allocation)
-                        target_scheduled_by = request.user if request.user.is_authenticated else None
-
-                    # Get or create PrescriptionScheduling for this date
-                    ps_rec, created = PrescriptionScheduling.objects.get_or_create(
-                        patient=ps,
-                        prescription_date=current_date,
+                with transaction.atomic():
+                    # Get or create patient snapshot
+                    raw_room_no = payload.get('patient_room_no', '')
+                    resolved_room_no = get_staying_room_display_number(raw_room_no) if raw_room_no else ''
+                    ps, created = PatientSnapshot.objects.get_or_create(
+                        pat_reg_no=str(patient_reg_no),
                         defaults={
-                            'doctor': request.user if request.user.is_authenticated else None,
-                            'status': target_status,
-                            'sent_to': target_sent_to,
-                            'scheduled_by': target_scheduled_by
+                            'pat_name': payload.get('patient_name', ''),
+                            'pat_age': payload.get('patient_age', ''),
+                            'pat_sex': payload.get('patient_sex', ''),
+                            'pat_room_no': resolved_room_no,
+                            'pat_ref_id': payload.get('patient_ref_id', ''),
                         }
                     )
                     
-                    # If it already existed but Final Schedule was run, update it to scheduled
-                    if not created and target_status == 'scheduled' and ps_rec.status == 'draft':
-                        ps_rec.status = 'scheduled'
-                        ps_rec.sent_to = target_sent_to
-                        ps_rec.scheduled_by = target_scheduled_by
-                        ps_rec.save()
+                    # Update patient info if changed
+                    changed = False
+                    if payload.get('patient_name') and ps.pat_name != payload.get('patient_name'):
+                        ps.pat_name = payload.get('patient_name'); changed = True
+                    if payload.get('patient_age') and ps.pat_age != payload.get('patient_age'):
+                        ps.pat_age = payload.get('patient_age'); changed = True
+                    if payload.get('patient_sex') and ps.pat_sex != payload.get('patient_sex'):
+                        ps.pat_sex = payload.get('patient_sex'); changed = True
+                    if resolved_room_no and ps.pat_room_no != resolved_room_no:
+                        ps.pat_room_no = resolved_room_no; changed = True
+                    if payload.get('patient_ref_id') and ps.pat_ref_id != payload.get('patient_ref_id'):
+                        ps.pat_ref_id = payload.get('patient_ref_id'); changed = True
+                    if changed: ps.save()
+                    
+                    # Deduplicate items WITHIN each group only
+                    cleaned_groups = []
+                    for group in items_groups:
+                        seen_in_group = set()
+                        unique_items = []
+                        for item in group.get('items', []):
+                            item_code = item.get('item_code')
+                            if item_code and item_code in seen_in_group:
+                                continue
+                            if item_code:
+                                seen_in_group.add(item_code)
+                            unique_items.append(item)
+                        if unique_items:
+                            cleaned_group = {**group, 'items': unique_items}
+                            cleaned_groups.append(cleaned_group)
+                    items_groups = cleaned_groups
+                    
+                    # Create prescription allocation
+                    from_date_parsed = parse_date(from_date)
+                    to_date_parsed = parse_date(to_date)
+                    
+                    # DATE VALIDATION: Prevent 500 error from loop crash
+                    if not from_date_parsed or not to_date_parsed:
+                        return JsonResponse({'error': 'Invalid date format provided. Expected YYYY-MM-DD.'}, status=400)
 
-                    current_date += timedelta(days=1)
-                
-                # Update patient snapshot
-                ps.prescription_count = PrescriptionAllocation.objects.filter(patient=ps).count()
-                ps.last_prescription_date = allocation.from_date
-                ps.save()
-                
-                # Create notification - COMMENTED OUT DUE TO WEBSOCKET ERRORS
-                # create_prescription_notification(allocation, 'prescription_allocated', request.user)
-                
-                # Log audit
-                log_prescription_audit(request.user, 'allocate_prescription', 'PrescriptionAllocation', str(allocation.id), {
-                    'prescription_name': prescription_name,
-                    'from_date': from_date,
-                    'to_date': to_date,
-                    'days': days
-                })
-                
-                return JsonResponse({
-                    'status': 'ok', 
-                    'message': 'Prescription allocated successfully', 
-                    'allocation_id': allocation.id,
-                    'prescriptions': _get_updated_prescriptions(ps.id)
-                })
+                    # AUTH FALLBACK
+                    active_user = request.user if (request.user and request.user.is_authenticated) else None
+                    if not active_user:
+                        try:
+                            from authentication.models import CustomUser
+                            active_user = CustomUser.objects.filter(is_active=True).first()
+                        except: pass
+
+                    allocation = PrescriptionAllocation.objects.create(
+                        patient=ps,
+                        prescription_name=prescription_name,
+                        items_groups=items_groups,
+                        procured_from=procured_from,
+                        usage=usage,
+                        scope=scope,
+                        from_date=from_date_parsed,
+                        to_date=to_date_parsed,
+                        days=days,
+                        allocated_by=active_user,
+                        status='draft'
+                    )
+                    
+                    # Create PrescriptionScheduling records
+                    # Already imported at top
+                    # Already imported at top
+                    
+                    current_date = from_date_parsed
+                    while current_date <= to_date_parsed:
+                        target_status = 'draft'
+                        target_sent_to = None
+                        target_scheduled_by = None
+                        
+                        if PrescriptionFinalScheduleRun.objects.filter(run_date=current_date, status='success').exists():
+                            target_status = 'scheduled'
+                            target_sent_to = determine_procurement_department_from_allocation(allocation)
+                            target_scheduled_by = active_user
+
+                        ps_rec, ps_created = PrescriptionScheduling.objects.get_or_create(
+                            patient=ps,
+                            prescription_date=current_date,
+                            defaults={
+                                'doctor': active_user,
+                                'status': target_status,
+                                'sent_to': target_sent_to,
+                                'scheduled_by': target_scheduled_by
+                            }
+                        )
+                        if not ps_created:
+                            if target_status == 'scheduled' and ps_rec.status == 'draft':
+                                ps_rec.status = 'scheduled'
+                                ps_rec.sent_to = target_sent_to
+                                ps_rec.scheduled_by = target_scheduled_by
+                            elif ps_rec.status == 'dispatched':
+                                # NEW: If new medicine added to a dispatched day, revert to scheduled
+                                ps_rec.status = 'scheduled'
+                                ps_rec.save()
+                            ps_rec.save()
+
+                        current_date += timedelta(days=1)
+                    
+                    ps.save()
+                    log_prescription_audit(active_user, 'allocate_prescription', 'PrescriptionAllocation', str(allocation.id), {
+                        'prescription_name': prescription_name,
+                        'from_date': from_date, 'to_date': to_date, 'days': days
+                    })
+                    
+                    pres_list = _get_updated_prescriptions(ps.id)
+                    return JsonResponse({
+                        'status': 'ok', 
+                        'message': 'Prescription allocated successfully', 
+                        'allocation_id': allocation.id,
+                        'prescriptions': pres_list
+                    })
             except Exception as e:
-                return JsonResponse({'error': str(e)}, status=500)
+                import traceback
+                err_tb = traceback.format_exc()
+                print(f"[ERROR] Allocation fail: {e}\n{err_tb}")
+                return JsonResponse({
+                    'status': 'error', 
+                    'error': str(e), 
+                    'detail': err_tb.splitlines()[-1] if err_tb else 'Error'
+                }, status=500)
 
         # ---------- cancel prescription ----------
         if action_post == 'cancel_prescription':
@@ -2819,7 +2878,7 @@ def prescription_entry_page(request):
                 allocation.save()
                 
                 # Ensure PrescriptionScheduling record exists for the resumed date and update status based on Final Schedule marker
-                from .models import PrescriptionScheduling, FinalScheduleRun
+                from .models import PrescriptionScheduling, PrescriptionFinalScheduleRun
                 from .prescription_views import determine_procurement_department_from_allocation
                 resume_date_obj = parse_date(resume_from)
                 
@@ -2827,7 +2886,7 @@ def prescription_entry_page(request):
                 target_sent_to = None
                 target_scheduled_by = None
                 
-                if FinalScheduleRun.objects.filter(run_date=resume_date_obj).exists():
+                if PrescriptionFinalScheduleRun.objects.filter(run_date=resume_date_obj, status='success').exists():
                     target_status = 'scheduled'
                     target_sent_to = determine_procurement_department_from_allocation(allocation)
                     target_scheduled_by = request.user if request.user.is_authenticated else None
@@ -2871,6 +2930,153 @@ def prescription_entry_page(request):
             except PrescriptionAllocation.DoesNotExist:
                 return JsonResponse({'error': 'allocation_not_found'}, status=404)
             except Exception as e:
+                return JsonResponse({'error': str(e)}, status=500)
+
+        # ---------- toggle prescription status (ON / OFF) ----------
+        if action_post == 'toggle_prescription_status':
+            allocation_id = payload.get('allocation_id')
+            turn_on = payload.get('turn_on', False)
+            
+            if not allocation_id:
+                return JsonResponse({'error': 'missing_allocation_id'}, status=400)
+            try:
+                with transaction.atomic():
+                    allocation = PrescriptionAllocation.objects.get(id=allocation_id)
+                    today = timezone.localtime(timezone.now()).date()
+                    patient_id = allocation.patient_id
+
+                    # AUTH FALLBACK for doctor/scheduled_by
+                    active_user = request.user if (request.user and request.user.is_authenticated) else None
+                    if not active_user:
+                        try:
+                            from authentication.models import CustomUser
+                            active_user = CustomUser.objects.filter(is_active=True).first()
+                        except: pass
+
+                    today_sched = PrescriptionScheduling.objects.filter(
+                        patient_id=patient_id,
+                        prescription_date=today
+                    ).first()
+                    is_today_dispatched = (today_sched and today_sched.status == 'dispatched')
+                    effective_today = today + timedelta(days=1) if is_today_dispatched else today
+
+                    if not turn_on:
+                        # Turning OFF: determine start date based on dispatch status
+                        cancel_from = effective_today
+                        
+                        # Only proceed if cancel_from is within the allocation range
+                        if cancel_from <= allocation.to_date:
+                            # Update cancellation range for this allocation
+                            allocation.cancelled_date_from = cancel_from
+                            allocation.cancelled_date_to = allocation.to_date
+                            allocation.status = 'cancelled'
+                            allocation.cancellation_reason = f"Turned OFF by {active_user.username if active_user else 'system'} on {today} (effective {cancel_from})"
+                            allocation.cancelled_by = active_user
+                            allocation.cancelled_at = timezone.now()
+                            allocation.save()
+                            
+                            # Sync scheduling day-by-day (Safety check: don't cancel day if other active medicines exist)
+                            cd = cancel_from
+                            while cd <= allocation.to_date:
+                                # Check if any OTHER allocation for this patient is NOT cancelled for this date
+                                other_active_exists = PrescriptionAllocation.objects.filter(
+                                    patient_id=patient_id,
+                                    from_date__lte=cd,
+                                    to_date__gte=cd
+                                ).exclude(id=allocation.id).exclude(
+                                    status='cancelled',
+                                    cancelled_date_from__lte=cd,
+                                    cancelled_date_to__gte=cd
+                                ).exists()
+                                
+                                if not other_active_exists:
+                                    # No other medicines active, safe to cancel the day's schedule row
+                                    PrescriptionScheduling.objects.filter(
+                                        patient_id=patient_id,
+                                        prescription_date=cd
+                                    ).exclude(status__in=['dispatched', 'cancelled']).update(status='cancelled')
+                                
+                                cd += timedelta(days=1)
+                            
+                            message = f"Turned OFF successfully from {cancel_from}"
+                        else:
+                            message = "Turned OFF, but no future dates were available to cancel"
+                            allocation.status = 'cancelled'
+                            allocation.save()
+                    else:
+                        # Turning ON: resume from resume_from onwards
+                        resume_from = effective_today
+                        
+                        if allocation.cancelled_date_from and allocation.cancelled_date_to:
+                            if resume_from >= allocation.cancelled_date_from:
+                                pre_resume_end = resume_from - timedelta(days=1)
+                                if pre_resume_end < allocation.cancelled_date_from:
+                                    allocation.cancelled_date_from = None
+                                    allocation.cancelled_date_to = None
+                                    allocation.cancellation_reason = ''
+                                else:
+                                    allocation.cancelled_date_to = min(allocation.cancelled_date_to, pre_resume_end)
+                            else:
+                                allocation.cancelled_date_from = None
+                                allocation.cancelled_date_to = None
+                                allocation.cancellation_reason = ''
+                        
+                        allocation.status = 'active'
+                        allocation.resumed_at = timezone.now()
+                        allocation.resumed_by = active_user
+                        allocation.save()
+                        
+                        # Restore scheduling records from resume_from onwards
+                        cd = resume_from
+                        while cd <= allocation.to_date:
+                            target_status = 'draft'
+                            target_sent_to = None
+                            
+                            if PrescriptionFinalScheduleRun.objects.filter(run_date=cd, status='success').exists():
+                                target_status = 'scheduled'
+                                target_sent_to = determine_procurement_department_from_allocation(allocation)
+                            
+                            # Update or create scheduling record
+                            ps_rec, created = PrescriptionScheduling.objects.get_or_create(
+                                patient_id=patient_id,
+                                prescription_date=cd,
+                                defaults={
+                                    'doctor': active_user,
+                                    'status': target_status,
+                                    'sent_to': target_sent_to,
+                                    'scheduled_by': active_user if target_status == 'scheduled' else None
+                                }
+                            )
+                            
+                            if not created and ps_rec.status in ['cancelled', 'draft']:
+                                ps_rec.status = target_status
+                                ps_rec.sent_to = target_sent_to
+                                if target_status == 'scheduled':
+                                    ps_rec.scheduled_by = active_user
+                                ps_rec.save()
+                            
+                            cd += timedelta(days=1)
+                        
+                        message = f"Turned ON successfully from {resume_from}"
+                     
+                    
+                    # Log audit
+                    log_prescription_audit(request.user, 'toggle_status', 'PrescriptionAllocation', str(allocation.id), {
+                        'turn_on': turn_on,
+                        'today': str(today)
+                    })
+                    
+                    return JsonResponse({
+                        'status': 'ok', 
+                        'message': message,
+                        'prescriptions': _get_updated_prescriptions(allocation.patient_id)
+                    })
+                
+            except PrescriptionAllocation.DoesNotExist:
+                return JsonResponse({'error': 'allocation_not_found'}, status=404)
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
                 return JsonResponse({'error': str(e)}, status=500)
 
         # ---------- update prescription ----------
@@ -2924,7 +3130,7 @@ def prescription_entry_page(request):
                         except: old_items_groups = []
 
                     # Cleanup new items_groups
-                    if items_groups and isinstance(items_groups, list):
+                    if items_groups is not None and isinstance(items_groups, list):
                         cleaned_groups = []
                         for group in items_groups:
                             unique_items = []
@@ -2939,13 +3145,17 @@ def prescription_entry_page(request):
                         items_groups = cleaned_groups
                     else:
                         items_groups = old_items_groups
-                    # Update in place
+                    save_from_date = parse_date(from_date) if from_date else allocation.from_date
+                    save_to_date = parse_date(to_date) if to_date else allocation.to_date
+
+                    # Update in place (No splitting for now, keep it simple as per request)
                     if prescription_name: allocation.prescription_name = prescription_name
                     if items_groups: allocation.items_groups = items_groups
                     if procured_from: allocation.procured_from = procured_from
                     allocation.scope = scope or ''
                     allocation.usage = usage or ''
-                    if to_date: allocation.to_date = parse_date(to_date)
+                    allocation.from_date = save_from_date
+                    allocation.to_date = save_to_date
                     allocation.notes = notes or ''
                     if allocation.from_date and allocation.to_date:
                         allocation.days = (allocation.to_date - allocation.from_date).days + 1
@@ -2953,8 +3163,8 @@ def prescription_entry_page(request):
 
                     result_allocation_id = allocation.id
 
-                    # Sync Scheduling
-                    cd = effective_date
+                    # Sync Scheduling - Start from from_date or today, whichever is earlier
+                    cd = min(save_from_date, today) if save_from_date else today
                     active_user = request.user if (request.user and request.user.is_authenticated) else None
                     if not active_user:
                         try:
@@ -2962,14 +3172,17 @@ def prescription_entry_page(request):
                             active_user = CustomUser.objects.filter(is_active=True).first()
                         except: pass
 
-                    from .models import FinalScheduleRun
-                    from .prescription_views import determine_procurement_department_from_allocation
                     while cd and allocation.to_date and cd <= allocation.to_date:
+                        # Skip dates before original from_date unless explicitly extended
+                        if cd < allocation.from_date:
+                            cd += timedelta(days=1)
+                            continue
+
                         target_status = 'draft'
                         target_sent_to = None
                         target_scheduled_by = None
                         
-                        if FinalScheduleRun.objects.filter(run_date=cd).exists():
+                        if PrescriptionFinalScheduleRun.objects.filter(run_date=cd, status='success').exists():
                             target_status = 'scheduled'
                             target_sent_to = determine_procurement_department_from_allocation(allocation)
                             target_scheduled_by = active_user
@@ -2983,12 +3196,32 @@ def prescription_entry_page(request):
                                 'scheduled_by': target_scheduled_by
                             }
                         )
-                        # If it already existed but Final Schedule was run, update it to scheduled
-                        if not created and target_status == 'scheduled' and ps_rec.status == 'draft':
-                            ps_rec.status = 'scheduled'
-                            ps_rec.sent_to = target_sent_to
-                            ps_rec.scheduled_by = target_scheduled_by
-                            ps_rec.save()
+                        # Revert status to Scheduled IF items changed or new item added
+                        # BUT: Protect 'dispatched' for today if the update is only effective from tomorrow
+                        if not created:
+                            if target_status == 'scheduled':
+                                # Only revert if cd is at or after effective_date
+                                # If effective_date is tomorrow, today (cd == today) stays dispatched
+                                if cd >= effective_date:
+                                    if ps_rec.status in ['draft', 'dispatched', 'cancelled']:
+                                        ps_rec.status = 'scheduled'
+                                        ps_rec.sent_to = target_sent_to
+                                        ps_rec.scheduled_by = active_user
+                                        ps_rec.save()
+                                    else:
+                                        # Already scheduled, just ensure sent_to is updated if changed
+                                        ps_rec.sent_to = target_sent_to
+                                        ps_rec.save()
+                                else:
+                                    # cd is before effective_date (e.g. today when effective is tomorrow)
+                                    # Just update sent_to metadata but KEEP status (e.g. dispatched stays dispatched)
+                                    ps_rec.sent_to = target_sent_to
+                                    ps_rec.save()
+
+                            elif target_status == 'draft' and ps_rec.status == 'cancelled':
+                                if cd >= effective_date:
+                                    ps_rec.status = 'draft'
+                                    ps_rec.save()
 
                         cd += timedelta(days=1)
 
@@ -2996,27 +3229,34 @@ def prescription_entry_page(request):
                     log_prescription_audit(request.user, 'update_prescription', 'PrescriptionAllocation', str(allocation.id), {'split': should_split})
                     
                     # Log date-wise changes for history tracking
-                    cd = effective_date
-                    current_snapshot = {
-                        'items_groups': allocation.items_groups,
-                        'allocation_id': allocation.id,
-                        'usage': allocation.usage,
-                        'scope': allocation.scope,
-                        'prescription_name': allocation.prescription_name
-                    }
-                    before_snapshot = {
-                        'items_groups': old_items_groups,
-                        'allocation_id': allocation.id
-                    }
+                    # We need to cover the entire range from current beginning to end
+                    log_start = min(save_from_date, today) if save_from_date else today
+                    log_end = save_to_date
                     
-                    while cd and allocation.to_date and cd <= allocation.to_date:
+                    cd_log = log_start
+                    while cd_log <= log_end:
+                        # For dates BEFORE the effective update date (e.g. today if dispatched), 
+                        # we record the OLD state as the 'current' effective state for that day.
+                        # For dates AFTER, we record the NEW state.
+                        active_items = items_groups if cd_log >= effective_date else old_items_groups
+                        
+                        snap = {
+                            'items_groups': active_items,
+                            'allocation_id': allocation.id,
+                            'usage': usage if cd_log >= effective_date else allocation.usage,
+                            'scope': scope if cd_log >= effective_date else allocation.scope,
+                            'prescription_name': prescription_name if cd_log >= effective_date else allocation.prescription_name
+                        }
+                        
                         PrescriptionChangeLog.objects.create(
-                            patient_id=patient_id, prescription_date=cd, action='update',
+                            patient_id=patient_id, 
+                            prescription_date=cd_log, 
+                            action='update',
                             changed_by=active_user, 
-                            before_values=before_snapshot,
-                            after_values=current_snapshot
+                            before_values={'items_groups': old_items_groups, 'allocation_id': allocation.id},
+                            after_values=snap
                         )
-                        cd += timedelta(days=1)
+                        cd_log += timedelta(days=1)
 
 
                 # TRANSACTION ENDS HERE (COMMITTED)
@@ -3177,8 +3417,7 @@ def prescription_entry_page(request):
             patient = PatientSnapshot.objects.get(pat_reg_no=patient_reg_no)
             prescriptions = PrescriptionAllocation.objects.filter(patient=patient).order_by('created_at')
             
-            # Import PrescriptionScheduling to calculate status counts
-            from .models import PrescriptionScheduling
+            # Already imported at top
             
             results = []
             for p in prescriptions:
@@ -3203,7 +3442,9 @@ def prescription_entry_page(request):
                     # Count status from PrescriptionScheduling records
                     # This correctly reflects the actual status of each date
                     for ps in scheduling_records:
-                        if ps.status in status_counts:
+                        if p.cancelled_date_from and p.cancelled_date_to and p.cancelled_date_from <= ps.prescription_date <= p.cancelled_date_to:
+                            status_counts['cancelled'] += 1
+                        elif ps.status in status_counts:
                             status_counts[ps.status] += 1
                     
                     # Don't add allocation status to counts - status_counts should only reflect PrescriptionScheduling records
@@ -3309,7 +3550,7 @@ def prescription_entry_page(request):
                 
                 # Check cancellation
                 is_cancelled = False
-                if allocation.status == 'cancelled' and allocation.cancelled_date_from and allocation.cancelled_date_to:
+                if allocation.cancelled_date_from and allocation.cancelled_date_to:
                     if allocation.cancelled_date_from <= current_date <= allocation.cancelled_date_to:
                         is_cancelled = True
                 
@@ -4535,6 +4776,40 @@ def get_therapy_data_api(request):
                     bookings = list(base_bookings_qs)
                 else:
                     bookings = list(base_bookings_qs)
+                
+                # NEW: Bulk filter inactive patients for IP patients
+                if bookings:
+                    try:
+                        from MySql_Data_pull.models import Registration
+                        # Collect all Ip-patient registration numbers
+                        ip_reg_ints = []
+                        for b in bookings:
+                            reg_str = str(b.allocation.patient.pat_reg_no).strip()
+                            digits = ''.join(ch for ch in reg_str if ch.isdigit())
+                            if len(digits) > 5: # IP Patient (Registration table usually only has IPs)
+                                try: ip_reg_ints.append(int(digits))
+                                except: pass
+                        
+                        if ip_reg_ints:
+                            active_regs = set(Registration.objects.using('therapy_db').filter(
+                                pat_reg_no__in=ip_reg_ints,
+                                pat_status='Y' # Only include ACTIVE patients
+                            ).values_list('pat_reg_no', flat=True))
+                            
+                            # Re-filter bookings list
+                            filtered_bookings = []
+                            for b in bookings:
+                                reg_str = str(b.allocation.patient.pat_reg_no).strip()
+                                digits = ''.join(ch for ch in reg_str if ch.isdigit())
+                                # Keep if OP (5 digits) or if Active IP
+                                if len(digits) == 5:
+                                    filtered_bookings.append(b)
+                                elif digits and int(digits) in active_regs:
+                                    filtered_bookings.append(b)
+                            
+                            bookings = filtered_bookings
+                    except Exception as e:
+                        print(f"Error filtering inactive patients in therapy API: {e}")
                 
                 from .nurse_allocation import is_nurse_treatment
                 from reshedule import therapist_requirements

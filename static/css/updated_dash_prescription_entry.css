@@ -761,3 +761,91 @@ tr.action-cancelled td:first-child {
     justify-content: space-between;
   }
 }
+
+/* Toggle Switch */
+.switch {
+  position: relative;
+  display: inline-block;
+  width: 44px;
+  height: 22px;
+}
+
+.switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: #cbd5e0;
+  transition: .3s;
+  border-radius: 22px;
+}
+
+.slider:before {
+  position: absolute;
+  content: "";
+  height: 16px;
+  width: 16px;
+  left: 3px;
+  bottom: 3px;
+  background-color: white;
+  transition: .3s;
+  border-radius: 50%;
+}
+
+input:checked + .slider {
+  background-color: #38a169;
+}
+
+input:focus + .slider {
+  box-shadow: 0 0 1px #38a169;
+}
+
+input:checked + .slider:before {
+  transform: translateX(22px);
+}
+
+.status-toggle-container {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: #f8fafc;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid #e2e8f0;
+  white-space: nowrap;
+  width: fit-content;
+}
+
+.toggle-label {
+  font-size: 0.7rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  min-width: 28px;
+  line-height: 1;
+}
+
+.label-off, .label-on {
+  color: #cbd5e0; /* Default gray/muted state */
+  transition: color 0.2s ease;
+}
+
+.label-off.active {
+  color: #ef4444; /* Vivid red for OFF state */
+}
+
+.label-on.active {
+  color: #10b981; /* Vivid green for ON state */
+}
+
+/* Ensure centering in the table cell */
+td .status-toggle-container {
+  margin: 0 auto;
+}

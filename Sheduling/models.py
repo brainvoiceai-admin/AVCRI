@@ -645,6 +645,7 @@ class PrescriptionItem(models.Model):
 class PrescriptionDispatch(models.Model):
     """Model to track prescription dispatch to procurement departments"""
     prescription_scheduling = models.ForeignKey(PrescriptionScheduling, on_delete=models.CASCADE, related_name='dispatches')
+    prescription_allocation = models.ForeignKey(PrescriptionAllocation, on_delete=models.CASCADE, related_name='dispatches', null=True, blank=True)
     department = models.CharField(max_length=100)  # IP Pharmacy, Kashaya Room, etc.
     dispatched_at = models.DateTimeField(auto_now_add=True)
     dispatched_by = models.ForeignKey('authentication.CustomUser', on_delete=models.CASCADE, related_name='dispatched_prescriptions')
