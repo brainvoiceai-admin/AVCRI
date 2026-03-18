@@ -1378,7 +1378,7 @@ def Therapy_Audit_Log(request):
     date_to = request.GET.get('date_to', '')
     
     # Start with therapy-related audit logs
-    therapy_actions = ['allocate_therapy', 'update_therapy', 'cancel_therapy', 'resume_therapy', 'remove_item', 'view_therapy']
+    therapy_actions = ['allocate_therapy', 'update_therapy', 'cancel_therapy', 'resume_therapy', 'remove_item', 'view_therapy', 'final_sched_th']
     audit_logs = AuditLog.objects.filter(action__in=therapy_actions)
     
     # Apply filters
@@ -1520,7 +1520,7 @@ def Therapy_Audit_Log(request):
 def therapy_audit_log_api(request):
     """API endpoint to get all filtered therapy audit logs for Excel/PDF export"""
     timezone.activate(_audit_display_tz())
-    therapy_actions = ['allocate_therapy', 'update_therapy', 'cancel_therapy', 'resume_therapy', 'remove_item', 'view_therapy']
+    therapy_actions = ['allocate_therapy', 'update_therapy', 'cancel_therapy', 'resume_therapy', 'remove_item', 'view_therapy', 'final_sched_th']
     audit_logs = AuditLog.objects.filter(action__in=therapy_actions)
 
     action_filter = request.GET.get('action', '')

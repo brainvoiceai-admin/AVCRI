@@ -1152,6 +1152,28 @@ def send_final_prescription_api(request):
                 )
             except Exception as e:
                 print(f"Error creating PrescriptionFinalScheduleRun marker: {e}")
+
+        # Write to centralized authentication.AuditLog (who clicked Final Schedule)
+        try:
+            from authentication.views import log_audit_event
+            if getattr(request, 'user', None) and request.user.is_authenticated:
+                log_audit_event(
+                    user=request.user,
+                    action='final_sched_rx',
+                    description=f"Final Schedule (Prescription) run for {filter_date}",
+                    status='success',
+                    object_type='PrescriptionFinalScheduleRun',
+                    object_id=str(filter_date),
+                    additional_data={
+                        'module': 'prescription_scheduling',
+                        'date': filter_date.isoformat(),
+                        'updated_count': updated_count,
+                        'departments': sent_to_departments,
+                    },
+                    request=request,
+                )
+        except Exception:
+            pass
         
         return JsonResponse({
             'success': True,

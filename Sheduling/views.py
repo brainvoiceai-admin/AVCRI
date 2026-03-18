@@ -4563,6 +4563,32 @@ def final_schedule_api(request):
 
         overall_success = bool(leave_update_result.get('success') and allocation_update_result.get('success'))
 
+        # Write to centralized authentication.AuditLog (who clicked Final Schedule)
+        try:
+            from authentication.views import log_audit_event
+            if getattr(request, 'user', None) and request.user.is_authenticated:
+                log_audit_event(
+                    user=request.user,
+                    action='final_sched_th',
+                    description=f"Final Schedule (Therapy) run for {date_filter}",
+                    status='success' if overall_success else 'failed',
+                    object_type='FinalScheduleRun',
+                    object_id=str(target_date),
+                    additional_data={
+                        'module': 'therapy_scheduling',
+                        'date': date_filter,
+                        'overall_success': overall_success,
+                        'leave_success': bool(leave_update_result.get('success')),
+                        'allocation_success': bool(allocation_update_result.get('success')),
+                        'total_processed': total_processed,
+                        'successful': successful,
+                        'failed': failed,
+                    },
+                    request=request,
+                )
+        except Exception:
+            pass
+
         message = f"Final Schedule completed for {date_filter}."
         if total_processed:
             message += f" Processed {total_processed} therapies: {successful} successful, {failed} failed."
