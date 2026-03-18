@@ -148,7 +148,7 @@ function updateTable(status, data, date) {
             message = 'No dispatched prescriptions found. Dispatched prescriptions will appear here after procurement departments mark them as dispatched.';
         }
 
-        const colspan = status === 'draft' ? 7 : 9;
+        const colspan = (status === 'draft') ? 7 : 9;
         tbody.innerHTML = `
                     <tr>
                         <td colspan="${colspan}" class="empty-state">
@@ -280,16 +280,26 @@ function updateFinalScheduleButtonState(isGenerated) {
 
 function sendFinalPrescription() {
     const date = document.getElementById('draft-date').value;
+    sendFinalPrescriptionWithDate(date);
+}
+
+function sendFinalPrescriptionWithDate(date) {
     if (!date) {
         alert('Please select a date first');
         return;
     }
 
-    if (!confirm(`Are you sure you want to send all draft prescriptions for ${formatDate(date)} to procurement departments?`)) {
+    const isSync = document.activeElement && (document.activeElement.id === 'resend-scheduled-prescriptions');
+    const msg = isSync 
+        ? `Syncing will update the procurement records with the LATEST medicines for ${formatDate(date)}. This updates the PDF records too. Continue?`
+        : `Are you sure you want to send all draft prescriptions for ${formatDate(date)} to procurement departments?`;
+
+    if (!confirm(msg)) {
         return;
     }
 
-    showLoading('draft');
+    const loaderStatus = isSync ? 'scheduled' : 'draft';
+    showLoading(loaderStatus);
 
     fetch('/sheduling/prescription/api/send-final-prescription/', {
         method: 'POST',
@@ -309,7 +319,7 @@ function sendFinalPrescription() {
             }
         })
         .then(data => {
-            hideLoading('draft');
+            hideLoading(loaderStatus);
             if (data.success) {
                 showAlert('success', data.message);
                 // Reload all data
@@ -321,7 +331,7 @@ function sendFinalPrescription() {
             }
         })
         .catch(error => {
-            hideLoading('draft');
+            hideLoading(loaderStatus);
             showAlert('error', 'Error sending final prescription: ' + error.message);
         });
 }
@@ -994,7 +1004,7 @@ function printPrescriptionScheduleToPDF() {
                     const patientId = therapyForPatient ? (therapyForPatient.patient_id || therapyForPatient.id) : null;
 
                     if (patientId) {
-                        return fetch(`/sheduling/prescription/api/prescription-details/?patient_id=${patientId}&date=${selectedDate}`)
+                        return fetch(`/sheduling/prescription/api/prescription-details/?patient_id=${patientId}&date=${selectedDate}&only_scheduled=true`)
                             .then(res => res.headers.get('content-type').includes('json') ? res.json() : Promise.reject('Session expired'))
                             .then(detailData => {
                                 if (detailData.success && detailData.patient_info) {
@@ -1014,8 +1024,8 @@ function printPrescriptionScheduleToPDF() {
                                         details: {
                                             success: true,
                                             patient_info: detailData.patient_info,
-                                            prescription_groups: [],
-                                            therapy_items: []
+                                            prescription_groups: detailData.prescription_groups || [],
+                                            therapy_items: detailData.therapy_items || []
                                         }
                                     };
                                 } else {
@@ -1183,7 +1193,7 @@ function printPrescriptionScheduleToPDF() {
                         // Fetch fresh details for each patient to ensure combined data is captured
                         const patientPromises = allPatients.map(item => {
                             // We trigger a fresh fetch for everyone to guarantee consistency
-                            return fetch(`/sheduling/prescription/api/prescription-details/?patient_id=${item.patient_id}&date=${selectedDate}`)
+                            return fetch(`/sheduling/prescription/api/prescription-details/?patient_id=${item.patient_id}&date=${selectedDate}&only_scheduled=true`)
                                 .then(res => res.headers.get('content-type').includes('json') ? res.json() : Promise.reject('Session expired'))
                                 .then(detailData => {
                                     const merged = { ...item };

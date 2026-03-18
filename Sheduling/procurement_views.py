@@ -84,7 +84,8 @@ def get_procurement_prescriptions_api(request):
             # Filter prescriptions: include if EITHER sent_to matches OR patient has allocation with procured_from matching
             matching_prescriptions = []
             for pres in all_prescriptions:
-                sent_to_matches = pres.sent_to and pres.sent_to.strip().lower() == user_dept_normalized
+                sent_to_list = [s.strip().lower() for s in (pres.sent_to or '').split(',')]
+                sent_to_matches = user_dept_normalized in sent_to_list
                 procured_from_matches = pres.patient_id in matching_patient_ids_from_allocations
                 
                 # Include prescription if either sent_to or procured_from matches
@@ -96,90 +97,47 @@ def get_procurement_prescriptions_api(request):
             prescriptions = PrescriptionScheduling.objects.filter(
                 id__in=prescription_ids
             ).select_related('patient', 'doctor').prefetch_related('items')
+        # --- NEW: Bulk Filter Inactive Patients ---
+        prescriptions_list = list(prescriptions)
+        if prescriptions_list:
+            try:
+                from MySql_Data_pull.models import Registration
+                ip_reg_ints = []
+                for p in prescriptions_list:
+                    reg_str = str(p.patient.pat_reg_no).strip()
+                    digits = ''.join(ch for ch in reg_str if ch.isdigit())
+                    if len(digits) > 5:
+                        try: ip_reg_ints.append(int(digits))
+                        except: pass
+                
+                if ip_reg_ints:
+                    active_regs = set(Registration.objects.using('therapy_db').filter(
+                        pat_reg_no__in=ip_reg_ints,
+                        pat_status='Y'
+                    ).values_list('pat_reg_no', flat=True))
+                    
+                    # Re-filter prescriptions list
+                    filtered_prescriptions = []
+                    for p in prescriptions_list:
+                        reg_str = str(p.patient.pat_reg_no).strip()
+                        digits = ''.join(ch for ch in reg_str if ch.isdigit())
+                        if len(digits) == 5:
+                            filtered_prescriptions.append(p)
+                        elif digits and int(digits) in active_regs:
+                            filtered_prescriptions.append(p)
+                            
+                    prescriptions_list = filtered_prescriptions
+            except Exception as e:
+                print(f"Error filtering inactive patients in Procurement API: {e}")
         
         data = []
-        for prescription in prescriptions:
-            # Get prescription count and a small preview of items
-            prescription_count = prescription.items.count()
+        for prescription in prescriptions_list:
+            # 1. Start with PrescriptionItem count (New system / Individually added items)
+            # These are the ones shown in the "Scheduled Prescription" tab
             items_preview = []
-            if prescription_count == 0:
-                try:
-                    from .models import PrescriptionAllocation
-                    # Get allocation for this patient/date
-                    allocation_query = PrescriptionAllocation.objects.filter(
-                        patient=prescription.patient,
-                        from_date__lte=filter_date,
-                        to_date__gte=filter_date
-                    )
-                    
-                    relevant_allocations = []
-                    if request.user.role != 'super_admin' and user_department:
-                        user_dept_normalized = user_department.strip().lower()
-                        for alloc in allocation_query:
-                            procured_from = alloc.procured_from.strip().lower() if alloc.procured_from else ''
-                            if procured_from == user_dept_normalized or not procured_from:
-                                relevant_allocations.append(alloc)
-                    else:
-                        relevant_allocations = list(allocation_query)
-                    
-                    # Helper to reconstruct historic items_groups reliably by working backward
-                    def get_effective_items_groups(alloc, target_date):
-                        # Pre-fetch logs for this specific allocation
-                        logs = PrescriptionChangeLog.objects.filter(
-                            Q(after_values__allocation_id=alloc.id) |
-                            Q(before_values__allocation_id=alloc.id)
-                        ).order_by('-timestamp')
-                        
-                        date_logs = {}
-                        for log in logs:
-                            if log.prescription_date not in date_logs:
-                                date_logs[log.prescription_date] = log
-                        
-                        running_items = alloc.items_groups
-                        temp_date = alloc.to_date
-                        
-                        # Reconstruct backwards from CURRENT state to find target_date's state
-                        while temp_date >= target_date:
-                            log = date_logs.get(temp_date)
-                            if temp_date == target_date:
-                                return log.after_values.get('items_groups', running_items) if log else running_items
-                            
-                            if log:
-                                running_items = log.before_values.get('items_groups', running_items)
-                                
-                            temp_date -= timedelta(days=1)
-                        
-                        return running_items
-
-                    # Process ALL relevant allocations
-                    for allocation in relevant_allocations:
-                        raw_groups = get_effective_items_groups(allocation, filter_date)
-
-                        if raw_groups:
-                            groups = []
-                            if isinstance(raw_groups, str):
-                                try: groups = json.loads(raw_groups)
-                                except: groups = []
-                            elif isinstance(raw_groups, list): groups = raw_groups
-                            elif isinstance(raw_groups, dict): groups = [raw_groups]
-                            
-                            for grp in groups:
-                                items = grp.get('items', []) if isinstance(grp, dict) else []
-                                for it in items:
-                                    if not it: continue
-                                    items_preview.append({
-                                        'item_name': it.get('item_name', ''),
-                                        'dose': grp.get('dosage', ''),
-                                        'quantity': it.get('quantity', ''),
-                                        'time': grp.get('time', ''),
-                                        'notes': grp.get('uno', '')
-                                    })
-                    prescription_count = len(items_preview)
-                except Exception:
-                    pass
-            else:
-                # Build preview from PrescriptionItem rows
-                for it in prescription.items.all()[:10]:
+            items_qs = prescription.items.all()
+            for it in items_qs:
+                if len(items_preview) < 10:
                     items_preview.append({
                         'item_name': it.item_name,
                         'dose': it.dose,
@@ -187,6 +145,77 @@ def get_procurement_prescriptions_api(request):
                         'time': it.time,
                         'notes': it.notes or ''
                     })
+            prescription_count = items_qs.count()
+
+            # 2. Add PrescriptionAllocation items (Kashayams / Treatments)
+            try:
+                from .models import PrescriptionAllocation
+                # Get allocations for this patient/date
+                allocation_query = PrescriptionAllocation.objects.filter(
+                    patient=prescription.patient,
+                    from_date__lte=filter_date,
+                    to_date__gte=filter_date
+                )
+                
+                relevant_allocations = []
+                if request.user.role != 'super_admin' and user_department:
+                    user_dept_normalized = user_department.strip().lower()
+                    for alloc in allocation_query:
+                        procured_from = alloc.procured_from.strip().lower() if alloc.procured_from else ''
+                        if procured_from == user_dept_normalized or not procured_from:
+                            relevant_allocations.append(alloc)
+                else:
+                    relevant_allocations = list(allocation_query)
+                
+                # Helper to reconstruct historic items_groups reliably
+                def get_effective_items_groups(alloc, target_date):
+                    logs = PrescriptionChangeLog.objects.filter(
+                        Q(after_values__allocation_id=alloc.id) |
+                        Q(before_values__allocation_id=alloc.id)
+                    ).order_by('-timestamp')
+                    
+                    date_logs = {}
+                    for log in logs:
+                        if log.prescription_date not in date_logs:
+                            date_logs[log.prescription_date] = log
+                    
+                    running_items = alloc.items_groups
+                    temp_date = alloc.to_date
+                    while temp_date >= target_date:
+                        log = date_logs.get(temp_date)
+                        if temp_date == target_date:
+                            return log.after_values.get('items_groups', running_items) if log else running_items
+                        if log:
+                            running_items = log.before_values.get('items_groups', running_items)
+                        temp_date -= timedelta(days=1)
+                    return running_items
+
+                alloc_items_count = 0
+                for allocation in relevant_allocations:
+                    # Skip cancelled treatments for this day
+                    if allocation.status == 'cancelled' and allocation.cancelled_date_from and allocation.cancelled_date_to:
+                        if allocation.cancelled_date_from <= filter_date <= allocation.cancelled_date_to:
+                            continue
+
+                    raw_groups = get_effective_items_groups(allocation, filter_date)
+                    if raw_groups:
+                        groups = json.loads(raw_groups) if isinstance(raw_groups, str) else (raw_groups if isinstance(raw_groups, list) else [raw_groups])
+                        for grp in groups:
+                            items = grp.get('items', []) if isinstance(grp, dict) else []
+                            for it in items:
+                                if not it: continue
+                                alloc_items_count += 1
+                                if len(items_preview) < 10:
+                                    items_preview.append({
+                                        'item_name': it.get('item_name', ''),
+                                        'dose': grp.get('dosage', ''),
+                                        'quantity': it.get('quantity', ''),
+                                        'time': grp.get('time', ''),
+                                        'notes': grp.get('uno', '')
+                                    })
+                prescription_count += alloc_items_count
+            except Exception as e:
+                print(f"Error merging allocation items in Procurement Index API: {e}")
             
             # Get patient details
             patient = prescription.patient
@@ -196,6 +225,16 @@ def get_procurement_prescriptions_api(request):
             patient_name = patient.pat_name or 'Unknown'
             doctor_name = doctor.get_full_name() if hasattr(doctor, 'get_full_name') else (doctor.username if doctor else 'Unknown')
             
+            # Get prepared count (how many individual dispatches already exist)
+            prepared_count = PrescriptionDispatch.objects.filter(
+                prescription_scheduling=prescription,
+                prescription_allocation__isnull=False
+            ).count()
+
+            # Skip patients with no active/scheduled items for this date
+            if prescription_count == 0:
+                continue
+
             data.append({
                 'patient_id': patient.id,
                 'patient_name': patient_name,
@@ -204,6 +243,7 @@ def get_procurement_prescriptions_api(request):
                 'room_no': getattr(patient, 'pat_room_no', None),
                 'doctor_name': doctor_name,
                 'prescription_count': prescription_count,
+                'prepared_count': prepared_count,
                 'items_preview': items_preview[:5],
                 'status': prescription.status,
                 'sent_to': prescription.sent_to,
@@ -233,7 +273,7 @@ def mark_as_dispatched_api(request):
         data = json.loads(request.body)
         patient_id = data.get('patient_id')
         date = data.get('date')
-        
+        allocation_id = data.get('allocation_id') # New: individual medicine dispatch
         
         if not patient_id or not date:
             return JsonResponse({'error': 'Patient ID and date are required'}, status=400)
@@ -242,54 +282,116 @@ def mark_as_dispatched_api(request):
         if not filter_date:
             return JsonResponse({'error': 'Invalid date format'}, status=400)
         
-        # Find the prescription (check both scheduled and dispatched)
+        from .models import PrescriptionAllocation
+        
+        # Find the scheduling record
         try:
-            prescription = PrescriptionScheduling.objects.get(
+            scheduling = PrescriptionScheduling.objects.get(
                 patient_id=patient_id,
                 prescription_date=filter_date
             )
-            
-            # If already dispatched, return success (no need to process again)
-            if prescription.status == 'dispatched':
-                return JsonResponse({
-                    'success': True,
-                    'message': 'Prescription already dispatched',
-                    'already_dispatched': True
-                })
-                
         except PrescriptionScheduling.DoesNotExist:
-            return JsonResponse({'error': 'Prescription not found'}, status=404)
+            return JsonResponse({'error': 'Scheduling record not found'}, status=404)
         
-        # Update status to dispatched
         with transaction.atomic():
-            prescription.status = 'dispatched'
-            prescription.dispatched_at = timezone.now()
-            prescription.dispatched_from = prescription.sent_to
-            prescription.save()
-            
-            # Get user for dispatch record (fallback to first superuser if no authenticated user)
             dispatch_user = request.user if request.user.is_authenticated else None
             if not dispatch_user:
                 from authentication.models import CustomUser
                 dispatch_user = CustomUser.objects.filter(is_superuser=True).first()
-            
-            # Create dispatch record
-            PrescriptionDispatch.objects.create(
-                prescription_scheduling=prescription,
-                department=prescription.sent_to,
-                dispatched_by=dispatch_user,
-                notes=f'Dispatched from {prescription.sent_to}'
-            )
-            
-            # Create change log entry
+
+            if allocation_id:
+                # Mark individual allocation as dispatched
+                try:
+                    target_alloc = PrescriptionAllocation.objects.get(id=allocation_id, patient_id=patient_id)
+                except PrescriptionAllocation.DoesNotExist:
+                    return JsonResponse({'error': 'Allocation not found'}, status=404)
+                
+                # Check if already dispatched for this specific allocation
+                if PrescriptionDispatch.objects.filter(
+                    prescription_scheduling=scheduling,
+                    prescription_allocation=target_alloc
+                ).exists():
+                    return JsonResponse({'success': True, 'message': 'Medicine already dispatched'})
+
+                # Create dispatch record for this specific allocation
+                PrescriptionDispatch.objects.create(
+                    prescription_scheduling=scheduling,
+                    prescription_allocation=target_alloc,
+                    department=target_alloc.procured_from or scheduling.sent_to,
+                    dispatched_by=dispatch_user,
+                    notes=f"Single medicine '{target_alloc.prescription_name}' dispatched"
+                )
+                
+                # Check if ALL other active medicines are now dispatched
+                all_allocs = PrescriptionAllocation.objects.filter(
+                    patient_id=patient_id,
+                    from_date__lte=filter_date,
+                    to_date__gte=filter_date
+                ).exclude(status='cancelled', cancelled_date_from__lte=filter_date, cancelled_date_to__gte=filter_date)
+                
+                dispatched_alloc_ids = PrescriptionDispatch.objects.filter(
+                    prescription_scheduling=scheduling,
+                    prescription_allocation__isnull=False
+                ).values_list('prescription_allocation_id', flat=True)
+                
+                all_dispatched = True
+                for a in all_allocs:
+                    if a.id not in dispatched_alloc_ids:
+                        all_dispatched = False
+                        break
+                
+                if all_dispatched:
+                    scheduling.status = 'dispatched'
+                    scheduling.dispatched_at = timezone.now()
+                    scheduling.save()
+                    
+                message = f"Medicine '{target_alloc.prescription_name}' marked as dispatched"
+            else:
+                # Mark everything as dispatched (Mark All as Prepared)
+                scheduling.status = 'dispatched'
+                scheduling.dispatched_at = timezone.now()
+                scheduling.dispatched_from = scheduling.sent_to
+                scheduling.save()
+                
+                # Get all active allocations for today to mark them individually
+                active_allocs = PrescriptionAllocation.objects.filter(
+                    patient_id=patient_id,
+                    from_date__lte=filter_date,
+                    to_date__gte=filter_date
+                ).exclude(status='cancelled', cancelled_date_from__lte=filter_date, cancelled_date_to__gte=filter_date)
+
+                for alloc in active_allocs:
+                    PrescriptionDispatch.objects.get_or_create(
+                        prescription_scheduling=scheduling,
+                        prescription_allocation=alloc,
+                        defaults={
+                            'department': alloc.procured_from or scheduling.sent_to,
+                            'dispatched_by': dispatch_user,
+                            'notes': f'Bulk dispatch from {scheduling.sent_to}'
+                        }
+                    )
+                
+                # Also create a general dispatch record for the schedule itself (legacy compatibility)
+                PrescriptionDispatch.objects.get_or_create(
+                    prescription_scheduling=scheduling,
+                    prescription_allocation=None,
+                    defaults={
+                        'department': scheduling.sent_to,
+                        'dispatched_by': dispatch_user,
+                        'notes': f'Bulk dispatch from {scheduling.sent_to}'
+                    }
+                )
+                
+                message = 'All medicines marked as dispatched'
+
+            # Log change
             PrescriptionChangeLog.objects.create(
-                patient=prescription.patient,
+                patient=scheduling.patient,
                 prescription_date=filter_date,
                 action='status_change',
                 changed_by=dispatch_user,
-                before_values={'status': 'scheduled'},
-                after_values={'status': 'dispatched'},
-                description=f'Prescription marked as dispatched from {prescription.sent_to}'
+                after_values={'status': 'dispatched', 'allocation_id': allocation_id},
+                description=message
             )
         
         return JsonResponse({
@@ -307,11 +409,12 @@ def mark_as_dispatched_api(request):
 @procurement_api_access_required
 def get_prescription_details_api(request):
     """
-    API endpoint to get detailed prescription AND therapy items for a patient (procurement dashboard).
-    This includes both prescription items and therapy-related items (BookingItem).
+    API endpoint to fetch all medicines (PrescriptionAllocation - Kashayams/Oils AND 
+    PrescriptionItem - Manually added medicines) for a patient and date,
+    including their grouped items.
     """
     try:
-        from .models import PrescriptionAllocation, Booking, BookingItem, PatientSnapshot
+        from .models import PrescriptionAllocation, Booking, BookingItem, PatientSnapshot, PrescriptionScheduling, PrescriptionItem, PrescriptionDispatch, PrescriptionChangeLog
         
         patient_id = request.GET.get('patient_id')
         date = request.GET.get('date')
@@ -319,260 +422,108 @@ def get_prescription_details_api(request):
         if not patient_id or not date:
             return JsonResponse({'error': 'patient_id and date are required'}, status=400)
         
-        # Parse date
         filter_date = parse_date(date)
         if not filter_date:
             return JsonResponse({'error': 'Invalid date format'}, status=400)
         
-        # Get patient
+        # Get patient model
         try:
-            patient = PatientSnapshot.objects.get(pk=patient_id)
+            patient = PatientSnapshot.objects.get(id=patient_id)
         except PatientSnapshot.DoesNotExist:
             return JsonResponse({'error': 'Patient not found'}, status=404)
         
-        from MySql_Data_pull.models import Registration, doctor_master, Treatment
-        
-        # Get patient info
         patient_info = {
-            'name': patient.pat_name or 'Unknown',
+            'id': patient.id,
+            'name': patient.pat_name,
             'registration_no': patient.pat_reg_no,
             'room_no': getattr(patient, 'pat_room_no', None),
-            'doctor_name': None,
-            'doctor_team': '',
-            'doa': ''
+            'doctor_name': None
         }
-        
-        # Fetch additional patient info from Registration and Treatment tables
-        try:
-            reg_no = patient.pat_reg_no
-            reg_no_str = str(reg_no)
-            digits_only = ''.join(c for c in reg_no_str if c.isdigit())
-            
-            if digits_only:
-                reg_no_int = int(digits_only)
-                registration = Registration.objects.using('therapy_db').filter(
-                    pat_reg_no=reg_no_int
-                ).first()
-                
-                if registration:
-                    patient_info['doctor_team'] = registration.dct_team or ''
-                    
-                    # Fetch DOA
-                    treatment = Treatment.objects.using('iptherapy_db').filter(
-                        Pat_Reg_No=digits_only
-                    ).order_by('-DOA').first()
-                    
-                    # Try with leading zeros fallback
-                    if not treatment:
-                        for pad in [4, 5, 6]:
-                            treatment = Treatment.objects.using('iptherapy_db').filter(
-                                Pat_Reg_No=digits_only.zfill(pad)
-                            ).order_by('-DOA').first()
-                            if treatment: break
-                            
-                    if treatment and treatment.DOA:
-                        if hasattr(treatment.DOA, 'strftime'):
-                            patient_info['doa'] = treatment.DOA.strftime('%d/%m/%Y')
-                        else:
-                            patient_info['doa'] = str(treatment.DOA).split(' ')[0]
-                    elif registration.pat_reg_date:
-                        if hasattr(registration.pat_reg_date, 'strftime'):
-                            patient_info['doa'] = registration.pat_reg_date.strftime('%d/%m/%Y')
-                        else:
-                            patient_info['doa'] = str(registration.pat_reg_date).split(' ')[0]
-                            
-                    # Fetch doctor name
-                    if registration.doctcode:
-                        doctor = doctor_master.objects.using('therapy_db').filter(
-                            Doct_Code=registration.doctcode
-                        ).first()
-                        if not doctor:
-                            doctor = doctor_master.objects.using('therapy_db').filter(
-                                Doct_Code=str(registration.doctcode).zfill(4)
-                            ).first()
-                        
-                        if doctor:
-                            patient_info['doctor_name'] = doctor.Doct_Name or ''
-        except Exception as e:
-            print(f"Error fetching additional patient info in procurement API: {e}")
-        
+
         # ===== DEPARTMENT FILTERING =====
-        # For super_admin: show all prescriptions (no department filter)
-        # For IP Pharmacy Staff: show only their department's prescriptions
         user_department = None
         if request.user.role != 'super_admin':
-            # Get department from logged-in user's StaffProfile
             if hasattr(request.user, 'staff_profile'):
                 user_department = request.user.staff_profile.department
             elif request.user.role == 'ip_pharmacy_staff':
-                # Fallback: if user doesn't have StaffProfile, return error
-                return JsonResponse({'error': 'User department not configured. Please contact administrator.'}, status=400)
+                return JsonResponse({'error': 'User department not configured.'}, status=400)
             else:
-                # For admin/scheduling_staff, allow department parameter or default to IP Pharmacy
                 user_department = request.GET.get('department', 'IP Pharmacy')
         
-        # Get prescription for doctor name and department filtering
-        prescription_query = PrescriptionScheduling.objects.filter(
+        user_dept_normalized = user_department.strip().lower() if user_department else ''
+        
+        # Helper for reconstructing historic items_groups
+        def get_effective_items_groups(alloc, target_date):
+            logs = PrescriptionChangeLog.objects.filter(
+                Q(after_values__allocation_id=alloc.id) |
+                Q(before_values__allocation_id=alloc.id)
+            ).order_by('-timestamp')
+            
+            date_logs = {}
+            for log in logs:
+                if log.prescription_date not in date_logs:
+                    date_logs[log.prescription_date] = log
+            
+            running_items = alloc.items_groups
+            temp_date = alloc.to_date
+            while temp_date >= target_date:
+                log = date_logs.get(temp_date)
+                if temp_date == target_date:
+                    return log.after_values.get('items_groups', running_items) if log else running_items
+                if log:
+                    running_items = log.before_values.get('items_groups', running_items)
+                temp_date -= timedelta(days=1)
+            return running_items
+
+        # Fetch ALL prescriptions for metadata
+        all_prescriptions = PrescriptionScheduling.objects.filter(
             patient_id=patient_id,
             prescription_date=filter_date
-        )
+        ).select_related('doctor')
         
-        # Filter by department if not super_admin (case-insensitive)
-        if user_department:
-            user_dept_normalized = user_department.strip().lower() if user_department else ''
-            # Get all prescriptions and filter case-insensitively
-            all_prescriptions = prescription_query.all()
-            matching_prescriptions = []
-            for ps in all_prescriptions:
-                if ps.sent_to and ps.sent_to.strip().lower() == user_dept_normalized:
-                    matching_prescriptions.append(ps)
-            
-            if matching_prescriptions:
-                prescription_query = PrescriptionScheduling.objects.filter(
-                    id__in=[p.id for p in matching_prescriptions]
-                )
-            else:
-                prescription_query = PrescriptionScheduling.objects.none()
-        
-        prescription = prescription_query.select_related('doctor').first()
-        # Don't return early if no prescription - we might still have allocations with procured_from matching
-        # Only return early if we have no prescription AND no allocations will match
-        
-        # ===== PRESCRIPTION ITEMS =====
-        prescription_groups = []  # List of groups with items
-        
-        # Get all PrescriptionAllocation records for this patient that cover the date
+        valid_pres_depts = set()
+        representative_prescription = None
+        for ps in all_prescriptions:
+            depts = [s.strip().lower() for s in (ps.sent_to or '').split(',')]
+            for d in depts: 
+                if d: valid_pres_depts.add(d)
+            if not representative_prescription or user_dept_normalized in depts:
+                representative_prescription = ps
+
+        if representative_prescription and representative_prescription.doctor:
+            patient_info['doctor_name'] = representative_prescription.doctor.get_full_name() or representative_prescription.doctor.username
+
+        # Fetch allocations (Kashayams / Ointments / etc.)
         allocations = PrescriptionAllocation.objects.filter(
             patient_id=patient_id,
             from_date__lte=filter_date,
             to_date__gte=filter_date
         ).order_by('from_date', 'id')
-        
-        # Filter allocations based on department: check both sent_to and procured_from
-        if user_department:
-            # Normalize user department for case-insensitive comparison
-            user_dept_normalized = user_department.strip().lower() if user_department else ''
-            
-            # Get all PrescriptionScheduling records for this patient/date that match user's department
-            # Use case-insensitive comparison with __iexact
-            valid_prescriptions = PrescriptionScheduling.objects.filter(
-                patient_id=patient_id,
-                prescription_date=filter_date
-            )
-            
-            # Filter by sent_to case-insensitively
-            valid_prescriptions_list = []
-            for ps in valid_prescriptions:
-                if ps.sent_to and ps.sent_to.strip().lower() == user_dept_normalized:
-                    valid_prescriptions_list.append(ps)
-            
-            sent_to_matches = len(valid_prescriptions_list) > 0
-            
-            # Filter allocations based on:
-            # Priority: If procured_from is set, it MUST match user's department
-            # If procured_from is NOT set/empty, then check sent_to
-            filtered_allocations = []
-            for allocation in allocations:
-                procured_from = allocation.procured_from.strip() if allocation.procured_from else ''
-                has_procured_from = bool(procured_from)
-                procured_from_normalized = procured_from.lower() if procured_from else ''
-                procured_from_matches = procured_from_normalized == user_dept_normalized
-                
-                # Include allocation if:
-                # - procured_from is set AND matches user's department (case-insensitive), OR
-                # - procured_from is NOT set/empty AND sent_to matches user's department
-                # This ensures that:
-                # - If procured_from is set to "Kashaya Room" and user is "IP Pharmacy", exclude it
-                # - If procured_from is empty and sent_to is "IP Pharmacy", show it for IP Pharmacy users
-                # - If procured_from is set to "IP Pharmacy", show it for IP Pharmacy users
-                if (has_procured_from and procured_from_matches) or (not has_procured_from and sent_to_matches):
-                    filtered_allocations.append(allocation)
-            
-            # Convert to queryset by filtering by IDs
-            if filtered_allocations:
-                allocation_ids = [a.id for a in filtered_allocations]
-                allocations = allocations.filter(id__in=allocation_ids)
-            else:
-                allocations = allocations.none()  # Return empty queryset
-        
-        prescription_is_cancelled = False
-        prescription_status = 'draft'
-        
-        if prescription and prescription.doctor:
-            patient_info['doctor_name'] = prescription.doctor.get_full_name() if hasattr(prescription.doctor, 'get_full_name') else (prescription.doctor.username if prescription.doctor else None)
-        
-        # Determine overall cancellation only if all allocations are cancelled
-        if allocations:
-            all_cancelled = all(a.status == 'cancelled' for a in allocations)
-            prescription_is_cancelled = all_cancelled
-            # Set a representative status (prefer non-cancelled if any)
-            non_cancel_statuses = [a.status for a in allocations if a.status != 'cancelled']
-            prescription_status = non_cancel_statuses[0] if non_cancel_statuses else 'cancelled'
-        
-        # Process all allocations and use items_groups
-        for allocation in allocations:
-            # Check if this allocation is cancelled for the current date
-            # An allocation is cancelled for a date only if:
-            # 1. The allocation status is 'cancelled', AND
-            # 2. The date falls within the cancelled_date_from and cancelled_date_to range
-            is_cancelled_for_this_date = False
-            if allocation.status == 'cancelled' and allocation.cancelled_date_from and allocation.cancelled_date_to:
-                if allocation.cancelled_date_from <= filter_date <= allocation.cancelled_date_to:
-                    is_cancelled_for_this_date = True
-            
-            # Helper to reconstruct historic items_groups reliably by working backward
-            def get_effective_items_groups(alloc, target_date):
-                # Pre-fetch logs for this specific allocation
-                logs = PrescriptionChangeLog.objects.filter(
-                    Q(after_values__allocation_id=alloc.id) |
-                    Q(before_values__allocation_id=alloc.id)
-                ).order_by('-timestamp')
-                
-                date_logs = {}
-                for log in logs:
-                    if log.prescription_date not in date_logs:
-                        date_logs[log.prescription_date] = log
-                
-                running_items = alloc.items_groups
-                temp_date = alloc.to_date
-                
-                # Reconstruct backwards from CURRENT state to find target_date's state
-                while temp_date >= target_date:
-                    log = date_logs.get(temp_date)
-                    if temp_date == target_date:
-                        return log.after_values.get('items_groups', running_items) if log else running_items
-                    
-                    if log:
-                        running_items = log.before_values.get('items_groups', running_items)
-                        
-                    temp_date -= timedelta(days=1)
-                
-                return running_items
 
+        prescription_groups = []
+        sent_to_matches = user_dept_normalized in valid_pres_depts
+
+        for allocation in allocations:
+            # 1. Department Filtering
+            procured_from = (allocation.procured_from or '').strip().lower()
+            if user_department:
+                if procured_from:
+                    if procured_from != user_dept_normalized: continue
+                elif not sent_to_matches and valid_pres_depts:
+                    # Only skip if we have other prescriptions but none match our dept
+                    continue
+
+            # 2. Pull effective items
             raw_groups = get_effective_items_groups(allocation, filter_date)
             if raw_groups:
-                groups = []
-                if isinstance(raw_groups, str):
-                    try:
-                        groups = json.loads(raw_groups)
-                    except Exception:
-                        groups = []
-                elif isinstance(raw_groups, list):
-                    groups = raw_groups
-                elif isinstance(raw_groups, dict):
-                    groups = [raw_groups]
-                
-                # Use groups exactly as they are in items_groups - no matching with PrescriptionItem
+                groups = json.loads(raw_groups) if isinstance(raw_groups, str) else (raw_groups if isinstance(raw_groups, list) else [raw_groups])
                 for group_idx, group in enumerate(groups):
                     items = group.get('items', []) if isinstance(group, dict) else []
                     group_items = []
-                    
-                    # Convert items from items_groups to the format expected by frontend
                     for it in items:
-                        # Only add non-empty items
                         if it and (it.get('item_name') or it.get('id')):
                             group_items.append({
-                                'id': f'prescription_alloc_{allocation.id}_{it.get("id", "")}',
+                                'id': f'prescription_alloc_{allocation.id}_{it.get("id", it.get("item_code", "it"))}',
                                 'type': 'prescription',
                                 'item_name': it.get('item_name', ''),
                                 'dose': group.get('dosage', ''),
@@ -582,246 +533,132 @@ def get_prescription_details_api(request):
                                 'status': 'active'
                             })
                     
-                    # Fallback: use allocation-level usage/scope if group-level missing
-                    alloc_usage = getattr(allocation, 'usage', '')
-                    alloc_scope = getattr(allocation, 'scope', '')
-                    group_usage = group.get('usage', '') or alloc_usage
-                    usage_array = group.get('usage_array', [])
-                    internal_external = group.get('internal_external', '') or alloc_scope
-                    
-                    # Add the group exactly as it appears in items_groups (with fallbacks)
-                    # Use is_cancelled_for_this_date instead of just checking allocation.status
+                    is_dispatched = PrescriptionDispatch.objects.filter(
+                        prescription_scheduling=representative_prescription,
+                        prescription_allocation=allocation
+                    ).exists() if representative_prescription else False
+
                     prescription_groups.append({
                         'group_id': f"prescription_group_{allocation.id}_{group_idx}",
+                        'allocation_id': allocation.id,
                         'time': group.get('time', 'M'),
                         'dose': group.get('dosage', ''),
-                        'usage': group_usage,
-                        'usage_array': usage_array,
-                        'internal_external': internal_external,
+                        'usage': group.get('usage', '') or getattr(allocation, 'usage', ''),
+                        'usage_array': group.get('usage_array', []),
+                        'internal_external': group.get('internal_external', '') or getattr(allocation, 'scope', ''),
                         'notes': group.get('uno', ''),
                         'oil_class': group.get('oil_class', ''),
                         'ingredients': group.get('ingredients', []),
-                        'ingredient_ids': group.get('ingredient_ids', []),
                         'items': group_items,
-                        'is_cancelled': is_cancelled_for_this_date,  # Use date-specific cancellation check
+                        'is_dispatched': is_dispatched,
                         'is_group': True
                     })
-        
-        # If no allocations found, check for PrescriptionItem records as fallback
-        if not prescription_groups and prescription:
-            items_qs = PrescriptionItem.objects.filter(prescription_scheduling=prescription).all()
-            prescription_is_cancelled = prescription.status == 'cancelled'
-            prescription_status = prescription.status
-            
-            if items_qs.exists():
-                for item in items_qs:
-                    # Create one group per prescription item
-                    prescription_groups.append({
-                        'group_id': f"prescription_item_{item.id}",
-                        'time': item.time or '',
+
+        # Fetch individually added PrescriptionItems
+        if representative_prescription:
+            items_qs = PrescriptionItem.objects.filter(prescription_scheduling=representative_prescription).all()
+            for item in items_qs:
+                prescription_groups.append({
+                    'group_id': f"prescription_item_{item.id}",
+                    'time': item.time or '',
+                    'dose': item.dose or '',
+                    'usage': getattr(item, 'usage', ''),
+                    'internal_external': getattr(item, 'internal_external', ''),
+                    'notes': item.notes or '',
+                    'items': [{
+                        'id': f'prescription_{item.id}',
+                        'type': 'prescription',
+                        'item_name': item.item_name,
                         'dose': item.dose or '',
-                        'usage': getattr(item, 'usage', '') or '',
-                        'internal_external': getattr(item, 'internal_external', '') or '',
+                        'quantity': item.quantity or '',
+                        'time': item.time or '',
+                        'usage': getattr(item, 'usage', ''),
                         'notes': item.notes or '',
-                        'items': [{
-                            'id': f'prescription_{item.id}',
-                            'type': 'prescription',
-                            'item_name': item.item_name,
-                            'dose': item.dose or '',
-                            'quantity': item.quantity or '',
-                            'time': item.time or '',
-                            'usage': getattr(item, 'usage', '') or '',
-                            'internal_external': getattr(item, 'internal_external', '') or '',
-                            'notes': item.notes or '',
-                            'status': getattr(item, 'status', 'active') if hasattr(item, 'status') else 'active'
-                        }],
-                        'is_group': True
-                    })
-        
-        # Flatten for backward compatibility (but prefer groups)
-        prescription_items = []
-        for group in prescription_groups:
-            # Add prescription status to first item of first group
-            if prescription_items == [] and group['items']:
-                group['items'][0]['prescription_status'] = prescription_status
-                group['items'][0]['prescription_is_cancelled'] = prescription_is_cancelled
-            prescription_items.extend(group['items'])
-        
-        # ===== THERAPY ITEMS (BookingItem) =====
-        # Get all bookings for this patient on this date
-        # Include ALL bookings (including cancelled) to show all items
+                        'status': 'active'
+                    }],
+                    'is_group': True,
+                    'is_dispatched': representative_prescription.status == 'dispatched'
+                })
+
+        # Therapy Items (BookingItem)
         bookings = Booking.objects.filter(
             allocation__patient=patient,
             date=filter_date
         ).select_related('allocation').prefetch_related('items').order_by('allocation__therapy_name', 'timeslot')
         
-        # Group therapy items by allocation and items_groups structure
-        therapy_groups = {}  # Key: (allocation_id, group_index), Value: {therapy_name, dosage, items: []}
-        
+        therapy_items = []
+        therapy_groups = {}
         for booking in bookings:
-            if not booking.allocation:
-                continue
-                
-            allocation = booking.allocation
-            therapy_name = allocation.therapy_name
-            
-            # Get items_groups from allocation to understand the grouping structure
-            items_groups = allocation.items_groups if isinstance(allocation.items_groups, list) else []
-            
-            # Get all BookingItems for this booking (including cancelled ones)
+            if not booking.allocation: continue
+            alloc = booking.allocation
+            items_groups = alloc.items_groups if isinstance(alloc.items_groups, list) else []
             booking_items = booking.items.all()
-            
-            # If we have items_groups, try to match BookingItems to groups
-            if items_groups and booking_items.exists():
-                # Create a map of item_code/item_name to BookingItem for quick lookup
-                item_map = {item.item_code: item for item in booking_items}
-                item_map.update({item.item_name: item for item in booking_items if item.item_name not in item_map})
-                
-                # Group items according to items_groups structure
-                for group_idx, group in enumerate(items_groups):
-                    group_key = (allocation.id, group_idx)
-                    dosage = group.get('dosage', '')
-                    uno = group.get('uno', '')
-                    
-                    if group_key not in therapy_groups:
-                        therapy_groups[group_key] = {
-                            'therapy_name': therapy_name,
-                            'therapy_id': allocation.id,
-                            'dosage': dosage,
-                            'usage': group.get('usage', ''),
-                            'usage_array': group.get('usage_array', []),
-                            'internal_external': group.get('internal_external', ''),
-                            'uno': uno,
-                            'booking_id': booking.id,
+            item_map = {item.item_code: item for item in booking_items}
+            item_map.update({item.item_name: item for item in booking_items})
+
+            if items_groups:
+                for idx, grp in enumerate(items_groups):
+                    key = (alloc.id, idx)
+                    if key not in therapy_groups:
+                        therapy_groups[key] = {
+                            'therapy_name': alloc.therapy_name,
+                            'dosage': grp.get('dosage', ''),
+                            'uno': grp.get('uno', ''),
                             'booking_status': booking.status,
                             'items': []
                         }
-                    
-                    # Match items from group to BookingItems
-                    group_items = group.get('items', [])
-                    for group_item in group_items:
-                        item_code = group_item.get('item_code') or group_item.get('id') or ''
-                        item_name = group_item.get('item_name') or group_item.get('text') or ''
-                        
-                        # Find matching BookingItem
-                        booking_item = None
-                        if item_code and item_code in item_map:
-                            booking_item = item_map[item_code]
-                        elif item_name and item_name in item_map:
-                            booking_item = item_map[item_name]
-                        else:
-                            # Try to find by name match
-                            for bi in booking_items:
-                                if bi.item_name == item_name or bi.item_code == item_code:
-                                    booking_item = bi
-                                    break
-                        
-                        if booking_item:
-                            therapy_groups[group_key]['items'].append({
-                                'id': f'therapy_{booking_item.id}',
+                    for i in grp.get('items', []):
+                        name = i.get('item_name') or i.get('text') or ''
+                        code = i.get('item_code') or i.get('id') or ''
+                        bi = item_map.get(code) or item_map.get(name)
+                        if bi:
+                            therapy_groups[key]['items'].append({
+                                'id': f'therapy_{bi.id}',
                                 'type': 'therapy',
-                                'item_name': booking_item.item_name,
-                                'item_code': booking_item.item_code,
-                                'dose': booking_item.dosage or dosage,
-                                'quantity': '',
-                                'time': '',
-                                'notes': booking_item.uno or uno,
-                                'status': booking_item.status
-                                # Note: is_cancelled removed - cancellation is at booking level, not item level
-                            })
-                        else:
-                            # Item in group but not found in BookingItems (might be removed)
-                            therapy_groups[group_key]['items'].append({
-                                'id': f'therapy_missing_{group_idx}_{len(therapy_groups[group_key]["items"])}',
-                                'type': 'therapy',
-                                'item_name': item_name,
-                                'item_code': item_code,
-                                'dose': dosage,
-                                'quantity': '',
-                                'time': '',
-                                'notes': uno,
-                                'status': 'removed',
-                                'is_cancelled': False,
-                                'is_removed': True
+                                'item_name': bi.item_name,
+                                'status': bi.status
                             })
             else:
-                # Fallback: if no items_groups, show items individually grouped by booking
-                group_key = (allocation.id, booking.id)
-                if group_key not in therapy_groups:
-                    therapy_groups[group_key] = {
-                        'therapy_name': therapy_name,
-                        'therapy_id': allocation.id,
-                        'dosage': '',
-                        'usage': '',
-                        'usage_array': [],
-                        'internal_external': '',
-                        'uno': '',
-                        'booking_id': booking.id,
+                for bi in booking_items:
+                    therapy_items.append({
+                        'group_id': f'therapy_indiv_{bi.id}',
+                        'therapy_name': alloc.therapy_name,
                         'booking_status': booking.status,
-                        'items': []
-                    }
-                
-                for item in booking_items:
-                    therapy_groups[group_key]['items'].append({
-                        'id': f'therapy_{item.id}',
-                        'type': 'therapy',
-                        'item_name': item.item_name,
-                        'item_code': item.item_code,
-                        'dose': item.dosage or '',
-                        'quantity': '',
-                        'time': '',
-                        'notes': item.uno or '',
-                        'status': item.status
-                        # Note: is_cancelled removed - cancellation is at booking level, not item level
+                        'items': [{'item_name': bi.item_name, 'status': bi.status, 'type': 'therapy', 'id': bi.id}],
+                        'is_group': True
                     })
-        
-        # Convert grouped structure to flat list for response (but keep grouping info)
-        therapy_items = []
-        for group_key, group_data in therapy_groups.items():
-            # Check if the entire booking/therapy is cancelled
-            booking_is_cancelled = group_data['booking_status'] == 'cancelled'
-            
-            # Remove individual item cancellation status - cancellation is at booking level
-            items_without_cancellation = []
-            for item in group_data['items']:
-                item_copy = item.copy()
-                item_copy.pop('is_cancelled', None)  # Remove item-level cancellation
-                items_without_cancellation.append(item_copy)
-            
+
+        for key, gdata in therapy_groups.items():
             therapy_items.append({
-                'group_id': f"therapy_group_{group_key[0]}_{group_key[1]}",
-                'therapy_name': group_data['therapy_name'],
-                'therapy_id': group_data['therapy_id'],
-                'dosage': group_data['dosage'],
-                'usage': group_data.get('usage', ''),
-                'usage_array': group_data.get('usage_array', []),
-                'internal_external': group_data.get('internal_external', ''),
-                'uno': group_data['uno'],
-                'booking_id': group_data['booking_id'],
-                'booking_status': group_data['booking_status'],
-                'booking_is_cancelled': booking_is_cancelled,
-                'items': items_without_cancellation,
+                'group_id': f"therapy_group_{key[0]}_{key[1]}",
+                'therapy_name': gdata['therapy_name'],
+                'dosage': gdata['dosage'],
+                'uno': gdata['uno'],
+                'booking_status': gdata['booking_status'],
+                'booking_is_cancelled': gdata['booking_status'] == 'cancelled',
+                'items': gdata['items'],
                 'is_group': True
             })
-        
-        # Combine all items (prescription first, then therapy)
-        all_items = prescription_items + therapy_items
-        
+
+        # Combine items for backward matching
+        all_items_flat = []
+        for g in prescription_groups:
+            all_items_flat.extend(g.get('items', []))
+
         return JsonResponse({
             'success': True,
             'patient_info': patient_info,
-            'items': prescription_items,  # Prescription items for backward compatibility
-            'prescription_items': prescription_items,  # Flattened for backward compatibility
-            'prescription_groups': prescription_groups,  # Grouped prescription items
-            'therapy_items': therapy_items,  # Grouped therapy items
+            'items': all_items_flat,
+            'prescription_groups': prescription_groups,
+            'prescription_items': all_items_flat,
+            'therapy_items': therapy_items,
             'counts': {
-                'total': len(prescription_items) + sum(len(g['items']) for g in therapy_items),
-                'prescription': len(prescription_items),
-                'prescription_groups': len(prescription_groups),
+                'total': len(all_items_flat) + sum(len(g['items']) for g in therapy_items),
+                'prescription': len(all_items_flat),
                 'therapy': len(therapy_items)
             }
         })
-    
+
     except Exception as e:
         import traceback
         return JsonResponse({'error': str(e), 'traceback': traceback.format_exc()}, status=500)

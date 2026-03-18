@@ -13,7 +13,7 @@ function generatePrescriptionPDF_NEW(prescriptionData, date) {
 
     try {
         const { jsPDF } = window.jspdf;
-        const doc = new jsPDF('l', 'mm', 'a4'); // Landscape
+        const doc = new jsPDF('p', 'mm', 'a4'); // Portrait
         console.log('[PDF NEW] jsPDF instance created');
 
         const pageWidth = doc.internal.pageSize.getWidth();
@@ -131,9 +131,9 @@ function generatePrescriptionPDF_NEW(prescriptionData, date) {
             ['ABF (8.00–8.30) – After Breakfast', 'BD (6.30–7.00)  – Before Dinner', 'NT – A Pinch Now And Then']
         ];
 
-        const col1X = margin + 5;
-        const col2X = margin + 85;
-        const col3X = margin + 170;
+        const col1X = margin + 2;
+        const col2X = margin + 65;
+        const col3X = margin + 130;
 
         legendRows.forEach((row, rowIdx) => {
             const rowY = yPos + (rowIdx * 3.5);
@@ -282,32 +282,33 @@ function generatePrescriptionPDF_NEW(prescriptionData, date) {
                 doc.setFont(undefined, 'bold');
 
                 // Column positions for professional alignment
-                const col1 = margin;        // Room / Gender
-                const col2 = margin + 40;   // Name / Age
-                const col3 = margin + 70;   // Doctor
-                const col4 = margin + 160;  // Doctor Team
-                const col5 = margin + 220;  // DOA
+                const col1 = margin;        
+                const col2 = margin + 50;   
+                const col3 = margin + 120;  
 
                 // Line 1: Room and Name
                 doc.text(`Room: ${roomNo}`, col1, yPos);
                 doc.text(`Name: ${name}`, col2, yPos);
                 yPos += 4.5;
-
-                // Line 2: Gender, Age, Doctor, Doctor Team, DOA
+                
+                // Line 2: Gender, Age, DOA
                 doc.text(`Gender: ${gender || 'N/A'}`, col1, yPos);
                 doc.text(`Age: ${age || 'N/A'}`, col2, yPos);
-                if (doctorName) {
-                    doc.text(`Doctor: ${doctorName}`, col3, yPos);
-                }
-                if (doctorTeam && doctorTeam !== '—') {
-                    doc.text(`Doctor Team: ${doctorTeam}`, col4, yPos);
-                }
                 if (cleanDoa) {
-                    doc.text(`DOA: ${cleanDoa}`, col5, yPos);
+                    doc.text(`DOA: ${cleanDoa}`, col3, yPos);
                 }
                 yPos += 4.5;
 
-                yPos += 2; // Extra gap before table
+                // Line 3: Doctor and Team
+                if (doctorName) {
+                    doc.text(`Doctor: ${doctorName}`, col1, yPos);
+                }
+                if (doctorTeam && doctorTeam !== '—') {
+                    doc.text(`Team: ${doctorTeam}`, col3, yPos);
+                }
+                yPos += 4.5;
+
+                yPos += 1; // Minimal gap before table
 
                 // ========== PRESCRIPTION TABLE WITH BORDERS ==========
                 const prescriptionGroups = patient.details?.prescription_groups || [];
@@ -318,19 +319,26 @@ function generatePrescriptionPDF_NEW(prescriptionData, date) {
                     prescriptionGroups.forEach(group => {
                         if (group.is_cancelled || group.is_canceled) return;
                         let allocationId = 'unknown';
-                        const groupMatch = group.group_id.match(/prescription_group_(\d+)_/);
+                        const groupMatch = group.group_id.match(/prescription_group_([^/_]+)_/);
                         if (groupMatch) {
                             allocationId = groupMatch[1];
                         } else {
-                            const itemMatch = group.group_id.match(/prescription_item_(\d+)/);
+                            const itemMatch = group.group_id.match(/prescription_item_([^/_]+)/);
                             if (itemMatch) {
                                 allocationId = `item_${itemMatch[1]}`;
                             }
                         }
-                        if (!groupsByAllocation[allocationId]) {
-                            groupsByAllocation[allocationId] = [];
+                        
+                        // NEW: Include usage and time in the grouping key to ensure separate rows 
+                        // for separate scheduled times/usages even from same allocation.
+                        const usageKey = (group.usage || '').trim().toLowerCase();
+                        const timeKey = (group.time || '').trim().toLowerCase();
+                        const uniqueKey = `${allocationId}_${usageKey}_${timeKey}`;
+                        
+                        if (!groupsByAllocation[uniqueKey]) {
+                            groupsByAllocation[uniqueKey] = [];
                         }
-                        groupsByAllocation[allocationId].push(group);
+                        groupsByAllocation[uniqueKey].push(group);
                     });
 
                     // Prepare table data
@@ -469,7 +477,8 @@ function generatePrescriptionPDF_NEW(prescriptionData, date) {
                             fontSize: 9,
                             cellPadding: 2,
                             lineColor: [0, 0, 0],
-                            lineWidth: 0.1
+                            lineWidth: 0.1,
+                            valign: 'middle'
                         },
                         headStyles: {
                             fillColor: [240, 240, 240],
@@ -478,16 +487,16 @@ function generatePrescriptionPDF_NEW(prescriptionData, date) {
                             halign: 'left'
                         },
                         columnStyles: {
-                            0: { cellWidth: 30 },   // Time/Usage
-                            1: { cellWidth: 140 },  // Items (wider for long medicine names)
-                            2: { cellWidth: 25 },   // Oil Class
-                            3: { cellWidth: 60 }    // Ingredients
+                            0: { cellWidth: 28.5 }, // 15% - Time/Usage
+                            1: { cellWidth: 104.5 },// 55% - Items
+                            2: { cellWidth: 28.5 }, // 15% - Oil Class
+                            3: { cellWidth: 28.5 }  // 15% - Ingredients
                         },
                         margin: { left: margin, right: margin },
                         tableWidth: 'auto'
                     });
 
-                    yPos = doc.lastAutoTable.finalY + 4;
+                    yPos = doc.lastAutoTable.finalY + 2.5;
                 }
 
                 // ========== THERAPY TABLE WITH BORDERS ==========
@@ -800,41 +809,49 @@ function generatePrescriptionPDF_NEW(prescriptionData, date) {
                             body: therapyTableData,
                             theme: 'grid',
                             styles: {
-                                fontSize: 9,
-                                cellPadding: 2,
+                                fontSize: 8.5,
+                                cellPadding: 1.5,
                                 lineColor: [0, 0, 0],
-                                lineWidth: 0.1
+                                lineWidth: 0.1,
+                                valign: 'middle'
                             },
                             headStyles: {
-                                fillColor: [76, 175, 80],  // Green header like screenshot
+                                fillColor: [76, 175, 80],
                                 textColor: [255, 255, 255],
                                 fontStyle: 'bold',
                                 halign: 'left'
                             },
                             columnStyles: {
-                                0: { cellWidth: 38 },   // Therapy
-                                1: { cellWidth: 45 },   // Usage (widened to prevent awkward wrapping)
-                                2: { cellWidth: 87 },   // Items (Dosage)
-                                3: { cellWidth: 25 },   // Oil Class
-                                4: { cellWidth: 18 },   // Time
-                                5: { cellWidth: 21 },   // From
-                                6: { cellWidth: 21 }    // To
-                                // Total: 255mm (matches Prescription table width)
+                                0: { cellWidth: 32 },   // Therapy
+                                1: { cellWidth: 32 },   // Usage
+                                2: { cellWidth: 46 },   // Items
+                                3: { cellWidth: 20 },   // Oil Class
+                                4: { cellWidth: 20, halign: 'center' }, // Time
+                                5: { cellWidth: 20, halign: 'center' }, // From
+                                6: { cellWidth: 20, halign: 'center' }  // To
+                            },
+                            didParseCell: function(data) {
+                                if (data.section === 'head' && (data.column.index >= 4)) {
+                                    data.cell.styles.halign = 'center';
+                                }
+                            },
+                            didDrawPage: function (data) {
+                                // Reset font size after table drawing if needed
+                                doc.setFontSize(10);
                             },
                             margin: { left: margin, right: margin },
-                            tableWidth: 'auto'
+                            tableWidth: 190
                         });
-
-                        yPos = doc.lastAutoTable.finalY + 5;
+                        yPos = doc.lastAutoTable.finalY + 2.5;
                     }
                 }
 
                 // Separator between patients
-                yPos += 3;
+                yPos += 1;
                 doc.setDrawColor(200, 200, 200);
                 doc.setLineWidth(0.3);
                 doc.line(margin, yPos, pageWidth - margin, yPos);
-                yPos += 6;
+                yPos += 3;
             }
         }
 

@@ -156,13 +156,16 @@ $(function () {
   const $resumeModal = $('#resume-modal-backdrop');
   const $resumeCloseBtn = $('#resume-modal-close'), $resumeModalInfo = $('#resume-modal-info');
 
-  // --- Confirmation Modal Logic ---
   const $confirmModal = $('#confirmation-modal-backdrop');
   const $confirmTitle = $('#confirmation-modal-title');
   const $confirmMessage = $('#confirmation-modal-message');
   const $confirmBtn = $('#confirmation-modal-confirm');
   const $confirmCancel = $('#confirmation-modal-cancel');
   let onConfirmAction = null;
+
+  // New DOM refs discovered to be missing
+  const $cancelEditBtn = $('#cancel-edit-btn');
+  const $cancelEditActualBtn = $('#clear-form'); // Since clear form acts as cancel edit
 
   function showConfirm(title, message, btnText, callback) {
     $confirmTitle.text(title);
@@ -1292,10 +1295,19 @@ $(function () {
       body: JSON.stringify(payload)
     }).then(response => {
       if (!response.ok) {
-        return response.json().then(j => {
-          throw new Error(j.error || 'Failed to save prescription');
-        }).catch(() => {
-          throw new Error(`Server error: ${response.status}`);
+        return response.text().then(text => {
+          let errorMsg = 'Failed to save prescription';
+          try {
+            const j = JSON.parse(text);
+            const detail = j.detail ? ` (${j.detail})` : '';
+            errorMsg = (j.error || errorMsg) + detail;
+          } catch (e) {
+            // Not JSON, show first 200 chars of HTML
+            errorMsg = `Server error ${response.status}: ` + text.substring(0, 200).replace(/<[^>]*>/g, '');
+          }
+          throw new Error(errorMsg);
+        }).catch(err => {
+          throw new Error(err.message || `Server error: ${response.status}`);
         });
       }
       return response.json();
@@ -1501,14 +1513,13 @@ $(function () {
         statusHtml = `<span class="status-pill status-mixed">${statusParts.join(' / ')}</span>`;
         statusClass = 'status-mixed';
       } else {
-        // Fallback to overall status if no counts available
         if (p.status === 'cancelled') {
           statusHtml = '<span class="status-pill status-cancelled">Cancelled</span>';
           statusClass = 'status-cancelled';
         } else if (p.status === 'draft') {
           statusHtml = '<span class="status-pill status-draft">Draft</span>';
           statusClass = 'status-draft';
-        } else if (p.status === 'active') {
+        } else if (p.status === 'active' || p.status === 'scheduled' || p.status === 'dispatched') {
           statusHtml = '<span class="status-pill status-active">Active</span>';
           statusClass = 'status-active';
         } else if (p.status === 'failed') {
@@ -1538,42 +1549,25 @@ $(function () {
         <td>${formatDate(p.from_date)}</td>
         <td>${formatDate(p.to_date)}</td>
         <td>${esc(p.days || '')}</td>
-        <td>${statusHtml}</td>
-        <td>
-          <button class="edit-prescription action-btn btn btn-outline" data-i="${i}">
-            <i class="fas fa-edit"></i> Edit
-          </button>
-          <button class="update-prescription action-btn btn btn-success" data-i="${i}" style="display:none">
-            <i class="fas fa-sync-alt"></i> Update
-          </button>
-          ${(() => {
-          // Check for cancelled dates - handle null, undefined, and string 'null'
-          const hasCancelledDates = p.cancelled_date_from &&
-            p.cancelled_date_to &&
-            p.cancelled_date_from !== 'null' &&
-            p.cancelled_date_to !== 'null' &&
-            p.cancelled_date_from !== null &&
-            p.cancelled_date_to !== null;
-          const hasDateRange = p.from_date && p.to_date;
-          let buttons = '';
-          // Show resume button if there are cancelled dates
-          if (hasCancelledDates) {
-            buttons += `<button class="resume-prescription action-btn btn btn-success" data-i="${i}">
-                <i class="fas fa-play-circle"></i> Resume
-              </button>`;
-          }
-          // Show cancel button if there's a date range (can always cancel, will merge with existing)
-          if (hasDateRange) {
-            buttons += `<button class="cancel-prescription action-btn btn" data-i="${i}" style="background:var(--warning);">
-                <i class="fas fa-ban"></i> Cancel
-              </button>`;
-          }
-          // Show Status button to view day-by-day history
-          buttons += `<button class="status-prescription action-btn btn btn-outline" data-i="${i}" style="border:1px solid var(--primary); color:var(--primary);">
+        <td style="width: 130px; vertical-align: middle;">
+          <div class="status-toggle-container">
+            <span class="toggle-label label-off ${p.status === 'cancelled' ? 'active' : ''}">OFF</span>
+            <label class="switch">
+              <input type="checkbox" class="toggle-prescription-status" data-i="${i}" ${p.status === 'cancelled' ? '' : 'checked'}>
+              <span class="slider"></span>
+            </label>
+            <span class="toggle-label label-on ${p.status !== 'cancelled' ? 'active' : ''}">ON</span>
+          </div>
+        </td>
+        <td class="text-right" style="width: 200px; vertical-align: middle; white-space: nowrap;">
+          <div style="display: flex; align-items: center; justify-content: flex-end; gap: 8px;">
+            <button class="edit-prescription action-btn btn btn-outline" data-i="${i}">
+              <i class="fas fa-edit"></i> Edit
+            </button>
+            <button class="status-prescription action-btn btn btn-outline" data-i="${i}" style="border:1px solid var(--primary); color:var(--primary);">
               <i class="fas fa-list"></i> Status
-            </button>`;
-          return buttons;
-        })()}
+            </button>
+          </div>
         </td>
       </tr>`;
       $prescriptionsTableBody.append(row);
@@ -1593,72 +1587,125 @@ $(function () {
     return `${day}/${month}/${year}`;
   }
 
+
+  // Handle status toggle
+  $prescriptionsTableBody.on('change', '.toggle-prescription-status', function() {
+    const $toggle = $(this);
+    const index = $toggle.data('i');
+    const p = addedPrescriptions[index];
+    if (!p) return;
+
+    const isOn = $toggle.is(':checked');
+    const message = isOn ? 'resuming' : 'cancelling';
+
+    $toggle.prop('disabled', true);
+    
+    fetch(API_URL + '?action=toggle_prescription_status', {
+      method: 'POST',
+      headers: { 
+        'Content-Type': 'application/json',
+        'X-Requested-With': 'XMLHttpRequest'
+      },
+      body: JSON.stringify({
+        allocation_id: p.id,
+        turn_on: isOn
+      })
+    })
+    .then(r => {
+      if (!r.ok) {
+        return r.text().then(text => {
+          let errorMsg = 'Network error (' + r.status + ')';
+          try {
+            const j = JSON.parse(text);
+            const detail = j.detail ? ` (${j.detail})` : '';
+            errorMsg = (j.error || errorMsg) + detail;
+          } catch (e) {
+            errorMsg = `Server error ${r.status}: ` + text.substring(0, 200).replace(/<[^>]*>/g, '');
+          }
+          throw new Error(errorMsg);
+        }).catch(err => {
+          throw new Error(err.message || `Server error: ${r.status}`);
+        });
+      }
+      return r.json();
+    })
+    .then(j => {
+      if (j.status === 'ok') {
+        if (j.prescriptions) {
+          addedPrescriptions = decoratePrescriptionList(j.prescriptions);
+          renderAll();
+        }
+      } else {
+        alert('Action failed: ' + (j.error || 'Unknown error'));
+        $toggle.prop('checked', !isOn); // Revert
+      }
+    })
+    .catch(e => {
+      console.error(`Error ${message} prescription:`, e);
+      alert('Network error: ' + (e.message || 'Please try again.'));
+      $toggle.prop('checked', !isOn); // Revert
+    })
+    .finally(() => {
+      $toggle.prop('disabled', false);
+    });
+  });
+
   // Edit prescription
-  $prescriptionsTableBody.on('click', '.edit-prescription', function () { const i = $(this).data('i'); loadPrescriptionForEdit(i); });
+  $prescriptionsTableBody.on('click', '.edit-prescription', function () {
+    const i = $(this).data('i');
+    try {
+      loadPrescriptionForEdit(i);
+    } catch (e) {
+      console.error('Error loading prescription for edit:', e);
+      alert('Error entering edit mode. Please try again.');
+    }
+  });
+
   function loadPrescriptionForEdit(index) {
-    const p = addedPrescriptions[index]; if (!p) return;
+    const p = addedPrescriptions[index];
+    if (!p) {
+      console.warn('Prescription not found at index:', index);
+      return;
+    }
+    
     editPrescriptionIndex = index;
+    console.log('Loading prescription for edit:', p);
+    
+    // Switch UI mode
     $('#form-title').text('Edit Prescription');
+    $allocateBtn.hide(); 
+    $updateBtn.show(); 
+    if ($cancelEditBtn.length) $cancelEditBtn.show();
+
+    // Populate basic fields
     $fromDate.val(p.from_date || '');
     $toDate.val(p.to_date || '');
     $daysInput.val(p.days || '');
-    // procured_from is now per group, not global - no need to set global field
-    $scopeSelect.val(p.scope || '');
+    $scopeSelect.val(p.scope || '').trigger('change');
 
-    // Load common usage and restore selection order
-    usageSelectionOrder = []; // Reset selection order
+    // Restore item groups
+    itemGroups = (p.items_groups || []).map(g => ({
+        ...g,
+        id: Math.random().toString(36).slice(2, 9)
+    }));
+    renderItemGroups();
+
+    // Usage tags
+    usageSelectionOrder = [];
     if (p.usage_array && Array.isArray(p.usage_array)) {
-      usageSelectionOrder = [...p.usage_array]; // Preserve the order from saved data
+      usageSelectionOrder = [...p.usage_array];
       $commonUsageSelect.val(p.usage_array).trigger('change');
-      // Reorder tags after loading
       setTimeout(reorderUsageTags, 200);
     } else if (p.usage) {
       const usageArray = p.usage.split(',').map(u => u.trim()).filter(u => u);
-      usageSelectionOrder = [...usageArray]; // Preserve the order from saved data
+      usageSelectionOrder = [...usageArray];
       $commonUsageSelect.val(usageArray).trigger('change');
-      // Reorder tags after loading
       setTimeout(reorderUsageTags, 200);
     } else {
-      usageSelectionOrder = [];
       $commonUsageSelect.val(null).trigger('change');
     }
 
-    // Load item groups and deduplicate items WITHIN each group only
-    // Same medicine can exist in different groups
-    const loadedGroups = [];
-
-    (p.items_groups || []).forEach(g => {
-      // Deduplicate items within THIS group only
-      const seenInGroup = new Set();
-      const uniqueItems = (g.items || []).filter(item => {
-        if (!item.item_code) return true; // Keep items without codes (shouldn't happen)
-        if (seenInGroup.has(item.item_code)) {
-          console.warn(`Duplicate item within group detected and removed: ${item.item_name} (${item.item_code})`);
-          return false; // Skip this duplicate item within the group
-        }
-        seenInGroup.add(item.item_code);
-        return true; // Keep this unique item within the group
-      });
-
-      // Only add the group if it has items after deduplication
-      if (uniqueItems.length > 0) {
-        loadedGroups.push({
-          id: Math.random().toString(36).slice(2, 9),
-          items: uniqueItems,
-          dosage: g.dosage || '',
-          time: g.time || '',
-          uno: g.uno || '',
-          oil_class: g.oil_class || '',
-          procured_from: g.procured_from || '',
-          ingredient_ids: g.ingredient_ids || [],
-          ingredients: g.ingredients || []
-        });
-      }
-    });
-
-    itemGroups = loadedGroups;
-    renderItemGroups();
-    $allocateBtn.hide(); $updateBtn.show(); window.scrollTo({ top: 0, behavior: 'smooth' });
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   }
   $updateBtn.on('click', function () {
     if (editPrescriptionIndex === null) { alert('No prescription in edit mode'); return; }
@@ -1863,6 +1910,7 @@ $(function () {
     editingGroupIndex = null; // Clear editing group index
     renderItemGroups();
     $allocateBtn.show(); $updateBtn.hide();
+    $cancelEditBtn.hide();
   }
 
   // Cancel prescription

@@ -258,6 +258,7 @@ tr:hover {
     color: #065f46;
 }
 
+
 .status-modified {
     background: #fef9c3;
     color: #854d0e;
@@ -321,6 +322,7 @@ tr:hover {
 .stat-dispatched .stat-value {
     color: var(--secondary);
 }
+
 
 .patient-details {
     display: flex;
