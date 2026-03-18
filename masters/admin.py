@@ -32,19 +32,19 @@ class UsageTypeAdmin(admin.ModelAdmin):
 
 @admin.register(PrescriptionUsage)
 class PrescriptionUsageAdmin(admin.ModelAdmin):
-    list_display = ['name', 'is_active', 'created_at', 'updated_at']
+    list_display = ['name', 'order_no', 'is_active', 'created_at', 'updated_at']
     list_filter = ['is_active', 'created_at']
     search_fields = ['name']
-    list_editable = ['is_active']
-    ordering = ['name']
+    list_editable = ['order_no', 'is_active']
+    ordering = ['order_no', 'name']
 
 @admin.register(PrescriptionTime)
 class PrescriptionTimeAdmin(admin.ModelAdmin):
-    list_display = ['name', 'is_active', 'created_at', 'updated_at']
+    list_display = ['name', 'order_no', 'is_active', 'created_at', 'updated_at']
     list_filter = ['is_active', 'created_at']
     search_fields = ['name']
-    list_editable = ['is_active']
-    ordering = ['name']
+    list_editable = ['order_no', 'is_active']
+    ordering = ['order_no', 'name']
 
 @admin.register(PrescriptionScope)
 class PrescriptionScopeAdmin(admin.ModelAdmin):

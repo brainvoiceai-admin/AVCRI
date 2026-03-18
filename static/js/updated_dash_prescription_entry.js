@@ -33,6 +33,33 @@ $(function () {
     }
   }
 
+  // Dynamic Chronological Time Order Scores from master DB
+  window.PRESCRIPTION_TIME_ORDER_MAP = window.PRESCRIPTION_TIME_ORDER_MAP || {};
+
+  function getTimeScore(text) {
+    if (!text || text === '—') return 1000;
+    const upperText = String(text).toUpperCase();
+
+    // Direct match check first
+    if (window.PRESCRIPTION_TIME_ORDER_MAP[upperText] !== undefined) {
+      return window.PRESCRIPTION_TIME_ORDER_MAP[upperText];
+    }
+
+    // Substring match check for multiple comma-separated values
+    const keys = Object.keys(window.PRESCRIPTION_TIME_ORDER_MAP);
+    let minScore = 999;
+    for (const key of keys) {
+      // Create regex to match the key as a whole word
+      const regex = new RegExp(`\\b${key}\\b`, 'i');
+      if (regex.test(text)) {
+        if (window.PRESCRIPTION_TIME_ORDER_MAP[key] < minScore) {
+          minScore = window.PRESCRIPTION_TIME_ORDER_MAP[key];
+        }
+      }
+    }
+    return minScore;
+  }
+
   function getDateRange(from, to) { const out = []; let cur = new Date(from + 'T00:00:00'), end = new Date(to + 'T00:00:00'); while (cur <= end) { out.push(cur.toISOString().slice(0, 10)); cur.setDate(cur.getDate() + 1); } return out; }
   function getCookie(name) { let v = document.cookie.match('(^|;)\\s*' + name + '\\s*=\\s*([^;]+)'); return v ? v.pop() : ''; }
 
@@ -91,7 +118,13 @@ $(function () {
         if ($tags.length === 0) return;
 
         const currentValues = $commonUsageSelect.val() || [];
-        const orderedValues = usageSelectionOrder.filter(val => currentValues.indexOf(val) !== -1);
+        // NEW: Sort values chronologically from Morning to Night (Chronological Sort)
+        const orderedValues = [...currentValues].sort((a, b) => {
+          const scoreA = getTimeScore(a);
+          const scoreB = getTimeScore(b);
+          if (scoreA !== scoreB) return scoreA - scoreB;
+          return a.localeCompare(b);
+        });
 
         // If no reordering needed, return early
         if (orderedValues.length <= 1) return;
@@ -115,7 +148,7 @@ $(function () {
           }
         });
 
-        // Reorder tags based on selection order by moving them in DOM
+        // Reorder tags based on CHRONOLOGICAL order by moving them in DOM
         // Only reorder if we have all tags mapped correctly
         if (Object.keys(tagMap).length === orderedValues.length) {
           orderedValues.forEach(val => {
@@ -132,6 +165,7 @@ $(function () {
                   if (targetIndex === 0) {
                     $tag.prependTo($choicesContainer);
                   } else {
+                    // Correctly position by inserting after the tag that should precede this one
                     const $prevTag = tagMap[orderedValues[targetIndex - 1]];
                     if ($prevTag && $prevTag.length) {
                       $tag.insertAfter($prevTag);
@@ -598,8 +632,17 @@ $(function () {
     ajax({ action: 'masters', type: 'prescriptionusage' }).then(list => {
       const $u = $commonUsageSelect;
       $u.empty();
+      
+      const sortedList = list || [];
+      // Populate global order map from DB
+      sortedList.forEach((x, idx) => {
+        // Use order_no if available, fallback to list sort position
+        const score = typeof x.order_no !== 'undefined' ? x.order_no : (idx + 1);
+        window.PRESCRIPTION_TIME_ORDER_MAP[String(x.name).toUpperCase()] = score;
+      });
+
       usageSelectionOrder = []; // Reset selection order
-      (list || []).forEach(x => $u.append(new Option(x.name, x.name)));
+      sortedList.forEach(x => $u.append(new Option(x.name, x.name)));
       // Initialize Select2 for multiselect
       if (!$u.hasClass('select2-hidden-accessible')) {
         $u.select2({
@@ -696,7 +739,19 @@ $(function () {
         }
       }, 500);
     }).catch(() => { });
-    ajax({ action: 'masters', type: 'prescriptiontime' }).then(list => { const $t = $('#item-builder-time'); $t.empty().append('<option value="">Select Time</option>'); (list || []).forEach(x => $t.append(new Option(x.name, x.name))); }).catch(() => { });
+    ajax({ action: 'masters', type: 'prescriptiontime' }).then(list => { 
+      const $t = $('#item-builder-time'); 
+      $t.empty().append('<option value="">Select Time</option>');
+      
+      const sortedList = list || [];
+      // Populate global order map from DB
+      sortedList.forEach((x, idx) => {
+        const score = typeof x.order_no !== 'undefined' ? x.order_no : (idx + 1);
+        window.PRESCRIPTION_TIME_ORDER_MAP[String(x.name).toUpperCase()] = score;
+      });
+
+      sortedList.forEach(x => $t.append(new Option(x.name, x.name))); 
+    }).catch(() => { });
     // Populate Oil Class in item builder section
     ajax({ action: 'masters', type: 'oil' }).then(list => { $itemBuilderOilClass.empty().append('<option value="">-- Select --</option>'); (list || []).forEach(o => $itemBuilderOilClass.append(new Option(o.name, o.name))); }).catch(() => { $itemBuilderOilClass.empty().append('<option value="">-- Select --</option>'); });
 
@@ -1025,6 +1080,16 @@ $(function () {
       `);
       return;
     }
+    // NEW: Sort item groups chronologically (Morning to Night)
+    itemGroups.sort((a, b) => {
+      const scoreA = getTimeScore(a.time);
+      const scoreB = getTimeScore(b.time);
+      if (scoreA !== scoreB) return scoreA - scoreB;
+      // Secondary sort: alphabetical by item names
+      const nameA = (a.items || []).map(it => it.item_name).join(', ');
+      const nameB = (b.items || []).map(it => it.item_name).join(', ');
+      return nameA.localeCompare(nameB);
+    });
 
     // Show each group separately with edit/remove buttons, but in the same format as final display
     itemGroups.forEach((g, i) => {
@@ -1241,7 +1306,12 @@ $(function () {
     // Get common usage in selection order
     const selectedValues = $commonUsageSelect.val() || [];
     // Maintain selection order instead of alphabetical
-    const commonUsageValues = usageSelectionOrder.filter(val => selectedValues.indexOf(val) !== -1);
+    const commonUsageValues = [...selectedValues].sort((a, b) => {
+      const scoreA = getTimeScore(a);
+      const scoreB = getTimeScore(b);
+      if (scoreA !== scoreB) return scoreA - scoreB;
+      return a.localeCompare(b);
+    });
     const commonUsage = commonUsageValues.join(', ');
 
     // Prepare prescription data
@@ -1403,7 +1473,7 @@ $(function () {
     if (!addedPrescriptions.length) {
       $prescriptionsTableBody.append(`
         <tr>
-          <td colspan="9">
+          <td colspan="11">
             <div class="empty-state">
               <i class="fas fa-prescription-bottle"></i>
               <h3>No Prescriptions Found</h3>
@@ -1414,13 +1484,48 @@ $(function () {
       `);
       return;
     }
+
+    // CHRONOLOGICAL SORTING (Morning to Night)
+    addedPrescriptions.sort((a, b) => {
+      // Get scores from usage
+      let usageA = a.usage || (a.usage_array && a.usage_array.length ? a.usage_array[0] : '');
+      let usageB = b.usage || (b.usage_array && b.usage_array.length ? b.usage_array[0] : '');
+      
+      // If no usage, try to find time in first group
+      if (!usageA && a.items_groups && a.items_groups.length) usageA = a.items_groups[0].time || '';
+      if (!usageB && b.items_groups && b.items_groups.length) usageB = b.items_groups[0].time || '';
+      
+      const scoreA = getTimeScore(usageA);
+      const scoreB = getTimeScore(usageB);
+      
+      if (scoreA !== scoreB) return scoreA - scoreB;
+      
+      // Fallback: alphabetical by name
+      return (a.prescription_name || '').localeCompare(b.prescription_name || '');
+    });
+
     addedPrescriptions.forEach((p, i) => {
       // Get common usage from prescription level (shown in its own column)
       let commonUsageDisplay = '';
       if (p.usage) {
-        commonUsageDisplay = esc(p.usage);
+        // Split, sort and join to ensure chronological order: M, ABF, BL...
+        const usageParts = p.usage.split(',').map(u => u.trim()).filter(Boolean);
+        const sortedUsage = usageParts.sort((a, b) => {
+          const scoreA = getTimeScore(a);
+          const scoreB = getTimeScore(b);
+          if (scoreA !== scoreB) return scoreA - scoreB;
+          return a.localeCompare(b);
+        });
+        commonUsageDisplay = esc(sortedUsage.join(', '));
       } else if (Array.isArray(p.usage_array) && p.usage_array.length > 0) {
-        commonUsageDisplay = esc(p.usage_array.join(', '));
+        // Sort usage array chronologically before joining
+        const sortedUsage = [...p.usage_array].sort((a, b) => {
+          const scoreA = getTimeScore(a);
+          const scoreB = getTimeScore(b);
+          if (scoreA !== scoreB) return scoreA - scoreB;
+          return a.localeCompare(b);
+        });
+        commonUsageDisplay = esc(sortedUsage.join(', '));
       }
 
       // Build clearer, per‑group blocks:
@@ -1714,7 +1819,12 @@ $(function () {
     // Get common usage in selection order
     const selectedValues = $commonUsageSelect.val() || [];
     // Maintain selection order instead of alphabetical
-    const commonUsageValues = usageSelectionOrder.filter(val => selectedValues.indexOf(val) !== -1);
+    const commonUsageValues = [...selectedValues].sort((a, b) => {
+      const scoreA = getTimeScore(a);
+      const scoreB = getTimeScore(b);
+      if (scoreA !== scoreB) return scoreA - scoreB;
+      return a.localeCompare(b);
+    });
     const commonUsage = commonUsageValues.join(', ');
 
     // Get dates and days from form

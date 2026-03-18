@@ -3376,15 +3376,15 @@ def prescription_entry_page(request):
             PrescriptionUsage = get_model_safe('masters', 'PrescriptionUsage')
             if PrescriptionUsage is not None:
                 try:
-                    for u in PrescriptionUsage.objects.filter(is_active=True).order_by('name')[:200]:
-                        results.append({'name': getattr(u, 'name', '')})
+                    for u in PrescriptionUsage.objects.filter(is_active=True).order_by('order_no', 'name')[:200]:
+                        results.append({'name': getattr(u, 'name', ''), 'order_no': getattr(u, 'order_no', 0)})
                 except Exception:
                     pass
         elif master_type in ('prescriptiontime', 'ptime'):
             if PrescriptionTime is not None:
                 try:
-                    for t in PrescriptionTime.objects.filter(is_active=True)[:20]:
-                        results.append({'name': getattr(t, 'name', '')})
+                    for t in PrescriptionTime.objects.filter(is_active=True).order_by('order_no', 'name')[:20]:
+                        results.append({'name': getattr(t, 'name', ''), 'order_no': getattr(t, 'order_no', 0)})
                 except Exception:
                     pass
         elif master_type in ('prescriptionscope', 'scope'):
