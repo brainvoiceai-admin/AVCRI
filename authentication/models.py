@@ -220,6 +220,9 @@ class AuditLog(models.Model):
         ('resume_therapy', 'Resume Therapy'),
         ('remove_item', 'Remove Item'),
         ('view_therapy', 'View Therapy'),
+        # Scheduling actions (final schedule runs)
+        ('final_sched_th', 'Final Schedule (Therapy)'),
+        ('final_sched_rx', 'Final Schedule (Prescription)'),
     ]
     
     STATUS_CHOICES = [
