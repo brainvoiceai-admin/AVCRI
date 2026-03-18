@@ -1481,7 +1481,7 @@ $(function () {
         <strong>Therapy: ${esc(data.therapy_name)}</strong> — ${data.from_date} → ${data.to_date}<br/>
         <small style="color:#6c757d;margin-top:4px;display:block;">
           ${summaryParts.length > 0 ? summaryParts.join(', ') : 'Status: ' + (data.overall_status || 'Unknown')}
-          &nbsp;|&nbsp; <em>Edits apply from today onwards; past sessions remain unchanged.</em>
+          &nbsp;|&nbsp; <em>Edits apply from the next editable date; past/locked sessions remain unchanged.</em>
         </small>
       `);
       $statusDatesList.empty();
@@ -1648,148 +1648,86 @@ $(function () {
     if (t.to_date && cto > t.to_date) { alert('Cancel To > therapy end'); return; }
     if (!reason) { alert('Cancellation reason is mandatory'); return; }
 
-    // IMMEDIATELY update local data BEFORE server call - EXACTLY like prescription entry
-    // Calculate how many days are being cancelled
-    const cancelledDates = getDateRange(cfrom, cto);
-    const cancelledDaysCount = cancelledDates.length;
-
-    // Update status_summary optimistically to reflect the cancellation
-    if (!t.status_summary) {
-      t.status_summary = {};
-    }
-
-    // Calculate how many days were already cancelled in the new range
-    let alreadyCancelledInRange = 0;
-    if (t.cancelled_date_from && t.cancelled_date_to) {
-      const existingCancelledDates = getDateRange(t.cancelled_date_from, t.cancelled_date_to);
-      const newCancelledDates = getDateRange(cfrom, cto);
-      // Count dates that are in both ranges (already cancelled)
-      alreadyCancelledInRange = newCancelledDates.filter(d => existingCancelledDates.includes(d)).length;
-    }
-
-    // Calculate how many new days are being cancelled (not already cancelled)
-    const newlyCancelledDays = cancelledDaysCount - alreadyCancelledInRange;
-
-    // Update cancelled count (add newly cancelled days)
-    if (newlyCancelledDays > 0) {
-      t.status_summary.cancelled = (t.status_summary.cancelled || 0) + newlyCancelledDays;
-
-      // Decrease draft/allocated counts for newly cancelled days
-      // We need to estimate how many were draft vs allocated
-      // For simplicity, we'll decrease draft first, then allocated
-      const currentDraft = t.status_summary.draft || 0;
-      const currentAllocated = t.status_summary.allocated || 0;
-
-      if (currentDraft >= newlyCancelledDays) {
-        t.status_summary.draft = currentDraft - newlyCancelledDays;
-        if (t.status_summary.draft === 0) {
-          delete t.status_summary.draft;
-        }
-      } else {
-        // Decrease all draft, then decrease allocated for the remainder
-        const remainingToCancel = newlyCancelledDays - currentDraft;
-        if (currentDraft > 0) {
-          delete t.status_summary.draft;
-        }
-        if (currentAllocated >= remainingToCancel) {
-          t.status_summary.allocated = currentAllocated - remainingToCancel;
-          if (t.status_summary.allocated === 0) {
-            delete t.status_summary.allocated;
-          }
-        } else {
-          // If allocated is less than remaining, just decrease what we have
-          if (currentAllocated > 0) {
-            delete t.status_summary.allocated;
-          }
-        }
-      }
-    }
-
-    if (!t.cancelled_date_from || cfrom < t.cancelled_date_from) {
-      t.cancelled_date_from = cfrom;
-    }
-    if (!t.cancelled_date_to || cto > t.cancelled_date_to) {
-      t.cancelled_date_to = cto;
-    }
-    t.status = 'cancelled';
-    t.cancellation_reason = reason;
-
-    // Set last_action to 'cancelled' immediately (ignore today's date check)
-    t.last_action = 'cancelled';
-    rememberTherapyAction(t.allocation_id || t.therapy_code || t.id, 'cancelled');
-
-    // IMMEDIATELY update UI - don't wait for server - EXACTLY like prescription entry
-    $cancelModal.hide();
-    renderAll();
-    alert('Therapy cancelled successfully.');
-
     if (t.allocation_id) {
-      // Server-side cancellation (happens in background)
+      // Server-side cancellation: wait for confirmation (important for schedule lock rules)
       fetch(API_URL + '?action=cancel_therapy', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ allocation_id: t.allocation_id, cancel_from: cfrom, cancel_to: cto, reason: reason })
       }).then(r => r.json()).then(j => {
-        if (j.status === 'ok') {
-          // UI already updated above, alert already shown, server sync will happen in background
+        if (j.status !== 'ok') {
+          alert(j.message || j.error || ('Failed: ' + JSON.stringify(j)));
+          return;
+        }
 
-          // Then reload from server to get merged cancellation dates (in background)
-          if (t.allocation_id && selectedPatient) {
-            const patientRegNo = selectedPatient.pat_op_reg_no || selectedPatient.pat_reg_no;
-            if (patientRegNo) {
-              ajax({ action: 'patient_therapies', patient_reg_no: patientRegNo }).then(therapies => {
-                if (therapies && Array.isArray(therapies)) {
-                  const updated = therapies.find(th => th.allocation_id === t.allocation_id);
-                  if (updated) {
-                    // Get the remembered action before updating
-                    const rememberedAction = therapyActionById[t.allocation_id || t.therapy_code || t.id];
+        // Apply local UI update after success
+        const cancelledDates = getDateRange(cfrom, cto);
+        const cancelledDaysCount = cancelledDates.length;
 
-                    // Update all fields from server response
-                    Object.assign(t, updated);
+        if (!t.status_summary) t.status_summary = {};
 
-                    // Explicitly set cancelled dates (handle null/undefined/string 'null')
-                    t.cancelled_date_from = (updated.cancelled_date_from && updated.cancelled_date_from !== 'null') ? updated.cancelled_date_from : null;
-                    t.cancelled_date_to = (updated.cancelled_date_to && updated.cancelled_date_to !== 'null') ? updated.cancelled_date_to : null;
-                    t.cancellation_reason = updated.cancellation_reason || '';
-                    t.status = updated.status || t.status;
+        let alreadyCancelledInRange = 0;
+        if (t.cancelled_date_from && t.cancelled_date_to) {
+          const existingCancelledDates = getDateRange(t.cancelled_date_from, t.cancelled_date_to);
+          alreadyCancelledInRange = cancelledDates.filter(d => existingCancelledDates.includes(d)).length;
+        }
 
-                    // Update status_summary if available
-                    if (updated.status_summary) {
-                      t.status_summary = updated.status_summary;
-                    }
+        const newlyCancelledDays = cancelledDaysCount - alreadyCancelledInRange;
+        if (newlyCancelledDays > 0) {
+          t.status_summary.cancelled = (t.status_summary.cancelled || 0) + newlyCancelledDays;
+          const currentDraft = t.status_summary.draft || 0;
+          const currentAllocated = t.status_summary.allocated || 0;
 
-                    // Check if today is in the cancelled range
-                    const today = new Date().toISOString().slice(0, 10);
-                    const todayIsCancelled = t.cancelled_date_from && t.cancelled_date_to &&
-                      t.cancelled_date_from !== 'null' && t.cancelled_date_to !== 'null' &&
-                      today >= t.cancelled_date_from && today <= t.cancelled_date_to;
-
-                    // If today is cancelled, override any previous action with 'cancelled'
-                    if (todayIsCancelled) {
-                      t.last_action = 'cancelled';
-                      rememberTherapyAction(t.allocation_id || t.therapy_code || t.id, 'cancelled');
-                    } else if (rememberedAction && rememberedAction !== 'cancelled') {
-                      // If today is NOT cancelled, restore the remembered action (updated/resumed/added)
-                      // but only if it's not 'cancelled' (we just cancelled, so don't restore old cancelled state)
-                      t.last_action = rememberedAction;
-                    }
-
-                    // Update UI again with server data
-                    renderAll();
-                  }
-                }
-              }).catch(() => {
-                // Silently fail - UI already updated with local values
-                console.log('Failed to reload therapy data from server, using local values');
-              });
+          if (currentDraft >= newlyCancelledDays) {
+            t.status_summary.draft = currentDraft - newlyCancelledDays;
+            if (t.status_summary.draft === 0) delete t.status_summary.draft;
+          } else {
+            const remainingToCancel = newlyCancelledDays - currentDraft;
+            if (currentDraft > 0) delete t.status_summary.draft;
+            if (currentAllocated >= remainingToCancel) {
+              t.status_summary.allocated = currentAllocated - remainingToCancel;
+              if (t.status_summary.allocated === 0) delete t.status_summary.allocated;
+            } else {
+              if (currentAllocated > 0) delete t.status_summary.allocated;
             }
           }
-        } else {
-          alert('Failed: ' + JSON.stringify(j));
+        }
+
+        if (!t.cancelled_date_from || cfrom < t.cancelled_date_from) t.cancelled_date_from = cfrom;
+        if (!t.cancelled_date_to || cto > t.cancelled_date_to) t.cancelled_date_to = cto;
+        t.status = 'cancelled';
+        t.cancellation_reason = reason;
+        t.last_action = 'cancelled';
+        rememberTherapyAction(t.allocation_id || t.therapy_code || t.id, 'cancelled');
+
+        $cancelModal.hide();
+        renderAll();
+        alert('Therapy cancelled successfully.');
+
+        // Reload from server in background for merged cancellation range / accurate counts
+        if (selectedPatient) {
+          const patientRegNo = selectedPatient.pat_op_reg_no || selectedPatient.pat_reg_no;
+          if (patientRegNo) {
+            ajax({ action: 'patient_therapies', patient_reg_no: patientRegNo }).then(therapies => {
+              if (therapies && Array.isArray(therapies)) {
+                const updated = therapies.find(th => th.allocation_id === t.allocation_id);
+                if (updated) {
+                  Object.assign(t, updated);
+                  t.cancelled_date_from = (updated.cancelled_date_from && updated.cancelled_date_from !== 'null') ? updated.cancelled_date_from : null;
+                  t.cancelled_date_to = (updated.cancelled_date_to && updated.cancelled_date_to !== 'null') ? updated.cancelled_date_to : null;
+                  t.cancellation_reason = updated.cancellation_reason || '';
+                  if (updated.status_summary) t.status_summary = updated.status_summary;
+                  renderAll();
+                }
+              }
+            }).catch(() => { /* ignore */ });
+          }
         }
       }).catch(() => alert('Network error'));
     } else {
-      // Local cancellation - already updated above, just show message
+      // Local cancellation (no server-side lock rules)
+      $cancelModal.hide();
+      renderAll();
       alert('Therapy cancelled locally.');
     }
   });
