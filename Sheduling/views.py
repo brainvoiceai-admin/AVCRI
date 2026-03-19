@@ -2638,7 +2638,6 @@ def prescription_entry_page(request):
         
         # --- Automatic Discharge Cancellation Logic ---
         try:
-            from MySql_Data_pull.models import Treatment
             # Fetch search_reg_no if not provided
             search_reg_no = str(reg_no) if reg_no else None
             if not search_reg_no:
@@ -2648,15 +2647,19 @@ def prescription_entry_page(request):
                     search_reg_no = p_obj.pat_reg_no
             
             if search_reg_no:
-                # Get the absolute LATEST treatment record for this patient
-                # Using .values() to ensure we get a dict for safe .get() access
-                latest_treatment = Treatment.objects.using('therapy_db').filter(
-                    Pat_Reg_No=search_reg_no
-                ).order_by('-DOA').values('Pat_DoD').first()
+                from django.db import connections
+                with connections['therapy_db'].cursor() as cursor:
+                    # Get the absolute LATEST discharge date for this patient
+                    cursor.execute("""
+                        SELECT Pat_Disch_Date FROM Patient_Discharge 
+                        WHERE Pat_Reg_No = %s 
+                        ORDER BY Pat_Visit_Date DESC
+                    """, [search_reg_no])
+                    row = cursor.fetchone()
                 
                 # Only auto-cancel if they have been discharged in their most recent stay
-                if latest_treatment and latest_treatment.get('Pat_DoD'):
-                    dod_raw = latest_treatment['Pat_DoD']
+                if row and row[0]:
+                    dod_raw = row[0]
                     # Handle both datetime and date objects safely
                     dod = dod_raw.date() if hasattr(dod_raw, 'date') else dod_raw
                     
@@ -3089,6 +3092,7 @@ def prescription_entry_page(request):
         if action_post == 'toggle_prescription_status':
             allocation_id = payload.get('allocation_id')
             turn_on = payload.get('turn_on', False)
+            reason = payload.get('reason', '').strip()
             
             if not allocation_id:
                 return JsonResponse({'error': 'missing_allocation_id'}, status=400)
@@ -3123,7 +3127,8 @@ def prescription_entry_page(request):
                             allocation.cancelled_date_from = cancel_from
                             allocation.cancelled_date_to = allocation.to_date
                             allocation.status = 'cancelled'
-                            allocation.cancellation_reason = f"Turned OFF by {active_user.username if active_user else 'system'} on {today} (effective {cancel_from})"
+                            base_reason = reason if reason else f"Turned OFF by {active_user.username if active_user else 'system'} on {today}"
+                            allocation.cancellation_reason = f"{base_reason} (effective {cancel_from})"
                             allocation.cancelled_by = active_user
                             allocation.cancelled_at = timezone.now()
                             allocation.save()
@@ -3529,15 +3534,15 @@ def prescription_entry_page(request):
             PrescriptionUsage = get_model_safe('masters', 'PrescriptionUsage')
             if PrescriptionUsage is not None:
                 try:
-                    for u in PrescriptionUsage.objects.filter(is_active=True).order_by('name')[:200]:
-                        results.append({'name': getattr(u, 'name', '')})
+                    for u in PrescriptionUsage.objects.filter(is_active=True).order_by('order_no', 'name')[:200]:
+                        results.append({'name': getattr(u, 'name', ''), 'order_no': getattr(u, 'order_no', 0)})
                 except Exception:
                     pass
         elif master_type in ('prescriptiontime', 'ptime'):
             if PrescriptionTime is not None:
                 try:
-                    for t in PrescriptionTime.objects.filter(is_active=True)[:20]:
-                        results.append({'name': getattr(t, 'name', '')})
+                    for t in PrescriptionTime.objects.filter(is_active=True).order_by('order_no', 'name')[:20]:
+                        results.append({'name': getattr(t, 'name', ''), 'order_no': getattr(t, 'order_no', 0)})
                 except Exception:
                     pass
         elif master_type in ('prescriptionscope', 'scope'):

@@ -74,27 +74,27 @@ function generatePrescriptionPDF_NEW(prescriptionData, date) {
             return false;
         }
 
-        // Chronological Time Order Scores
-        const TIME_ORDER_MAP = {
-            'M': 1, 'ABF': 2, 'BL': 3, 'AL': 4, 'E': 5, 'BD': 6, 'AD': 7, 'BT': 8, 'NT': 9
-        };
+        // Dynamic Chronological Time Order Scores from master DB
+        const TIME_ORDER_MAP = window.PRESCRIPTION_TIME_ORDER_MAP || {};
 
         function getTimeScore(text) {
             if (!text || text === '—') return 1000;
             const upperText = String(text).toUpperCase();
 
-            // Head and Body must be at the absolute end
-            if (upperText.includes('HEAD') || upperText.includes('BODY')) {
-                return 2000;
+            // Direct match check first
+            if (TIME_ORDER_MAP[upperText] !== undefined) {
+                return TIME_ORDER_MAP[upperText];
             }
 
+            // Substring match check
             const keys = Object.keys(TIME_ORDER_MAP);
             let minScore = 999;
             for (const key of keys) {
-                // Match standard codes or common variants like N&T for NT
-                const regex = new RegExp(`\\b${key}\\b`);
-                if (regex.test(upperText) || (key === 'NT' && upperText.includes('N&T'))) {
-                    if (TIME_ORDER_MAP[key] < minScore) minScore = TIME_ORDER_MAP[key];
+                const regex = new RegExp(`\\b${key}\\b`, 'i');
+                if (regex.test(text)) {
+                    if (TIME_ORDER_MAP[key] < minScore) {
+                        minScore = TIME_ORDER_MAP[key];
+                    }
                 }
             }
             return minScore;

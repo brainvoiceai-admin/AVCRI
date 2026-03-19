@@ -54,7 +54,7 @@
             <form method="post" action="{% url 'prestime_manage' %}" class="row g-3 align-items-center">
                 {% csrf_token %}
 
-                <div class="col-md-6">
+                <div class="col-md-4">
                     <label for="id_name" class="form-label visually-hidden">Time Slot Name</label>
                     <input type="text" name="name" id="id_name"
                         class="form-control {% if errors.name %}is-invalid{% endif %}"
@@ -63,6 +63,14 @@
                     {% if errors.name %}
                     <div class="invalid-feedback">{{ errors.name }}</div>
                     {% endif %}
+                </div>
+
+                <div class="col-md-2">
+                    <label for="id_order_no" class="form-label visually-hidden">Order No</label>
+                    <input type="number" name="order_no" id="id_order_no"
+                        class="form-control"
+                        placeholder="Order No (e.g. 1)"
+                        value="{{ form.order_no.value|default_if_none:'0' }}">
                 </div>
 
                 <div class="col-md-4">
@@ -135,6 +143,7 @@
                         <thead class="table-dark">
                             <tr>
                                 <th scope="col">Time Slot</th>
+                                <th scope="col">Order No</th>
                                 <th scope="col">Status</th>
                                 <th scope="col">Actions</th>
                             </tr>
@@ -143,6 +152,7 @@
                             {% for source in prestime_list %}
                             <tr>
                                 <td><strong>{{ source.name }}</strong></td>
+                                <td>{{ source.order_no|default:"0" }}</td>
                                 <td>
                                     {% if source.is_active %}
                                     <span class="badge bg-success">Active</span>

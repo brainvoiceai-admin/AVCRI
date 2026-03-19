@@ -56,6 +56,7 @@ class UsageType(models.Model):
 class PrescriptionUsage(models.Model):
     """Master list of usage types specifically for prescriptions."""
     name = models.CharField(max_length=100, unique=True, verbose_name="Prescription Usage Name")
+    order_no = models.IntegerField(default=0, verbose_name="Order Number")
     is_active = models.BooleanField(default=True, verbose_name="Active")
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="Created At")
     updated_at = models.DateTimeField(auto_now=True, verbose_name="Updated At")
@@ -66,7 +67,7 @@ class PrescriptionUsage(models.Model):
     class Meta:
         verbose_name = "Prescription Usage"
         verbose_name_plural = "Prescription Usages"
-        ordering = ["name"]
+        ordering = ["order_no", "name"]
 
 
 class NurseTreatmentMaster(models.Model):
@@ -109,6 +110,7 @@ class NurseMaster(models.Model):
 class PrescriptionTime(models.Model):
     """Master list of standardized time slots for prescriptions or dosing schedules. Examples: 8 AM, 12 PM, 4 PM."""
     name = models.CharField(max_length=20, unique=True, verbose_name="Time Slot")
+    order_no = models.IntegerField(default=0, verbose_name="Order Number")
     is_active = models.BooleanField(default=True, verbose_name="Active")
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="Created At")
     updated_at = models.DateTimeField(auto_now=True, verbose_name="Updated At")
@@ -119,7 +121,7 @@ class PrescriptionTime(models.Model):
     class Meta:
         verbose_name = "Prescription Time Slot"
         verbose_name_plural = "Prescription Time Slots"
-        ordering = ["name"]
+        ordering = ["order_no", "name"]
 
 
 #Ext/Int Master

@@ -338,6 +338,22 @@
   </div>
   </div>
 
+  <!-- Toggle Reason Modal -->
+  <div id="toggle-reason-modal-backdrop" class="modal-backdrop" style="display:none; z-index: 1050;">
+    <div class="modal" role="dialog" aria-modal="true" style="max-width: 450px; text-align: left; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); margin: 0;">
+      <h3 style="margin-bottom: 15px;"><i class="fas fa-exclamation-circle"></i> Cancel Prescription</h3>
+      <div style="margin-bottom: 20px;">
+        <label for="toggle-reason-input" style="font-weight: 600; font-size: 0.9em; margin-bottom: 8px; display: block; color: var(--text-dark);">Reason for cancellation <span style="color: var(--danger);">*</span></label>
+        <textarea id="toggle-reason-input" rows="3" placeholder="Please enter a valid reason for cancelling..." style="width: 100%; border-radius: 6px; padding: 10px; border: 1px solid var(--border-light); resize: vertical;"></textarea>
+        <div id="toggle-reason-error" style="color: var(--danger); font-size: 0.85em; display: none; margin-top: 6px;"><i class="fas fa-info-circle"></i> A valid reason is required.</div>
+      </div>
+      <div class="modal-footer" style="justify-content: flex-end; gap: 12px; margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--border-light);">
+        <button id="toggle-reason-cancel" class="btn btn-outline" style="min-width: 90px;">Cancel</button>
+        <button id="toggle-reason-confirm" class="btn btn-danger" style="min-width: 90px;">Confirm</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Prescription History Modal -->
   <div id="history-modal-backdrop" class="modal-backdrop">
     <div class="modal" role="dialog" aria-modal="true"
@@ -411,7 +427,7 @@
   </div>
 
 
-  <script src="{% static 'js/updated_dash_prescription_entry.js' %}?v=11.3"></script>
+  <script src="{% static 'js/updated_dash_prescription_entry.js' %}?v=11.4"></script>
   <script src="{% static 'js/dashboards_nav.js' %}"></script>
 </body>
 

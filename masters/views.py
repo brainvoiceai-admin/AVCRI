@@ -738,7 +738,7 @@ class PrescriptionUsageManagementView(ListView):
         elif status == 'inactive':
             queryset = queryset.filter(is_active=False)
         
-        return queryset.order_by('name')
+        return queryset.order_by('order_no', 'name')
     
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -753,12 +753,17 @@ class PrescriptionUsageManagementView(ListView):
     def post(self, request, *args, **kwargs):
         """Handle POST requests for creating new prescription usages"""
         name = request.POST.get('name')
+        order_no = request.POST.get('order_no', 0)
+        try:
+            order_no = int(order_no)
+        except ValueError:
+            order_no = 0
         is_active = request.POST.get('is_active') == 'on'
         
         # Create new record
         if name:
             try:
-                obj = PrescriptionUsage.objects.create(name=name, is_active=is_active)
+                obj = PrescriptionUsage.objects.create(name=name, order_no=order_no, is_active=is_active)
                 _log_master_audit(request, 'create', 'PrescriptionUsage', str(obj.id), f'Created PrescriptionUsage: {name}')
                 messages.success(request, f'Prescription usage "{name}" created successfully.')
             except Exception as e:
@@ -771,7 +776,7 @@ class PrescriptionUsageManagementView(ListView):
 @method_decorator(module_access_required('prescription_usage_manage'), name='dispatch')
 class PrescriptionUsageUpdateView(UpdateView):
     model = PrescriptionUsage
-    fields = ['name', 'is_active']
+    fields = ['name', 'order_no', 'is_active']
     template_name = 'masters/prescriptionusage_form.html'
     success_url = reverse_lazy('prescriptionusage_manage')
     
@@ -1079,8 +1084,7 @@ class PrescriptionTimeManagementView(ListView):
             queryset = queryset.filter(is_active=True)
         elif status == 'inactive':
             queryset = queryset.filter(is_active=False)
-        
-        return queryset.order_by('name')
+        return queryset.order_by('order_no', 'name')
     
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -1095,12 +1099,17 @@ class PrescriptionTimeManagementView(ListView):
     def post(self, request, *args, **kwargs):
         """Handle POST requests for creating new prescription times"""
         name = request.POST.get('name')
+        order_no = request.POST.get('order_no', 0)
+        try:
+            order_no = int(order_no)
+        except ValueError:
+            order_no = 0
         is_active = request.POST.get('is_active') == 'on'
         
         # Create new record
         if name:
             try:
-                obj = PrescriptionTime.objects.create(name=name, is_active=is_active)
+                obj = PrescriptionTime.objects.create(name=name, order_no=order_no, is_active=is_active)
                 _log_master_audit(request, 'create', 'PrescriptionTime', str(obj.id), f'Created PrescriptionTime: {name}')
                 messages.success(request, f'Prescription time "{name}" created successfully.')
             except Exception as e:
@@ -1112,7 +1121,7 @@ class PrescriptionTimeManagementView(ListView):
 
 class PrescriptionTimeUpdateView(UpdateView):
     model = PrescriptionTime
-    fields = ['name', 'is_active']
+    fields = ['name', 'order_no', 'is_active']
     template_name = 'masters/prestime_form.html'
     success_url = reverse_lazy('prestime_manage')
     
