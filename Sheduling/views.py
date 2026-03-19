@@ -37,6 +37,115 @@ def _schedule_lock_upto_date():
     return lock_upto, first_editable
 
 
+def _refresh_patient_staying_rooms(reg_nos):
+    """
+    Refresh PatientSnapshot.pat_room_no for the given patient reg nos from external source tables.
+    This is intentionally separated from the allocation algorithm (Final Schedule / Reschedule calls this first).
+    """
+    try:
+        reg_nos = [str(x).strip() for x in (reg_nos or []) if str(x).strip()]
+        if not reg_nos:
+            # Always print so button clicks are observable in terminal
+            try:
+                import sys as _sys
+                out = getattr(_sys, '__stdout__', None) or _sys.stdout
+                out.write("[ROOM REFRESH] No patients found to refresh (0).\n")
+                out.flush()
+            except Exception:
+                pass
+            return {'success': True, 'updated': 0, 'source': None, 'patients': []}
+
+        # Build a mapping reg_no -> raw_room_no from external DB tables.
+        room_by_reg = {}
+        source = None
+
+        # Preferred: Treatment table (has Pat_Room_No as string).
+        try:
+            from MySql_Data_pull.models import Treatment
+            rows = list(Treatment.objects.filter(Pat_Reg_No__in=reg_nos).values('Pat_Reg_No', 'Pat_Room_No'))
+            for r in rows:
+                k = str(r.get('Pat_Reg_No') or '').strip()
+                v = r.get('Pat_Room_No')
+                if k and v is not None and str(v).strip() != '':
+                    room_by_reg[k] = str(v).strip()
+            if rows:
+                source = 'Treatment'
+        except Exception:
+            pass
+
+        # Fallback: Registration table (pat_room_no is numeric; only works for numeric reg nos).
+        if not room_by_reg:
+            try:
+                from MySql_Data_pull.models import Registration
+                numeric_regs = []
+                for r in reg_nos:
+                    try:
+                        numeric_regs.append(int(''.join(ch for ch in str(r) if ch.isdigit()) or ''))
+                    except Exception:
+                        continue
+                numeric_regs = [n for n in numeric_regs if n]
+                if numeric_regs:
+                    rows = list(Registration.objects.filter(pat_reg_no__in=numeric_regs).values('pat_reg_no', 'pat_room_no'))
+                    for r in rows:
+                        k = str(r.get('pat_reg_no') or '').strip()
+                        v = r.get('pat_room_no')
+                        if k and v is not None and str(v).strip() != '':
+                            room_by_reg[k] = str(v).strip()
+                    if rows:
+                        source = 'Registration'
+            except Exception:
+                pass
+
+        if not room_by_reg:
+            return {'success': True, 'updated': 0, 'source': source}
+
+        # Normalize room display consistently with the rest of the app
+        from masters.models import get_staying_room_display_number
+        updated = 0
+        refreshed_patients = []  # [{pat_reg_no, old_room_no, new_room_no}]
+        now_ts = timezone.now()
+        for reg, raw_room in room_by_reg.items():
+            try:
+                normalized = get_staying_room_display_number(raw_room) or str(raw_room).strip()
+                # Only update when snapshot exists
+                snap = PatientSnapshot.objects.filter(pat_reg_no=str(reg)).first()
+                if snap:
+                    old_room = (snap.pat_room_no or '').strip() if hasattr(snap, 'pat_room_no') else ''
+                    new_room = (normalized or '').strip()
+                    # Update only if changed (so logs are meaningful)
+                    if new_room and new_room != old_room:
+                        PatientSnapshot.objects.filter(pk=snap.pk).update(
+                            pat_room_no=new_room,
+                            source_updated_at=now_ts,
+                            updated_at=now_ts
+                        )
+                        updated += 1
+                        refreshed_patients.append({
+                            'pat_reg_no': str(reg),
+                            'old_room_no': old_room,
+                            'new_room_no': new_room,
+                        })
+            except Exception:
+                continue
+
+        # Print to terminal for quick verification during button clicks.
+        # Use sys.__stdout__ so this still prints even when the caller is inside redirect_stdout().
+        try:
+            import sys as _sys
+            out = getattr(_sys, '__stdout__', None) or _sys.stdout
+            out.write(f"[ROOM REFRESH] Updated {updated} patient room(s) (source={source}).\n")
+            if refreshed_patients:
+                for p in refreshed_patients:
+                    out.write(f"  - {p.get('pat_reg_no')}: {p.get('old_room_no') or '—'} -> {p.get('new_room_no')}\n")
+            out.flush()
+        except Exception:
+            pass
+
+        return {'success': True, 'updated': updated, 'source': source, 'patients': refreshed_patients}
+    except Exception as e:
+        return {'success': False, 'updated': 0, 'error': str(e)}
+
+
 def get_room_sort_key(room_no):
     """
     Returns a sort key tuple (priority, number, original_string) based on hospital room hierarchy:
@@ -4512,7 +4621,33 @@ def final_schedule_api(request):
         except ValueError:
             return JsonResponse({'error': 'Invalid date format'}, status=400)
 
-        # Redirect stdout to capture debug output (for server-side inspection only)
+        # Step 0: Refresh patient staying rooms BEFORE capturing stdout, so it shows in terminal.
+        try:
+            from .models import Booking
+            reg_nos = list(
+                Booking.objects.filter(date=target_date)
+                .values_list('allocation__patient__pat_reg_no', flat=True)
+                .distinct()
+            )
+            room_refresh_result = _refresh_patient_staying_rooms(reg_nos)
+            try:
+                import sys as _sys
+                _out = getattr(_sys, '__stdout__', None) or _sys.stdout
+                _out.write(f"[ROOM REFRESH] final_schedule_api date={date_filter} patients_in_scope={len(reg_nos)} updated={room_refresh_result.get('updated')}\n")
+                _out.flush()
+            except Exception:
+                pass
+        except Exception as e:
+            room_refresh_result = {'success': False, 'updated': 0, 'error': str(e)}
+            try:
+                import sys as _sys
+                _out = getattr(_sys, '__stdout__', None) or _sys.stdout
+                _out.write(f"[ROOM REFRESH] final_schedule_api ERROR: {str(e)}\n")
+                _out.flush()
+            except Exception:
+                pass
+
+        # Redirect stdout to capture debug output (not returned to frontend)
         with redirect_stdout(debug_output_buffer):
             # Step 1: Update emergency leave data via api.py
             try:
@@ -4591,6 +4726,7 @@ def final_schedule_api(request):
                     'message': (allocation_update_result.get('error') or leave_update_result.get('error') or '')[:1000],
                     'stats': {
                         'leave': leave_update_result,
+                        'room_refresh': room_refresh_result,
                         'allocation': allocation_update_result,
                         'nurse_allocation': nurse_allocation_update_result,
                     }
@@ -4645,6 +4781,7 @@ def final_schedule_api(request):
                 'successful': successful,
                 'failed': failed,
                 'leave': leave_update_result,
+                'room_refresh': room_refresh_result,
                 'allocation': alloc_stats,
                 'nurse_allocation': nurse_allocation_result,
             }
@@ -4847,39 +4984,27 @@ def get_therapy_data_api(request):
                 else:
                     bookings = list(base_bookings_qs)
                 
-                # NEW: Bulk filter inactive patients for IP patients
-                if bookings:
+                # Hide inactive patient treatments in *draft* view.
+                # Use shared logic `final_allocation.is_patient_active()` which covers both:
+                # - IP patients (Registration.pat_status == 'Y')
+                # - OP patients (Treatment.Status == 'ON')
+                if status_filter == 'draft' and bookings:
                     try:
-                        from MySql_Data_pull.models import Registration
-                        # Collect all Ip-patient registration numbers
-                        ip_reg_ints = []
+                        from final_allocation import is_patient_active
+                        active_cache = {}
+
+                        filtered_bookings = []
                         for b in bookings:
-                            reg_str = str(b.allocation.patient.pat_reg_no).strip()
-                            digits = ''.join(ch for ch in reg_str if ch.isdigit())
-                            if len(digits) > 5: # IP Patient (Registration table usually only has IPs)
-                                try: ip_reg_ints.append(int(digits))
-                                except: pass
-                        
-                        if ip_reg_ints:
-                            active_regs = set(Registration.objects.using('therapy_db').filter(
-                                pat_reg_no__in=ip_reg_ints,
-                                pat_status='Y' # Only include ACTIVE patients
-                            ).values_list('pat_reg_no', flat=True))
-                            
-                            # Re-filter bookings list
-                            filtered_bookings = []
-                            for b in bookings:
-                                reg_str = str(b.allocation.patient.pat_reg_no).strip()
-                                digits = ''.join(ch for ch in reg_str if ch.isdigit())
-                                # Keep if OP (5 digits) or if Active IP
-                                if len(digits) == 5:
-                                    filtered_bookings.append(b)
-                                elif digits and int(digits) in active_regs:
-                                    filtered_bookings.append(b)
-                            
-                            bookings = filtered_bookings
+                            pat_reg_no = getattr(getattr(b.allocation, 'patient', None), 'pat_reg_no', None)
+                            key = str(pat_reg_no).strip() if pat_reg_no is not None else ''
+                            if key not in active_cache:
+                                active_cache[key] = bool(is_patient_active(pat_reg_no))
+                            if active_cache.get(key, True):
+                                filtered_bookings.append(b)
+                        bookings = filtered_bookings
                     except Exception as e:
-                        print(f"Error filtering inactive patients in therapy API: {e}")
+                        # Fail-open: if external DB checks fail, still return draft data.
+                        print(f"Error filtering inactive patients in therapy API (draft): {e}")
                 
                 from .nurse_allocation import is_nurse_treatment
                 from reshedule import therapist_requirements
@@ -5369,6 +5494,20 @@ def reschedule_therapy_api(request):
             target_date = parse_date(date)
             if not target_date:
                 return JsonResponse({'error': 'Invalid date format. Use YYYY-MM-DD.'}, status=400)
+
+            # Refresh patient staying room before rescheduling (keep algorithm unchanged)
+            try:
+                reg_no = getattr(getattr(allocation, 'patient', None), 'pat_reg_no', None)
+                rr = _refresh_patient_staying_rooms([reg_no] if reg_no else [])
+                try:
+                    import sys as _sys
+                    _out = getattr(_sys, '__stdout__', None) or _sys.stdout
+                    _out.write(f"[ROOM REFRESH] reschedule_therapy_api date={date} pat_reg_no={reg_no} updated={rr.get('updated')}\n")
+                    _out.flush()
+                except Exception:
+                    pass
+            except Exception:
+                pass
             
             # Check if there's a failed booking for this date
             booking = Booking.objects.filter(allocation=allocation, date=target_date).first()
@@ -5495,6 +5634,20 @@ def reschedule_all_failed_api(request):
         ).exclude(
             failure_reason='Patient Inactive'
         ).select_related('allocation', 'allocation__patient')
+
+        # Refresh staying rooms for all patients involved before rescheduling (keep algorithm unchanged)
+        try:
+            reg_nos = list(failed_bookings_qs.values_list('allocation__patient__pat_reg_no', flat=True).distinct())
+            rr = _refresh_patient_staying_rooms(reg_nos)
+            try:
+                import sys as _sys
+                _out = getattr(_sys, '__stdout__', None) or _sys.stdout
+                _out.write(f"[ROOM REFRESH] reschedule_all_failed_api date={date} patients_in_scope={len(reg_nos)} updated={rr.get('updated')}\n")
+                _out.flush()
+            except Exception:
+                pass
+        except Exception:
+            pass
         
         if not failed_bookings_qs.exists():
             return JsonResponse({
