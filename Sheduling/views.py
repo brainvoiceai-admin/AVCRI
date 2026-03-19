@@ -467,6 +467,19 @@ def therapy_entry(request):
                 allocation = TherapyAllocation.objects.get(id=allocation_id)
                 cancel_from_obj = parse_date(cancel_from)
                 cancel_to_obj = parse_date(cancel_to)
+
+                # Guardrail: past dates are never editable; after 5:30 AM (schedule TZ) today is also locked.
+                # If the requested cancel range touches any locked date, block the request (no DB changes).
+                lock_upto_date, first_editable_date = _schedule_lock_upto_date()
+                if cancel_from_obj is None or cancel_to_obj is None:
+                    return JsonResponse({'error': 'invalid_dates'}, status=400)
+                if cancel_from_obj <= lock_upto_date:
+                    return JsonResponse({
+                        'error': 'schedule_locked',
+                        'message': f"Schedules up to {lock_upto_date.isoformat()} are locked. You can only cancel from {first_editable_date.isoformat()} onwards.",
+                        'lock_upto_date': lock_upto_date.isoformat(),
+                        'first_editable_date': first_editable_date.isoformat(),
+                    }, status=400)
                 
                 # Merge with existing cancellations if any
                 if allocation.cancelled_date_from and allocation.cancelled_date_to:
@@ -1501,6 +1514,9 @@ def therapy_entry(request):
                 if not fdate or not tdate or fdate > tdate:
                     return JsonResponse({'error': 'invalid_dates'}, status=400)
 
+                # Schedule lock window: after 5:30 AM (schedule TZ), today is locked (auto-cancel today for NEW therapies).
+                lock_upto_date, first_editable_date = _schedule_lock_upto_date()
+
                 # resolve timeslot (accept "HH:MM" or slot_number)
                 timeslot_obj = None
                 ts_val = payload.get('timeslot') or payload.get('slot') or ''
@@ -1609,10 +1625,15 @@ def therapy_entry(request):
                     }
                     date_status_map = {}  # Maps date to status for detailed breakdown
                     
+                    any_auto_cancelled = False
                     for i in range((tdate - fdate).days + 1):
                         single_date = fdate + timedelta(days=i)
-                        # Initially set all as draft
-                        booking_status = 'draft'
+                        # Default: draft. If date is locked (past, or today after 5:30AM), auto-cancel it.
+                        if single_date <= lock_upto_date:
+                            booking_status = 'cancelled'
+                            any_auto_cancelled = True
+                        else:
+                            booking_status = 'draft'
                         b = Booking.objects.create(allocation=alloc, date=single_date, timeslot=timeslot_obj, room=room_obj, status=booking_status, snapshot_therapy_name=(alloc.therapy_name or '')[:255])
                         created_items = []
                         for grp in payload.get('items_groups', []):
@@ -1643,8 +1664,28 @@ def therapy_entry(request):
                             for t in therapists:
                                 assigns.append(getattr(t,'therapist_code',''))
                         bookings_created.append({'date': single_date.isoformat(), 'booking_id': b.pk, 'items_count': len(created_items), 'therapists': assigns})
-                        date_status_map[single_date.isoformat()] = 'draft'
-                        status_counts['draft'] += 1
+                        date_status_map[single_date.isoformat()] = booking_status
+                        if booking_status in status_counts:
+                            status_counts[booking_status] += 1
+
+                    # If we auto-cancelled any locked date(s), record it at allocation level as well (so UI shows cancellations).
+                    # Current business rule expects: after 5:30 AM, "today" should be auto-cancelled for newly added therapies.
+                    if any_auto_cancelled:
+                        # Only set cancellation range if today is in the allocation range and is locked.
+                        # (Avoid setting cancellation metadata for unrelated future-only therapies.)
+                        if fdate <= lock_upto_date <= tdate:
+                            # Merge with existing cancellation metadata (shouldn't exist for brand-new alloc, but safe).
+                            if alloc.cancelled_date_from and alloc.cancelled_date_to:
+                                alloc.cancelled_date_from = min(alloc.cancelled_date_from, lock_upto_date)
+                                alloc.cancelled_date_to = max(alloc.cancelled_date_to, lock_upto_date)
+                            else:
+                                alloc.cancelled_date_from = lock_upto_date
+                                alloc.cancelled_date_to = lock_upto_date
+                            auto_reason = "Auto-cancelled (schedule locked after 5:30 AM)."
+                            alloc.cancellation_reason = (auto_reason if not alloc.cancellation_reason else (alloc.cancellation_reason + " | " + auto_reason))[:1000]
+                            alloc.cancelled_by = request.user if request.user.is_authenticated else None
+                            alloc.cancelled_at = timezone.now()
+                            alloc.save(update_fields=['cancelled_date_from', 'cancelled_date_to', 'cancellation_reason', 'cancelled_by', 'cancelled_at'])
 
                     # Check which dates have Final Schedule run - run algorithm for those dates immediately
                     # Other dates will remain in draft and can be scheduled via Final Schedule button in dashboard
@@ -1659,6 +1700,9 @@ def therapy_entry(request):
                         # Group dates by Final Schedule status
                         dates_with_final_schedule = []
                         for d in daterange(fdate, tdate):
+                            # Skip locked dates (past and, after 5:30AM, today). They must remain unchanged / cancelled.
+                            if d <= lock_upto_date:
+                                continue
                             if FinalScheduleRun.objects.filter(run_date=d).exists():
                                 dates_with_final_schedule.append(d)
                         
