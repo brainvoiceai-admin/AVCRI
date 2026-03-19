@@ -4984,11 +4984,11 @@ def get_therapy_data_api(request):
                 else:
                     bookings = list(base_bookings_qs)
                 
-                # Hide inactive patient treatments in *draft* view.
-                # Use shared logic `final_allocation.is_patient_active()` which covers both:
-                # - IP patients (Registration.pat_status == 'Y')
-                # - OP patients (Treatment.Status == 'ON')
-                if status_filter == 'draft' and bookings:
+                # Hide inactive patient treatments for:
+                # - draft view in scheduling dashboard, and
+                # - all statuses when include_zero_therapist=true (PDF context for prescription print).
+                # Use shared logic `final_allocation.is_patient_active()` which covers both IP + OP.
+                if bookings and (status_filter == 'draft' or include_zero_therapist):
                     try:
                         from final_allocation import is_patient_active
                         active_cache = {}
@@ -5003,8 +5003,8 @@ def get_therapy_data_api(request):
                                 filtered_bookings.append(b)
                         bookings = filtered_bookings
                     except Exception as e:
-                        # Fail-open: if external DB checks fail, still return draft data.
-                        print(f"Error filtering inactive patients in therapy API (draft): {e}")
+                        # Fail-open: if external DB checks fail, still return data.
+                        print(f"Error filtering inactive patients in therapy API (draft/print): {e}")
                 
                 from .nurse_allocation import is_nurse_treatment
                 from reshedule import therapist_requirements

@@ -223,6 +223,8 @@ def get_prescription_data_api(request):
         change_set = set(change_logs_patients)
 
         # --- PROCESS RESULTS ---
+        # Use shared active/inactive checker (covers both IP + OP)
+        from final_allocation import is_patient_active
         data = []
         for ps in prescriptions_qs:
             patient = ps.patient
@@ -235,6 +237,15 @@ def get_prescription_data_api(request):
                 
             reg_str = str(patient.pat_reg_no).strip()
             digits = reg_to_digits.get(reg_str, '')
+
+            # For draft and scheduled (used in UI and PDF): hide inactive patients (including inactive OP).
+            if status in ['draft', 'scheduled']:
+                try:
+                    if not is_patient_active(reg_str):
+                        continue
+                except Exception:
+                    # Fail-open to avoid breaking dashboard if external DB is temporarily unavailable
+                    pass
             
             # Patient Status Check & Cache Retrieval
             doctor_name = ''
@@ -1054,11 +1065,42 @@ def send_final_prescription_api(request):
         if not draft_prescriptions.exists():
             return JsonResponse({'error': 'No draft or scheduled prescriptions found for the selected date'}, status=400)
         
+        from final_allocation import is_patient_active
+
         with transaction.atomic():
             updated_count = 0
+            cancelled_inactive_count = 0
             sent_to_departments = []
             
             for prescription_scheduling in draft_prescriptions:
+                # Inactive patients: auto-cancel for this date; do not schedule/send.
+                patient_reg_no = getattr(prescription_scheduling.patient, 'pat_reg_no', None)
+                try:
+                    if not is_patient_active(patient_reg_no):
+                        previous_status = prescription_scheduling.status
+                        prescription_scheduling.status = 'cancelled'
+                        prescription_scheduling.sent_to = None
+                        prescription_scheduling.scheduled_by = request.user
+                        prescription_scheduling.save(update_fields=['status', 'sent_to', 'scheduled_by', 'updated_at'])
+
+                        PrescriptionChangeLog.objects.create(
+                            patient=prescription_scheduling.patient,
+                            prescription_date=filter_date,
+                            action='status_change',
+                            changed_by=request.user,
+                            before_values={'status': previous_status},
+                            after_values={
+                                'status': 'cancelled',
+                                'reason': 'Patient inactive - auto-cancelled during final schedule'
+                            },
+                            description=f'Prescription auto-cancelled for inactive patient on {filter_date}'
+                        )
+                        cancelled_inactive_count += 1
+                        continue
+                except Exception:
+                    # If active check fails unexpectedly, do not auto-cancel; proceed with current flow.
+                    pass
+
                 # Find ALL allocations that cover this date (capture everything active)
                 active_allocations_for_date = PrescriptionAllocation.objects.filter(
                     patient=prescription_scheduling.patient,
@@ -1145,6 +1187,7 @@ def send_final_prescription_api(request):
                         'message': f'Prescription Final Schedule generated for {updated_count} prescriptions.',
                         'stats': {
                             'updated_count': updated_count,
+                            'cancelled_inactive_count': cancelled_inactive_count,
                             'departments': sent_to_departments,
                             'source': 'prescription_scheduling'
                         }
@@ -1168,6 +1211,7 @@ def send_final_prescription_api(request):
                         'module': 'prescription_scheduling',
                         'date': filter_date.isoformat(),
                         'updated_count': updated_count,
+                        'cancelled_inactive_count': cancelled_inactive_count,
                         'departments': sent_to_departments,
                     },
                     request=request,
@@ -1177,8 +1221,9 @@ def send_final_prescription_api(request):
         
         return JsonResponse({
             'success': True,
-            'message': f'Successfully sent {updated_count} prescriptions to {", ".join(sent_to_departments)}',
+            'message': f'Successfully sent {updated_count} prescriptions to {", ".join(sent_to_departments)}. Auto-cancelled {cancelled_inactive_count} inactive patient prescription(s).',
             'updated_count': updated_count,
+            'cancelled_inactive_count': cancelled_inactive_count,
             'departments': sent_to_departments
         })
         
