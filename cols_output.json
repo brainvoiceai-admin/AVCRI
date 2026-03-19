@@ -1,0 +1,1 @@
+[["Pat_Reg_No", "decimal"], ["Pat_Visit_Date", "datetime"], ["Pat_Disch_Date", "datetime"], ["Pat_User", "varchar"], ["Pat_User_Date", "datetime"]]

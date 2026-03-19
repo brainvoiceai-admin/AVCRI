@@ -1701,10 +1701,37 @@ $(function () {
     if (!p) return;
 
     const isOn = $toggle.is(':checked');
-    const message = isOn ? 'resuming' : 'cancelling';
 
+    if (!isOn) {
+      // Show modal for reason
+      $('#toggle-reason-input').val('');
+      $('#toggle-reason-error').hide();
+      $('#toggle-reason-modal-backdrop').show();
+
+      // Clean up previous event handlers to avoid multiple calls
+      $('#toggle-reason-confirm').off('click').on('click', function() {
+        const reasonForToggle = $('#toggle-reason-input').val().trim();
+        if (!reasonForToggle) {
+          $('#toggle-reason-error').show();
+          return;
+        }
+        $('#toggle-reason-modal-backdrop').hide();
+        executeToggleStatus(p, isOn, reasonForToggle, $toggle);
+      });
+
+      $('#toggle-reason-cancel').off('click').on('click', function() {
+        $('#toggle-reason-modal-backdrop').hide();
+        $toggle.prop('checked', true); // Revert UI
+      });
+    } else {
+      executeToggleStatus(p, isOn, '', $toggle);
+    }
+  });
+
+  function executeToggleStatus(p, isOn, reasonForToggle, $toggle) {
+    const message = isOn ? 'resuming' : 'cancelling';
     $toggle.prop('disabled', true);
-    
+
     fetch(API_URL + '?action=toggle_prescription_status', {
       method: 'POST',
       headers: { 
@@ -1713,7 +1740,8 @@ $(function () {
       },
       body: JSON.stringify({
         allocation_id: p.id,
-        turn_on: isOn
+        turn_on: isOn,
+        reason: reasonForToggle
       })
     })
     .then(r => {
@@ -1753,7 +1781,7 @@ $(function () {
     .finally(() => {
       $toggle.prop('disabled', false);
     });
-  });
+  }
 
   // Edit prescription
   $prescriptionsTableBody.on('click', '.edit-prescription', function () {
