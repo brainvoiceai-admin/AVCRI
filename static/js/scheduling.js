@@ -1782,7 +1782,7 @@ function generateTherapyPDF(therapyData, date) {
         }
 
         const { jsPDF } = window.jspdf;
-        const doc = new jsPDF('p', 'mm', 'a4');
+        const doc = new jsPDF('l', 'mm', 'a4');
 
         const pageWidth = doc.internal.pageSize.getWidth();
         const pageHeight = doc.internal.pageSize.getHeight();
@@ -1987,11 +1987,13 @@ function generateTherapyPDF(therapyData, date) {
                     ];
                 });
 
-                // Generate table for this slot with custom cell styling for senior therapists
+                // Generate table for this slot with custom cell styling for senior therapists (landscape)
                 const columnStyles = {
-                    4: { // Therapist Assigned column
-                        cellWidth: 50,
-                    }
+                    0: { cellWidth: 28 },
+                    1: { cellWidth: 42 },
+                    2: { cellWidth: 22 },
+                    3: { cellWidth: 52 },
+                    4: { cellWidth: 'auto' },
                 };
 
                 // Custom cell styling function to highlight senior therapists
@@ -2119,6 +2121,13 @@ function generateTherapyPDF(therapyData, date) {
                 },
                 alternateRowStyles: {
                     fillColor: [240, 253, 244], // Light green alternate rows
+                },
+                columnStyles: {
+                    0: { cellWidth: 28 },
+                    1: { cellWidth: 40 },
+                    2: { cellWidth: 52 },
+                    3: { cellWidth: 28 },
+                    4: { cellWidth: 'auto' },
                 },
                 didDrawPage: function (data) {
                     // Calculate actual page number: nurseTableStartPage is the page we're starting on

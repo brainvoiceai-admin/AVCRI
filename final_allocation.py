@@ -1914,6 +1914,23 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
 
         # preferred slot only
         pref_slot = getattr(booking, 'timeslot', None) or getattr(allocation, 'timeslot', None)
+        # Vasthi therapy group (masters), except Mathra THEB037: final schedule must use 08:30 only
+        try:
+            from reshedule import is_group_vasthi_0830_only
+            if is_group_vasthi_0830_only(therapy_name, getattr(allocation, 'therapy_code', None)):
+                sm0830 = SlotMaster.objects.filter(
+                    slot_time=datetime.strptime('08:30', '%H:%M').time(),
+                    is_active=True,
+                ).first()
+                if sm0830:
+                    pref_slot = sm0830
+                    if create_bookings and getattr(booking, 'timeslot_id', None) != sm0830.id:
+                        booking.timeslot = sm0830
+                        booking.save(update_fields=['timeslot', 'updated_at'])
+                else:
+                    print('[VASTHI GROUP] Final schedule: no active SlotMaster for 08:30')
+        except Exception as _gv_e:
+            print(f'[VASTHI GROUP] Final schedule slot rule skipped: {_gv_e}')
         requested_slot_value = None
         if pref_slot:
             st = getattr(pref_slot, 'start_time', None)

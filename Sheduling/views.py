@@ -1648,6 +1648,30 @@ def therapy_entry(request):
                     if timeslot_obj is None and SlotMaster is not None and ts_val:
                         return JsonResponse({'error': 'timeslot_not_found', 'timeslot': ts_val}, status=400)
 
+                # Vasthi therapy group (masters), except Mathra THEB037: must use 08:30 only
+                try:
+                    from Sheduling.nurse_allocation import is_nurse_treatment
+                    from reshedule import is_group_vasthi_0830_only
+                    if (
+                        not is_nurse_treatment(payload.get('therapy_code'), payload.get('therapy_name'))
+                        and is_group_vasthi_0830_only(payload.get('therapy_name'), payload.get('therapy_code'))
+                    ):
+                        from_time_0830 = datetime.strptime('08:30', '%H:%M').time()
+                        if SlotMaster is not None:
+                            slot0830 = SlotMaster.objects.filter(slot_time=from_time_0830, is_active=True).first()
+                            if slot0830:
+                                timeslot_obj = slot0830
+                            else:
+                                return JsonResponse(
+                                    {
+                                        'error': 'vasthi_group_requires_0830',
+                                        'message': 'Therapies in the Vasthi therapy group require 08:30; no active 08:30 SlotMaster',
+                                    },
+                                    status=400,
+                                )
+                except Exception:
+                    pass
+
                 # room resolution (optional)
                 room_obj = None
                 room_no = payload.get('room_no') or payload.get('room')
@@ -3911,6 +3935,26 @@ def allocate_therapy(request):
             t = parse_time_hhmm(payload["timeslot"])
             if t:
                 timeslot = SlotMaster.objects.filter(slot_time=t, is_active=True).first()
+
+    # Vasthi therapy group (masters), except Mathra THEB037: must use 08:30 only
+    if not nurse_treatment:
+        try:
+            from reshedule import is_group_vasthi_0830_only
+            if is_group_vasthi_0830_only(payload.get("therapy_name"), payload.get("therapy_code")):
+                t0830 = parse_time_hhmm("08:30")
+                slot0830 = SlotMaster.objects.filter(slot_time=t0830, is_active=True).first() if t0830 else None
+                if slot0830:
+                    timeslot = slot0830
+                else:
+                    return JsonResponse(
+                        {
+                            "error": "vasthi_group_requires_0830",
+                            "message": "Therapies in the Vasthi therapy group require 08:30; SlotMaster for 08:30 not found",
+                        },
+                        status=400,
+                    )
+        except Exception:
+            pass
 
     # room (optional for both regular and nurse treatments)
     room = None

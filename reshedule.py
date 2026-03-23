@@ -613,7 +613,49 @@ def _slot_time_value(slot_obj):
     return getattr(slot_obj, 'slot_time', None) or getattr(slot_obj, 'start_time', None)
 
 
-def get_allowed_slot_values(patient_type, therapy_category, used_slots=None, therapy_name=None):
+# Mathra Vasthi (THEB037) is exempt from the Vasthi therapy-group 08:30-only rule.
+GROUP_VASTHI_MATHRA_THERAPY_CODE = "THEB037"
+# masters.TherapyGroup.name (normalized) for therapies that may use only the 08:30 slot
+VASTHI_THERAPY_GROUP_NAME_NORMALIZED = "vasthi"
+
+
+def is_group_vasthi_0830_only(therapy_name, therapy_code=None):
+    """
+    True when therapy must be scheduled only at 08:30 (final schedule / reschedule / slot lists).
+
+    Applies when TherapyMaster links the therapy to a Therapy Group whose name is 'Vasthi'
+    (case-insensitive), as defined in masters. Exempt: therapy_code THEB037 (Mathra Vasthi).
+
+    Looks up TherapyMaster by therapy_code first; if missing, falls back to therapy_name__iexact.
+    """
+    code = (therapy_code or "").strip().upper()
+    if code == GROUP_VASTHI_MATHRA_THERAPY_CODE:
+        return False
+    try:
+        from masters.models import TherapyMaster
+
+        tm = None
+        if therapy_code:
+            tm = (
+                TherapyMaster.objects.filter(therapy_code=str(therapy_code).strip())
+                .select_related("therapy_group")
+                .first()
+            )
+        if not tm and therapy_name:
+            tm = (
+                TherapyMaster.objects.filter(therapy_name__iexact=str(therapy_name).strip())
+                .select_related("therapy_group")
+                .first()
+            )
+        if not tm or not getattr(tm, "therapy_group_id", None):
+            return False
+        gname = (tm.therapy_group.name or "").strip().lower()
+        return gname == VASTHI_THERAPY_GROUP_NAME_NORMALIZED
+    except Exception:
+        return False
+
+
+def get_allowed_slot_values(patient_type, therapy_category, used_slots=None, therapy_name=None, therapy_code=None):
     """
     Return ordered list of allowed slot strings "HH:MM" for this patient_type and therapy_category.
     Excludes any used_slots provided (list of slot model instances).
@@ -623,6 +665,7 @@ def get_allowed_slot_values(patient_type, therapy_category, used_slots=None, the
         therapy_category: Therapy category (easy/medium/hard/special)
         used_slots: List of slot model instances that are already used
         therapy_name: Name of the therapy (for treatment-specific restrictions)
+        therapy_code: Therapy code (master lookup + THEB037 exemption)
     """
     general_slots = ["06:30","08:30","10:00","11:30","14:30","16:00","17:30"]
 
@@ -657,6 +700,13 @@ def get_allowed_slot_values(patient_type, therapy_category, used_slots=None, the
             # Remove 06:30 from allowed slots for Lepam
             allowed_slots = [s for s in allowed_slots if s != "06:30"]
             print(f"[SLOT RESTRICTION] Lepam treatment detected - excluding 06:30 slot. Allowed slots: {allowed_slots}")
+
+    # Vasthi therapy group (masters.TherapyGroup name 'Vasthi'), except THEB037: only 08:30
+    if is_group_vasthi_0830_only(therapy_name, therapy_code):
+        allowed_slots = [s for s in allowed_slots if s == "08:30"]
+        if not allowed_slots:
+            allowed_slots = ["08:30"]
+        print(f"[SLOT RESTRICTION] Vasthi therapy group — only 08:30 allowed. Slots: {allowed_slots}")
 
     # remove any used slots (used_slots is list of slot model instances; use slot_time for SlotMaster)
     if used_slots:
@@ -3323,7 +3373,13 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
             # No preferred -> use automatic slot allocation immediately (do not fail early)
             # Prepare allowed slots for this patient (OP/IP aware)
             therapy_req = therapist_requirements(allocation)
-            allowed_slot_values = get_allowed_slot_values(patient_type, therapy_req.get("therapy_category"), used_slots, therapy_name)
+            allowed_slot_values = get_allowed_slot_values(
+                patient_type,
+                therapy_req.get("therapy_category"),
+                used_slots,
+                therapy_name,
+                getattr(allocation, "therapy_code", None),
+            )
             allocated_here = False
             
             # TIER 1: Try slots WITH continuity (if continuity exists)
@@ -3399,7 +3455,8 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
 
         # if preferred exists -> try preferred first
         canonical_pref = map_to_canonical_slot(pref_slot) or pref_slot
-        
+        preferred_rejected_reason = None
+
         # RESTRICTION: Check if preferred slot is 06:30 for Lepam treatment - reject it
         if therapy_name and canonical_pref:
             therapy_name_lower = str(therapy_name).strip().lower()
@@ -3411,20 +3468,41 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                         if pref_slot_str == "06:30":
                             print(f"[SLOT RESTRICTION] Lepam treatment cannot use 06:30 slot. Rejecting preferred slot and trying alternatives.")
                             canonical_pref = None  # Force fallback to automatic slot allocation
+                            preferred_rejected_reason = "lepam_cannot_use_0630_slot"
                 except Exception as e:
                     print(f"[SLOT RESTRICTION] Error checking preferred slot for Lepam: {e}")
+
+        # Vasthi therapy group (except Mathra THEB037): force allocation attempts to 08:30 only
+        if is_group_vasthi_0830_only(therapy_name, getattr(allocation, "therapy_code", None)):
+            try:
+                t0830 = datetime.strptime("08:30", "%H:%M").time()
+                sm = SlotMaster.objects.filter(slot_time=t0830, is_active=True).first()
+                if sm:
+                    cur_t = None
+                    if canonical_pref:
+                        cur_t = getattr(canonical_pref, "slot_time", None) or getattr(canonical_pref, "start_time", None)
+                    if cur_t != t0830:
+                        canonical_pref = sm
+                        preferred_rejected_reason = None
+                        print("[SLOT RESTRICTION] Vasthi therapy group: normalized preferred slot to 08:30")
+                else:
+                    canonical_pref = None
+                    preferred_rejected_reason = "group_vasthi_no_0830_slotmaster"
+                    print("[SLOT RESTRICTION] Vasthi therapy group: no active SlotMaster for 08:30")
+            except Exception as e:
+                print(f"[SLOT RESTRICTION] Vasthi therapy group preferred-slot normalization error: {e}")
 
         therapy_req = therapist_requirements(allocation)
         needs_room_flag = therapy_needs_room(allocation)
         needs_bath_flag = therapy_needs_bath(allocation)
 
-        # If preferred slot was rejected for Lepam (canonical_pref is None), skip attempting it
+        # If preferred slot was rejected (e.g. Lepam at 06:30, or Vasthi group with no 08:30 master), skip attempting it
         if not canonical_pref:
             # Force fallback to automatic slot allocation
             task = None
             success = False
-            reason = "lepam_cannot_use_0630_slot"
-            print(f"[SLOT RESTRICTION] Lepam treatment: Preferred slot 06:30 rejected. Will try alternate slots.")
+            reason = preferred_rejected_reason or "no_preferred_slot"
+            print(f"[SLOT RESTRICTION] Skipping preferred slot attempt (reason={reason}). Will try alternate slots where applicable.")
         else:
             task, success, reason = attempt_allocate_slot(allocation, booking, target_date, canonical_pref, therapy_req, needs_room_flag, needs_bath_flag, used_slots, create_bookings, patient_id, last_allocation, AllocationAttempt)
         
@@ -3481,7 +3559,13 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
             
             if should_try_fallback:
                 # attempt other allowed slots (OP/IP aware)
-                allowed_slot_values = get_allowed_slot_values(patient_type, therapy_req.get("therapy_category"), used_slots, therapy_name)
+                allowed_slot_values = get_allowed_slot_values(
+                    patient_type,
+                    therapy_req.get("therapy_category"),
+                    used_slots,
+                    therapy_name,
+                    getattr(allocation, "therapy_code", None),
+                )
                 print(f"[DEBUG Reschedule] Allowed slot values for patient_type={patient_type}, category={therapy_req.get('therapy_category')}: {allowed_slot_values}")
                 
                 # remove preferred if present
