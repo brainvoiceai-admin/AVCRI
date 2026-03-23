@@ -1464,7 +1464,7 @@ def friendly_label(slot_str):
     except:
         return slot_str
 
-def compute_available_slots_for_date(date_obj, therapy_name, patient_type):
+def compute_available_slots_for_date(date_obj, therapy_name, patient_type, therapy_code=None):
     """
     Returns list of {"value":"HH:MM","label":"H:MM AM/PM"} available on date_obj.
     Respects:
@@ -1488,6 +1488,15 @@ def compute_available_slots_for_date(date_obj, therapy_name, patient_type):
 
     if therapy_category in ["hard", "special"]:
         candidate_slots = [s for s in candidate_slots if s not in ["11:30", "17:30"]]
+
+    try:
+        from reshedule import is_group_vasthi_0830_only
+        if is_group_vasthi_0830_only(therapy_name, therapy_code):
+            candidate_slots = [s for s in candidate_slots if s == "08:30"]
+            if not candidate_slots:
+                candidate_slots = ["08:30"]
+    except Exception:
+        pass
 
     def requirements_from_details(det):
         if not det:
@@ -1581,10 +1590,11 @@ def available_slots(request):
       - date=YYYY-MM-DD  => {"slots":[...]}
       - from_date=YYYY-MM-DD&to_date=YYYY-MM-DD => {"dates":[{"date":"YYYY-MM-DD","slots":[...]}]}
     Required: therapy_name param
-    Optional: patient_type (IP/OP)
+    Optional: patient_type (IP/OP), therapy_code (recommended for Therapy Master lookup; THEB037 exempt from Vasthi-group 08:30 rule)
     """
     therapy_name = request.GET.get("therapy_name", "").strip()
     patient_type = request.GET.get("patient_type", "").strip().upper()
+    therapy_code = request.GET.get("therapy_code", "").strip() or None
 
     if not therapy_name:
         return JsonResponse({"error":"therapy_name is required"}, status=400)
@@ -1598,7 +1608,7 @@ def available_slots(request):
             date_obj = datetime.strptime(date_str, "%Y-%m-%d").date()
         except Exception:
             return JsonResponse({"error":"invalid date format for 'date', expected YYYY-MM-DD"}, status=400)
-        slots = compute_available_slots_for_date(date_obj, therapy_name, patient_type)
+        slots = compute_available_slots_for_date(date_obj, therapy_name, patient_type, therapy_code)
         return JsonResponse({"slots": slots})
 
     if from_date_str:
@@ -1626,7 +1636,7 @@ def available_slots(request):
         result_dates = []
         cur = from_date_obj
         while cur <= to_date_obj:
-            slots = compute_available_slots_for_date(cur, therapy_name, patient_type)
+            slots = compute_available_slots_for_date(cur, therapy_name, patient_type, therapy_code)
             result_dates.append({"date": cur.isoformat(), "slots": slots})
             cur = cur + timedelta(days=1)
 

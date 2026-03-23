@@ -89,7 +89,7 @@
                                 style="padding: 8px 18px; white-space: nowrap; display: flex; align-items: center; gap: 6px;">
                                 <span style="font-size: 16px;">📊</span> Export Draft
                             </button>
-                            <button class="btn btn-secondary" id="export-draft-pdf" title="Export draft therapies to PDF"
+                            <button class="btn btn-secondary" id="export-draft-pdf" title="Download draft therapy PDF for the selected date"
                                 style="padding: 8px 18px; white-space: nowrap; display: flex; align-items: center; gap: 6px;">
                                 <span style="font-size: 16px;">🖨️</span> Export PDF
                             </button>
@@ -1120,115 +1120,6 @@
                 filename += '.xlsx';
 
                 XLSX.writeFile(wb, filename);
-            });
-        });
-    </script>
-    <script>
-        // Draft Therapies export (Therapist + Nurse tables) to PDF
-        document.addEventListener('DOMContentLoaded', function () {
-            const draftPdfBtn = document.getElementById('export-draft-pdf');
-            if (!draftPdfBtn) return;
-
-            draftPdfBtn.addEventListener('click', function () {
-                const hasJsPdf = window.jspdf && window.jspdf.jsPDF;
-                if (!hasJsPdf) {
-                    alert('PDF library not loaded.');
-                    return;
-                }
-
-                const therapistTable = document.getElementById('draft-therapist-table');
-                const nurseTable = document.getElementById('draft-nurse-table');
-
-                function tableToHeadBody(tableEl) {
-                    if (!tableEl) return null;
-
-                    const headerRow = tableEl.querySelector('thead tr');
-                    const head = headerRow
-                        ? [Array.from(headerRow.querySelectorAll('th')).map(th => (th.innerText || '').trim())]
-                        : [];
-
-                    const body = [];
-                    const bodyRows = tableEl.querySelectorAll('tbody tr');
-                    if (!bodyRows.length) return { head, body };
-
-                    // Empty state check
-                    if (bodyRows.length === 1) {
-                        const onlyCell = bodyRows[0].querySelector('td');
-                        if (onlyCell && onlyCell.classList.contains('empty-state')) {
-                            return { head, body };
-                        }
-                    }
-
-                    bodyRows.forEach(tr => {
-                        const cells = Array.from(tr.querySelectorAll('td')).map(td => (td.innerText || '').trim());
-                        if (cells.length) body.push(cells);
-                    });
-
-                    return { head, body };
-                }
-
-                const therapist = tableToHeadBody(therapistTable);
-                const nurse = tableToHeadBody(nurseTable);
-
-                const hasTherapistData = therapist && therapist.body && therapist.body.length > 0;
-                const hasNurseData = nurse && nurse.body && nurse.body.length > 0;
-
-                if (!hasTherapistData && !hasNurseData) {
-                    alert('No draft therapies to export for the selected filters.');
-                    return;
-                }
-
-                const draftDate = document.getElementById('draft-date')?.value || '';
-
-                const doc = new window.jspdf.jsPDF('l', 'pt', 'a4');
-                if (typeof doc.autoTable !== 'function') {
-                    alert('PDF table export library not loaded.');
-                    return;
-                }
-                const pageWidth = doc.internal.pageSize.getWidth();
-
-                function addTitle(title) {
-                    doc.setFont('helvetica', 'bold');
-                    doc.setFontSize(14);
-                    doc.text(title, pageWidth / 2, 26, { align: 'center' });
-                    if (draftDate) {
-                        doc.setFont('helvetica', 'normal');
-                        doc.setFontSize(10);
-                        doc.text('Date: ' + draftDate, pageWidth / 2, 42, { align: 'center' });
-                    }
-                }
-
-                let started = false;
-                if (hasTherapistData) {
-                    addTitle('Draft Therapies — Therapist Treatments');
-                    doc.autoTable({
-                        head: therapist.head,
-                        body: therapist.body,
-                        startY: 54,
-                        styles: { fontSize: 9, cellPadding: 4, overflow: 'linebreak' },
-                        headStyles: { fillColor: [37, 99, 235] },
-                        margin: { left: 18, right: 18 },
-                    });
-                    started = true;
-                }
-
-                if (hasNurseData) {
-                    if (started) doc.addPage();
-                    addTitle('Draft Therapies — Nurse Treatments');
-                    doc.autoTable({
-                        head: nurse.head,
-                        body: nurse.body,
-                        startY: 54,
-                        styles: { fontSize: 9, cellPadding: 4, overflow: 'linebreak' },
-                        headStyles: { fillColor: [16, 185, 129] },
-                        margin: { left: 18, right: 18 },
-                    });
-                }
-
-                let filename = 'Draft_Therapies';
-                if (draftDate) filename += '_' + draftDate.replace(/-/g, '');
-                filename += '.pdf';
-                doc.save(filename);
             });
         });
     </script>

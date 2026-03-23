@@ -226,6 +226,11 @@ function setupEventListeners() {
         printTherapyScheduleToPDF();
     });
 
+    const exportDraftPdfBtn = document.getElementById('export-draft-pdf');
+    if (exportDraftPdfBtn) {
+        exportDraftPdfBtn.addEventListener('click', exportDraftTherapyTimeslotPDF);
+    }
+
     // Individual reschedule buttons (schedule buttons removed)
     document.addEventListener('click', function (e) {
         // Use closest to handle clicks on button children (text, icons, etc.)
@@ -1392,6 +1397,344 @@ function generateTherapyExcel(therapyData, date, patientFilter) {
     XLSX.writeFile(wb, filename);
 }
 
+function draftItemMatchesSearch(item, q) {
+    if (!q) return true;
+    const patient = (item.patient_name || '').toLowerCase();
+    const therapy = (item.therapy_name || '').toLowerCase();
+    const regno = String(item.patient_reg_no || '').toLowerCase();
+    return patient.includes(q) || therapy.includes(q) || regno.includes(q);
+}
+
+function formatDateDMYForDraftPdf(iso) {
+    if (!iso) return '—';
+    const p = String(iso).split('T')[0].split('-');
+    if (p.length !== 3) return String(iso);
+    return `${p[2]}-${p[1]}-${p[0]}`;
+}
+
+function draftWardCategoryFromRoom(roomNo) {
+    const s = String(roomNo || '').trim().toUpperCase().replace(/[^A-Z0-9-]/g, '');
+    if (!s) return 'Other';
+    if (s.startsWith('CT')) return 'Cottage';
+    if (s.startsWith('DS')) return 'Deluxe Suite';
+    if (s.startsWith('NR')) return 'Normal Room';
+    if (s.startsWith('FG')) return 'Female Ward';
+    if (s.startsWith('MG')) return 'Male Ward';
+    if (s.startsWith('OP')) return 'OP Ward';
+    if (s.startsWith('CB')) return 'Cabin';
+    return 'Other';
+}
+
+const DRAFT_WARD_ORDER = {
+    Cottage: 1,
+    'Deluxe Suite': 2,
+    'Normal Room': 3,
+    'Female Ward': 4,
+    'Male Ward': 5,
+    'OP Ward': 6,
+    Cabin: 7,
+    Other: 99,
+};
+
+function normalizeDraftSexLabel(patSex) {
+    const x = String(patSex || '').trim().toUpperCase();
+    if (!x) return 'Other';
+    if (x.startsWith('F')) return 'Female';
+    if (x.startsWith('M')) return 'Male';
+    return 'Other';
+}
+
+function exportDraftTherapyTimeslotPDF() {
+    const draftDate = document.getElementById('draft-date')?.value;
+    if (!draftDate) {
+        alert('Please select a date for draft therapies first.');
+        return;
+    }
+    if (typeof window.jspdf === 'undefined') {
+        alert('PDF library not loaded. Please refresh the page.');
+        return;
+    }
+    const searchQ = (document.getElementById('draft-search')?.value || '').trim().toLowerCase();
+    const btn = document.getElementById('export-draft-pdf');
+    const originalHtml = btn ? btn.innerHTML : '';
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<span>⏳</span> Generating...';
+    }
+    fetch(`/sheduling/scheduling/api/therapy-data/?status=draft&date=${encodeURIComponent(draftDate)}`)
+        .then(r => r.json())
+        .then(data => {
+            if (btn) {
+                btn.disabled = false;
+                btn.innerHTML = originalHtml;
+            }
+            if (!data.success) {
+                alert(data.error || 'Could not load draft therapies.');
+                return;
+            }
+            let rows = data.data || [];
+            if (searchQ) {
+                rows = rows.filter(it => draftItemMatchesSearch(it, searchQ));
+            }
+            generateDraftTherapyTimeslotPDF(rows, draftDate);
+        })
+        .catch(err => {
+            if (btn) {
+                btn.disabled = false;
+                btn.innerHTML = originalHtml;
+            }
+            alert('Error generating PDF: ' + err.message);
+        });
+}
+
+function generateDraftTherapyTimeslotPDF(therapyData, dateIso) {
+    try {
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF('l', 'mm', 'a4');
+        if (typeof doc.autoTable !== 'function') {
+            alert('PDF table plugin not loaded.');
+            return;
+        }
+
+        const pageWidth = doc.internal.pageSize.getWidth();
+        const pageHeight = doc.internal.pageSize.getHeight();
+        const margin = 12;
+        let yPos = margin;
+        let currentPage = 1;
+
+        const NO_SLOT_KEY = '—';
+
+        const unique = [];
+        const seen = new Set();
+        (therapyData || []).forEach(item => {
+            const bid = item.booking_id || item.id;
+            if (seen.has(bid)) return;
+            seen.add(bid);
+            unique.push(item);
+        });
+
+        const nurseRows = [];
+        const therapistRows = [];
+        unique.forEach(item => {
+            const nurseFlag = item.is_nurse_treatment === true || item.is_nurse_treatment === 'true';
+            if (nurseFlag) nurseRows.push(item);
+            else therapistRows.push(item);
+        });
+
+        if (therapistRows.length === 0 && nurseRows.length === 0) {
+            alert('No draft therapies to export for the selected filters.');
+            return;
+        }
+
+        const scheduleLabel = formatDateDMYForDraftPdf(dateIso);
+
+        function addFooterPage(pageNum) {
+            doc.setFontSize(8);
+            doc.setFont(undefined, 'normal');
+            doc.text(`Page ${pageNum}`, pageWidth / 2, pageHeight - 8, { align: 'center' });
+            doc.text(scheduleLabel, margin, pageHeight - 8);
+        }
+
+        function checkNewPage(neededMm) {
+            if (yPos + neededMm > pageHeight - 12) {
+                addFooterPage(currentPage);
+                doc.addPage();
+                currentPage++;
+                yPos = margin;
+                return true;
+            }
+            return false;
+        }
+
+        function drawReportHeader() {
+            doc.setFontSize(12);
+            doc.setFont(undefined, 'bold');
+            doc.text('Draft therapy', pageWidth / 2, yPos, { align: 'center' });
+            yPos += 6;
+            doc.setFontSize(10);
+            doc.text(scheduleLabel, pageWidth / 2, yPos, { align: 'center' });
+            yPos += 5;
+            doc.setFontSize(7);
+            doc.setFont(undefined, 'normal');
+            doc.setTextColor(60, 60, 60);
+            doc.text(
+                'Treatment | Patient | Room No | From Date | To Date',
+                pageWidth / 2,
+                yPos,
+                { align: 'center' }
+            );
+            doc.setTextColor(0, 0, 0);
+            yPos += 5;
+            doc.setLineWidth(0.2);
+            doc.line(margin, yPos, pageWidth - margin, yPos);
+            yPos += 5;
+        }
+
+        drawReportHeader();
+
+        function sortItemsInGroup(arr) {
+            return arr.slice().sort((a, b) => {
+                const roomA = a.patient_room_no || a.room_no || '';
+                const roomB = b.patient_room_no || b.room_no || '';
+                const rc = compareRooms(roomA, roomB);
+                if (rc !== 0) return rc;
+                return (a.patient_name || '').localeCompare(b.patient_name || '');
+            });
+        }
+
+        const slotGroups = {};
+        therapistRows.forEach(item => {
+            const raw = item.timeslot;
+            const slot = raw && String(raw).trim() && String(raw) !== '00:00' ? String(raw) : NO_SLOT_KEY;
+            if (!slotGroups[slot]) slotGroups[slot] = [];
+            slotGroups[slot].push(item);
+        });
+
+        const sortedSlots = Object.keys(slotGroups).sort((a, b) => {
+            if (a === NO_SLOT_KEY) return 1;
+            if (b === NO_SLOT_KEY) return -1;
+            const ta = a.split(':').map(Number);
+            const tb = b.split(':').map(Number);
+            const ma = (ta[0] || 0) * 60 + (ta[1] || 0);
+            const mb = (tb[0] || 0) * 60 + (tb[1] || 0);
+            return ma - mb;
+        });
+
+        const sexOrder = ['Female', 'Male', 'Other'];
+
+        sortedSlots.forEach((slot, slotIdx) => {
+            const items = sortItemsInGroup(slotGroups[slot]);
+            checkNewPage(18);
+            doc.setFontSize(10);
+            doc.setFont(undefined, 'bold');
+            const slotLabel = slot === NO_SLOT_KEY ? 'No time slot' : format12Hour(slot);
+            doc.text(`Time: ${slotLabel}`, margin, yPos);
+            yPos += 5;
+
+            sexOrder.forEach(sexLabel => {
+                const sexItems = items.filter(it => normalizeDraftSexLabel(it.patient_sex) === sexLabel);
+                if (!sexItems.length) return;
+                checkNewPage(12);
+                doc.setFontSize(9);
+                doc.setFont(undefined, 'bold');
+                doc.text(sexLabel, margin + 2, yPos);
+                yPos += 4;
+
+                const byWard = {};
+                sexItems.forEach(it => {
+                    const roomDisp = it.patient_room_no || it.room_no || '';
+                    const w = draftWardCategoryFromRoom(roomDisp);
+                    if (!byWard[w]) byWard[w] = [];
+                    byWard[w].push(it);
+                });
+                const wards = Object.keys(byWard).sort(
+                    (a, b) => (DRAFT_WARD_ORDER[a] || 99) - (DRAFT_WARD_ORDER[b] || 99)
+                );
+
+                wards.forEach(ward => {
+                    const wardItems = sortItemsInGroup(byWard[ward]);
+                    checkNewPage(14);
+                    doc.setFontSize(8);
+                    doc.setFont(undefined, 'bold');
+                    doc.setTextColor(55, 65, 81);
+                    doc.text(ward, margin + 4, yPos);
+                    yPos += 3.5;
+                    doc.setTextColor(0, 0, 0);
+
+                    const body = wardItems.map(it => [
+                        it.therapy_name || '—',
+                        it.patient_name || '—',
+                        it.patient_room_no || it.room_no || '—',
+                        formatDateDMYForDraftPdf(it.from_date),
+                        formatDateDMYForDraftPdf(it.to_date),
+                    ]);
+
+                    const tableStartPage = doc.internal.getNumberOfPages();
+                    doc.autoTable({
+                        head: [['Treatment', 'Patient', 'Room No', 'From Date', 'To Date']],
+                        body: body,
+                        startY: yPos,
+                        margin: { left: margin, right: margin },
+                        styles: { fontSize: 7, cellPadding: 1.2, overflow: 'linebreak' },
+                        headStyles: { fillColor: [71, 85, 105], fontSize: 7 },
+                        alternateRowStyles: { fillColor: [248, 250, 252] },
+                        columnStyles: {
+                            0: { cellWidth: 72 },
+                            1: { cellWidth: 52 },
+                            2: { cellWidth: 22 },
+                            3: { cellWidth: 28 },
+                            4: { cellWidth: 'auto' },
+                        },
+                        didDrawPage: (data) => {
+                            const actual = tableStartPage + data.pageNumber - 1;
+                            addFooterPage(actual);
+                            currentPage = actual;
+                        },
+                    });
+                    yPos = doc.lastAutoTable.finalY + 3;
+                });
+            });
+
+            if (slotIdx < sortedSlots.length - 1) {
+                checkNewPage(6);
+                doc.setDrawColor(200, 200, 200);
+                doc.line(margin, yPos, pageWidth - margin, yPos);
+                yPos += 4;
+            }
+        });
+
+        if (therapistRows.length === 0 && nurseRows.length > 0) {
+            doc.setFontSize(9);
+            doc.setFont(undefined, 'italic');
+            doc.text('No draft therapist treatments for this date (nurse list follows).', margin, yPos);
+            yPos += 6;
+            doc.setFont(undefined, 'normal');
+        }
+
+        if (nurseRows.length > 0) {
+            addFooterPage(currentPage);
+            doc.addPage();
+            currentPage = doc.internal.getNumberOfPages();
+            yPos = margin;
+            doc.setFontSize(11);
+            doc.setFont(undefined, 'bold');
+            doc.text('Draft — Nurse treatments', pageWidth / 2, yPos, { align: 'center' });
+            yPos += 6;
+            doc.setFontSize(9);
+            doc.setFont(undefined, 'normal');
+            doc.text(scheduleLabel, pageWidth / 2, yPos, { align: 'center' });
+            yPos += 8;
+
+            const nurseBody = sortItemsInGroup(nurseRows).map(it => [
+                it.patient_name || '—',
+                it.patient_room_no || it.room_no || '—',
+                it.therapy_name || '—',
+                formatDateDMYForDraftPdf(it.date || it.from_date),
+            ]);
+            const nurseTableStart = doc.internal.getNumberOfPages();
+            doc.autoTable({
+                head: [['Patient', 'Room No', 'Therapy', 'Date']],
+                body: nurseBody,
+                startY: yPos,
+                margin: { left: margin, right: margin },
+                styles: { fontSize: 8, cellPadding: 2 },
+                headStyles: { fillColor: [16, 185, 129] },
+                didDrawPage: (data) => {
+                    const actual = nurseTableStart + data.pageNumber - 1;
+                    addFooterPage(actual);
+                    currentPage = actual;
+                },
+            });
+        }
+
+        const fname = `Draft_Therapy_${dateIso}.pdf`;
+        doc.save(fname);
+    } catch (e) {
+        console.error(e);
+        alert('Error generating draft PDF: ' + e.message);
+    }
+}
+
 // Print Therapy Schedule to PDF
 function printTherapyScheduleToPDF() {
     const selectedDate = document.getElementById('scheduled-date').value;
@@ -1439,7 +1782,7 @@ function generateTherapyPDF(therapyData, date) {
         }
 
         const { jsPDF } = window.jspdf;
-        const doc = new jsPDF('p', 'mm', 'a4');
+        const doc = new jsPDF('l', 'mm', 'a4');
 
         const pageWidth = doc.internal.pageSize.getWidth();
         const pageHeight = doc.internal.pageSize.getHeight();
@@ -1644,11 +1987,13 @@ function generateTherapyPDF(therapyData, date) {
                     ];
                 });
 
-                // Generate table for this slot with custom cell styling for senior therapists
+                // Generate table for this slot with custom cell styling for senior therapists (landscape)
                 const columnStyles = {
-                    4: { // Therapist Assigned column
-                        cellWidth: 50,
-                    }
+                    0: { cellWidth: 28 },
+                    1: { cellWidth: 42 },
+                    2: { cellWidth: 22 },
+                    3: { cellWidth: 52 },
+                    4: { cellWidth: 'auto' },
                 };
 
                 // Custom cell styling function to highlight senior therapists
@@ -1776,6 +2121,13 @@ function generateTherapyPDF(therapyData, date) {
                 },
                 alternateRowStyles: {
                     fillColor: [240, 253, 244], // Light green alternate rows
+                },
+                columnStyles: {
+                    0: { cellWidth: 28 },
+                    1: { cellWidth: 40 },
+                    2: { cellWidth: 52 },
+                    3: { cellWidth: 28 },
+                    4: { cellWidth: 'auto' },
                 },
                 didDrawPage: function (data) {
                     // Calculate actual page number: nurseTableStartPage is the page we're starting on
