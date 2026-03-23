@@ -5231,6 +5231,7 @@ def get_therapy_data_api(request):
                         'booking_id': booking.id,
                         'patient_name': booking.allocation.patient.pat_name,
                         'patient_reg_no': booking.allocation.patient.pat_reg_no,
+                        'patient_sex': (booking.allocation.patient.pat_sex or '').strip(),
                         'therapy_name': booking.allocation.therapy_name,
                         'therapy_code': booking.allocation.therapy_code,
                         'date': booking.date.isoformat(),
