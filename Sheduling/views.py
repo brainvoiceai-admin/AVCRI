@@ -2659,61 +2659,6 @@ def prescription_entry_page(request):
             q_obj |= Q(patient__pat_reg_no=str(reg_no))
             
         plist = list(PrescriptionAllocation.objects.filter(q_obj).order_by('from_date', 'created_at').distinct())
-        
-        # --- Automatic Discharge Cancellation Logic ---
-        try:
-            # Fetch search_reg_no if not provided
-            search_reg_no = str(reg_no) if reg_no else None
-            if not search_reg_no:
-                # Get from first allocation or snapshot
-                if plist:
-                    p_obj = plist[0].patient
-                    search_reg_no = p_obj.pat_reg_no
-            
-            if search_reg_no:
-                from django.db import connections
-                with connections['therapy_db'].cursor() as cursor:
-                    # Get the absolute LATEST discharge date for this patient
-                    cursor.execute("""
-                        SELECT Pat_Disch_Date FROM Patient_Discharge 
-                        WHERE Pat_Reg_No = %s 
-                        ORDER BY Pat_Visit_Date DESC
-                    """, [search_reg_no])
-                    row = cursor.fetchone()
-                
-                # Only auto-cancel if they have been discharged in their most recent stay
-                if row and row[0]:
-                    dod_raw = row[0]
-                    # Handle both datetime and date objects safely
-                    dod = dod_raw.date() if hasattr(dod_raw, 'date') else dod_raw
-                    
-                    # Log if we find a discharge date and prescriptions need cancellation
-                    for p_rec in plist:
-                        # If prescription ends after discharge, cancel from dod+1
-                        if p_rec.to_date and p_rec.to_date > dod:
-                            # Calculate effective cancel_from
-                            cancel_from = max(dod + timedelta(days=1), p_rec.from_date)
-                            
-                            # Only update if not already cancelled from this date
-                            if cancel_from <= p_rec.to_date and (not p_rec.cancelled_date_from or p_rec.cancelled_date_from > cancel_from):
-                                p_rec.cancelled_date_from = cancel_from
-                                p_rec.cancelled_date_to = p_rec.to_date
-                                p_rec.status = 'cancelled'
-                                p_rec.cancellation_reason = f"Automatically cancelled due to patient discharge on {dod}"
-                                p_rec.save()
-                                
-                                # Sync scheduling
-                                # Already imported at top
-                                PrescriptionScheduling.objects.filter(
-                                    patient_id=p_rec.patient_id,
-                                    prescription_date__range=(cancel_from, p_rec.to_date)
-                                ).exclude(status='dispatched').update(status='cancelled')
-                                
-                                print(f"[INFO] Auto-cancelled prescription {p_rec.id} for patient {search_reg_no} due to discharge on {dod}")
-        except Exception as e:
-            print(f"[ERROR] Discharge sync error: {e}")
-            import traceback
-            traceback.print_exc()
 
         res_list = []
         for p in plist:
@@ -2754,6 +2699,7 @@ def prescription_entry_page(request):
                 'cancelled_date_from': p.cancelled_date_from.isoformat() if p.cancelled_date_from else None,
                 'cancelled_date_to': p.cancelled_date_to.isoformat() if p.cancelled_date_to else None,
                 'resumed_at': p.resumed_at.isoformat() if p.resumed_at else None,
+                'cancelled_at': p.cancelled_at.isoformat() if getattr(p, 'cancelled_at', None) else None,
                 'created_at': p.created_at.isoformat() if p.created_at else None,
                 'updated_at': p.updated_at.isoformat() if p.updated_at else None
             })
@@ -5297,7 +5243,8 @@ def get_therapy_data_api(request):
                         'items': booking.allocation.items if hasattr(booking.allocation, 'items') and booking.allocation.items else [],
                         'dosage': booking.allocation.dosage if hasattr(booking.allocation, 'dosage') else '',
                         'uno': booking.allocation.uno if hasattr(booking.allocation, 'uno') else '',
-                        'oil_class': booking.allocation.oil_class or ''
+                        'oil_class': booking.allocation.oil_class or '',
+                        'therapists_required': therapy_req.get('total', 0),
                     }
                     if status_filter == 'failed':
                         item['failure_reason'] = getattr(booking, 'failure_reason', None) or ''
@@ -5340,8 +5287,9 @@ def get_therapy_data_api(request):
             from reshedule import therapist_requirements
             
             for allocation in allocations:
+                therapy_req_no_date = therapist_requirements(allocation)
                 # Skip therapies with zero therapist requirements (only for failed status)
-                if status_filter == 'failed' and therapist_requirements(allocation).get("total", 1) == 0:
+                if status_filter == 'failed' and therapy_req_no_date.get("total", 1) == 0:
                     continue
                 
                 # Check if this treatment requires special senior tag handling
@@ -5477,7 +5425,8 @@ def get_therapy_data_api(request):
                     'items': allocation.items if hasattr(allocation, 'items') and allocation.items else [],
                     'dosage': allocation.dosage if hasattr(allocation, 'dosage') else '',
                     'uno': allocation.uno if hasattr(allocation, 'uno') else '',
-                    'oil_class': allocation.oil_class or ''
+                    'oil_class': allocation.oil_class or '',
+                    'therapists_required': therapy_req_no_date.get('total', 0),
                 })
         
         # Apply strict room-based sorting to the final dataset

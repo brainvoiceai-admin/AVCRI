@@ -117,10 +117,38 @@ function updateScheduleButtonsState() {
 
 // Initialize the dashboard
 document.addEventListener('DOMContentLoaded', function () {
+    // Delegated handler so draft PDF works even if setupEventListeners fails partway (missing ids, etc.)
+    if (!window.__schedulingDraftPdfDelegated) {
+        window.__schedulingDraftPdfDelegated = true;
+        document.addEventListener('click', function (e) {
+            const pdfBtn = e.target.closest && e.target.closest('#export-draft-pdf');
+            if (!pdfBtn || pdfBtn.disabled) return;
+            e.preventDefault();
+            exportDraftTherapyTimeslotPDF();
+        });
+    }
     setupEventListeners();
     updateScheduleButtonsState();
     setTimeout(updateScheduleButtonsState, 50);
 });
+
+function _bindClick(id, handler) {
+    const el = document.getElementById(id);
+    if (el) {
+        el.addEventListener('click', handler);
+    } else {
+        console.warn('[Therapy scheduling] Missing #' + id + ' — skip click binding');
+    }
+}
+
+function _bindChange(id, handler) {
+    const el = document.getElementById(id);
+    if (el) {
+        el.addEventListener('change', handler);
+    } else {
+        console.warn('[Therapy scheduling] Missing #' + id + ' — skip change binding');
+    }
+}
 
 // Tab switching
 function setupEventListeners() {
@@ -130,27 +158,33 @@ function setupEventListeners() {
             document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
             document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
             this.classList.add('active');
-            document.getElementById(this.dataset.tab).classList.add('active');
+            const panelId = this.dataset.tab;
+            const panel = panelId ? document.getElementById(panelId) : null;
+            if (panel) {
+                panel.classList.add('active');
+            } else {
+                console.warn('[Therapy scheduling] Missing tab panel #' + panelId);
+            }
             updateScheduleButtonsState();
         });
     });
 
     // Final Schedule button
-    document.getElementById('final-schedule-btn').addEventListener('click', triggerFinalSchedule);
+    _bindClick('final-schedule-btn', triggerFinalSchedule);
 
     // Schedule all drafts (hidden by default)
-    document.getElementById('schedule-all').addEventListener('click', scheduleAllDrafts);
+    _bindClick('schedule-all', scheduleAllDrafts);
 
     // Reschedule all failed
-    document.getElementById('reschedule-all').addEventListener('click', rescheduleAllFailed);
+    _bindClick('reschedule-all', rescheduleAllFailed);
 
     // Modal event listeners
-    document.getElementById('confirmScheduleBtn').addEventListener('click', confirmSchedule);
+    _bindClick('confirmScheduleBtn', confirmSchedule);
     // Reschedule no longer uses modal - it uses the date filter directly
     // document.getElementById('confirmRescheduleBtn') is kept for potential future use
 
     // Date filters - show therapies scheduled for the selected date
-    document.getElementById('draft-date').addEventListener('change', function () {
+    _bindChange('draft-date', function () {
         finalScheduleAlreadyRun = false;
         updateScheduleButtonsState();
         if (this.value) {
@@ -185,7 +219,7 @@ function setupEventListeners() {
             updateScheduleButtonsState();
         });
     }
-    document.getElementById('scheduled-date').addEventListener('change', function () {
+    _bindChange('scheduled-date', function () {
         const selectedDate = this.value || '';
         activateScheduledTab();
         const patientFilter = getPatientSearchValue();
@@ -217,19 +251,16 @@ function setupEventListeners() {
     }
 
     // Export to Excel button
-    document.getElementById('export-therapy-excel').addEventListener('click', function () {
+    _bindClick('export-therapy-excel', function () {
         exportTherapyScheduleToExcel();
     });
 
     // Print to PDF button
-    document.getElementById('print-therapy-pdf').addEventListener('click', function () {
+    _bindClick('print-therapy-pdf', function () {
         printTherapyScheduleToPDF();
     });
 
-    const exportDraftPdfBtn = document.getElementById('export-draft-pdf');
-    if (exportDraftPdfBtn) {
-        exportDraftPdfBtn.addEventListener('click', exportDraftTherapyTimeslotPDF);
-    }
+    // Draft PDF: bound via document delegation in DOMContentLoaded (avoids double-fire / duplicate)
 
     // Individual reschedule buttons (schedule buttons removed)
     document.addEventListener('click', function (e) {
@@ -954,7 +985,6 @@ function triggerFinalSchedule() {
             return response.json();
         })
         .then(data => {
-            setAllocationInProgress(false);
             if (data && data.already_run) {
                 finalScheduleAlreadyRun = true;
             }
@@ -986,12 +1016,14 @@ function triggerFinalSchedule() {
             }
         })
         .catch(error => {
-            setAllocationInProgress(false);
-            hideLoading('draft');
             const msg = (error && error.message && (error.message.indexOf('past') !== -1 || error.message.indexOf('400') !== -1))
                 ? 'You cannot make schedule for past days.'
                 : ('Error running Final Schedule: ' + (error && error.message ? error.message : 'Unknown error'));
             showAlert('error', msg);
+        })
+        .finally(() => {
+            hideLoading('draft');
+            setAllocationInProgress(false);
         });
 }
 
@@ -1121,8 +1153,6 @@ function rescheduleAllFailed() {
             return response.json();
         })
         .then(data => {
-            setAllocationInProgress(false);
-            hideLoading('failed');
             if (data.success) {
                 const stats = data.stats || {};
                 const total = stats.total ?? 0;
@@ -1145,12 +1175,14 @@ function rescheduleAllFailed() {
             }
         })
         .catch(error => {
-            setAllocationInProgress(false);
-            hideLoading('failed');
             const msg = (error && error.message && (String(error.message).indexOf('past') !== -1 || String(error.message).indexOf('400') !== -1))
                 ? 'You cannot make schedule for past days.'
                 : ('Error rescheduling therapies: ' + (error && error.message ? error.message : 'Unknown error'));
             showAlert('error', msg);
+        })
+        .finally(() => {
+            hideLoading('failed');
+            setAllocationInProgress(false);
         });
 }
 
@@ -1457,6 +1489,12 @@ function exportDraftTherapyTimeslotPDF() {
     const searchQ = (document.getElementById('draft-search')?.value || '').trim().toLowerCase();
     const btn = document.getElementById('export-draft-pdf');
     const originalHtml = btn ? btn.innerHTML : '';
+    const restoreBtn = () => {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = originalHtml;
+        }
+    };
     if (btn) {
         btn.disabled = true;
         btn.innerHTML = '<span>⏳</span> Generating...';
@@ -1464,10 +1502,6 @@ function exportDraftTherapyTimeslotPDF() {
     fetch(`/sheduling/scheduling/api/therapy-data/?status=draft&date=${encodeURIComponent(draftDate)}`)
         .then(r => r.json())
         .then(data => {
-            if (btn) {
-                btn.disabled = false;
-                btn.innerHTML = originalHtml;
-            }
             if (!data.success) {
                 alert(data.error || 'Could not load draft therapies.');
                 return;
@@ -1476,14 +1510,18 @@ function exportDraftTherapyTimeslotPDF() {
             if (searchQ) {
                 rows = rows.filter(it => draftItemMatchesSearch(it, searchQ));
             }
-            generateDraftTherapyTimeslotPDF(rows, draftDate);
+            try {
+                generateDraftTherapyTimeslotPDF(rows, draftDate);
+            } catch (genErr) {
+                console.error(genErr);
+                alert('Error generating PDF: ' + (genErr.message || String(genErr)));
+            }
         })
         .catch(err => {
-            if (btn) {
-                btn.disabled = false;
-                btn.innerHTML = originalHtml;
-            }
             alert('Error generating PDF: ' + err.message);
+        })
+        .finally(() => {
+            restoreBtn();
         });
 }
 
@@ -1552,22 +1590,11 @@ function generateDraftTherapyTimeslotPDF(therapyData, dateIso) {
             doc.text('Draft therapy', pageWidth / 2, yPos, { align: 'center' });
             yPos += 6;
             doc.setFontSize(10);
-            doc.text(scheduleLabel, pageWidth / 2, yPos, { align: 'center' });
-            yPos += 5;
-            doc.setFontSize(7);
             doc.setFont(undefined, 'normal');
-            doc.setTextColor(60, 60, 60);
-            doc.text(
-                'Treatment | Patient | Room No | From Date | To Date',
-                pageWidth / 2,
-                yPos,
-                { align: 'center' }
-            );
+            doc.text(scheduleLabel, pageWidth / 2, yPos, { align: 'center' });
+            yPos += 6;
             doc.setTextColor(0, 0, 0);
-            yPos += 5;
-            doc.setLineWidth(0.2);
-            doc.line(margin, yPos, pageWidth - margin, yPos);
-            yPos += 5;
+            // Column titles appear once on the first therapist table (not repeated per ward)
         }
 
         drawReportHeader();
@@ -1601,6 +1628,8 @@ function generateDraftTherapyTimeslotPDF(therapyData, dateIso) {
         });
 
         const sexOrder = ['Female', 'Male', 'Other'];
+        const draftTableHead = [['Treatment', 'Patient', 'Room No', 'Therapists req.', 'From Date', 'To Date']];
+        let draftTherapistColumnHeadShown = false;
 
         sortedSlots.forEach((slot, slotIdx) => {
             const items = sortItemsInGroup(slotGroups[slot]);
@@ -1641,17 +1670,26 @@ function generateDraftTherapyTimeslotPDF(therapyData, dateIso) {
                     yPos += 3.5;
                     doc.setTextColor(0, 0, 0);
 
-                    const body = wardItems.map(it => [
-                        it.therapy_name || '—',
-                        it.patient_name || '—',
-                        it.patient_room_no || it.room_no || '—',
-                        formatDateDMYForDraftPdf(it.from_date),
-                        formatDateDMYForDraftPdf(it.to_date),
-                    ]);
+                    const body = wardItems.map(it => {
+                        const tr =
+                            it.therapists_required != null && it.therapists_required !== ''
+                                ? String(it.therapists_required)
+                                : '—';
+                        return [
+                            it.therapy_name || '—',
+                            it.patient_name || '—',
+                            it.patient_room_no || it.room_no || '—',
+                            tr,
+                            formatDateDMYForDraftPdf(it.from_date),
+                            formatDateDMYForDraftPdf(it.to_date),
+                        ];
+                    });
 
                     const tableStartPage = doc.internal.getNumberOfPages();
+                    const showColumnHead = !draftTherapistColumnHeadShown;
                     doc.autoTable({
-                        head: [['Treatment', 'Patient', 'Room No', 'From Date', 'To Date']],
+                        head: showColumnHead ? draftTableHead : [],
+                        showHead: showColumnHead ? 'firstPage' : 'never',
                         body: body,
                         startY: yPos,
                         margin: { left: margin, right: margin },
@@ -1659,11 +1697,12 @@ function generateDraftTherapyTimeslotPDF(therapyData, dateIso) {
                         headStyles: { fillColor: [71, 85, 105], fontSize: 7 },
                         alternateRowStyles: { fillColor: [248, 250, 252] },
                         columnStyles: {
-                            0: { cellWidth: 72 },
-                            1: { cellWidth: 52 },
-                            2: { cellWidth: 22 },
-                            3: { cellWidth: 28 },
-                            4: { cellWidth: 'auto' },
+                            0: { cellWidth: 56 },
+                            1: { cellWidth: 44 },
+                            2: { cellWidth: 18 },
+                            3: { cellWidth: 22, halign: 'center' },
+                            4: { cellWidth: 24 },
+                            5: { cellWidth: 'auto' },
                         },
                         didDrawPage: (data) => {
                             const actual = tableStartPage + data.pageNumber - 1;
@@ -1671,6 +1710,7 @@ function generateDraftTherapyTimeslotPDF(therapyData, dateIso) {
                             currentPage = actual;
                         },
                     });
+                    draftTherapistColumnHeadShown = true;
                     yPos = doc.lastAutoTable.finalY + 3;
                 });
             });
@@ -1714,6 +1754,7 @@ function generateDraftTherapyTimeslotPDF(therapyData, dateIso) {
             const nurseTableStart = doc.internal.getNumberOfPages();
             doc.autoTable({
                 head: [['Patient', 'Room No', 'Therapy', 'Date']],
+                showHead: 'firstPage',
                 body: nurseBody,
                 startY: yPos,
                 margin: { left: margin, right: margin },
