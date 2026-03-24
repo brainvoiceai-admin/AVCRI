@@ -770,10 +770,17 @@ tr.action-cancelled td:first-child {
   height: 22px;
 }
 
+/* Input covers the track so clicks always hit the checkbox (zero-size inputs miss clicks on some browsers) */
 .switch input {
+  position: absolute;
   opacity: 0;
-  width: 0;
-  height: 0;
+  width: 100%;
+  height: 100%;
+  top: 0;
+  left: 0;
+  margin: 0;
+  cursor: pointer;
+  z-index: 2;
 }
 
 .slider {
@@ -786,6 +793,8 @@ tr.action-cancelled td:first-child {
   background-color: #cbd5e0;
   transition: .3s;
   border-radius: 22px;
+  z-index: 1;
+  pointer-events: none;
 }
 
 .slider:before {
@@ -800,15 +809,16 @@ tr.action-cancelled td:first-child {
   border-radius: 50%;
 }
 
-input:checked + .slider {
+/* Scope to .switch so other page checkboxes cannot drive prescription row sliders */
+.switch input:checked + .slider {
   background-color: #38a169;
 }
 
-input:focus + .slider {
+.switch input:focus + .slider {
   box-shadow: 0 0 1px #38a169;
 }
 
-input:checked + .slider:before {
+.switch input:checked + .slider:before {
   transform: translateX(22px);
 }
 

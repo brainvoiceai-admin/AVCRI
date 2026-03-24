@@ -229,18 +229,37 @@ $(function () {
   // --- state ---
   let itemGroups = [];
   let addedPrescriptions = [];
+  /** When cancel-reason modal is open for turning OFF, used to revert toggle if user dismisses backdrop */
+  let pendingPrescriptionToggle = null;
   let editPrescriptionIndex = null;
   let cancelingPrescriptionIndex = null;
   let resumingPrescriptionIndex = null;
   let selectedPatient = null;
   let prescriptionActionById = {};
 
+  /** Single primary key for session memory + data attributes (prefer id, then allocation_id). */
+  function canonicalPrescriptionKey(p) {
+    if (!p) return '';
+    const raw = p.id != null && String(p.id).trim() !== '' ? p.id : p.allocation_id;
+    if (raw == null || String(raw).trim() === '') return '';
+    const s = String(raw).trim();
+    if (s === 'undefined' || s === 'null') return '';
+    return s;
+  }
+
+  /** ON = allocation still active for scheduling; OFF only when header status is cancelled. */
+  function isPrescriptionScheduleToggleOn(p) {
+    const s = String(p && p.status != null ? p.status : '').trim().toLowerCase();
+    return s !== 'cancelled';
+  }
+
   // Track the last action performed so rows can be color-coded
   // This in-memory dict is only used as an immediate-session override (e.g. right after an
   // edit action so the row turns yellow before the page re-fetches from the DB).
   function rememberPrescriptionAction(id, action) {
-    if (!id) return;
-    const key = String(id);
+    if (id == null || id === '') return;
+    const key = String(id).trim();
+    if (!key || key === 'undefined' || key === 'null') return;
     prescriptionActionById[key] = action;
   }
 
@@ -259,6 +278,12 @@ $(function () {
 
     const updatedAtDate = dateOf(p.updated_at);
     const createdAtDate = dateOf(p.created_at);
+    const statusLower = String(p.status || '').trim().toLowerCase();
+
+    // 0. Allocation marked cancelled (toggle OFF) — must not fall through to "added"
+    if (statusLower === 'cancelled') {
+      return 'cancelled';
+    }
 
     // 1. Cancelled: cancelled_at is set
     if (p.cancelled_at && p.cancelled_at !== 'null') {
@@ -290,17 +315,24 @@ $(function () {
   function decoratePrescriptionList(list) {
     console.log('Decorating prescription list. IDs:', (list || []).map(p => p.id));
     return (list || []).map(p => {
-      // Check in-memory session override first
-      const key1 = p.allocation_id ? String(p.allocation_id) : null;
-      const key2 = p.id ? String(p.id) : null;
-      const sessionOverride = (key1 && prescriptionActionById[key1]) ||
-        (key2 && prescriptionActionById[key2]) || '';
+      const rxKey = canonicalPrescriptionKey(p);
+      // One key only — dual lookup (allocation_id vs id) could apply the same remembered action to wrong rows
+      const sessionOverride = rxKey ? (prescriptionActionById[rxKey] || '') : '';
 
       // DB-derived action (persistent, survives navigation)
       const dbDerived = derivePrescriptionActionFromDB(p);
 
-      // Session override wins for current session; DB-derived is authoritative on reload
-      const action = sessionOverride || dbDerived;
+      // Session wins for immediate feedback (edit/update), but stale "added" must not hide cancel/resume from server
+      let action = sessionOverride || dbDerived;
+      if (
+        sessionOverride === 'added' &&
+        (dbDerived === 'cancelled' || dbDerived === 'resumed')
+      ) {
+        action = dbDerived;
+      }
+      if (sessionOverride === 'updated' && dbDerived === 'cancelled') {
+        action = dbDerived;
+      }
       return { ...p, last_action: action };
     });
   }
@@ -1385,8 +1417,8 @@ $(function () {
       if (j.allocation_id || j.status === 'ok') {
         // Remember this as 'added' action before reloading
         const newAllocationId = j.allocation_id;
-        if (newAllocationId) {
-          rememberPrescriptionAction(newAllocationId, 'added');
+        if (newAllocationId != null && String(newAllocationId).trim() !== '') {
+          rememberPrescriptionAction(String(newAllocationId).trim(), 'added');
         }
 
         // Reset form first
@@ -1656,12 +1688,12 @@ $(function () {
         <td>${esc(p.days || '')}</td>
         <td style="width: 130px; vertical-align: middle;">
           <div class="status-toggle-container">
-            <span class="toggle-label label-off ${p.status === 'cancelled' ? 'active' : ''}">OFF</span>
+            <span class="toggle-label label-off ${isPrescriptionScheduleToggleOn(p) ? '' : 'active'}">OFF</span>
             <label class="switch">
-              <input type="checkbox" class="toggle-prescription-status" data-i="${i}" ${p.status === 'cancelled' ? '' : 'checked'}>
+              <input type="checkbox" class="toggle-prescription-status" id="rx-schedule-${esc((canonicalPrescriptionKey(p) || i).toString().replace(/[^a-zA-Z0-9_-]/g, '_'))}" name="rx-schedule-${esc((canonicalPrescriptionKey(p) || 'idx_' + i).toString().replace(/[^a-zA-Z0-9_-]/g, '_'))}" data-i="${i}" data-rx-id="${esc(canonicalPrescriptionKey(p))}" ${isPrescriptionScheduleToggleOn(p) ? 'checked' : ''}>
               <span class="slider"></span>
             </label>
-            <span class="toggle-label label-on ${p.status !== 'cancelled' ? 'active' : ''}">ON</span>
+            <span class="toggle-label label-on ${isPrescriptionScheduleToggleOn(p) ? 'active' : ''}">ON</span>
           </div>
         </td>
         <td class="text-right" style="width: 200px; vertical-align: middle; white-space: nowrap;">
@@ -1693,11 +1725,34 @@ $(function () {
   }
 
 
-  // Handle status toggle
+  function resolvePrescriptionForToggle($toggle) {
+    const rxId = $toggle.attr('data-rx-id');
+    if (rxId !== undefined && rxId !== null && String(rxId).trim() !== '') {
+      const byId = addedPrescriptions.find(x => canonicalPrescriptionKey(x) === String(rxId).trim());
+      if (byId) return byId;
+    }
+    const index = Number($toggle.attr('data-i'));
+    if (!Number.isNaN(index) && index >= 0 && index < addedPrescriptions.length) {
+      return addedPrescriptions[index];
+    }
+    return undefined;
+  }
+
+  // Dismiss cancel modal by clicking dimmed area (avoids invisible overlay blocking the page)
+  $('#toggle-reason-modal-backdrop').on('click', function (e) {
+    if (e.target === this) {
+      $(this).hide();
+      if (pendingPrescriptionToggle && pendingPrescriptionToggle.length) {
+        pendingPrescriptionToggle.prop('checked', true);
+      }
+      pendingPrescriptionToggle = null;
+    }
+  });
+
+  // Handle status toggle (delegated — survives table re-renders)
   $prescriptionsTableBody.on('change', '.toggle-prescription-status', function() {
     const $toggle = $(this);
-    const index = $toggle.data('i');
-    const p = addedPrescriptions[index];
+    const p = resolvePrescriptionForToggle($toggle);
     if (!p) return;
 
     const isOn = $toggle.is(':checked');
@@ -1706,7 +1761,8 @@ $(function () {
       // Show modal for reason
       $('#toggle-reason-input').val('');
       $('#toggle-reason-error').hide();
-      $('#toggle-reason-modal-backdrop').show();
+      pendingPrescriptionToggle = $toggle;
+      $('#toggle-reason-modal-backdrop').css('display', 'flex');
 
       // Clean up previous event handlers to avoid multiple calls
       $('#toggle-reason-confirm').off('click').on('click', function() {
@@ -1716,12 +1772,14 @@ $(function () {
           return;
         }
         $('#toggle-reason-modal-backdrop').hide();
+        pendingPrescriptionToggle = null;
         executeToggleStatus(p, isOn, reasonForToggle, $toggle);
       });
 
       $('#toggle-reason-cancel').off('click').on('click', function() {
         $('#toggle-reason-modal-backdrop').hide();
         $toggle.prop('checked', true); // Revert UI
+        pendingPrescriptionToggle = null;
       });
     } else {
       executeToggleStatus(p, isOn, '', $toggle);
@@ -1739,7 +1797,11 @@ $(function () {
         'X-Requested-With': 'XMLHttpRequest'
       },
       body: JSON.stringify({
-        allocation_id: p.id,
+        allocation_id: (() => {
+          const k = canonicalPrescriptionKey(p);
+          const n = k ? Number(k) : NaN;
+          return !Number.isNaN(n) ? n : p.id;
+        })(),
         turn_on: isOn,
         reason: reasonForToggle
       })
@@ -1764,8 +1826,21 @@ $(function () {
     })
     .then(j => {
       if (j.status === 'ok') {
-        if (j.prescriptions) {
+        const rk = canonicalPrescriptionKey(p);
+        if (rk) rememberPrescriptionAction(rk, isOn ? 'resumed' : 'cancelled');
+        if (Array.isArray(j.prescriptions)) {
           addedPrescriptions = decoratePrescriptionList(j.prescriptions);
+          renderAll();
+        } else {
+          const pid = canonicalPrescriptionKey(p);
+          const idx = addedPrescriptions.findIndex(x => canonicalPrescriptionKey(x) === pid);
+          if (idx >= 0) {
+            addedPrescriptions[idx] = {
+              ...addedPrescriptions[idx],
+              status: isOn ? 'active' : 'cancelled',
+            };
+          }
+          addedPrescriptions = decoratePrescriptionList(addedPrescriptions);
           renderAll();
         }
       } else {
@@ -1922,14 +1997,14 @@ $(function () {
           const todayIsResumed = p.resumed_at && p.resumed_at.slice(0, 10) === today;
 
           // Use the potentially new allocation_id returned by the server for color-coding
-          const resultId = j.allocation_id || p.allocation_id || p.id;
+          const resultId = canonicalPrescriptionKey(p) || String(j.allocation_id != null ? j.allocation_id : '').trim();
 
           if (todayIsCancelled) {
-            rememberPrescriptionAction(resultId, 'cancelled');
+            if (resultId) rememberPrescriptionAction(resultId, 'cancelled');
           } else if (todayIsResumed) {
-            rememberPrescriptionAction(resultId, 'resumed');
+            if (resultId) rememberPrescriptionAction(resultId, 'resumed');
           } else {
-            rememberPrescriptionAction(resultId, 'updated');
+            if (resultId) rememberPrescriptionAction(resultId, 'updated');
           }
 
           // Also mark the local object just in case, though it might be replaced soon
@@ -1996,15 +2071,16 @@ $(function () {
           today >= p.cancelled_date_from && today <= p.cancelled_date_to;
         const todayIsResumed = p.resumed_at && p.resumed_at.slice(0, 10) === today;
 
+        const rkUpd = canonicalPrescriptionKey(p);
         if (todayIsCancelled) {
           p.last_action = 'cancelled';
-          rememberPrescriptionAction(p.allocation_id || p.id, 'cancelled');
+          if (rkUpd) rememberPrescriptionAction(rkUpd, 'cancelled');
         } else if (todayIsResumed) {
           p.last_action = 'resumed';
-          rememberPrescriptionAction(p.allocation_id || p.id, 'resumed');
+          if (rkUpd) rememberPrescriptionAction(rkUpd, 'resumed');
         } else {
           p.last_action = 'updated';
-          rememberPrescriptionAction(p.allocation_id || p.id, 'updated');
+          if (rkUpd) rememberPrescriptionAction(rkUpd, 'updated');
         }
         resetFormState();
         renderAll();
@@ -2018,15 +2094,16 @@ $(function () {
         today >= p.cancelled_date_from && today <= p.cancelled_date_to;
       const todayIsResumed = p.resumed_at && p.resumed_at.slice(0, 10) === today;
 
+      const rkLoc = canonicalPrescriptionKey(p);
       if (todayIsCancelled) {
         p.last_action = 'cancelled';
-        rememberPrescriptionAction(p.allocation_id || p.id, 'cancelled');
+        if (rkLoc) rememberPrescriptionAction(rkLoc, 'cancelled');
       } else if (todayIsResumed) {
         p.last_action = 'resumed';
-        rememberPrescriptionAction(p.allocation_id || p.id, 'resumed');
+        if (rkLoc) rememberPrescriptionAction(rkLoc, 'resumed');
       } else {
         p.last_action = 'updated';
-        rememberPrescriptionAction(p.allocation_id || p.id, 'updated');
+        if (rkLoc) rememberPrescriptionAction(rkLoc, 'updated');
       }
       resetFormState();
       // Render immediately to show correct color
@@ -2195,7 +2272,8 @@ $(function () {
 
     // Set last_action to 'cancelled' immediately (ignore today's date check)
     p.last_action = 'cancelled';
-    rememberPrescriptionAction(p.allocation_id || p.id, 'cancelled');
+    const rkCan = canonicalPrescriptionKey(p);
+    if (rkCan) rememberPrescriptionAction(rkCan, 'cancelled');
 
     // IMMEDIATELY update UI - don't wait for server - EXACTLY like therapy entry
     $cancelModal.hide();
@@ -2393,7 +2471,8 @@ $(function () {
 
     // Mark as resumed for color coding FIRST, before rendering
     prescription.last_action = 'resumed';
-    rememberPrescriptionAction(prescription.allocation_id || prescription.id, 'resumed');
+    const rkRes = canonicalPrescriptionKey(prescription);
+    if (rkRes) rememberPrescriptionAction(rkRes, 'resumed');
 
     // Decrease cancelled count and increase draft count optimistically
     if (prescription.status_summary.cancelled && prescription.status_summary.cancelled > 0) {
@@ -2470,10 +2549,8 @@ $(function () {
                     const updated = decoratedList.find(pr => pr.allocation_id === prescription.allocation_id);
                     if (updated) {
                       // Preserve last_action before updating - use string keys to match storage
-                      const key1 = prescription.allocation_id ? String(prescription.allocation_id) : null;
-                      const key2 = prescription.id ? String(prescription.id) : null;
-                      const rememberedAction = (key1 && prescriptionActionById[key1]) ||
-                        (key2 && prescriptionActionById[key2]) || '';
+                      const rxK = canonicalPrescriptionKey(prescription);
+                      const rememberedAction = rxK ? (prescriptionActionById[rxK] || '') : '';
                       // Update all fields from server response
                       Object.assign(prescription, updated);
                       // Restore last_action if it was remembered (always restore to preserve resumed/updated state)
@@ -2482,15 +2559,15 @@ $(function () {
                       if (rememberedAction) {
                         prescription.last_action = rememberedAction;
                         // Also update the stored action to ensure it persists
-                        if (key1) {
-                          rememberPrescriptionAction(key1, rememberedAction);
+                        if (rxK) {
+                          rememberPrescriptionAction(rxK, rememberedAction);
                         }
                       } else {
                         // If no remembered action but we just resumed, ensure it's set
                         // This handles edge cases where the action wasn't remembered properly
                         prescription.last_action = 'resumed';
-                        if (key1) {
-                          rememberPrescriptionAction(key1, 'resumed');
+                        if (rxK) {
+                          rememberPrescriptionAction(rxK, 'resumed');
                         }
                       }
                       // Re-render to show updated color immediately

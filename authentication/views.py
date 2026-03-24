@@ -2217,6 +2217,7 @@ def search_patients_by_room(request):
             ).values('Pat_Reg_No', 'Pat_Room_No', 'Pat_Name', 'Pat_Sex', 'Pat_Age', 'DOA', 'Pat_DoD').distinct()[:500]
             
             # Filter by normalized room number prefix in Python
+            from final_allocation import is_patient_active
             matched_count = 0
             for treatment in treatment_records:
                 room_no = treatment.get('Pat_Room_No', '').strip()
@@ -2226,6 +2227,12 @@ def search_patients_by_room(request):
                     # Check if it starts with the normalized query (prefix match)
                     if normalized_room.startswith(normalized_query):
                         reg_no = treatment['Pat_Reg_No']
+                        # Align with prescription/scheduling: do not show discharged/inactive patients
+                        try:
+                            if not is_patient_active(reg_no):
+                                continue
+                        except Exception:
+                            pass
                         treatment_patients.append({
                             'reg_no': reg_no,
                             'room_no': room_no,  # Keep original format for display
@@ -2312,7 +2319,14 @@ def search_patients_by_room(request):
                     pass
                 
                 if is_active:
-                    active_snapshot_records.append(snapshot)
+                    try:
+                        from final_allocation import is_patient_active as _ipa_snap
+                        if not _ipa_snap(reg_no):
+                            is_active = False
+                    except Exception:
+                        pass
+                    if is_active:
+                        active_snapshot_records.append(snapshot)
             
             print(f"[DEBUG] Found {len(active_snapshot_records)} active PatientSnapshot records matching normalized prefix '{normalized_query}' (filtered for recent visits)")
             
@@ -2464,6 +2478,13 @@ def search_patients_by_room(request):
                 # Skip if already added
                 if reg_no_str in added_reg_nos:
                     continue
+                
+                try:
+                    from final_allocation import is_patient_active as _ipa_room
+                    if not _ipa_room(reg_no_str):
+                        continue
+                except Exception:
+                    pass
                 
                 # Check VIP status
                 vip_status = False
