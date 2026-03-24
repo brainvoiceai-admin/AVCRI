@@ -60,9 +60,14 @@ def _refresh_patient_staying_rooms(reg_nos):
         source = None
 
         # Preferred: Treatment table (has Pat_Room_No as string).
+        # Must use iptherapy_db (same source used by room search API).
         try:
             from MySql_Data_pull.models import Treatment
-            rows = list(Treatment.objects.filter(Pat_Reg_No__in=reg_nos).values('Pat_Reg_No', 'Pat_Room_No'))
+            rows = list(
+                Treatment.objects.using('iptherapy_db')
+                .filter(Pat_Reg_No__in=reg_nos)
+                .values('Pat_Reg_No', 'Pat_Room_No')
+            )
             for r in rows:
                 k = str(r.get('Pat_Reg_No') or '').strip()
                 v = r.get('Pat_Room_No')
@@ -74,6 +79,7 @@ def _refresh_patient_staying_rooms(reg_nos):
             pass
 
         # Fallback: Registration table (pat_room_no is numeric; only works for numeric reg nos).
+        # Use therapy_db alias explicitly to stay aligned with patient/room searches.
         if not room_by_reg:
             try:
                 from MySql_Data_pull.models import Registration
@@ -85,7 +91,11 @@ def _refresh_patient_staying_rooms(reg_nos):
                         continue
                 numeric_regs = [n for n in numeric_regs if n]
                 if numeric_regs:
-                    rows = list(Registration.objects.filter(pat_reg_no__in=numeric_regs).values('pat_reg_no', 'pat_room_no'))
+                    rows = list(
+                        Registration.objects.using('therapy_db')
+                        .filter(pat_reg_no__in=numeric_regs)
+                        .values('pat_reg_no', 'pat_room_no')
+                    )
                     for r in rows:
                         k = str(r.get('pat_reg_no') or '').strip()
                         v = r.get('pat_room_no')
@@ -4207,6 +4217,27 @@ def scheduling_dashboard(request):
         filter_date = timezone.localdate()
         date_filter = filter_date.isoformat()
     
+    # Refresh staying rooms for draft patients before loading draft data,
+    # so the dashboard always shows latest room assignments.
+    try:
+        draft_reg_qs = TherapyAllocation.objects.filter(bookings__status='draft')
+        if has_query_date and filter_date:
+            draft_reg_qs = draft_reg_qs.filter(
+                from_date__lte=filter_date,
+                to_date__gte=filter_date,
+                bookings__date=filter_date,
+            )
+        draft_reg_nos = list(
+            draft_reg_qs.exclude(patient__pat_reg_no__isnull=True)
+            .exclude(patient__pat_reg_no__exact='')
+            .values_list('patient__pat_reg_no', flat=True)
+            .distinct()
+        )
+        _refresh_patient_staying_rooms(draft_reg_nos)
+    except Exception:
+        # Non-blocking: dashboard should still render even if room refresh fails.
+        pass
+
     # Fetch bookings based on status for the specific date (if filter provided)
     # This ensures each date is treated separately
     if filter_date:
@@ -4439,6 +4470,26 @@ def user_therapy_entry_dashboard(request):
             'stats': {'draft_count': 0, 'failed_count': 0, 'scheduled_count': 0},
         }
         return render(request, 'dashboards/user_therapy_entry/user_therapy_entry.html', context)
+
+    # Refresh staying rooms for draft patients on this user's draft-date load.
+    try:
+        user_draft_reg_nos = list(
+            TherapyAllocation.objects.filter(
+                allocated_by=current_user,
+                from_date__lte=draft_date,
+                to_date__gte=draft_date,
+                bookings__status='draft',
+                bookings__date=draft_date,
+            )
+            .exclude(patient__pat_reg_no__isnull=True)
+            .exclude(patient__pat_reg_no__exact='')
+            .values_list('patient__pat_reg_no', flat=True)
+            .distinct()
+        )
+        _refresh_patient_staying_rooms(user_draft_reg_nos)
+    except Exception:
+        # Non-blocking: page should render even if room refresh fails.
+        pass
 
     # ---- Draft: filter by draft_date only ----
     base_draft = TherapyAllocation.objects.filter(allocated_by=current_user).filter(

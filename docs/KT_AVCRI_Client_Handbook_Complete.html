@@ -1,0 +1,1420 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>AVCRI — Client Knowledge Transfer Handbook</title>
+<style>
+body { font-family: Arial, Helvetica, sans-serif; max-width: 900px; margin: 2em auto; line-height: 1.5; color: #222; }
+table { border-collapse: collapse; width: 100%; margin: 1em 0; font-size: 14px; }
+th, td { border: 1px solid #ccc; padding: 8px; text-align: left; vertical-align: top; }
+th { background: #f5f5f5; }
+h1, h2, h3, h4 { margin-top: 1.3em; }
+code { background: #f4f4f4; padding: 2px 5px; font-size: 0.95em; }
+hr { margin: 2em 0; border: none; border-top: 1px solid #ddd; }
+</style>
+</head>
+<body>
+<h1>AVCRI — Client Knowledge Transfer Handbook (Complete)</h1>
+<p><strong>Single document for stakeholders and delivery teams</strong><br />
+<strong>Audience:</strong> Product owners, clinical and operations leads, client sponsors, engineering, support<br />
+<strong>Contents:</strong> (1) Resource-allocation rules and parameters, (2) Application URLs, pages, modules, and data models<br />
+<strong>Version:</strong> 1.0 — March 2026  </p>
+<hr />
+<h2>How to use this file with Google Docs</h2>
+<ol>
+<li><strong>Recommended:</strong> Upload <strong><code>KT_AVCRI_Client_Handbook_Complete.html</code></strong> (in the same <code>docs/</code> folder) to <strong>Google Drive</strong>, then right-click → <strong>Open with → Google Docs</strong>. Google converts it to an editable Doc you can share (you may tidy headings or table widths once).</li>
+<li><strong>Alternative:</strong> If you have <strong>Pandoc</strong> installed locally, run<br />
+<code>pandoc KT_AVCRI_Client_Handbook_Complete.md -o KT_AVCRI_Client_Handbook_Complete.docx</code><br />
+   then upload the <strong><code>.docx</code></strong> to Drive and <strong>Open with → Google Docs</strong>.</li>
+<li><strong>Alternative:</strong> Copy from this <strong><code>.md</code></strong> into a blank Google Doc (tables may need touch-up).</li>
+<li><strong>Regenerate HTML</strong> after editing this markdown:<br />
+<code>pip install markdown</code> then <code>python docs/_md_to_html.py</code> (script lives in <code>docs/</code>).</li>
+</ol>
+<hr />
+<h2>Table of contents</h2>
+<table>
+<thead>
+<tr>
+<th>Section</th>
+<th>Topic</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>1–15</strong></td>
+<td>Resource allocation — conditions, parameters, lifecycle</td>
+</tr>
+<tr>
+<td><strong>16</strong></td>
+<td>URL map (where each part of the system lives)</td>
+</tr>
+<tr>
+<td><strong>17–18</strong></td>
+<td>Therapy and prescription flows (conceptual)</td>
+</tr>
+<tr>
+<td><strong>19</strong></td>
+<td>Patient module (<code>/</code> routes)</td>
+</tr>
+<tr>
+<td><strong>20</strong></td>
+<td>Scheduling module (<code>/sheduling/</code>)</td>
+</tr>
+<tr>
+<td><strong>21</strong></td>
+<td>Authentication module (<code>/authentication/</code>)</td>
+</tr>
+<tr>
+<td><strong>22</strong></td>
+<td>Masters module (<code>/Masters/</code>)</td>
+</tr>
+<tr>
+<td><strong>23</strong></td>
+<td>MySQL data tools (<code>/therapy/</code>)</td>
+</tr>
+<tr>
+<td><strong>24</strong></td>
+<td>Model index (quick reference)</td>
+</tr>
+<tr>
+<td><strong>25–27</strong></td>
+<td>Front-end assets, known gaps, references</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h1>Part I — Resource allocation: conditions and parameters</h1>
+<h2>1. Executive summary</h2>
+<p>The application allocates <strong>finite resources</strong> (therapists by grade and gender, treatment rooms by slot, nurses for specific treatment types) to <strong>patient therapies</strong> and coordinates <strong>medicine prescriptions</strong> per patient and date. Behaviour is <strong>parameter-driven</strong> from <strong>master data</strong> (therapies, slots, grades, nurse-treatment definitions) and <strong>hard-coded business rules</strong> (IP/OP slot sets, Vasthi 08:30, Lepam slot exclusion, etc.).</p>
+<p><strong>Two parallel domains:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Domain</th>
+<th>Primary artefacts</th>
+<th>Resource focus</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Therapy scheduling</strong></td>
+<td><code>TherapyAllocation</code>, <code>Booking</code>, <code>BookingAssignment</code>, <code>TherapistBooking</code>, <code>RoomBooking</code></td>
+<td>Therapists, rooms, time slots</td>
+</tr>
+<tr>
+<td><strong>Prescription scheduling</strong></td>
+<td><code>PrescriptionAllocation</code>, <code>PrescriptionScheduling</code>, dispatches</td>
+<td>Procurement / dispatch workflow per calendar day</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>2. Stakeholder lens — what each group should know</h2>
+<table>
+<thead>
+<tr>
+<th>Stakeholder</th>
+<th>Focus</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Clinical / therapy leads</strong></td>
+<td>Which therapies need rooms, bathing therapists, senior tagging, nurse-only flow; slot restrictions by therapy group and category.</td>
+</tr>
+<tr>
+<td><strong>Operations / floor</strong></td>
+<td>Draft vs scheduled vs failed bookings; patient “active” definition for lists; zero-therapist therapies may be hidden from some dashboards.</td>
+</tr>
+<tr>
+<td><strong>Master data owners</strong></td>
+<td><code>TherapyMaster</code>, <code>TherapyGroup</code>, <code>SlotMaster</code>, <code>NurseTreatmentMaster</code>, therapist grades, room catalogue — incorrect masters directly change allocation outcomes.</td>
+</tr>
+<tr>
+<td><strong>IT / integration</strong></td>
+<td>External DBs (<code>therapy_db</code>, <code>iptherapy_db</code>, <code>hospital_db</code>) for registration, treatment, discharge; failures often <strong>fail-open</strong> (patient treated as active) to avoid blocking care.</td>
+</tr>
+<tr>
+<td><strong>Engineering</strong></td>
+<td>Core logic in <code>final_allocation.py</code>, <code>reshedule.py</code>, <code>allocation_logic.py</code>, <code>Sheduling/views.py</code>, <code>Patient/views.py</code>, <code>Sheduling/nurse_allocation.py</code>.</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>3. Core parameters (master data)</h2>
+<h3>3.1 Therapy master (<code>TherapyMaster</code> and related)</h3>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Effect on allocation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Therapy name / code</strong></td>
+<td>Lookup key; normalized matching tolerates spacing/case variants.</td>
+</tr>
+<tr>
+<td><strong>Therapy group</strong> (e.g. name <strong>“Vasthi”</strong>, case-insensitive)</td>
+<td>Triggers <strong>08:30-only</strong> scheduling rule (see section 4.2).</td>
+</tr>
+<tr>
+<td><strong>Therapy code <code>THEB037</code></strong> (Mathra Vasthi)</td>
+<td><strong>Exempt</strong> from Vasthi 08:30-only rule.</td>
+</tr>
+<tr>
+<td><strong>Category</strong> (<code>easy</code> / <code>medium</code> / <code>hard</code> / <code>special</code>)</td>
+<td>Drives <strong>allowed slot sets</strong> with IP/OP (see section 4.1).</td>
+</tr>
+<tr>
+<td><strong>Counts:</strong> <code>no_of_super_senior_therapist</code>, <code>no_of_senior_therapist</code>, <code>no_of_junior_therapist</code>, <code>no_of_trainee_therapist</code>, <strong><code>total_no_of_therapist</code></strong></td>
+<td>Required therapist mix per session; <strong>zero total</strong> therapies handled differently in UI lists vs unknown therapy fallbacks.</td>
+</tr>
+<tr>
+<td><strong><code>bathing_required</code> = Yes</strong></td>
+<td>Pool restricted to <strong>bathing-capable</strong> therapists; special rules for Dhara/Pizhichil senior vs bathing (see section 5).</td>
+</tr>
+<tr>
+<td><strong><code>treatment_room_required</code> = Yes</strong></td>
+<td>Room must be allocated; room free per date+slot; <strong>unique constraint</strong> on <code>(room, date, timeslot)</code> for bookings.</td>
+</tr>
+</tbody>
+</table>
+<h3>3.2 Slot master (<code>SlotMaster</code>)</h3>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong><code>slot_time</code></strong> (e.g. 08:30)</td>
+<td>Canonical slot for bookings and <code>TherapistBooking</code> / <code>RoomBooking</code>.</td>
+</tr>
+<tr>
+<td><strong><code>is_active</code></strong></td>
+<td>Inactive slots are not used when resolving 08:30 or other fixed times.</td>
+</tr>
+</tbody>
+</table>
+<h3>3.3 Nurse treatments (<code>NurseTreatmentMaster</code>)</h3>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong><code>treatment_code</code> / name</strong>, <strong><code>is_active</code></strong></td>
+<td>If matched, therapy is treated as <strong>nurse treatment</strong>: no therapist slot requirement in the same way; <strong>nurse assignments</strong> per booking/day (<code>BookingNurseAssignment</code>).</td>
+</tr>
+<tr>
+<td><strong>Nurse count</strong> (from master / allocation)</td>
+<td>Drives how many nurses are attached; workload balancing across active nurses.</td>
+</tr>
+</tbody>
+</table>
+<h3>3.4 Therapist master</h3>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Grade</strong> (Super Senior / Senior / Junior / Trainee)</td>
+<td>Must satisfy counts from therapy master; <strong>trainee</strong> requirements may be substituted with <strong>junior</strong> under rules in <code>reshedule.py</code>.</td>
+</tr>
+<tr>
+<td><strong><code>therapist_gender</code></strong></td>
+<td>Matched to <strong>patient gender</strong> (normalized: non-female → male preference path).</td>
+</tr>
+<tr>
+<td><strong><code>is_bathing_therapist</code> / bathing flag</strong></td>
+<td>Required when therapy needs bathing.</td>
+</tr>
+<tr>
+<td><strong><code>employee_code</code></strong></td>
+<td>Used with <strong>emergency leave</strong> matching.</td>
+</tr>
+<tr>
+<td><strong>Weekly leave</strong> (<code>TherapistLeaveMaster</code> / <code>TherapistLeave</code> by weekday)</td>
+<td>Therapist excluded for that weekday.</td>
+</tr>
+<tr>
+<td><strong>Emergency leave</strong> (<code>EmergencyLeave</code> date range)</td>
+<td>Therapist excluded for overlapping dates.</td>
+</tr>
+</tbody>
+</table>
+<h3>3.5 Rooms (<code>TreatmentRoom</code>)</h3>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Room number / floor / type</strong></td>
+<td>Room selection and <strong>patient staying-room</strong> mapping (e.g. CT → TRC) in allocation logic.</td>
+</tr>
+<tr>
+<td><strong>Booking uniqueness</strong></td>
+<td>One booking per <code>(room, date, timeslot)</code> at DB level.</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>4. Time-slot conditions</h2>
+<h3>4.1 Patient type: IP vs OP</h3>
+<table>
+<thead>
+<tr>
+<th>Patient type</th>
+<th>Default allowed slots (algorithm <code>get_allowed_slot_values</code>)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>OP</strong></td>
+<td><code>11:30</code>, <code>17:30</code></td>
+</tr>
+<tr>
+<td><strong>IP</strong></td>
+<td><code>06:30</code>, <code>08:30</code>, <code>10:00</code>, <code>14:30</code>, <code>16:00</code></td>
+</tr>
+<tr>
+<td><strong>Unspecified</strong></td>
+<td>Full general list: <code>06:30</code>, <code>08:30</code>, <code>10:00</code>, <code>11:30</code>, <code>14:30</code>, <code>16:00</code>, <code>17:30</code></td>
+</tr>
+</tbody>
+</table>
+<h3>4.2 Therapy category interaction</h3>
+<table>
+<thead>
+<tr>
+<th>Category</th>
+<th>Condition</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong><code>hard</code> or <code>special</code></strong></td>
+<td><strong>Removes</strong> OP-only slots <code>11:30</code> and <code>17:30</code> from the <strong>general</strong> pool (stricter set).</td>
+</tr>
+<tr>
+<td><strong>IP + <code>easy</code> or <code>medium</code></strong></td>
+<td><strong>Adds</strong> <code>11:30</code> and <code>17:30</code> to IP allowed list (IP easy/medium may use OP-preferred slots).</td>
+</tr>
+</tbody>
+</table>
+<h3>4.3 Named therapy restrictions</h3>
+<table>
+<thead>
+<tr>
+<th>Rule</th>
+<th>Condition</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Lepam</strong></td>
+<td>Name contains <strong>“lepam”</strong> (case-insensitive) → <strong><code>06:30</code> excluded</strong> from allowed slots.</td>
+</tr>
+<tr>
+<td><strong>Vasthi group</strong></td>
+<td>Therapy linked to <strong><code>TherapyGroup.name</code></strong> normalised to <strong><code>vasthi</code></strong>, except code <strong><code>THEB037</code></strong> → <strong>only <code>08:30</code></strong> allowed (allocation, reschedule, slot APIs, patient slot picker).</td>
+</tr>
+</tbody>
+</table>
+<h3>4.4 Patient-facing slot availability (<code>compute_available_slots_for_date</code>)</h3>
+<p>Beyond allowed lists, each candidate slot is checked for:</p>
+<ul>
+<li><strong>Room:</strong> if therapy needs room → at least one <strong>free</strong> <code>TreatmentRoom</code> for that date + <code>SlotMaster</code> (no <code>RoomBooking</code> with <code>status='BOOKED'</code> blocking all rooms).</li>
+<li><strong>Therapists:</strong> exclude therapists on <strong>weekday leave</strong>; exclude <strong>booked</strong> at that slot (<code>TherapistBooking</code> <code>BOOKED</code>); if <strong>bathing required</strong> → filter to <code>is_bathing_therapist</code>; <strong>grade counts</strong> must be satisfiable from remaining pool.</li>
+</ul>
+<p><strong>OP default candidate list</strong> in this path: <code>11:30</code>, <code>17:30</code> (then category/Vasthi/Lepam filters apply).</p>
+<hr />
+<h2>5. Therapist allocation — key conditions</h2>
+<table>
+<thead>
+<tr>
+<th>Condition</th>
+<th>Detail</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Leave</strong></td>
+<td>Weekly recurring leave + emergency leave (by therapist id or employee code).</td>
+</tr>
+<tr>
+<td><strong>Already booked</strong></td>
+<td>Same therapist cannot be double-booked at same date+slot (<code>TherapistBooking</code> / assignment uniqueness).</td>
+</tr>
+<tr>
+<td><strong>Gender</strong></td>
+<td>Therapist gender aligned with patient (normalization rules in <code>reshedule.allocate_therapists</code>).</td>
+</tr>
+<tr>
+<td><strong>Senior tag therapies</strong></td>
+<td>Fixed list of <strong>Dhara / Thakradhara</strong> variants (<code>is_treatment_requiring_senior_tag</code>) — <strong>one</strong> non-bathing senior tagged; bathing senior rules for multi-therapist Dhara/Pizhichil.</td>
+</tr>
+<tr>
+<td><strong>Daily load / difficulty</strong></td>
+<td>Category-aware balancing (easy/medium/hard counts per therapist day).</td>
+</tr>
+<tr>
+<td><strong>Continuity</strong></td>
+<td><code>TherapistContinuityPlan</code> can pre-reserve therapists for date/slot/patient before final run.</td>
+</tr>
+<tr>
+<td><strong>Unknown therapy in master</strong></td>
+<td>Some code paths default to requiring <strong>at least one</strong> therapist to avoid “scheduled with zero therapists”; exact default can differ between <code>final_allocation</code> vs <code>reshedule</code> — treat master data as source of truth.</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>6. Room allocation — key conditions</h2>
+<table>
+<thead>
+<tr>
+<th>Condition</th>
+<th>Detail</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Therapy needs room</strong></td>
+<td>From master <code>treatment_room_required == Yes</code>.</td>
+</tr>
+<tr>
+<td><strong>Free room</strong></td>
+<td>No existing <code>RoomBooking</code> for same room+date+slot with <code>BOOKED</code> (and algorithm fallbacks).</td>
+</tr>
+<tr>
+<td><strong>Patient context</strong></td>
+<td><strong>Staying room</strong> may map to preferred treatment room types (e.g. cottage CT → TRC).</td>
+</tr>
+<tr>
+<td><strong>TRC exclusion</strong></td>
+<td>Legacy paths may exclude <code>TRC*</code> prefixed rooms from certain fallbacks.</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>7. Nurse allocation — key conditions</h2>
+<table>
+<thead>
+<tr>
+<th>Condition</th>
+<th>Detail</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Identification</strong></td>
+<td><code>is_nurse_treatment(therapy_code, therapy_name)</code> via <code>NurseTreatmentMaster</code>.</td>
+</tr>
+<tr>
+<td><strong>Time slot</strong></td>
+<td>Not slot-bound like therapists; <strong>day-level</strong> assignment.</td>
+</tr>
+<tr>
+<td><strong>Nurse pool</strong></td>
+<td><code>NurseMaster.is_active=True</code>; round-robin / workload soft balancing.</td>
+</tr>
+<tr>
+<td><strong>Uniqueness</strong></td>
+<td>One row per <code>(nurse, booking)</code> for assigned status (see model constraints).</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>8. Patient “active” and visibility</h2>
+<table>
+<thead>
+<tr>
+<th>Check</th>
+<th>Source</th>
+<th>Used for</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>IP active</strong></td>
+<td><code>Registration</code> (<code>therapy_db</code>): <code>pat_status == 'Y'</code></td>
+<td><code>is_patient_active</code>, room search cross-checks, draft therapy list filtering.</td>
+</tr>
+<tr>
+<td><strong>OP active</strong></td>
+<td><code>Treatment</code> (<code>iptherapy_db</code>): <code>Status == 'ON'</code></td>
+<td>Same helper; padded reg no variants tried.</td>
+</tr>
+<tr>
+<td><strong>Room search (Treatment row)</strong></td>
+<td><code>Pat_DoD</code> null or ≥ today, <code>DOA</code> ≤ today</td>
+<td>“In hospital” for room tab.</td>
+</tr>
+<tr>
+<td><strong>Errors / DB down</strong></td>
+<td>Helper often <strong>fail-open → active</strong></td>
+<td>Avoids blocking scheduling if SQL Server link fails.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Stakeholder note:</strong> If external DB is unstable, logs may show ODBC errors; behaviour may <strong>include</strong> patients or <strong>skip</strong> checks unpredictably until connectivity is restored.</p>
+<hr />
+<h2>9. Booking and therapy allocation lifecycle (status vocabulary)</h2>
+<h3>9.1 <code>TherapyAllocation.status</code></h3>
+<p><code>draft</code> → <code>allocated</code> → <code>cancelled</code> / <code>failed</code> (as implemented in workflows).</p>
+<h3>9.2 <code>Booking.status</code> (per day)</h3>
+<p>Examples used in code/comments: <strong><code>draft</code></strong>, <strong><code>scheduled</code></strong>, <strong><code>failed</code></strong>, <strong><code>cancelled</code></strong>, <strong><code>completed</code></strong>, partially cancelled variants.<br />
+<strong><code>failure_reason</code></strong> stores machine-oriented reasons (e.g. insufficient therapists, slot issues).</p>
+<h3>9.3 <code>BookingItem.status</code></h3>
+<p><code>scheduled</code> / <code>cancelled</code> / <code>completed</code> — procurement and completion granularity.</p>
+<h3>9.4 Dashboard / API filters</h3>
+<ul>
+<li><strong>Zero-therapist</strong> non-nurse therapies may be <strong>hidden</strong> from <strong>scheduled/failed</strong> therapy lists (still may appear for <strong>allocated/prescription</strong> views).  </li>
+<li><strong>Draft</strong> therapy list may <strong>exclude inactive patients</strong> using <code>is_patient_active</code>.</li>
+</ul>
+<hr />
+<h2>10. Prescription (medicine) scheduling — parameters</h2>
+<table>
+<thead>
+<tr>
+<th>Entity</th>
+<th>Status / meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong><code>PrescriptionAllocation</code></strong></td>
+<td>Header for a prescription period; <code>draft</code> / <code>active</code> / <code>cancelled</code> / <code>failed</code>; cancellation date ranges for partial OFF.</td>
+</tr>
+<tr>
+<td><strong><code>PrescriptionScheduling</code></strong></td>
+<td>Per <strong>patient + calendar date</strong>: <code>draft</code>, <code>scheduled</code>, <code>dispatched</code>, <code>cancelled</code>, <code>failed</code>, etc.</td>
+</tr>
+<tr>
+<td><strong>Toggle OFF/ON</strong></td>
+<td>Changes allocation + syncs scheduling rows by rules (not auto-cancelled from external discharge in current build — bulk discharge auto-cancel was <strong>removed</strong> from prescription refresh).</td>
+</tr>
+<tr>
+<td><strong>Procurement</strong></td>
+<td><code>sent_to</code> / department routing from allocation metadata; final schedule run may flip days to <code>scheduled</code>.</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>11. Hard constraints (integrity)</h2>
+<table>
+<thead>
+<tr>
+<th>Constraint</th>
+<th>Business meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Unique <code>(room, date, timeslot)</code> on <code>Booking</code></strong></td>
+<td>One concurrent booking per room per slot.</td>
+</tr>
+<tr>
+<td><strong>Unique <code>(therapist, booking_date, booking_timeslot)</code> on <code>BookingAssignment</code></strong></td>
+<td>No double therapist assignment at same time.</td>
+</tr>
+<tr>
+<td><strong>Nurse <code>(nurse, booking)</code> unique</strong></td>
+<td>No duplicate nurse on same booking.</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>12. External systems and databases</h2>
+<table>
+<thead>
+<tr>
+<th>Database (alias)</th>
+<th>Typical content</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong><code>therapy_db</code></strong></td>
+<td><code>Registration</code>, <code>Patient_Discharge</code>, etc.</td>
+</tr>
+<tr>
+<td><strong><code>iptherapy_db</code></strong></td>
+<td><code>Treatment</code> (OP/IP therapy rows, room, DoD, status).</td>
+</tr>
+<tr>
+<td><strong><code>hospital_db</code></strong></td>
+<td>OP registration (<code>OPMaster</code>), etc.</td>
+</tr>
+<tr>
+<td><strong>Django default DB</strong></td>
+<td>Allocations, bookings, snapshots, masters, sessions.</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>13. Operational parameters (for configuration discussions)</h2>
+<table>
+<thead>
+<tr>
+<th>Topic</th>
+<th>Question for stakeholders</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Slot grid</strong></td>
+<td>Should general slots change (e.g. add 09:00)? Requires <code>SlotMaster</code> + code list sync in <code>get_allowed_slot_values</code> / patient UI.</td>
+</tr>
+<tr>
+<td><strong>Vasthi rule</strong></td>
+<td>Confirmed: <strong>Therapy group name</strong> <code>Vasthi</code> + <strong>THEB037</strong> exemption — any new Vasthi-like therapies must be grouped correctly in masters.</td>
+</tr>
+<tr>
+<td><strong>Senior-tag list</strong></td>
+<td>New Dhara variants require code update in <code>is_treatment_requiring_senior_tag</code>.</td>
+</tr>
+<tr>
+<td><strong>Nurse treatments</strong></td>
+<td>New nurse-only procedures must be added to <code>NurseTreatmentMaster</code>.</td>
+</tr>
+<tr>
+<td><strong>SQLite vs production DB</strong></td>
+<td>Dev <code>database is locked</code> / session errors: use proper DB for concurrent use.</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>14. Traceability — main code anchors</h2>
+<table>
+<thead>
+<tr>
+<th>Topic</th>
+<th>Primary modules</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Slot rules</td>
+<td><code>reshedule.py</code> → <code>get_allowed_slot_values</code>, <code>is_group_vasthi_0830_only</code></td>
+</tr>
+<tr>
+<td>Patient slot API</td>
+<td><code>Patient/views.py</code> → <code>compute_available_slots_for_date</code></td>
+</tr>
+<tr>
+<td>Therapist assign</td>
+<td><code>reshedule.py</code> → <code>allocate_therapists</code>; <code>allocation_logic.py</code>; <code>final_allocation.py</code></td>
+</tr>
+<tr>
+<td>Room assign</td>
+<td><code>reshedule.py</code> → <code>allocate_treatment_room</code></td>
+</tr>
+<tr>
+<td>Nurse assign</td>
+<td><code>Sheduling/nurse_allocation.py</code></td>
+</tr>
+<tr>
+<td>Therapy create / API</td>
+<td><code>Sheduling/views.py</code> → <code>allocate_therapy</code>, <code>therapy_entry</code>, <code>get_therapy_data_api</code></td>
+</tr>
+<tr>
+<td>Patient active</td>
+<td><code>final_allocation.py</code> → <code>is_patient_active</code></td>
+</tr>
+<tr>
+<td>Room search API</td>
+<td><code>authentication/views.py</code> → <code>search_patients_by_room</code></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>15. Document maintenance (Part I)</h2>
+<ul>
+<li>When <strong>business rules change</strong>, update <strong>this handbook</strong> and any separate engineering deep-dives in the repository if applicable.  </li>
+<li>For <strong>algorithm step-by-step</strong> (e.g. emergency leave reassignment), keep <code>RESCHEDULE_ALGORITHM_EXPLANATION.md</code> aligned in the codebase.</li>
+</ul>
+<hr />
+<h1>Part II — Application structure: pages, flows, and models</h1>
+<h2>16. URL map (how the project is mounted)</h2>
+<table>
+<thead>
+<tr>
+<th>Mount path</th>
+<th>Django app</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>/</code></td>
+<td><code>Patient</code></td>
+<td>Patient-facing home, legacy therapy/prescription wizard, sessions, APIs</td>
+</tr>
+<tr>
+<td><code>/sheduling/</code></td>
+<td><code>Sheduling</code></td>
+<td>Primary scheduling UIs: therapy entry, prescription entry, scheduling board, procurement, dashboards</td>
+</tr>
+<tr>
+<td><code>/authentication/</code></td>
+<td><code>authentication</code></td>
+<td>Login, role dashboards, user/role/module admin, patient search APIs</td>
+</tr>
+<tr>
+<td><code>/Masters/</code></td>
+<td><code>masters</code></td>
+<td>Super-admin master CRUD (therapies, items, slots, therapists, rooms, prescription metadata)</td>
+</tr>
+<tr>
+<td><code>/therapy/</code></td>
+<td><code>MySql_Data_pull</code></td>
+<td>Dev/ops: raw external DB table peek, registration search</td>
+</tr>
+<tr>
+<td><code>/admin/</code></td>
+<td>Django admin</td>
+<td>Built-in admin</td>
+</tr>
+<tr>
+<td><code>/patient-history/</code></td>
+<td><code>Patient</code> (root)</td>
+<td>Alias for patient history API used by popups</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>17. Therapy flow (conceptual)</h2>
+<ol>
+<li><strong>Patient identity</strong> comes from <strong>registration</strong> data (often <code>MySql_Data_pull.Registration</code> on alias <code>therapy_db</code>) and/or <strong>scheduling</strong> <code>PatientSnapshot</code> after allocation.</li>
+<li><strong>Prescribing therapies</strong> happens either:</li>
+<li><strong>Legacy path:</strong> <code>Patient</code> views store rows in <strong>session</strong>, then <code>submit_all_data</code> writes <strong><code>Visit</code></strong>, <strong><code>store_Therapy</code></strong>, <strong><code>store_PrescriptionItem</code></strong> (and related) on the default DB / therapy DB per code paths in <code>Patient/views.py</code>, or  </li>
+<li><strong>Scheduling path:</strong> Staff use <strong><code>/sheduling/therapy-entry/</code></strong> (<code>therapy_entry</code> + <code>allocate_therapy</code>) which creates <strong><code>Sheduling.TherapyAllocation</code></strong>, per-day <strong><code>Booking</code></strong>, <strong><code>BookingItem</code></strong>, <strong><code>BookingAssignment</code></strong>, optional <strong><code>BookingNurseAssignment</code></strong>, notifications, audit rows.</li>
+<li><strong>Final scheduling</strong> (<code>final_schedule_api</code>, <code>final_allocation.py</code>) assigns <strong><code>Patient.TherapistBooking</code></strong> / <strong><code>Patient.RoomBooking</code></strong> (and links from scheduling bookings) according to masters and business rules in <strong>Part I</strong> of this handbook.</li>
+<li><strong>Operational views</strong> (<code>/sheduling/therapist/</code>, <code>/sheduling/patient/</code>, availability pages) read scheduling + patient booking models for the day.</li>
+</ol>
+<hr />
+<h2>18. Prescription flow (conceptual)</h2>
+<ol>
+<li><strong>Prescription lines</strong> originate from <strong><code>store_Prescription</code></strong> / <strong><code>store_PrescriptionItem</code></strong> (MySql_Data_pull) synced or entered via UI; scheduling mirrors allocations in <strong><code>PrescriptionAllocation</code></strong>, <strong><code>PrescriptionItem</code></strong>, <strong><code>PrescriptionScheduling</code></strong>, <strong><code>PrescriptionDispatch</code></strong>.</li>
+<li><strong><code>/sheduling/prescriptions/</code></strong> — list/update prescription scheduling state; browser scripts call <strong><code>Sheduling/views.py</code></strong> prescription refresh/toggle endpoints (see <code>static/js/updated_dash_prescription_entry.js</code>).</li>
+<li><strong><code>/sheduling/prescription-scheduling/</code></strong> — board-style scheduling; APIs in <strong><code>prescription_views.py</code></strong> (<code>get_prescription_data_api</code>, <code>send_final_prescription_api</code>, change log, status updates).</li>
+<li><strong><code>/sheduling/procurement/</code></strong> — procurement marks dispatch; APIs in <strong><code>procurement_views.py</code></strong>.</li>
+</ol>
+<hr />
+<h2>19. Module: Patient (<code>/</code>)</h2>
+<p>Base namespace: <code>patient:</code> (see <code>AVCRI/urls.py</code>).</p>
+<h3>19.1 <code>GET /</code> — Home</h3>
+<ul>
+<li><strong>View:</strong> <code>home</code>  </li>
+<li><strong>Template:</strong> <code>home.html</code>  </li>
+<li><strong>Role:</strong> Entry / navigation hub for patient journey.  </li>
+<li><strong>Models:</strong> None required for static home; downstream flows use session keys such as <code>patient_reg_no</code>.</li>
+</ul>
+<h3>19.2 <code>GET|POST /therapy/</code> — Legacy therapy entry</h3>
+<ul>
+<li><strong>View:</strong> <code>therapy_entry_view</code>  </li>
+<li><strong>Template:</strong> <code>dashboards/prescriptions/therapy_entry.html</code> (same template family as scheduling therapy entry)  </li>
+<li><strong>Behaviour:</strong>  </li>
+<li><strong>GET:</strong> Loads patient from <code>Registration</code> (<code>therapy_db</code>) using <code>session['patient_reg_no']</code>. If missing, redirects to <code>patient:patient_lookup</code> (URL is <strong>commented out</strong> in <code>Patient/urls.py</code> — operational sites should set session via another path or use Sheduling entry).  </li>
+<li><strong>POST (JSON):</strong> Accepts <code>therapy_data</code> rows; resolves optional slot strings against <strong><code>masters.SlotMaster</code></strong>; stores sanitized rows in <strong><code>session['therapy_rows_data']</code></strong>.  </li>
+<li><strong>Models:</strong> <code>MySql_Data_pull.Registration</code>, <code>masters.ItemMaster</code> / <code>masters.SlotMaster</code> (read).</li>
+</ul>
+<h3>19.3 <code>GET /prescription/</code> — Legacy prescription entry</h3>
+<ul>
+<li><strong>View:</strong> <code>prescription_entry_view</code>  </li>
+<li><strong>Behaviour:</strong> Currently <strong><code>redirect('prescription_entry')</code></strong> — same name as this route → <strong>self-redirect risk</strong>. Operational prescription UI is <strong><code>/sheduling/prescriptions/</code></strong> (<code>prescription_entry_page</code>).  </li>
+<li><strong>Models:</strong> None (redirect only).</li>
+</ul>
+<h3>19.4 <code>POST /submit/</code> — Commit wizard data</h3>
+<ul>
+<li><strong>View:</strong> <code>submit_all_data</code>  </li>
+<li><strong>Behaviour:</strong> Creates <strong><code>MySql_Data_pull.Visit</code></strong> and persists therapy/prescription structures from session into <strong><code>store_Therapy</code></strong>, <strong><code>store_TherapyItem</code></strong>, <strong><code>store_Prescription</code></strong>, <strong><code>store_PrescriptionItem</code></strong> (and related day rows) inside <code>transaction.atomic</code> — see <code>Patient/views.py</code> for full field mapping. Uses <strong><code>Patient.Repeated_Visitors</code></strong> for repeated-visitor flag.  </li>
+<li><strong>Models:</strong> <code>Visit</code>, <code>store_*</code>, <code>Repeated_Visitors</code>, <code>Registration</code>.</li>
+</ul>
+<h3>19.5 Patient search and details APIs</h3>
+<table>
+<thead>
+<tr>
+<th>URL</th>
+<th>View</th>
+<th>Purpose</th>
+<th>Models / DB</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>GET /search-patients/</code></td>
+<td><code>search_patients_api</code></td>
+<td>Autocomplete patients</td>
+<td><code>Registration</code> (therapy_db)</td>
+</tr>
+<tr>
+<td><code>GET /get-patient-details/</code></td>
+<td><code>get_patient_details_api</code></td>
+<td>Detail payload</td>
+<td><code>Registration</code>, related</td>
+</tr>
+<tr>
+<td><code>GET /patient-history/</code></td>
+<td><code>patient_history_api</code></td>
+<td>History for popups</td>
+<td><code>Patient.PatientHistory</code>, etc.</td>
+</tr>
+<tr>
+<td><code>GET /search-therapies/</code></td>
+<td><code>search_therapies_api</code></td>
+<td>Therapy search by IP/OP</td>
+<td><code>masters.TherapyMaster</code>, fallback <code>Patient.TherapyDetails</code></td>
+</tr>
+</tbody>
+</table>
+<h3>19.6 <code>GET /patients/&lt;visit_id&gt;/sessions/</code> — Session management</h3>
+<ul>
+<li><strong>View:</strong> <code>PatientSessionsView</code> (TemplateView)  </li>
+<li><strong>Template:</strong> <code>dashboards/prescriptions/patient_sessions.html</code>  </li>
+<li><strong>Role:</strong> Lists/cancels/completes session-level bookings for a visit.  </li>
+<li><strong>Models:</strong> <code>Visit</code>, <code>store_TherapyItem</code>, <code>TherapistBooking</code>, <code>RoomBooking</code> (per actions in views).</li>
+</ul>
+<h3>19.7 Session actions</h3>
+<ul>
+<li><strong><code>POST /session/cancel-multi/</code></strong> — <code>cancel_session_bookings</code>  </li>
+<li><strong><code>POST /session/complete-multi/</code></strong> — <code>complete_session_bookings</code>  </li>
+<li><strong>Models:</strong> Booking-related rows on default DB and therapy store.</li>
+</ul>
+<h3>19.8 Therapy / prescription item CRUD</h3>
+<table>
+<thead>
+<tr>
+<th>URL</th>
+<th>View</th>
+<th>Template</th>
+<th>Models</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>…/therapy-item/&lt;id&gt;/update/</code></td>
+<td><code>update_therapy_item</code></td>
+<td><code>update_therapy_item.html</code></td>
+<td><code>store_TherapyItem</code>, etc.</td>
+</tr>
+<tr>
+<td><code>…/therapy-item/&lt;id&gt;/cancel/</code></td>
+<td><code>cancel_therapy_item</code></td>
+<td>—</td>
+<td>Store + cancellations</td>
+</tr>
+<tr>
+<td><code>…/prescription-item/&lt;id&gt;/update/</code></td>
+<td><code>update_prescription_item</code></td>
+<td><code>update_prescription_item.html</code></td>
+<td><code>store_PrescriptionItem</code></td>
+</tr>
+<tr>
+<td><code>…/prescription-item/&lt;id&gt;/cancel/</code></td>
+<td><code>cancel_prescription_item</code></td>
+<td>—</td>
+<td>Store items</td>
+</tr>
+<tr>
+<td><code>…/prescription/&lt;id&gt;/add-item/</code></td>
+<td><code>add_prescription_item</code></td>
+<td><code>add_prescription_item.html</code></td>
+<td><code>store_PrescriptionItem</code></td>
+</tr>
+<tr>
+<td>Add therapy item (path typo in urls: leading <code>/</code>)</td>
+<td><code>add_therapy_item</code></td>
+<td><code>add_therapy_item.html</code></td>
+<td><code>store_TherapyItem</code></td>
+</tr>
+</tbody>
+</table>
+<h3>19.9 Supporting JSON endpoints</h3>
+<ul>
+<li><strong><code>GET /available_slots/</code></strong>, <strong><code>/time_slots/</code></strong>, <strong><code>/unit_numbers/</code></strong> — slot/unit helpers; tie to <strong><code>SlotMaster</code></strong>, <strong><code>Patient.TimeSlot</code></strong>, <strong><code>masters.UnitNo</code></strong> depending on implementation in <code>Patient/views.py</code>.  </li>
+<li><strong><code>GET /allocation-result/</code></strong> — <code>allocation_result_view</code> → <code>dashboards/doctorsAndHelpDesk/allocation_result.html</code> (post-allocation messaging).  </li>
+<li><strong><code>GET /get-item-details/</code></strong> — item metadata for forms.</li>
+</ul>
+<hr />
+<h2>20. Module: Sheduling (<code>/sheduling/</code>)</h2>
+<h3>20.1 Therapy entry</h3>
+<table>
+<thead>
+<tr>
+<th>URL</th>
+<th>Name</th>
+<th>View</th>
+<th>Template</th>
+<th>Functionality</th>
+<th>Primary models</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>GET/POST …/therapy-entry/</code></td>
+<td><code>patient_therapy</code></td>
+<td><code>therapy_entry</code></td>
+<td><code>dashboards/prescriptions/therapy_entry.html</code></td>
+<td>Rich therapy capture for staff; builds payloads for allocation; uses masters context</td>
+<td><code>PatientSnapshot</code>, masters</td>
+</tr>
+<tr>
+<td><code>POST …/api/allocate_therapy/</code></td>
+<td><code>allocate_therapy</code></td>
+<td><code>allocate_therapy</code></td>
+<td>— (JSON)</td>
+<td>Creates <strong><code>TherapyAllocation</code></strong>, <strong><code>Booking</code></strong>, items, assignments, audit; nurse vs normal paths</td>
+<td><code>TherapyAllocation</code>, <code>Booking</code>, <code>BookingItem</code>, <code>BookingAssignment</code>, <code>BookingNurseAssignment</code>, <code>PatientSnapshot</code>, <code>SlotMaster</code>, <code>TreatmentRoom</code>, <code>AuditLog</code>, <code>TherapyNotification</code></td>
+</tr>
+</tbody>
+</table>
+<h3>20.2 Prescription entry (scheduling app)</h3>
+<table>
+<thead>
+<tr>
+<th>URL</th>
+<th>View</th>
+<th>Template</th>
+<th>Functionality</th>
+<th>Models</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>GET …/prescriptions/</code></td>
+<td><code>prescription_entry_page</code></td>
+<td><code>dashboards/prescriptions/prescription_entry.html</code></td>
+<td>Lists prescriptions, ON/OFF scheduling toggle, refresh; uses <code>updated_dash_prescription_entry.js/css</code></td>
+<td><code>PrescriptionAllocation</code>, store prescriptions, session/toggle state</td>
+</tr>
+</tbody>
+</table>
+<h3>20.3 Therapy scheduling board</h3>
+<table>
+<thead>
+<tr>
+<th>URL</th>
+<th>View</th>
+<th>Template</th>
+<th>APIs (same module)</th>
+<th>Functionality</th>
+<th>Models</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>GET …/scheduling/</code></td>
+<td><code>scheduling_dashboard</code></td>
+<td><code>dashboards/scheduling/scheduling.html</code></td>
+<td><code>schedule_therapies_api</code>, <code>final_schedule_api</code>, <code>get_therapy_data_api</code>, <code>final_schedule_status_api</code>, <code>reschedule_therapy_api</code>, <code>reschedule_all_failed_api</code>, <code>therapy_change_log_api</code></td>
+<td>Draft/final schedule, reschedule failed, change log, therapy grid data</td>
+<td><code>TherapyAllocation</code>, <code>Booking*</code>, <code>FinalScheduleRun</code>, <code>TherapistContinuityPlan</code>, <code>BookingRescheduleHistory</code>, etc.</td>
+</tr>
+</tbody>
+</table>
+<h3>20.4 Continuity matrix</h3>
+<ul>
+<li><strong><code>GET …/scheduling/api/continuity-matrix/</code></strong> — <code>matrix_views.continuity_matrix_api</code> — data for therapist continuity planning.</li>
+</ul>
+<h3>20.5 Prescription scheduling</h3>
+<table>
+<thead>
+<tr>
+<th>URL</th>
+<th>View</th>
+<th>Template</th>
+<th>Key APIs</th>
+<th>Models</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>GET …/prescription-scheduling/</code></td>
+<td><code>prescription_scheduling_dashboard</code></td>
+<td><code>dashboards/prescriptions/prescription_scheduling.html</code></td>
+<td><code>get_prescription_data_api</code>, <code>get_prescription_details_api</code>, <code>send_final_prescription_api</code>, <code>get_change_log_api</code>, <code>update_prescription_status_api</code>, <code>get_previous_prescriptions_api</code>, <code>download_prescription_history_api</code></td>
+<td><code>PrescriptionAllocation</code>, <code>PrescriptionScheduling</code>, <code>PrescriptionItem</code>, <code>PrescriptionChangeLog</code>, <code>PrescriptionFinalScheduleRun</code>, <code>PrescriptionDispatch</code></td>
+</tr>
+</tbody>
+</table>
+<h3>20.6 Procurement</h3>
+<table>
+<thead>
+<tr>
+<th>URL</th>
+<th>View</th>
+<th>Template</th>
+<th>APIs</th>
+<th>Models</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>GET …/procurement/</code></td>
+<td><code>procurement_dashboard</code></td>
+<td><code>dashboards/procurement/procurement_dashboard.html</code></td>
+<td><code>get_procurement_prescriptions_api</code>, <code>mark_as_dispatched_api</code>, details/items/change-log</td>
+<td><code>PrescriptionDispatch</code>, allocations, items</td>
+</tr>
+</tbody>
+</table>
+<h3>20.7 Patient dashboard (scheduling)</h3>
+<table>
+<thead>
+<tr>
+<th>URL</th>
+<th>View</th>
+<th>Template</th>
+<th>APIs</th>
+<th>Models</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>GET …/patient/</code></td>
+<td><code>patient_dashboard</code></td>
+<td><code>patient_dashboard.html</code></td>
+<td><code>get_patient_data_api</code>, <code>get_patient_prescriptions_api</code></td>
+<td>Snapshots, bookings, prescription summaries</td>
+</tr>
+</tbody>
+</table>
+<h3>20.8 Therapist dashboard and difficulty</h3>
+<table>
+<thead>
+<tr>
+<th>URL</th>
+<th>View</th>
+<th>Template</th>
+<th>APIs</th>
+<th>Models</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>GET …/therapist/</code></td>
+<td><code>therapist_dashboard</code></td>
+<td><code>dashboards/therapist/therapist_dashboard.html</code></td>
+<td><code>get_therapist_data_api</code>, <code>get_therapist_sessions_by_date_api</code></td>
+<td><code>TherapistMaster</code>, <code>BookingAssignment</code>, sessions</td>
+</tr>
+<tr>
+<td><code>GET …/therapist-difficulty/</code></td>
+<td><code>therapist_difficulty_dashboard</code></td>
+<td><code>dashboards/superadmin/therapist_difficulty_dashboard.html</code></td>
+<td><code>get_therapist_difficulty_data</code></td>
+<td>Load / metrics models per view</td>
+</tr>
+</tbody>
+</table>
+<h3>20.9 Availability</h3>
+<table>
+<thead>
+<tr>
+<th>URL</th>
+<th>View</th>
+<th>Template</th>
+<th>APIs</th>
+<th>Models</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>GET …/therapist-availability/</code></td>
+<td><code>therapist_availability_dashboard</code></td>
+<td><code>dashboards/therapist/therapist_availability.html</code></td>
+<td><code>get_available_therapists_api</code>, <code>get_therapists_on_leave_api</code>, <code>get_time_slots_api</code></td>
+<td><code>TherapistMaster</code>, <code>TherapistLeave</code> / masters leave, <code>SlotMaster</code></td>
+</tr>
+<tr>
+<td><code>GET …/room-availability/</code></td>
+<td><code>room_availability_dashboard</code></td>
+<td><code>dashboards/room/room_availability.html</code></td>
+<td><code>get_available_rooms_api</code>, <code>get_occupied_rooms_api</code>, time slots</td>
+<td><code>TreatmentRoom</code>, bookings, <code>Floor</code></td>
+</tr>
+</tbody>
+</table>
+<h3>20.10 User therapy entry</h3>
+<table>
+<thead>
+<tr>
+<th>URL</th>
+<th>View</th>
+<th>Template</th>
+<th>Role</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>GET …/user-therapy-entry/</code></td>
+<td><code>user_therapy_entry_dashboard</code></td>
+<td><code>dashboards/user_therapy_entry/user_therapy_entry.html</code></td>
+<td>Simplified therapy entry for designated users (same template reused in branching in <code>views.py</code>).</td>
+</tr>
+</tbody>
+</table>
+<h3>20.11 Bulk Excel (testing / bulk load)</h3>
+<table>
+<thead>
+<tr>
+<th>URL</th>
+<th>View</th>
+<th>Template</th>
+<th>Role</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>GET|POST …/therapy-bulk-excel/</code></td>
+<td><code>therapy_bulk_excel</code></td>
+<td><code>dashboards/scheduling/therapy_bulk_excel.html</code></td>
+<td>Upload spreadsheet to create <strong><code>TherapyAllocation</code></strong> + <strong><code>Booking</code></strong> rows in bulk.</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>21. Module: authentication (<code>/authentication/</code>)</h2>
+<h3>21.1 Auth and profile</h3>
+<ul>
+<li><strong><code>GET|POST …/login/</code></strong> — <code>login_view</code> → <code>login.html</code>  </li>
+<li><strong><code>GET …/logout/</code></strong> — <code>logout_view</code>  </li>
+<li><strong><code>GET …/profile/</code></strong> — <code>user_profile</code> → <code>dashboards/account/user_profile.html</code>  </li>
+</ul>
+<h3>21.2 Role landing dashboards (each renders a hub template)</h3>
+<table>
+<thead>
+<tr>
+<th>URL</th>
+<th>View</th>
+<th>Template</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>…/therapist/dashboard/</code></td>
+<td><code>therapist_dashboard</code></td>
+<td><code>dashboards/therapist/therapist_dashboard.html</code></td>
+</tr>
+<tr>
+<td><code>…/scheduling_dashboard/dashboard/</code></td>
+<td><code>scheduling_dashboard</code></td>
+<td><code>dashboards/scheduling/scheduling_dashboard.html</code></td>
+</tr>
+<tr>
+<td><code>…/doctor/dashboard/</code></td>
+<td><code>doctor_dashboard</code></td>
+<td><code>dashboards/doctorsAndHelpDesk/doctor_dashboard.html</code></td>
+</tr>
+<tr>
+<td><code>…/gmhr/dashboard/</code></td>
+<td><code>gm_hr_dashboard</code></td>
+<td><code>dashboards/gm_hr/gm_hr_dashboard.html</code></td>
+</tr>
+<tr>
+<td><code>…/Patient_dashboard/dashboard/</code></td>
+<td><code>Patient_dashboard</code></td>
+<td><code>dashboards/patient/Patient_dashboard.html</code></td>
+</tr>
+<tr>
+<td><code>…/Manage_user/dashboard/</code></td>
+<td><code>Manage_user</code></td>
+<td><code>dashboards/superadmin/Manage_user.html</code></td>
+</tr>
+<tr>
+<td><code>…/Audit_Log/dashboard/</code></td>
+<td><code>Audit_Log</code></td>
+<td><code>dashboards/superadmin/Audit_Log.html</code></td>
+</tr>
+<tr>
+<td><code>…/Therapy_Audit_Log/dashboard/</code></td>
+<td><code>Therapy_Audit_Log</code></td>
+<td><code>dashboards/superadmin/Therapy_Audit_Log.html</code></td>
+</tr>
+<tr>
+<td><code>…/view_patient_details/dashboard/</code></td>
+<td><code>view_patient_details</code></td>
+<td><code>dashboards/therapist/view_patient_details.html</code></td>
+</tr>
+<tr>
+<td><code>…/therapist_feedback_form/dashboard/</code></td>
+<td><code>therapist_feedback_form</code></td>
+<td><code>dashboards/therapist/therapist_feedback_form.html</code></td>
+</tr>
+<tr>
+<td><code>…/Therapy_Report/dashboard/</code></td>
+<td><code>Therapy_Report</code></td>
+<td><code>dashboards/reports/therapy_report.html</code></td>
+</tr>
+<tr>
+<td><code>…/housekeepingdash/dashboard/</code></td>
+<td><code>housekeepingdash</code></td>
+<td><code>dashboards/Housekeeping Staff/housekeepingdash.html</code></td>
+</tr>
+<tr>
+<td><code>…/Patient_feedback_review/dashboard/</code></td>
+<td><code>Patient_feedback_review</code></td>
+<td><code>dashboards/gm_hr/Patient_feedback_review.html</code></td>
+</tr>
+<tr>
+<td><code>…/nurse_dash/dashboard/</code></td>
+<td><code>nurse_dash</code></td>
+<td><code>dashboards/Nurse/nurse_dash.html</code></td>
+</tr>
+<tr>
+<td><code>…/ip_pharmacy/dashboard/</code></td>
+<td><code>ip_pharmacy</code></td>
+<td><code>dashboards/ip_pharmacy/ip_pharmacy.html</code></td>
+</tr>
+<tr>
+<td><code>…/prescription_dash/dashboard/</code></td>
+<td><code>prescription_dash</code></td>
+<td><code>dashboards/prescriptions/prescription_dash.html</code></td>
+</tr>
+<tr>
+<td><code>…/patient_profile/dashboard/</code></td>
+<td><code>patient_profile</code></td>
+<td><code>dashboards/patient/patient_profile.html</code></td>
+</tr>
+</tbody>
+</table>
+<h3>21.3 Admin and APIs</h3>
+<ul>
+<li><strong>Role CRUD:</strong> <code>role_management</code>, <code>create_role</code>, <code>edit_role</code>, <code>delete_role</code>, <code>toggle_role_status</code> — templates under <code>authentication/</code>.  </li>
+<li><strong>User–role assignment:</strong> <code>user_role_assignment</code>  </li>
+<li><strong>Module and nav:</strong> <code>module_management</code>, <code>nav_section_management</code>  </li>
+<li><strong>Therapist schedule:</strong> <code>therapist_schedule</code> → <code>dashboards/therapist/therapist_schedule.html</code>  </li>
+<li><strong>Add therapy (autofill):</strong> <code>add_therapy_with_autofill</code> (may render <code>therapy_entry</code> template with context)  </li>
+<li><strong>Patient search APIs:</strong> <code>search_patients</code>, <code>search_patients_by_room</code>, <code>get_patient_details</code> — used by dashboards; respect <strong><code>is_patient_active</code></strong> filters on room search paths.  </li>
+<li><strong>Audit APIs:</strong> <code>audit_log_api</code>, <code>therapy_audit_log_api</code>  </li>
+<li><strong>Role change:</strong> <code>confirm_role_change</code>, <code>execute_role_change</code>  </li>
+</ul>
+<p><strong>Models:</strong> <code>authentication</code> app models for roles/modules/users; <code>authentication.AuditLog</code> (referenced from <code>masters</code> audit logging).</p>
+<hr />
+<h2>22. Module: masters (<code>/Masters/</code>)</h2>
+<p><strong>Dashboard:</strong> <code>GET /Masters/dashboard/</code> → <code>master_management_dashboard</code> → <code>masters/master_management_dashboard.html</code> (super admin). Links to each list view below.</p>
+<h3>22.1 Master list pages (typical pattern)</h3>
+<p>Each <strong>manage</strong> URL is a list view with search/filters, pagination, enable/disable/delete/update routes, and often bulk-upload metadata. Templates live under <code>masters/*.html</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Path (relative to <code>/Masters/</code>)</th>
+<th>Route name</th>
+<th>Model</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>therapy/</code></td>
+<td><code>therapy_master_manage</code></td>
+<td><code>TherapyMaster</code></td>
+</tr>
+<tr>
+<td><code>therapy-groups/</code></td>
+<td><code>therapy_group_manage</code></td>
+<td><code>TherapyGroup</code></td>
+</tr>
+<tr>
+<td><code>items/</code></td>
+<td><code>item_master_manage</code></td>
+<td><code>ItemMaster</code></td>
+</tr>
+<tr>
+<td><code>item-groups/</code></td>
+<td><code>item_group_manage</code></td>
+<td><code>ItemGroup</code></td>
+</tr>
+<tr>
+<td><code>slots/</code></td>
+<td><code>slot_master_manage</code></td>
+<td><code>SlotMaster</code></td>
+</tr>
+<tr>
+<td><code>ingredients/</code></td>
+<td><code>ingredient_master_manage</code></td>
+<td><code>IngredientMaster</code></td>
+</tr>
+<tr>
+<td><code>treatment-rooms/</code></td>
+<td><code>treatment_room_master_manage</code></td>
+<td><code>Patient.TreatmentRoom</code></td>
+</tr>
+<tr>
+<td><code>therapists/</code></td>
+<td><code>therapist_master_manage</code></td>
+<td><code>TherapistMaster</code> (+ Excel export)</td>
+</tr>
+<tr>
+<td><code>therapist-grades/</code></td>
+<td><code>therapistgrade_manage</code></td>
+<td><code>TherapistGrade</code></td>
+</tr>
+<tr>
+<td><code>nurse-treatments/</code></td>
+<td><code>nursetreatment_manage</code></td>
+<td><code>NurseTreatmentMaster</code></td>
+</tr>
+<tr>
+<td><code>nurses/</code></td>
+<td><code>nursemaster_manage</code></td>
+<td><code>NurseMaster</code></td>
+</tr>
+<tr>
+<td><code>procured</code></td>
+<td><code>procured_manage</code></td>
+<td><code>Procured</code></td>
+</tr>
+<tr>
+<td><code>oils/</code></td>
+<td><code>oilclass_manage</code></td>
+<td><code>OilClass</code></td>
+</tr>
+<tr>
+<td><code>usages/</code></td>
+<td><code>usagetype_manage</code></td>
+<td><code>UsageType</code></td>
+</tr>
+<tr>
+<td><code>prescription-usages/</code></td>
+<td><code>prescriptionusage_manage</code></td>
+<td><code>PrescriptionUsage</code></td>
+</tr>
+<tr>
+<td><code>times/</code></td>
+<td><code>prestime_manage</code></td>
+<td><code>PrescriptionTime</code></td>
+</tr>
+<tr>
+<td><code>prescopes/</code></td>
+<td><code>prescope_manage</code></td>
+<td><code>PrescriptionScope</code></td>
+</tr>
+<tr>
+<td><code>units/</code></td>
+<td><code>unit_list</code></td>
+<td><code>UnitNo</code></td>
+</tr>
+<tr>
+<td><code>room-names/</code></td>
+<td><code>roomname_manage</code></td>
+<td><code>Patient.RoomName</code></td>
+</tr>
+<tr>
+<td><code>floors/</code></td>
+<td><code>floor_manage</code></td>
+<td><code>Patient.Floor</code></td>
+</tr>
+<tr>
+<td><code>bulk-upload/</code></td>
+<td><code>bulk_upload_master</code></td>
+<td>Multi-type spreadsheet import</td>
+</tr>
+<tr>
+<td><code>download-template/&lt;master_type&gt;/</code></td>
+<td><code>download_master_template</code></td>
+<td>Template files</td>
+</tr>
+</tbody>
+</table>
+<h3>22.2 Master JSON APIs</h3>
+<ul>
+<li><strong><code>GET /Masters/api/master-data/?type=…</code></strong> — Dropdown payloads (<code>therapy</code>, <code>item</code>, <code>slot</code>, <code>therapist</code>, etc.).  </li>
+<li><strong><code>POST /Masters/api/master-item/</code></strong> (super admin) — <code>create_master_item</code>  </li>
+<li><strong>PATCH/PUT <code>/Masters/api/master-item/&lt;id&gt;/</code></strong> — <code>update_master_item</code>  </li>
+<li><strong>DELETE <code>/Masters/api/master-item/&lt;id&gt;/delete/</code></strong> — <code>delete_master_item</code>  </li>
+<li><strong>Therapist REST</strong> under <code>/Masters/api/therapist/</code> and therapist-leave endpoints.</li>
+</ul>
+<hr />
+<h2>23. Module: MySql_Data_pull (<code>/therapy/</code>)</h2>
+<table>
+<thead>
+<tr>
+<th>URL</th>
+<th>View</th>
+<th>Template</th>
+<th>Functionality</th>
+<th>Models</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>GET /therapy/therapy/</code></td>
+<td><code>table_view</code></td>
+<td><code>sql_data_test.html</code></td>
+<td>Pick a legacy table name; show first 10 rows from <strong><code>therapy_db</code></strong></td>
+<td>Keys in <code>TABLE_MODELS</code> in <code>views.py</code> (some model names may be legacy)</td>
+</tr>
+<tr>
+<td><code>GET|POST /therapy/registration-search/</code></td>
+<td><code>registration_search</code></td>
+<td><code>dashboards/pat_reg.html</code></td>
+<td>Search registration by number; list recent registrations</td>
+<td><code>Registration</code></td>
+</tr>
+</tbody>
+</table>
+<p><strong>Important operational models (app <code>MySql_Data_pull</code>):</strong> <code>Registration</code>, <code>Visit</code>, <code>store_Therapy</code>, <code>store_TherapyItem</code>, <code>store_TherapyItemDay</code>, <code>store_Prescription</code>, <code>store_PrescriptionItem</code>, <code>Prescription</code>, <code>Treatment</code>, <code>Scheduling</code>, etc. (see <code>models.py</code> in the repository for the full list).</p>
+<hr />
+<h2>24. Cross-app model index (quick reference)</h2>
+<h3>Sheduling.models</h3>
+<p><code>PatientSnapshot</code>, <code>TherapyAllocation</code>, <code>Booking</code>, <code>BookingItem</code>, <code>BookingAssignment</code>, <code>BookingNurseAssignment</code>, <code>TherapistContinuityPlan</code>, <code>CancellationRequest</code>, <code>NotificationQueue</code>, <code>TherapyNotification</code>, <code>AuditLog</code>, <code>AllocationChange</code>, <code>BookingRescheduleHistory</code>, <code>PrescriptionAllocation</code>, <code>PrescriptionNotification</code>, <code>PrescriptionChange</code>, <code>PrescriptionScheduling</code>, <code>PrescriptionChangeLog</code>, <code>PrescriptionItem</code>, <code>PrescriptionDispatch</code>, <code>FinalScheduleRun</code>, <code>PrescriptionFinalScheduleRun</code>.</p>
+<h3>Patient.models</h3>
+<p><code>Repeated_Visitors</code>, <code>Therapist</code>, <code>TherapyDetails</code>, <code>PatientHistory</code>, <code>DailyPatientCount</code>, <code>TherapistLeave</code>, <code>TimeSlot</code>, <code>RoomName</code>, <code>Floor</code>, <code>TreatmentRoom</code>, <code>RoomBooking</code>, <code>TherapistBooking</code>, <code>BookingCancellations</code>, <code>AllocationAttempt</code>.</p>
+<h3>masters.models</h3>
+<p><code>Procured</code>, <code>OilClass</code>, <code>UsageType</code>, <code>PrescriptionUsage</code>, <code>NurseTreatmentMaster</code>, <code>NurseMaster</code>, <code>PrescriptionTime</code>, <code>PrescriptionScope</code>, <code>UnitNo</code>, <code>TherapyGroup</code>, <code>TherapyMaster</code>, <code>ItemGroup</code>, <code>ItemMaster</code>, <code>SlotMaster</code>, <code>IngredientMaster</code>, <code>TherapistGrade</code>, <code>TherapistMaster</code>, <code>TherapistLeaveMaster</code>, <code>StayingRoom</code>, <code>EmergencyLeave</code>.</p>
+<hr />
+<h2>25. Front-end assets (high touch)</h2>
+<table>
+<thead>
+<tr>
+<th>Area</th>
+<th>Files (under <code>static/</code> in the repository)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Scheduling grid / draft PDF</td>
+<td><code>js/scheduling.js</code>, scheduling templates</td>
+</tr>
+<tr>
+<td>Prescription entry toggle and list</td>
+<td><code>js/updated_dash_prescription_entry.js</code>, <code>css/updated_dash_prescription_entry.css</code></td>
+</tr>
+<tr>
+<td>Therapy entry forms</td>
+<td>Shared <code>therapy_entry.html</code> + app-specific JS</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>26. Known gaps / code health notes (for maintainers)</h2>
+<ul>
+<li><strong><code>Patient</code>:</strong> <code>patient_lookup</code> URL is commented but <strong><code>therapy_entry_view</code></strong> still redirects to it if session lacks <code>patient_reg_no</code>.  </li>
+<li><strong><code>prescription_entry_view</code></strong> redirects to itself (<code>prescription_entry</code>); use <strong><code>/sheduling/prescriptions/</code></strong> for the live screen.  </li>
+<li><strong><code>Patient/urls.py</code>:</strong> <code>path('/patients/&lt;visit_id&gt;/add-therapy-item/'</code> has a leading slash typo — verify routing in your environment.</li>
+</ul>
+<hr />
+<h2>27. Additional references in the repository</h2>
+<p>The following files in the AVCRI codebase may supplement this handbook for engineering depth: <code>COMPREHENSIVE_KT_DOCUMENTATION.md</code>, <code>RESCHEDULE_ALGORITHM_EXPLANATION.md</code>, <code>DHARA_PIZICHIL_RESCHEDULING_FIXES.md</code>.  </p>
+<p>For day-to-day updates, prefer editing <strong><code>KT_AVCRI_Client_Handbook_Complete.md</code></strong> (this document) and regenerating the <strong><code>.docx</code></strong> if you use Word/Google Docs as the client-facing copy.</p>
+<hr />
+<p><em>End of AVCRI Client Knowledge Transfer Handbook (Complete)</em></p>
+</body>
+</html>
