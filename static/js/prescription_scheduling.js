@@ -1431,14 +1431,48 @@ function printPrescriptionScheduleToPDF() {
                                         if ((!target.therapy_id) && source.therapy_id) target.therapy_id = source.therapy_id;
 
                                         // Items (Ingredients/Dosage) logic
-                                        const targetHasRealItems = target.items && target.items.length > 0 && target.items.some(i => i.item_name !== target.therapy_name);
-                                        const sourceHasRealItems = source.items && source.items.length > 0 && source.items.some(i => i.item_name !== source.therapy_name);
-
-                                        if (sourceHasRealItems) {
-                                            // Always prioritize items from therapy-data API (source) as it contains the most up-to-date scheduling info
-                                            // and our local converter correctly handles items_groups vs flat items
-                                            target.items = source.items;
+                                        // Therapy-data API sometimes returns placeholder "minimal" items for some roles (e.g., Vasanthi),
+                                        // which would overwrite the fully-populated details payload and cause missing:
+                                        // - oils / medicinal mixtures (dosage column)
+                                        // - usage notes / ingredients (ingredients column)
+                                        // Only overwrite items if the source contains meaningful details.
+                                        function isNonEmptyString(v) {
+                                            return v !== null && v !== undefined && String(v).trim() !== '' && String(v).trim() !== '—';
                                         }
+                                        function hasMeaningfulNestedGroupDetails(items) {
+                                            if (!Array.isArray(items) || items.length === 0) return false;
+                                            // Nested style: [{ items: [...], dosage, oil_class, ingredients, ... }, ...]
+                                            const looksNested = items[0] && items[0].items && Array.isArray(items[0].items);
+                                            if (!looksNested) return false;
+
+                                            return items.some(group => {
+                                                if (!group || typeof group !== 'object') return false;
+                                                const dosage = group.dosage ?? group.dose ?? group.quantity ?? '';
+                                                const oilClass = group.oil_class ?? group.oilClass ?? group.oil_class_name ?? '';
+                                                const usage = group.usage ?? '';
+                                                const ingredients = group.ingredients;
+
+                                                const ingredientsNonEmpty = (() => {
+                                                    if (!ingredients) return false;
+                                                    if (Array.isArray(ingredients)) return ingredients.length > 0;
+                                                    if (typeof ingredients === 'string') return ingredients.trim().length > 0;
+                                                    return false;
+                                                })();
+
+                                                // Consider it "real" if we have at least 2 meaningful fields.
+                                                // This avoids overwriting the fully-populated details payload with minimal placeholders.
+                                                const detailsCount = [
+                                                    isNonEmptyString(dosage),
+                                                    isNonEmptyString(oilClass),
+                                                    ingredientsNonEmpty,
+                                                    isNonEmptyString(usage)
+                                                ].filter(Boolean).length;
+                                                return detailsCount >= 2;
+                                            });
+                                        }
+
+                                        const sourceHasRealItems = hasMeaningfulNestedGroupDetails(source.items);
+                                        if (sourceHasRealItems) target.items = source.items;
                                     }
 
                                     allTherapyItems.forEach(item => {
