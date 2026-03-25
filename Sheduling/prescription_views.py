@@ -862,6 +862,17 @@ def get_prescription_details_api(request):
                 
             allocation = booking.allocation
             therapy_name = allocation.therapy_name
+
+            # Prefer slot time (HH:MM) for PDF "Time" column.
+            # This is needed because the prescription details API currently powers the PDF,
+            # and some roles may not receive complete therapy-time data from the separate API.
+            slot_time = getattr(getattr(booking, 'timeslot', None), 'slot_time', None)
+            booking_time_str = ''
+            if slot_time:
+                try:
+                    booking_time_str = slot_time.strftime('%H:%M')
+                except Exception:
+                    booking_time_str = str(slot_time)
             
             # Get items_groups from allocation
             items_groups = allocation.items_groups if isinstance(allocation.items_groups, list) else []
@@ -892,6 +903,12 @@ def get_prescription_details_api(request):
                             'ingredients': group.get('ingredients', []) or [],
                             'booking_id': booking.id,
                             'booking_status': booking.status,
+                            # Used by prescription PDF generator.
+                            'timeslot': booking_time_str,
+                            'time': booking_time_str,
+                            # Used by prescription PDF generator for "From Date"/"To Date".
+                            'from_date': allocation.from_date.isoformat() if getattr(allocation, 'from_date', None) else '',
+                            'to_date': allocation.to_date.isoformat() if getattr(allocation, 'to_date', None) else '',
                             'items': []
                         }
                     
@@ -953,6 +970,12 @@ def get_prescription_details_api(request):
                         'ingredients': [],
                         'booking_id': booking.id,
                         'booking_status': booking.status,
+                        # Used by prescription PDF generator.
+                        'timeslot': booking_time_str,
+                        'time': booking_time_str,
+                        # Used by prescription PDF generator for "From Date"/"To Date".
+                        'from_date': allocation.from_date.isoformat() if getattr(allocation, 'from_date', None) else '',
+                        'to_date': allocation.to_date.isoformat() if getattr(allocation, 'to_date', None) else '',
                         'items': []
                     }
                 
@@ -994,6 +1017,12 @@ def get_prescription_details_api(request):
                 'booking_id': group_data['booking_id'],
                 'booking_status': group_data['booking_status'],
                 'booking_is_cancelled': booking_is_cancelled,
+                # Used by prescription PDF generator for the "Time" column.
+                'timeslot': group_data.get('timeslot', '') or group_data.get('time', '') or '',
+                'time': group_data.get('time', '') or group_data.get('timeslot', '') or '',
+                # Used by prescription PDF generator for "From Date"/"To Date".
+                'from_date': group_data.get('from_date', '') or '',
+                'to_date': group_data.get('to_date', '') or '',
                 'items': items_without_cancellation,
                 'is_group': True
             })
