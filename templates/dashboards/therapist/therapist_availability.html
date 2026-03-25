@@ -23,6 +23,28 @@
     </header>
 
     <div class="dashboard">
+      <!-- Section 0: Therapist availability summary for tomorrow -->
+      <div class="card" style="grid-column: 1 / -1;">
+        <div class="card-header">
+          <i class="fas fa-chart-bar"></i>
+          <h2>Therapist Availability Summary</h2>
+        </div>
+        <div class="card-body">
+          <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:end; margin-bottom:12px;">
+            <div class="form-group" style="margin-bottom:0; flex: 0 0 220px;">
+              <label for="summaryDate">Summary Date</label>
+              <input type="date" id="summaryDate" class="form-control" required>
+            </div>
+            <button type="button" class="btn" id="summaryGenerateBtn" onclick="window.generateTherapistAvailabilitySummary && window.generateTherapistAvailabilitySummary()">
+              <i class="fas fa-redo"></i> Generate
+            </button>
+          </div>
+          <div id="tomorrowSummary" class="result no-result">
+            <h3><i class="fas fa-clock"></i> Generating summary...</h3>
+          </div>
+        </div>
+      </div>
+
       <!-- Section 1: Therapist Availability -->
       <div class="card">
         <div class="card-header">

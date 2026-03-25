@@ -464,7 +464,7 @@ function updateTable(status, data) {
         if (therapistData.length === 0) {
             therapistTbody.innerHTML = `
                         <tr>
-                            <td colspan="5" class="empty-state">
+                            <td colspan="6" class="empty-state">
                                 <div class="empty-state-icon">📋</div>
                                 <div>No draft therapist treatments found for this date.</div>
                             </td>
@@ -479,7 +479,8 @@ function updateTable(status, data) {
                     groupIdx++;
                     prevPatient = patientKey;
                 }
-                const displayDate = item.date || (item.from_date + ' to ' + item.to_date);
+                const fromVal = item.from_date ? formatDateDMYForDraftPdf(item.from_date) : '—';
+                const toVal = item.to_date ? formatDateDMYForDraftPdf(item.to_date) : '—';
                 const row = document.createElement('tr');
                 row.className = 'draft-row' + (groupIdx % 2 === 0 ? ' patient-group-alt' : '');
                 row.setAttribute('data-patient', (item.patient_name || '').toLowerCase());
@@ -491,7 +492,8 @@ function updateTable(status, data) {
                                 <div style="font-size: 12px; color: var(--gray);">${escapeHtml(item.patient_reg_no)}</div>
                             </td>
                             <td>${escapeHtml(item.therapy_name)}</td>
-                            <td>${displayDate}</td>
+                            <td>${fromVal}</td>
+                            <td>${toVal}</td>
                             <td>${format12Hour(item.timeslot) || '—'}</td>
                             <td>${item.patient_room_no || '—'}</td>
                         `;
@@ -504,7 +506,7 @@ function updateTable(status, data) {
         if (nurseData.length === 0) {
             nurseTbody.innerHTML = `
                         <tr>
-                            <td colspan="4" class="empty-state">
+                            <td colspan="5" class="empty-state">
                                 <div class="empty-state-icon">📋</div>
                                 <div>No draft nurse treatments found for this date.</div>
                             </td>
@@ -519,7 +521,8 @@ function updateTable(status, data) {
                     groupIdx++;
                     prevPatient = patientKey;
                 }
-                const displayDate = item.date || (item.from_date + ' to ' + item.to_date);
+                const fromVal = item.from_date ? formatDateDMYForDraftPdf(item.from_date) : '—';
+                const toVal = item.to_date ? formatDateDMYForDraftPdf(item.to_date) : '—';
                 const row = document.createElement('tr');
                 row.className = 'draft-row' + (groupIdx % 2 === 0 ? ' patient-group-alt' : '');
                 row.setAttribute('data-patient', (item.patient_name || '').toLowerCase());
@@ -531,7 +534,8 @@ function updateTable(status, data) {
                                 <div style="font-size: 12px; color: var(--gray);">${escapeHtml(item.patient_reg_no)}</div>
                             </td>
                             <td>${escapeHtml(item.therapy_name)}</td>
-                            <td>${displayDate}</td>
+                            <td>${fromVal}</td>
+                            <td>${toVal}</td>
                             <td>${item.patient_room_no || '—'}</td>
                         `;
                 nurseTbody.appendChild(row);
@@ -1594,10 +1598,27 @@ function generateDraftTherapyTimeslotPDF(therapyData, dateIso) {
             doc.text(scheduleLabel, pageWidth / 2, yPos, { align: 'center' });
             yPos += 6;
             doc.setTextColor(0, 0, 0);
-            // Column titles appear once on the first therapist table (not repeated per ward)
         }
 
         drawReportHeader();
+
+        // Draw centered column heading UNDER the main header (once),
+        // then print time slots and room tables.
+        const draftColumnHeaders = ['Treatment', 'Patient', 'Room No', 'From Date', 'To Date', 'Therapists req.'];
+        const draftColWidths = [56, 44, 18, 24, 24, 22];
+        // Client requested: larger + black column heading.
+        doc.setFontSize(10);
+        doc.setFont(undefined, 'bold');
+        doc.setTextColor(0, 0, 0);
+        let headerX = margin;
+        draftColumnHeaders.forEach((h, i) => {
+            const cx = headerX + (draftColWidths[i] / 2);
+            doc.text(h, cx, yPos, { align: 'center' });
+            headerX += draftColWidths[i];
+        });
+        doc.setTextColor(0, 0, 0);
+        doc.setFont(undefined, 'normal');
+        yPos += 4;
 
         function sortItemsInGroup(arr) {
             return arr.slice().sort((a, b) => {
@@ -1628,8 +1649,9 @@ function generateDraftTherapyTimeslotPDF(therapyData, dateIso) {
         });
 
         const sexOrder = ['Female', 'Male', 'Other'];
-        const draftTableHead = [['Treatment', 'Patient', 'Room No', 'Therapists req.', 'From Date', 'To Date']];
-        let draftTherapistColumnHeadShown = false;
+        // Keep "Therapists req." as the last column (client-requested).
+        const draftTableHead = [['Treatment', 'Patient', 'Room No', 'From Date', 'To Date', 'Therapists req.']];
+        let draftTherapistColumnHeadShown = true; // manual header drawn above
 
         sortedSlots.forEach((slot, slotIdx) => {
             const items = sortItemsInGroup(slotGroups[slot]);
@@ -1648,6 +1670,22 @@ function generateDraftTherapyTimeslotPDF(therapyData, dateIso) {
                 doc.setFont(undefined, 'bold');
                 doc.text(sexLabel, margin + 2, yPos);
                 yPos += 4;
+
+                // Total therapists required for this time slot + sex.
+                // Printed AFTER all ward tables for this sex (not at the start).
+                const sexTotalReq = sexItems.reduce((acc, it) => {
+                    const raw = it.therapists_required;
+                    if (raw === null || typeof raw === 'undefined') return acc;
+                    const s = String(raw).trim();
+                    if (!s || s === '—') return acc;
+                    const n = parseInt(s, 10);
+                    return acc + (Number.isFinite(n) ? n : 0);
+                }, 0);
+                // Column widths match the autoTable columnStyles below:
+                // [Treatment, Patient, Room No, From Date, To Date, Therapists req]
+                const colWidths = [56, 44, 18, 24, 24, 22];
+                const lastColCenterX =
+                    margin + colWidths.slice(0, 5).reduce((a, b) => a + b, 0) + (colWidths[5] / 2);
 
                 const byWard = {};
                 sexItems.forEach(it => {
@@ -1679,9 +1717,9 @@ function generateDraftTherapyTimeslotPDF(therapyData, dateIso) {
                             it.therapy_name || '—',
                             it.patient_name || '—',
                             it.patient_room_no || it.room_no || '—',
-                            tr,
                             formatDateDMYForDraftPdf(it.from_date),
                             formatDateDMYForDraftPdf(it.to_date),
+                            tr, // last column
                         ];
                     });
 
@@ -1700,9 +1738,9 @@ function generateDraftTherapyTimeslotPDF(therapyData, dateIso) {
                             0: { cellWidth: 56 },
                             1: { cellWidth: 44 },
                             2: { cellWidth: 18 },
-                            3: { cellWidth: 22, halign: 'center' },
+                            3: { cellWidth: 24 },
                             4: { cellWidth: 24 },
-                            5: { cellWidth: 'auto' },
+                            5: { cellWidth: 22, halign: 'center' }, // Therapists req last
                         },
                         didDrawPage: (data) => {
                             const actual = tableStartPage + data.pageNumber - 1;
@@ -1713,6 +1751,14 @@ function generateDraftTherapyTimeslotPDF(therapyData, dateIso) {
                     draftTherapistColumnHeadShown = true;
                     yPos = doc.lastAutoTable.finalY + 3;
                 });
+                // Sex total required after finishing all wards for this sex.
+                checkNewPage(6);
+                doc.setFontSize(8);
+                doc.setFont(undefined, 'bold');
+                doc.setTextColor(0, 0, 0);
+                doc.text(String(sexTotalReq), lastColCenterX, yPos, { align: 'center' });
+                doc.setFont(undefined, 'normal');
+                yPos += 3.5;
             });
 
             if (slotIdx < sortedSlots.length - 1) {
