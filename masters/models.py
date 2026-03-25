@@ -306,6 +306,79 @@ class SlotMaster(models.Model):
         verbose_name_plural = "Slot Masters"
         ordering = ["slot_number"]
 
+# Shift Master
+class ShiftMaster(models.Model):
+    """
+    Master list of therapist shifts.
+    Example: shift-1, shift-2, etc.
+    """
+    shift_name = models.CharField(max_length=50, unique=True, verbose_name="Shift Name")
+    is_active = models.BooleanField(default=True, verbose_name="Active")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Created At")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="Updated At")
+
+    def __str__(self):
+        return self.shift_name
+
+    class Meta:
+        verbose_name = "Shift Master"
+        verbose_name_plural = "Shift Masters"
+        ordering = ["shift_name"]
+
+
+class ShiftSlotMapping(models.Model):
+    """
+    Maps a shift to the SlotMaster records that belong to that shift.
+    This supports overlap: the same SlotMaster slot can be present in multiple shifts.
+    """
+    shift = models.ForeignKey(ShiftMaster, on_delete=models.CASCADE, related_name="shift_slots", verbose_name="Shift")
+    slot = models.ForeignKey(SlotMaster, on_delete=models.CASCADE, related_name="slot_shifts", verbose_name="Slot")
+    is_active = models.BooleanField(default=True, verbose_name="Active")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Created At")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="Updated At")
+
+    class Meta:
+        verbose_name = "Shift Slot Mapping"
+        verbose_name_plural = "Shift Slot Mappings"
+        constraints = [
+            models.UniqueConstraint(fields=["shift", "slot"], name="ux_shift_slot_unique"),
+        ]
+        indexes = [
+            models.Index(fields=["shift", "is_active"], name="idx_shift_slot_shift_active"),
+            models.Index(fields=["slot", "is_active"], name="idx_shift_slot_slot_active"),
+        ]
+
+    def __str__(self):
+        return f"{self.shift.shift_name} -> {self.slot.slot_time.strftime('%H:%M')}"
+
+
+class TherapistShiftMapping(models.Model):
+    """
+    Maps therapists to shifts (e.g., therapist is available for shift-1 / shift-2).
+    Allocation checks both sides:
+      - therapist must have a shift mapping
+      - shift must contain the requested time-slot
+    """
+    therapist = models.ForeignKey("TherapistMaster", on_delete=models.CASCADE, related_name="shift_mappings", verbose_name="Therapist")
+    shift = models.ForeignKey(ShiftMaster, on_delete=models.CASCADE, related_name="therapist_mappings", verbose_name="Shift")
+    is_active = models.BooleanField(default=True, verbose_name="Active")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Created At")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="Updated At")
+
+    class Meta:
+        verbose_name = "Therapist Shift Mapping"
+        verbose_name_plural = "Therapist Shift Mappings"
+        constraints = [
+            models.UniqueConstraint(fields=["therapist", "shift"], name="ux_therapist_shift_unique"),
+        ]
+        indexes = [
+            models.Index(fields=["shift", "is_active"], name="idx_tshift_sh_act"),
+            models.Index(fields=["therapist", "is_active"], name="idx_tshift_th_act"),
+        ]
+
+    def __str__(self):
+        return f"{self.therapist.therapist_code} -> {self.shift.shift_name}"
+
 # Ingredient Master
 class IngredientMaster(models.Model):
     """Master list of ingredients used in prescriptions."""

@@ -26,13 +26,14 @@ def get_therapy_details(therapy_name):
         return None
     if name in therapy_cache:
         return therapy_cache[name]
-    try:
-        details = TherapyMaster.objects.get(therapy_name__iexact=therapy_name)
-        therapy_cache[name] = details
-        return details
-    except TherapyMaster.DoesNotExist:
-        therapy_cache[name] = None
-        return None
+    # Use filter().first() because duplicate therapy_name rows may exist.
+    details = (
+        TherapyMaster.objects.filter(therapy_name__iexact=therapy_name)
+        .order_by("id")
+        .first()
+    )
+    therapy_cache[name] = details
+    return details
 
 # -----------------------
 # Therapy attribute helpers
@@ -224,6 +225,28 @@ def allocate_therapists(date, time_slot, therapy_requirements, last_therapists=N
     day_of_week = date.weekday()
     allocated = []
 
+    # Shift eligibility (additive): only enforced when shift masters/mappings are configured.
+    shift_filter_enabled = False
+    mapped_ids, eligible_ids = (set(), set())
+    try:
+        from masters.models import ShiftSlotMapping, TherapistShiftMapping
+
+        shift_filter_enabled = ShiftSlotMapping.objects.filter(is_active=True).exists() and TherapistShiftMapping.objects.filter(is_active=True).exists()
+        if shift_filter_enabled:
+            mapped_ids = set(
+                TherapistShiftMapping.objects.filter(is_active=True).values_list("therapist_id", flat=True).distinct()
+            )
+            if mapped_ids:
+                eligible_ids = set(
+                    TherapistShiftMapping.objects.filter(
+                        is_active=True,
+                        shift__shift_slots__slot=time_slot,
+                        shift__shift_slots__is_active=True,
+                    ).values_list("therapist_id", flat=True).distinct()
+                )
+    except Exception:
+        shift_filter_enabled = False
+
     # Build grade_map expected by allocator
     grade_map = {
         "Super Senior Therapist": therapy_requirements.get("super_senior", 0),
@@ -272,6 +295,9 @@ def allocate_therapists(date, time_slot, therapy_requirements, last_therapists=N
                 # skip if on leave (recurring or emergency)
                 if therapist_on_leave(t):
                     continue
+                # Shift eligibility: if therapist is explicitly tagged to shifts, enforce slot membership.
+                if shift_filter_enabled and t.id in mapped_ids and t.id not in eligible_ids:
+                    continue
                 # skip if booked at this date+slot
                 if TherapistBooking.objects.filter(therapist=t, date=date, time_slot=time_slot, status='BOOKED').exists():
                     continue
@@ -292,6 +318,8 @@ def allocate_therapists(date, time_slot, therapy_requirements, last_therapists=N
             if t in allocated:
                 continue
             if therapist_on_leave(t):
+                continue
+            if shift_filter_enabled and t.id in mapped_ids and t.id not in eligible_ids:
                 continue
             # check booked (BOOKED blocks)
             if TherapistBooking.objects.filter(therapist=t, date=date, time_slot=time_slot, status='BOOKED').exists():

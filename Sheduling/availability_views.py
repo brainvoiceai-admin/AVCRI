@@ -118,6 +118,36 @@ def get_available_therapists_api(request):
                 ).first()
                 
                 if slot_master:
+                    # Shift eligibility filter (additive): applies only when shift masters are configured
+                    try:
+                        from masters.models import ShiftSlotMapping, TherapistShiftMapping
+
+                        shift_filter_enabled = (
+                            ShiftSlotMapping.objects.filter(is_active=True).exists()
+                            and TherapistShiftMapping.objects.filter(is_active=True).exists()
+                        )
+
+                        if shift_filter_enabled:
+                            mapped_ids = set(
+                                TherapistShiftMapping.objects.filter(is_active=True).values_list(
+                                    "therapist_id", flat=True
+                                ).distinct()
+                            )
+                            if mapped_ids:
+                                eligible_ids = set(
+                                    TherapistShiftMapping.objects.filter(
+                                        is_active=True,
+                                        shift__shift_slots__slot=slot_master,
+                                        shift__shift_slots__is_active=True,
+                                    ).values_list("therapist_id", flat=True).distinct()
+                                )
+                                disallowed_ids = mapped_ids - eligible_ids
+                                if disallowed_ids:
+                                    available_therapists = available_therapists.exclude(pk__in=disallowed_ids)
+                    except Exception:
+                        # fail-open: do not block scheduling if shift configuration is incomplete
+                        pass
+
                     # Get therapists who have bookings at this time slot using TherapistBooking
                     booked_therapist_ids = TherapistBooking.objects.filter(
                         date=target_date,

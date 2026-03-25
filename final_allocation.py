@@ -196,15 +196,16 @@ def get_therapy_details(therapy_name):
 
     details = None
 
-    # 1) Try exact iexact match on original name
-    try:
-        details = TherapyMaster.objects.get(therapy_name__iexact=raw)
-    except TherapyMaster.DoesNotExist:
-        details = None
+    # 1) Try exact iexact match on original name.
+    # Use filter().first() because duplicate rows may exist.
+    details = (
+        TherapyMaster.objects.filter(therapy_name__iexact=raw)
+        .order_by("id")
+        .first()
+    )
 
     # 2) If not found, try normalized whitespace-insensitive match
     if details is None:
-        from django.db.models import F
         try:
             # Fetch candidates and normalize in Python
             candidates = TherapyMaster.objects.all()
@@ -801,6 +802,45 @@ def allocate_treatment_slot(patient_type, therapy_category, used_slots=None):
     return allowed_slots[0] if allowed_slots else None
 
 # -----------------------
+# Shift eligibility helpers (for therapist allocation)
+# -----------------------
+def _shift_enforcement_enabled():
+    """
+    Enable shift filtering only when both masters are configured and populated.
+    This prevents changing behaviour in existing environments where the new masters
+    haven't been filled yet.
+    """
+    try:
+        from masters.models import ShiftSlotMapping, TherapistShiftMapping
+        return ShiftSlotMapping.objects.filter(is_active=True).exists() and TherapistShiftMapping.objects.filter(is_active=True).exists()
+    except Exception:
+        return False
+
+
+def _shift_eligibility_sets_for_slot(slot_master):
+    """
+    Returns (mapped_ids, eligible_ids) for a given SlotMaster.
+    - mapped_ids: therapists who have at least one active shift mapping
+    - eligible_ids: subset of mapped_ids whose shifts contain slot_master
+    """
+    from masters.models import ShiftSlotMapping, TherapistShiftMapping
+
+    mapped_ids = set(
+        TherapistShiftMapping.objects.filter(is_active=True).values_list("therapist_id", flat=True).distinct()
+    )
+    if not mapped_ids:
+        return set(), set()
+
+    eligible_ids = set(
+        TherapistShiftMapping.objects.filter(
+            is_active=True,
+            shift__shift_slots__slot=slot_master,
+            shift__shift_slots__is_active=True,
+        ).values_list("therapist_id", flat=True).distinct()
+    )
+    return mapped_ids, eligible_ids
+
+# -----------------------
 # Therapist allocation with EmergencyLeave integration
 # -----------------------
 def allocate_therapists(
@@ -817,6 +857,11 @@ def allocate_therapists(
 
     day_of_week = date.weekday()
     allocated = []
+
+    shift_filter_enabled = _shift_enforcement_enabled()
+    mapped_ids, eligible_ids = (set(), set())
+    if shift_filter_enabled:
+        mapped_ids, eligible_ids = _shift_eligibility_sets_for_slot(time_slot)
 
     # Normalize patient gender: default to 'male' if not explicitly female
     desired_gender = None
@@ -934,6 +979,8 @@ def allocate_therapists(
         - If allow_extra=True and all therapists have 5 sessions, allow 1 extra (max 6)
         - If therapist already has 6 sessions, cannot assign
         """
+        if shift_filter_enabled and getattr(t, "id", None) in mapped_ids and getattr(t, "id", None) not in eligible_ids:
+            return False
         session_count = get_therapist_daily_session_count(t)
         max_sessions = 6 if allow_extra else 5
         return session_count < max_sessions
@@ -954,6 +1001,8 @@ def allocate_therapists(
             reason = None
             if t in allocated:
                 reason = "already_allocated_in_this_run"
+            elif shift_filter_enabled and t.id in mapped_ids and t.id not in eligible_ids:
+                reason = "not_in_shift_time_slot"
             elif therapist_on_leave(t):
                 reason = "on_leave"
             elif TherapistBooking.objects.filter(therapist=t, date=date, time_slot=time_slot, status='BOOKED').exists():
@@ -1140,6 +1189,10 @@ def allocate_therapists(
                 continue
             if therapist_on_leave(t):
                 continue
+            # Shift eligibility filter (additive): if therapist is explicitly mapped to shifts
+            # then they are eligible only when the requested slot is part of one of those shifts.
+            if shift_filter_enabled and t.id in mapped_ids and t.id not in eligible_ids:
+                continue
             # CHECK FOR EXISTING BOOKINGS: Do not assign if already booked at this date+time_slot
             if TherapistBooking.objects.filter(therapist=t, date=date, time_slot=time_slot, status='BOOKED').exists():
                 continue
@@ -1285,6 +1338,12 @@ def assign_continuity_therapists_pass1(booking, allocation, target_date, locked_
     
     if not slot_master:
         return result
+
+    # Shift eligibility filter (additive): enforce only when shift masters are configured.
+    shift_filter_enabled = _shift_enforcement_enabled()
+    mapped_ids, eligible_ids = (set(), set())
+    if shift_filter_enabled:
+        mapped_ids, eligible_ids = _shift_eligibility_sets_for_slot(slot_master)
     
     # Get continuity therapists from plan
     continuity_therapists = []
@@ -1480,6 +1539,10 @@ def assign_continuity_therapists_pass1(booking, allocation, target_date, locked_
         # Check availability constraints
         if therapist_on_leave(t):
             print(f"[CONTINUITY PASS1] Therapist {t.therapist_code} on leave - skipping")
+            continue
+
+        # Shift eligibility
+        if shift_filter_enabled and t.id in mapped_ids and t.id not in eligible_ids:
             continue
         
         # Check if already booked at this slot

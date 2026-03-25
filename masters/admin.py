@@ -3,6 +3,7 @@ from .models import (
     Procured, OilClass, UsageType, PrescriptionUsage, PrescriptionTime, 
     PrescriptionScope, UnitNo, TherapyMaster, TherapyGroup, ItemMaster, ItemGroup, SlotMaster,
     TherapistMaster, TherapistLeaveMaster, TherapistGrade, StayingRoom,
+    ShiftMaster, ShiftSlotMapping, TherapistShiftMapping,
     NurseTreatmentMaster, NurseMaster
 )
 
@@ -136,6 +137,32 @@ class SlotMasterAdmin(admin.ModelAdmin):
             'fields': ('is_active',)
         }),
     )
+
+@admin.register(ShiftMaster)
+class ShiftMasterAdmin(admin.ModelAdmin):
+    list_display = ['shift_name', 'is_active', 'created_at', 'updated_at']
+    list_filter = ['is_active', 'created_at']
+    search_fields = ['shift_name']
+    list_editable = ['is_active']
+    ordering = ['shift_name']
+
+
+@admin.register(ShiftSlotMapping)
+class ShiftSlotMappingAdmin(admin.ModelAdmin):
+    list_display = ['shift', 'slot', 'is_active', 'created_at', 'updated_at']
+    list_filter = ['shift', 'is_active', 'created_at']
+    search_fields = ['shift__shift_name', 'slot__slot_name', 'slot__slot_time']
+    list_editable = ['is_active']
+    ordering = ['shift', 'slot']
+
+
+@admin.register(TherapistShiftMapping)
+class TherapistShiftMappingAdmin(admin.ModelAdmin):
+    list_display = ['therapist', 'shift', 'is_active', 'created_at', 'updated_at']
+    list_filter = ['shift', 'is_active', 'created_at']
+    search_fields = ['therapist__therapist_code', 'therapist__therapist_name', 'shift__shift_name']
+    list_editable = ['is_active']
+    ordering = ['shift', 'therapist']
 
 @admin.register(TherapistMaster)
 class TherapistMasterAdmin(admin.ModelAdmin):
