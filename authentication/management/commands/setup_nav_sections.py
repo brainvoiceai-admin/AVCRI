@@ -23,6 +23,7 @@ MODULE_SECTION_MAP = {
     "therapy_master_manage":         {"section": "masters"},
     "item_master_manage":            {"section": "masters"},
     "slot_master_manage":            {"section": "masters"},
+    "shift_master_manage":          {"section": "masters"},
     "therapist_master_manage":       {"section": "masters"},
     "procured_manage":               {"section": "masters"},
     "oilclass_manage":               {"section": "masters"},

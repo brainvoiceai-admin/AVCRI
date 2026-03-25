@@ -122,11 +122,13 @@ def get_therapy_details(therapy_name):
 
     details = None
 
-    # 1) Try exact iexact on original name first
-    try:
-        details = TherapyMaster.objects.get(therapy_name__iexact=raw)
-    except TherapyMaster.DoesNotExist:
-        details = None
+    # 1) Try exact iexact on original name first.
+    # Use filter().first() because the DB may contain duplicate therapy_name rows.
+    details = (
+        TherapyMaster.objects.filter(therapy_name__iexact=raw)
+        .order_by("id")
+        .first()
+    )
 
     # 2) If not found, try normalized name match (whitespace-insensitive)
     if details is None:
@@ -732,6 +734,27 @@ def allocate_therapists(date, time_slot, therapy_requirements, last_therapists=N
     day_of_week = date.weekday()
     allocated = []
 
+    # Shift eligibility (additive): only enforced when shift masters/mappings are configured.
+    shift_filter_enabled = False
+    mapped_ids, eligible_ids = (set(), set())
+    try:
+        from masters.models import ShiftSlotMapping, TherapistShiftMapping
+        shift_filter_enabled = ShiftSlotMapping.objects.filter(is_active=True).exists() and TherapistShiftMapping.objects.filter(is_active=True).exists()
+        if shift_filter_enabled:
+            mapped_ids = set(
+                TherapistShiftMapping.objects.filter(is_active=True).values_list("therapist_id", flat=True).distinct()
+            )
+            if mapped_ids:
+                eligible_ids = set(
+                    TherapistShiftMapping.objects.filter(
+                        is_active=True,
+                        shift__shift_slots__slot=time_slot,
+                        shift__shift_slots__is_active=True,
+                    ).values_list("therapist_id", flat=True).distinct()
+                )
+    except Exception:
+        shift_filter_enabled = False
+
     # Normalize patient gender: default to 'male' if not explicitly female
     desired_gender = None
     try:
@@ -903,6 +926,8 @@ def allocate_therapists(date, time_slot, therapy_requirements, last_therapists=N
                 continue
             if therapist_on_leave(t):
                 continue
+            if shift_filter_enabled and t.id in mapped_ids and t.id not in eligible_ids:
+                continue
             if TherapistBooking.objects.filter(therapist=t, date=date, time_slot=time_slot, status='BOOKED').exists():
                 continue
             
@@ -964,6 +989,8 @@ def allocate_therapists(date, time_slot, therapy_requirements, last_therapists=N
                 continue
             if therapist_on_leave(t):
                 continue
+            if shift_filter_enabled and t.id in mapped_ids and t.id not in eligible_ids:
+                continue
             if TherapistBooking.objects.filter(therapist=t, date=date, time_slot=time_slot, status='BOOKED').exists():
                 continue
             
@@ -1024,6 +1051,27 @@ def allocate_therapists_with_grade_substitution(date, time_slot, therapy_require
 
     day_of_week = date.weekday()
     allocated = []
+
+    # Shift eligibility (additive): only enforced when shift masters/mappings are configured.
+    shift_filter_enabled = False
+    mapped_ids, eligible_ids = (set(), set())
+    try:
+        from masters.models import ShiftSlotMapping, TherapistShiftMapping
+        shift_filter_enabled = ShiftSlotMapping.objects.filter(is_active=True).exists() and TherapistShiftMapping.objects.filter(is_active=True).exists()
+        if shift_filter_enabled:
+            mapped_ids = set(
+                TherapistShiftMapping.objects.filter(is_active=True).values_list("therapist_id", flat=True).distinct()
+            )
+            if mapped_ids:
+                eligible_ids = set(
+                    TherapistShiftMapping.objects.filter(
+                        is_active=True,
+                        shift__shift_slots__slot=time_slot,
+                        shift__shift_slots__is_active=True,
+                    ).values_list("therapist_id", flat=True).distinct()
+                )
+    except Exception:
+        shift_filter_enabled = False
 
     # Normalize patient gender
     desired_gender = None
@@ -1151,6 +1199,8 @@ def allocate_therapists_with_grade_substitution(date, time_slot, therapy_require
                 continue
             if TherapistBooking.objects.filter(therapist=t, date=date, time_slot=time_slot, status='BOOKED').exists():
                 continue
+            if shift_filter_enabled and t.id in mapped_ids and t.id not in eligible_ids:
+                continue
             
             # Check daily session limit (max 6 sessions)
             session_count = get_therapist_daily_session_count(t)
@@ -1209,6 +1259,8 @@ def allocate_therapists_with_grade_substitution(date, time_slot, therapy_require
                 if therapist_on_leave(t):
                     continue
                 if TherapistBooking.objects.filter(therapist=t, date=date, time_slot=time_slot, status='BOOKED').exists():
+                    continue
+                if shift_filter_enabled and t.id in mapped_ids and t.id not in eligible_ids:
                     continue
                 
                 if desired_gender:

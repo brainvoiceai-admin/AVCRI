@@ -49,6 +49,7 @@ MODULES = [
     {"name": "therapy_master_manage",       "display_name": "Therapy Master",             "url_path": "/Masters/therapy/",              "url_name": "therapy_master_manage",       "icon": "\U0001f3e5", "order": 101, "section": "masters"},
     {"name": "item_master_manage",          "display_name": "Item Master",                "url_path": "/Masters/items/",                "url_name": "item_master_manage",          "icon": "\U0001f4e6", "order": 102, "section": "masters"},
     {"name": "slot_master_manage",          "display_name": "Slot Master",                "url_path": "/Masters/slots/",                "url_name": "slot_master_manage",          "icon": "\u23f0",     "order": 103, "section": "masters"},
+    {"name": "shift_master_manage",        "display_name": "Shift Master",              "url_path": "/Masters/shifts/",              "url_name": "shift_master_manage",      "icon": "\u23f1\ufe0f", "order": 104, "section": "masters"},
     {"name": "therapist_master_manage",     "display_name": "Therapist Master",           "url_path": "/Masters/therapists/",           "url_name": "therapist_master_manage",     "icon": "\U0001f468\u200d\u2695\ufe0f", "order": 104, "section": "masters"},
     {"name": "procured_manage",             "display_name": "Procurement Sources",        "url_path": "/Masters/procured",              "url_name": "procured_manage",             "icon": "\U0001f4cb", "order": 105, "section": "masters"},
     {"name": "oilclass_manage",             "display_name": "Oil Classes",                "url_path": "/Masters/oils/",                 "url_name": "oilclass_manage",             "icon": "\U0001f6e2\ufe0f", "order": 106, "section": "masters"},
@@ -107,7 +108,7 @@ ROLES = [
             "audit_log", "therapist_difficulty_dashboard", "therapy_bulk_excel",
             "prescription_scheduling", "Therapy_Audit_Log",
             "master_management_dashboard", "therapy_master_manage",
-            "item_master_manage", "slot_master_manage", "therapist_master_manage",
+            "item_master_manage", "slot_master_manage", "shift_master_manage", "therapist_master_manage",
             "procured_manage", "oilclass_manage", "usagetype_manage",
             "prestime_manage", "prescope_manage", "unit_list",
             "therapy_group_manage", "item_group_manage", "therapistgrade_manage",
@@ -130,7 +131,7 @@ ROLES = [
         "display_name": "Scheduling Staff",
         "modules": [
             "add_therapy", "add_prescription",
-            "prescription_scheduling", "therapy_master_manage",
+            "prescription_scheduling", "therapy_master_manage", "shift_master_manage",
         ],
     },
     {

@@ -86,6 +86,17 @@ urlpatterns = [
     path('slots/<int:pk>/delete/', views.slot_master_delete, name='slot_master_delete'),
     path('slots/<int:pk>/enable/', views.slot_master_enable, name='slot_master_enable'),
     path('slots/<int:pk>/disable/', views.slot_master_disable, name='slot_master_disable'),
+
+    # Shift Master CRUD
+    path('shifts/', views.ShiftMasterManagementView.as_view(), name='shift_master_manage'),
+    path('shifts/add/', views.ShiftMasterCreateView.as_view(), name='shift_master_add'),
+    path('shifts/<int:pk>/update/', views.ShiftMasterUpdateView.as_view(), name='shift_master_update'),
+    path('shifts/<int:pk>/delete/', views.shift_master_delete, name='shift_master_delete'),
+    path('shifts/<int:pk>/enable/', views.shift_master_enable, name='shift_master_enable'),
+    path('shifts/<int:pk>/disable/', views.shift_master_disable, name='shift_master_disable'),
+
+    # Assign SlotMaster times to a ShiftMaster
+    path('shifts/<int:pk>/assign-slots/', views.shift_assign_slots, name='shift_assign_slots'),
     # Ingredient Master CRUD
     path('ingredients/', views.IngredientMasterManagementView.as_view(), name='ingredient_master_manage'),
     path('ingredients/add/', views.IngredientMasterCreateView.as_view(), name='ingredient_master_add'),

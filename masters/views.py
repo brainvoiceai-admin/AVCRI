@@ -14,7 +14,8 @@ from .models import (
     Procured, OilClass, UsageType, PrescriptionUsage, PrescriptionTime, 
     PrescriptionScope, UnitNo, TherapyMaster, TherapyGroup, ItemMaster, ItemGroup, SlotMaster,
     TherapistGrade, TherapistMaster, TherapistLeaveMaster, NurseTreatmentMaster,
-    NurseMaster, IngredientMaster
+    NurseMaster, IngredientMaster,
+    ShiftMaster, ShiftSlotMapping
 )
 from Patient.models import TreatmentRoom, RoomName, Floor
 import json
@@ -2203,6 +2204,183 @@ def slot_master_disable(request, pk):
     _log_master_audit(request, 'update', 'SlotMaster', str(pk), f'Disabled SlotMaster: {slot.slot_number}')
     messages.success(request, f'Slot {slot.slot_number} disabled successfully.')
     return redirect('slot_master_manage')
+
+# -----------------------
+# Shift Master CRUD Views
+# -----------------------
+@method_decorator(module_access_required('shift_master_manage'), name='dispatch')
+class ShiftMasterManagementView(ListView):
+    model = ShiftMaster
+    template_name = 'masters/shift_master_manage.html'
+    context_object_name = 'shift_list'
+    paginate_by = 20
+
+    def get_queryset(self):
+        queryset = ShiftMaster.objects.all()
+
+        # Search filter
+        search = self.request.GET.get('search', '')
+        if search:
+            queryset = queryset.filter(shift_name__icontains=search)
+
+        # Status filter
+        status = self.request.GET.get('status', '')
+        if status == 'active':
+            queryset = queryset.filter(is_active=True)
+        elif status == 'inactive':
+            queryset = queryset.filter(is_active=False)
+
+        return queryset.order_by('shift_name')
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['master_type'] = 'shift_master'
+        context['master_name'] = 'Shift Master'
+        context['search'] = self.request.GET.get('search', '')
+        context['status_filter'] = self.request.GET.get('status', '')
+
+        # Template-safety: avoid calling queryset methods with args inside templates.
+        # Compute active slot counts once per row for display.
+        shift_objs = list(context.get('shift_list', []))
+        for s in shift_objs:
+            try:
+                s.active_slot_count = s.shift_slots.filter(is_active=True).count()
+            except Exception:
+                s.active_slot_count = 0
+        context['shift_list'] = shift_objs
+        return context
+
+
+@method_decorator(module_access_required('shift_master_manage'), name='dispatch')
+class ShiftMasterCreateView(CreateView):
+    model = ShiftMaster
+    fields = ['shift_name', 'is_active']
+    template_name = 'masters/shift_master_form.html'
+    success_url = reverse_lazy('shift_master_manage')
+
+    def form_valid(self, form):
+        response = super().form_valid(form)
+        _log_master_audit(self.request, 'create', 'ShiftMaster', str(self.object.pk), f'Created ShiftMaster: {self.object.shift_name}')
+        messages.success(self.request, f'Shift "{self.object.shift_name}" created successfully.')
+        return response
+
+
+@method_decorator(module_access_required('shift_master_manage'), name='dispatch')
+class ShiftMasterUpdateView(UpdateView):
+    model = ShiftMaster
+    fields = ['shift_name', 'is_active']
+    template_name = 'masters/shift_master_form.html'
+    success_url = reverse_lazy('shift_master_manage')
+
+    def form_valid(self, form):
+        _log_master_audit(self.request, 'update', 'ShiftMaster', str(self.object.pk), f'Updated ShiftMaster: {self.object.shift_name}')
+        messages.success(self.request, f'Shift "{self.object.shift_name}" updated successfully.')
+        return super().form_valid(form)
+
+
+@login_required
+@super_admin_required
+def shift_master_delete(request, pk):
+    """Delete a shift master record."""
+    shift = get_object_or_404(ShiftMaster, pk=pk)
+    shift_name = shift.shift_name
+    shift.delete()
+    _log_master_audit(request, 'delete', 'ShiftMaster', str(pk), f'Deleted ShiftMaster: {shift_name}')
+    messages.success(request, f'Shift "{shift_name}" deleted successfully.')
+    return redirect('shift_master_manage')
+
+
+@login_required
+@super_admin_required
+def shift_master_enable(request, pk):
+    """Enable a shift master record."""
+    shift = get_object_or_404(ShiftMaster, pk=pk)
+    shift.is_active = True
+    shift.save()
+    _log_master_audit(request, 'update', 'ShiftMaster', str(pk), f'Enabled ShiftMaster: {shift.shift_name}')
+    messages.success(request, f'Shift "{shift.shift_name}" enabled successfully.')
+    return redirect('shift_master_manage')
+
+
+@login_required
+@super_admin_required
+def shift_master_disable(request, pk):
+    """Disable a shift master record."""
+    shift = get_object_or_404(ShiftMaster, pk=pk)
+    shift.is_active = False
+    shift.save()
+    _log_master_audit(request, 'update', 'ShiftMaster', str(pk), f'Disabled ShiftMaster: {shift.shift_name}')
+    messages.success(request, f'Shift "{shift.shift_name}" disabled successfully.')
+    return redirect('shift_master_manage')
+
+
+@login_required
+@module_access_required('shift_master_manage')
+def shift_assign_slots(request, pk):
+    """
+    Assign SlotMaster records to a ShiftMaster.
+    Saves to ShiftSlotMapping, supporting overlap (same slot can be mapped to multiple shifts).
+    """
+    shift = get_object_or_404(ShiftMaster, pk=pk)
+
+    if request.method == "POST":
+        selected_ids_raw = request.POST.getlist("slot_ids")  # list of SlotMaster PKs (strings)
+        selected_ids = set()
+        for v in selected_ids_raw:
+            try:
+                selected_ids.add(int(v))
+            except (TypeError, ValueError):
+                continue
+
+        active_slots_qs = SlotMaster.objects.filter(is_active=True).values_list("pk", flat=True)
+        active_slot_ids = set(active_slots_qs)
+        # Only allow selections from active slots (fail-safe)
+        selected_ids = selected_ids.intersection(active_slot_ids)
+
+        existing_qs = ShiftSlotMapping.objects.filter(shift=shift)
+        existing_ids = set(existing_qs.values_list("slot_id", flat=True))
+
+        # Enable selected mappings
+        if selected_ids:
+            existing_qs.filter(slot_id__in=selected_ids).update(is_active=True)
+
+        # Disable non-selected mappings
+        if existing_ids:
+            existing_qs.exclude(slot_id__in=selected_ids).update(is_active=False)
+
+        # Create missing mappings
+        to_create = list(selected_ids - existing_ids)
+        if to_create:
+            ShiftSlotMapping.objects.bulk_create(
+                [ShiftSlotMapping(shift=shift, slot_id=sid, is_active=True) for sid in to_create]
+            )
+
+        _log_master_audit(
+            request,
+            "update",
+            "ShiftMaster",
+            str(shift.pk),
+            f"Assigned {len(selected_ids)} slot(s) for ShiftMaster {shift.shift_name}",
+            additional_data={"selected_slot_ids": sorted(selected_ids)},
+        )
+        messages.success(request, f"Slots updated for shift \"{shift.shift_name}\".")
+        return redirect("shift_assign_slots", pk=shift.pk)
+
+    # GET: render assignment UI
+    slot_list = SlotMaster.objects.filter(is_active=True).order_by("slot_number")
+    mapped_slot_ids = set(
+        ShiftSlotMapping.objects.filter(shift=shift, is_active=True).values_list("slot_id", flat=True)
+    )
+
+    return render(
+        request,
+        "masters/shift_assign_slots.html",
+        {
+            "shift": shift,
+            "slot_list": slot_list,
+            "mapped_slot_ids": mapped_slot_ids,
+        },
+    )
 
 # Ingredient Master CRUD Views
 class IngredientMasterManagementView(ListView):
