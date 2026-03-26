@@ -1199,6 +1199,9 @@ function printPrescriptionScheduleToPDF() {
                                     const merged = { ...item };
                                     if (detailData.success && detailData.patient_info) {
                                         merged.details = detailData;
+                                        if (detailData.time_order_map) {
+                                            window.PRESCRIPTION_TIME_ORDER_MAP = detailData.time_order_map;
+                                        }
                                         merged.age = merged.age || detailData.patient_info.age;
                                         merged.sex = merged.sex || detailData.patient_info.sex;
                                         if (!merged.doctor_name && detailData.patient_info.doctor_name) {

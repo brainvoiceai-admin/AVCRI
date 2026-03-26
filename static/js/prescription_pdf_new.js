@@ -74,30 +74,76 @@ function generatePrescriptionPDF_NEW(prescriptionData, date) {
             return false;
         }
 
-        // Dynamic Chronological Time Order Scores from master DB
-        const TIME_ORDER_MAP = window.PRESCRIPTION_TIME_ORDER_MAP || {};
+        // Chronological Time Order Mapping (Minutes from midnight)
+        const TIME_VALUE_MAP = {
+            'M': 330,    // 5:30 AM
+            'ABF': 480,  // 8:00 AM
+            'BL': 660,   // 11:00 AM
+            'AL': 750,   // 12:30 PM
+            'E': 960,    // 4:00 PM
+            'BD': 1110,  // 6:30 PM
+            'AD': 1200,  // 8:00 PM
+            'BT': 1320,  // 10:00 PM
+            'NT': 1400   // Late night
+        };
 
         function getTimeScore(text) {
-            if (!text || text === '—') return 1000;
+            if (!text || text === '—') return 8000;
             const upperText = String(text).toUpperCase();
 
-            // Direct match check first
-            if (TIME_ORDER_MAP[upperText] !== undefined) {
-                return TIME_ORDER_MAP[upperText];
-            }
+            // 1. ABSOLUTE OVERRIDE: External treatments (Body/Head) must be last
+            // We check this first to ensure they beat any master order or times.
+            if (upperText.includes('BODY')) return 9000;
+            if (upperText.includes('HEAD')) return 9100;
 
-            // Substring match check
-            const keys = Object.keys(TIME_ORDER_MAP);
-            let minScore = 999;
-            for (const key of keys) {
-                const regex = new RegExp(`\\b${key}\\b`, 'i');
-                if (regex.test(text)) {
-                    if (TIME_ORDER_MAP[key] < minScore) {
-                        minScore = TIME_ORDER_MAP[key];
+            // 2. Master Order Ranking (Usage Order)
+            const masterMap = window.PRESCRIPTION_TIME_ORDER_MAP || {};
+            const words = upperText.split(/[\s,()/.-]+/);
+            let bestMasterScore = 4999;
+            let foundMasterMatch = false;
+            
+            for (const word of words) {
+                if (word && masterMap[word] !== undefined) {
+                    if (masterMap[word] < bestMasterScore) {
+                        bestMasterScore = masterMap[word];
+                        foundMasterMatch = true;
                     }
                 }
             }
-            return minScore;
+            if (foundMasterMatch) return bestMasterScore;
+
+            // 3. Chronological Fallback (Minutes since midnight)
+            const baseChronologicalScore = 1000;
+            const timeMatches = upperText.match(/(\d{1,2})[:.](\d{2})\s*(AM|PM)?/gi);
+            if (timeMatches && timeMatches.length > 0) {
+                let minMinutes = 1440;
+                timeMatches.forEach(tm => {
+                    const cleanItem = tm.replace('.', ':');
+                    const parts = cleanItem.split(':');
+                    let h = parseInt(parts[0]);
+                    const m = parseInt(parts[1]);
+                    const isPM = tm.toUpperCase().includes('PM');
+                    const isAM = tm.toUpperCase().includes('AM');
+                    if (isPM && h < 12) h += 12;
+                    if (isAM && h === 12) h = 0;
+                    const minutes = (h * 60) + m;
+                    if (minutes < minMinutes) minMinutes = minutes;
+                });
+                return baseChronologicalScore + minMinutes;
+            }
+
+            // 24h format Check
+            const h24Match = upperText.match(/(\d{2}):(\d{2}):(\d{2})/);
+            if (h24Match) return baseChronologicalScore + (parseInt(h24Match[1]) * 60) + parseInt(h24Match[2]);
+
+            // Internal code fallback (M, E, etc.)
+            for (const [key, value] of Object.entries(TIME_VALUE_MAP)) {
+                if (upperText.split(/[\s,]+/).includes(key) || upperText.includes(key)) {
+                    return baseChronologicalScore + value;
+                }
+            }
+
+            return 8000;
         }
 
         // ========== HEADER ==========
@@ -159,95 +205,100 @@ function generatePrescriptionPDF_NEW(prescriptionData, date) {
             patientsByRoom[roomKey].push(patient);
         });
 
-        // STRICT HOSPITAL CHART ORDER CONFIGURATION
-        const SECTION_CONFIG = [
-            {
-                title: 'SUITE – GROUND FLOOR',
-                rooms: ['DS-1', 'DS-2', 'DS-3', 'DS-4', 'DS-5', 'DS-6', 'NR-7', 'NR-8', 'NR-9', 'NR-10', 'NR-11', 'NR-12', 'NR-13', 'NR-14', 'NR-28', 'NR-29', 'NR-31', 'NR-32', 'NR-33']
-            },
-            {
-                title: 'FIRST FLOOR',
-                rooms: ['NR-15', 'NR-15A', 'NR-16', 'NR-17', 'NR-18', 'NR-19', 'NR-20', 'NR-21', 'NR-22', 'NR-23', 'NR-24', 'NR-25', 'NR-26', 'NR-27']
-            },
-            {
-                title: 'COTTAGES – NEW BLOCK',
-                rooms: ['CT-1', 'CT-2', 'CT-3', 'CT-4', 'CT-5', 'CT-6', 'CT-7', 'CT-8', 'CT-9', 'CT-10', 'CT-11', 'CT-12', 'CT-14', 'CT-16', 'CT-17', 'CT-19', 'CT-20', 'CT-21', 'CT-22', 'CT-23']
-            },
-            {
-                title: 'GENERAL WARD ROOMS',
-                rooms: ['MG-1', 'MG-3', 'MG-4', 'MG-5', 'FG-1', 'FG-2', 'FG-3', 'FG-5', 'FG-7', 'FG-8']
-            },
-            {
-                title: 'CABIN',
-                rooms: ['CB-1', 'CB-2']
-            }
+        // STRICT HOSPITAL CHART ORDER CONFIGURATION 2026
+        const CATEGORIES = [
+            { title: 'DELUXE SUITE ROOMS', prefixes: ['DS'] },
+            { title: 'NORMAL ROOMS', prefixes: ['NR'] },
+            { title: 'COTTAGES', prefixes: ['CT'] },
+            { title: 'GENERAL WARD MALE', prefixes: ['MG', 'MD', 'MW'] },
+            { title: 'GENERAL WARD FEMALE', prefixes: ['FG', 'FD', 'FW'] },
+            { title: 'CABINS', prefixes: ['CB', 'CN'] }
         ];
 
         const processedRooms = new Set();
+        const availableRoomKeys = Object.keys(patientsByRoom);
 
-        // 1. Process Defined Sections
-        SECTION_CONFIG.forEach(section => {
-            let sectionHeaderPrinted = false;
-            section.rooms.forEach(roomDef => {
-                const roomKey = roomDef.toUpperCase();
-                if (patientsByRoom[roomKey]) {
-                    if (!sectionHeaderPrinted) {
-                        checkNewPage(20);
-                        doc.setFontSize(11);
-                        doc.setFont(undefined, 'bold');
-                        doc.text(section.title, margin, yPos);
-                        yPos += 6;
-                        doc.line(margin, yPos - 3, pageWidth - margin, yPos - 3);
-                        sectionHeaderPrinted = true;
-                    }
+        // Natural sort helper (for CB-1, CB-2, CB-10 order)
+        const naturalSort = (a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
+
+        // 1. Process Main Categories by Prefix
+        CATEGORIES.forEach(cat => {
+            const catRooms = availableRoomKeys.filter(rk => {
+                if (processedRooms.has(rk)) return false;
+                const rkStr = String(rk).trim().toUpperCase();
+                return cat.prefixes.some(p => rkStr.startsWith(p.trim().toUpperCase()));
+            }).sort(naturalSort);
+
+            if (catRooms.length > 0) {
+                checkNewPage(20);
+                doc.setFontSize(11);
+                doc.setFont(undefined, 'bold');
+                doc.text(cat.title, margin, yPos);
+                yPos += 6;
+                doc.setDrawColor(0, 0, 0);
+                doc.setLineWidth(0.4);
+                doc.line(margin, yPos - 3, pageWidth - margin, yPos - 3);
+
+                catRooms.forEach(roomKey => {
                     processRoomPatients(roomKey);
                     processedRooms.add(roomKey);
-                }
-            });
+                });
+            }
         });
 
-        // 2. Process OP Patients
-        const opRooms = Object.keys(patientsByRoom).filter(r => r.startsWith('OP') && !processedRooms.has(r));
+        // 2. Process OP / Outpatients
+        const opRooms = availableRoomKeys.filter(rk => {
+            if (processedRooms.has(rk)) return false;
+            return String(rk).trim().toUpperCase().startsWith('OP');
+        }).sort(naturalSort);
+
         if (opRooms.length > 0) {
-            opRooms.sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
-            let sectionHeaderPrinted = false;
+            checkNewPage(20);
+            doc.setFontSize(11);
+            doc.setFont(undefined, 'bold');
+            doc.text('OP PATIENTS', margin, yPos);
+            yPos += 8;
+            doc.line(margin, yPos - 3, pageWidth - margin, yPos - 3);
+
             opRooms.forEach(roomKey => {
-                if (!sectionHeaderPrinted) {
-                    checkNewPage(20);
-                    doc.setFontSize(11);
-                    doc.setFont(undefined, 'bold');
-                    doc.text('OP PATIENTS', margin, yPos);
-                    yPos += 8;
-                    doc.line(margin, yPos - 3, pageWidth - margin, yPos - 3);
-                    sectionHeaderPrinted = true;
-                }
                 processRoomPatients(roomKey);
                 processedRooms.add(roomKey);
             });
         }
 
-        // 3. Process Remaining Rooms
-        const remainingRooms = Object.keys(patientsByRoom).filter(r => !processedRooms.has(r));
+        // 3. Process Any Remaining Rooms (N/A, orphans)
+        const remainingRooms = availableRoomKeys.filter(rk => !processedRooms.has(rk)).sort(naturalSort);
         if (remainingRooms.length > 0) {
-            remainingRooms.sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
-            let sectionHeaderPrinted = false;
+            checkNewPage(20);
+            doc.setFontSize(11);
+            doc.setFont(undefined, 'bold');
+            doc.text('OTHER ROOMS', margin, yPos);
+            yPos += 6;
+            doc.line(margin, yPos - 3, pageWidth - margin, yPos - 3);
+
             remainingRooms.forEach(roomKey => {
-                if (!sectionHeaderPrinted) {
-                    checkNewPage(20);
-                    doc.setFontSize(11);
-                    doc.setFont(undefined, 'bold');
-                    doc.text('OTHER ROOMS', margin, yPos);
-                    yPos += 6;
-                    doc.line(margin, yPos - 3, pageWidth - margin, yPos - 3);
-                    sectionHeaderPrinted = true;
-                }
                 processRoomPatients(roomKey);
+                processedRooms.add(roomKey);
             });
         }
+
 
         function processRoomPatients(roomKey) {
             const patients = patientsByRoom[roomKey];
             for (let patient of patients) {
+                // Check if there are any printable (non-cancelled) items first
+                const prescriptionGroups = patient.details?.prescription_groups || [];
+                const therapyItems = patient.therapy_items || [];
+                
+                const activePrescriptions = prescriptionGroups.filter(g => !g.is_cancelled && !g.is_canceled);
+                // Also check for therapy-specific cancellation flags
+                const activeTherapies = therapyItems.filter(g => !g.booking_is_cancelled && !g.booking_is_canceled);
+                
+                if (activePrescriptions.length === 0 && activeTherapies.length === 0) {
+                    console.log(`[PDF] Skipping patient ${patient.patient_name || patient.registration_no} - no active items.`);
+                    continue; 
+                }
+
                 checkNewPage(50);
 
                 // Get display room no
@@ -311,7 +362,7 @@ function generatePrescriptionPDF_NEW(prescriptionData, date) {
                 yPos += 1; // Minimal gap before table
 
                 // ========== PRESCRIPTION TABLE WITH BORDERS ==========
-                const prescriptionGroups = patient.details?.prescription_groups || [];
+                // Note: prescriptionGroups was already defined above for filtering
 
                 if (prescriptionGroups.length > 0) {
                     // Group by allocation
