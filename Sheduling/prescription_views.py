@@ -956,7 +956,7 @@ def get_prescription_details_api(request):
             booking_items = booking.items.all()
             
             # If we have items_groups, try to match BookingItems to groups
-            if items_groups and booking_items.exists():
+            if items_groups:
                 item_map = {item.item_code: item for item in booking_items}
                 item_map.update({item.item_name: item for item in booking_items if item.item_name not in item_map})
                 
