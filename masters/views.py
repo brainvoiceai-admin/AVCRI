@@ -15,7 +15,7 @@ from .models import (
     PrescriptionScope, UnitNo, TherapyMaster, TherapyGroup, ItemMaster, ItemGroup, SlotMaster,
     TherapistGrade, TherapistMaster, TherapistLeaveMaster, NurseTreatmentMaster,
     NurseMaster, IngredientMaster,
-    ShiftMaster, ShiftSlotMapping
+    ShiftMaster, ShiftSlotMapping, TherapistShiftMapping
 )
 from Patient.models import TreatmentRoom, RoomName, Floor
 import json
@@ -2732,6 +2732,8 @@ class TherapistMasterCreateView(CreateView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context['grades'] = TherapistGrade.objects.filter(is_active=True).order_by('display_order', 'name')
+        context['available_shifts'] = ShiftMaster.objects.filter(is_active=True).order_by('shift_name')
+        context['selected_shift_ids'] = []
         return context
     
     def form_valid(self, form):
@@ -2825,6 +2827,22 @@ class TherapistMasterCreateView(CreateView):
         instance.user = user
         instance.therapist_profile = therapist_profile
         instance.save()
+
+        # Handle therapist -> shift mapping
+        selected_shift_ids = set()
+        for sid in self.request.POST.getlist('shift_ids'):
+            try:
+                selected_shift_ids.add(int(sid))
+            except (TypeError, ValueError):
+                continue
+        if selected_shift_ids:
+            valid_shift_ids = set(
+                ShiftMaster.objects.filter(id__in=selected_shift_ids).values_list('id', flat=True)
+            )
+            TherapistShiftMapping.objects.bulk_create(
+                [TherapistShiftMapping(therapist=instance, shift_id=sid, is_active=True) for sid in valid_shift_ids]
+            )
+
         _log_master_audit(self.request, 'create', 'TherapistMaster', str(instance.pk), f'Created TherapistMaster: {therapist_name} ({therapist_code})')
         messages.success(self.request, f'Therapist "{therapist_name}" ({therapist_code}) created successfully. Username: {username}, Default password: {default_password}')
         return redirect(self.success_url)
@@ -2852,6 +2870,10 @@ class TherapistMasterUpdateView(UpdateView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context['grades'] = TherapistGrade.objects.filter(is_active=True).order_by('display_order', 'name')
+        context['available_shifts'] = ShiftMaster.objects.filter(is_active=True).order_by('shift_name')
+        context['selected_shift_ids'] = list(
+            TherapistShiftMapping.objects.filter(therapist=self.object, is_active=True).values_list('shift_id', flat=True)
+        )
         
         # Add leave management context
         context['therapist_leaves'] = [
@@ -2871,6 +2893,31 @@ class TherapistMasterUpdateView(UpdateView):
         # Save the therapist first
         response = super().form_valid(form)
         _log_master_audit(self.request, 'update', 'TherapistMaster', str(self.object.pk), f'Updated TherapistMaster: {self.object.therapist_name} ({self.object.therapist_code})')
+
+        # Handle therapist -> shift mapping
+        selected_shift_ids = set()
+        for sid in self.request.POST.getlist('shift_ids'):
+            try:
+                selected_shift_ids.add(int(sid))
+            except (TypeError, ValueError):
+                continue
+
+        existing_qs = TherapistShiftMapping.objects.filter(therapist=self.object)
+        existing_ids = set(existing_qs.values_list('shift_id', flat=True))
+        valid_shift_ids = set(
+            ShiftMaster.objects.filter(id__in=selected_shift_ids).values_list('id', flat=True)
+        )
+
+        if valid_shift_ids:
+            existing_qs.filter(shift_id__in=valid_shift_ids).update(is_active=True)
+        if existing_ids:
+            existing_qs.exclude(shift_id__in=valid_shift_ids).update(is_active=False)
+
+        to_create = list(valid_shift_ids - existing_ids)
+        if to_create:
+            TherapistShiftMapping.objects.bulk_create(
+                [TherapistShiftMapping(therapist=self.object, shift_id=sid, is_active=True) for sid in to_create]
+            )
         
         # Handle leave days
         if 'leave_days' in self.request.POST:
