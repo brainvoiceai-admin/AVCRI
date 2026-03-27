@@ -232,6 +232,8 @@ def get_therapists_on_leave_api(request):
     try:
         selected_date = request.GET.get('date')
         gender = request.GET.get('gender')
+        leave_type = (request.GET.get('leave_type') or 'all').strip().lower()
+        leave_type = leave_type.replace('-', '_').replace(' ', '_')
         
         if not selected_date:
             return JsonResponse({'error': 'Date parameter is required'}, status=400)
@@ -243,118 +245,41 @@ def get_therapists_on_leave_api(request):
             return JsonResponse({'error': 'Invalid date format'}, status=400)
         
         leave_data = []
+        include_week_off = leave_type in ['all', 'week_off', 'weekoff']
+        include_leave = leave_type in ['all', 'leave', 'emergency_leave', 'emergency']
         
         # Get therapists on recurring leave for this date
         # TherapistLeaveMaster model uses leave_day (day of week: 0=Monday, 1=Tuesday, etc.)
-        day_of_week = target_date.weekday()  # 0=Monday, 1=Tuesday, ..., 6=Sunday
-        recurring_leave_query = TherapistLeaveMaster.objects.filter(
-            leave_day=day_of_week,
-            is_active=True
-        )
-        
-        # Filter by gender if specified - use therapist_gender column from TherapistMaster
-        if gender and gender != 'all':
-            gender_lower = gender.lower()
-            if gender_lower in ['male', 'm']:
-                recurring_leave_query = recurring_leave_query.filter(
-                    Q(therapist__therapist_gender__iexact='male') | 
-                    Q(therapist__therapist_gender__iexact='m') |
-                    Q(therapist__therapist_gender__istartswith='male')
-                )
-            elif gender_lower in ['female', 'f']:
-                recurring_leave_query = recurring_leave_query.filter(
-                    Q(therapist__therapist_gender__iexact='female') | 
-                    Q(therapist__therapist_gender__iexact='f') |
-                    Q(therapist__therapist_gender__istartswith='female')
-                )
-        
-        # Get recurring leave records with therapist details
-        recurring_leave_records = recurring_leave_query.select_related('therapist')
-        
-        # Process recurring leaves
-        for leave_record in recurring_leave_records:
-            therapist = leave_record.therapist
-            # Get gender - use therapist_gender field directly from TherapistMaster
-            therapist_gender_val = None
-            if therapist.therapist_gender:
-                therapist_gender_val = str(therapist.therapist_gender).strip()
+        if include_week_off:
+            day_of_week = target_date.weekday()  # 0=Monday, 1=Tuesday, ..., 6=Sunday
+            recurring_leave_query = TherapistLeaveMaster.objects.filter(
+                leave_day=day_of_week,
+                is_active=True
+            )
             
-            # Format gender for display
-            gender_display = 'Unknown'
-            if therapist_gender_val:
-                therapist_gender_lower = therapist_gender_val.lower()
-                if therapist_gender_lower in ['male', 'm'] or therapist_gender_lower.startswith('male'):
-                    gender_display = 'Male'
-                elif therapist_gender_lower in ['female', 'f'] or therapist_gender_lower.startswith('female'):
-                    gender_display = 'Female'
-                else:
-                    gender_display = therapist_gender_val
+            # Filter by gender if specified - use therapist_gender column from TherapistMaster
+            if gender and gender != 'all':
+                gender_lower = gender.lower()
+                if gender_lower in ['male', 'm']:
+                    recurring_leave_query = recurring_leave_query.filter(
+                        Q(therapist__therapist_gender__iexact='male') | 
+                        Q(therapist__therapist_gender__iexact='m') |
+                        Q(therapist__therapist_gender__istartswith='male')
+                    )
+                elif gender_lower in ['female', 'f']:
+                    recurring_leave_query = recurring_leave_query.filter(
+                        Q(therapist__therapist_gender__iexact='female') | 
+                        Q(therapist__therapist_gender__iexact='f') |
+                        Q(therapist__therapist_gender__istartswith='female')
+                    )
             
-            # Get grade name directly
-            grade_name = None
-            if therapist.therapist_grade:
-                grade_name = therapist.therapist_grade.name
+            # Get recurring leave records with therapist details
+            recurring_leave_records = recurring_leave_query.select_related('therapist')
             
-            leave_info = {
-                'id': therapist.pk,
-                'name': therapist.therapist_name,
-                'code': therapist.therapist_code,
-                'employee_code': therapist.employee_code,
-                'gender': gender_display,  # This should be 'Male', 'Female', or 'Unknown'
-                'grade': grade_name,  # Grade name from TherapistGrade model
-                'leave_date': target_date.strftime('%Y-%m-%d'),
-                'leave_day': leave_record.leave_day,
-                'leave_day_name': leave_record.leave_day_name,
-                'leave_type': 'Week Off',  # Changed from 'Recurring Leave' to 'Week Off'
-                'from_date': target_date.strftime('%Y-%m-%d'),
-                'to_date': target_date.strftime('%Y-%m-%d'),
-                'reason': '',  # No reason field in current model
-                'is_bathing': therapist.is_bathing_therapist,
-                'is_active': leave_record.is_active
-            }
-            leave_data.append(leave_info)
-        
-        # Get therapists on emergency leave for this date
-        emergency_leave_query = EmergencyLeave.objects.filter(
-            from_date__lte=target_date,
-            to_date__gte=target_date
-        ).select_related('therapist')
-        
-        # Process emergency leaves
-        emergency_therapist_ids = set()
-        for em_leave in emergency_leave_query:
-            # Get therapist either from FK or by employee_code
-            therapist = None
-            if em_leave.therapist:
-                therapist = em_leave.therapist
-            elif em_leave.employee_code:
-                therapist = TherapistMaster.objects.filter(
-                    employee_code=em_leave.employee_code,
-                    is_active=True
-                ).first()
-            
-            if therapist and therapist.pk not in emergency_therapist_ids:
-                emergency_therapist_ids.add(therapist.pk)
-                
-                # Filter by gender if specified - use therapist_gender column
-                if gender and gender != 'all':
-                    therapist_gender_val = None
-                    if therapist.therapist_gender:
-                        therapist_gender_val = therapist.therapist_gender.lower()
-                    
-                    if not therapist_gender_val:
-                        continue  # Skip if therapist_gender is not set
-                    
-                    gender_lower = gender.lower()
-                    # Check if therapist_gender matches the filter
-                    if gender_lower in ['male', 'm']:
-                        if therapist_gender_val not in ['male', 'm'] and not therapist_gender_val.startswith('male'):
-                            continue
-                    elif gender_lower in ['female', 'f']:
-                        if therapist_gender_val not in ['female', 'f'] and not therapist_gender_val.startswith('female'):
-                            continue
-                
-                # Get gender for display - use therapist_gender field directly
+            # Process recurring leaves
+            for leave_record in recurring_leave_records:
+                therapist = leave_record.therapist
+                # Get gender - use therapist_gender field directly from TherapistMaster
                 therapist_gender_val = None
                 if therapist.therapist_gender:
                     therapist_gender_val = str(therapist.therapist_gender).strip()
@@ -383,16 +308,97 @@ def get_therapists_on_leave_api(request):
                     'gender': gender_display,  # This should be 'Male', 'Female', or 'Unknown'
                     'grade': grade_name,  # Grade name from TherapistGrade model
                     'leave_date': target_date.strftime('%Y-%m-%d'),
-                    'leave_day': None,
-                    'leave_day_name': None,
-                    'leave_type': 'Emergency Leave',  # Always show as 'Emergency Leave'
-                    'from_date': em_leave.from_date.strftime('%Y-%m-%d'),
-                    'to_date': em_leave.to_date.strftime('%Y-%m-%d'),
-                    'reason': em_leave.leave_type or '',  # Show leave_type as reason if available
+                    'leave_day': leave_record.leave_day,
+                    'leave_day_name': leave_record.leave_day_name,
+                    'leave_type': 'Week Off',
+                    'from_date': target_date.strftime('%Y-%m-%d'),
+                    'to_date': target_date.strftime('%Y-%m-%d'),
+                    'reason': '',  # No reason field in current model
                     'is_bathing': therapist.is_bathing_therapist,
-                    'is_active': True
+                    'is_active': leave_record.is_active
                 }
                 leave_data.append(leave_info)
+        
+        # Get therapists on emergency leave for this date
+        if include_leave:
+            emergency_leave_query = EmergencyLeave.objects.filter(
+                from_date__lte=target_date,
+                to_date__gte=target_date
+            ).select_related('therapist')
+            
+            # Process emergency leaves
+            emergency_therapist_ids = set()
+            for em_leave in emergency_leave_query:
+                # Get therapist either from FK or by employee_code
+                therapist = None
+                if em_leave.therapist:
+                    therapist = em_leave.therapist
+                elif em_leave.employee_code:
+                    therapist = TherapistMaster.objects.filter(
+                        employee_code=em_leave.employee_code,
+                        is_active=True
+                    ).first()
+                
+                if therapist and therapist.pk not in emergency_therapist_ids:
+                    emergency_therapist_ids.add(therapist.pk)
+                    
+                    # Filter by gender if specified - use therapist_gender column
+                    if gender and gender != 'all':
+                        therapist_gender_val = None
+                        if therapist.therapist_gender:
+                            therapist_gender_val = therapist.therapist_gender.lower()
+                        
+                        if not therapist_gender_val:
+                            continue  # Skip if therapist_gender is not set
+                        
+                        gender_lower = gender.lower()
+                        # Check if therapist_gender matches the filter
+                        if gender_lower in ['male', 'm']:
+                            if therapist_gender_val not in ['male', 'm'] and not therapist_gender_val.startswith('male'):
+                                continue
+                        elif gender_lower in ['female', 'f']:
+                            if therapist_gender_val not in ['female', 'f'] and not therapist_gender_val.startswith('female'):
+                                continue
+                    
+                    # Get gender for display - use therapist_gender field directly
+                    therapist_gender_val = None
+                    if therapist.therapist_gender:
+                        therapist_gender_val = str(therapist.therapist_gender).strip()
+                    
+                    # Format gender for display
+                    gender_display = 'Unknown'
+                    if therapist_gender_val:
+                        therapist_gender_lower = therapist_gender_val.lower()
+                        if therapist_gender_lower in ['male', 'm'] or therapist_gender_lower.startswith('male'):
+                            gender_display = 'Male'
+                        elif therapist_gender_lower in ['female', 'f'] or therapist_gender_lower.startswith('female'):
+                            gender_display = 'Female'
+                        else:
+                            gender_display = therapist_gender_val
+                    
+                    # Get grade name directly
+                    grade_name = None
+                    if therapist.therapist_grade:
+                        grade_name = therapist.therapist_grade.name
+                    
+                    leave_info = {
+                        'id': therapist.pk,
+                        'name': therapist.therapist_name,
+                        'code': therapist.therapist_code,
+                        'employee_code': therapist.employee_code,
+                        'gender': gender_display,  # This should be 'Male', 'Female', or 'Unknown'
+                        'grade': grade_name,  # Grade name from TherapistGrade model
+                        'leave_date': target_date.strftime('%Y-%m-%d'),
+                        'leave_day': None,
+                        'leave_day_name': None,
+                        'leave_type': 'Emergency Leave',
+                        'from_date': em_leave.from_date.strftime('%Y-%m-%d'),
+                        'to_date': em_leave.to_date.strftime('%Y-%m-%d'),
+                        'reason': em_leave.leave_type or '',  # Show leave_type as reason if available
+                        'is_bathing': therapist.is_bathing_therapist,
+                        'is_active': True
+                    }
+                    leave_data.append(leave_info)
         
         return JsonResponse({
             'success': True,
