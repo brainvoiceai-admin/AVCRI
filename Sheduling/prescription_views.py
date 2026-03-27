@@ -189,32 +189,7 @@ def get_prescription_data_api(request):
                     'is_active': True
                 }
 
-        # 2b. Bulk fetch OP Treatment status (iptherapy_db) - NEW: filter out inactive OPs
-        op_status_cache = {}
-        if op_regs:
-            try:
-                from MySql_Data_pull.models import Treatment
-                # Expand op_regs with common padding versions (matching final_allocation.is_patient_active)
-                expanded_op_regs = set(op_regs)
-                for r in op_regs:
-                    expanded_op_regs.add(r.zfill(4))
-                    expanded_op_regs.add(r.zfill(5))
-                    expanded_op_regs.add(r.zfill(6))
-                
-                # Check for patients with Status='ON' (Active)
-                ops = Treatment.objects.using('iptherapy_db').filter(
-                    Pat_Reg_No__in=list(expanded_op_regs),
-                    Status='ON'
-                ).values_list('Pat_Reg_No', flat=True).distinct()
-                
-                for o in ops:
-                    # Normalize back to unpadded for cache lookup
-                    val = str(o).strip().lstrip('0') or '0'
-                    op_status_cache[val] = True
-            except Exception as e:
-                print(f"Error fetching OP status cache: {e}")
-                # Fail-open: if DB unreachable, don't filter anyone
-                for r in op_regs: op_status_cache[r] = True
+        # 2b. OP patients should be included without active/inactive filtering.
         
         # 3. Bulk fetch Doctor info (therapy_db)
         doctor_cache = {}
@@ -304,15 +279,8 @@ def get_prescription_data_api(request):
                 else:
                     # For OP patients (5 digits) or others
                     if digits and len(digits) <= 5:
-                        # If not in active OP cache and currently in a non-terminal state, skip him
-                        if digits not in op_status_cache:
-                            if ps.status in ['draft', 'scheduled']:
-                                # Exclude inactive/discharged OP from future workload
-                                continue
-                            elif ps.status == 'dispatched':
-                                pass
-                            else:
-                                continue
+                        # Do not apply OP active/inactive checks.
+                        pass
             except Exception as e:
                 print(f"Error checking patient status for {reg_str}: {e}")
                 pass

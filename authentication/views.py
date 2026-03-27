@@ -2038,7 +2038,6 @@ def search_patients(request):
         # Note: OPMaster uses Reg_Date as registration date
         try:
             from django.db.models import Q
-            from MySql_Data_pull.models import Treatment
             # If initial load (clicking search bar), show 10 most recent OP patients
             if is_initial_load:
                 op_patients = OPMaster.objects.using('hospital_db').all().values(
@@ -2059,22 +2058,7 @@ def search_patients(request):
                 print(f"[DEBUG] Empty query (not initial load) - returning empty OP patients")
             
             for patient in op_patients:
-                # Check if patient has active status in Treatment table (Status = 'ON')
                 pat_reg_no_str = str(patient['NPat_Reg_No'])
-                try:
-                    # Use exists() to avoid fetching datetime fields that may cause timezone issues
-                    has_active_treatment = Treatment.objects.using('iptherapy_db').filter(
-                        Pat_Reg_No=pat_reg_no_str,
-                        Status='ON'
-                    ).exists()
-                    # Only process OP patients with active status (Status = 'ON')
-                    if not has_active_treatment:
-                        continue  # Skip this patient if no active treatment record
-                except Exception as e:
-                    print(f"Error checking Treatment status for OP patient {pat_reg_no_str}: {e}")
-                    import traceback
-                    traceback.print_exc()
-                    continue  # Skip this patient if error checking status
                 
                 # Check VIP status
                 vip_status = False
