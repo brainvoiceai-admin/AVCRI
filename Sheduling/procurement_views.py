@@ -618,6 +618,14 @@ def get_prescription_details_api(request):
                                 'item_name': bi.item_name,
                                 'status': bi.status
                             })
+                        else:
+                            # Fallback to items info in grp even if BookingItem isn't in DB yet
+                            therapy_groups[key]['items'].append({
+                                'id': f'therapy_missing_{idx}_{len(therapy_groups[key]["items"])}',
+                                'type': 'therapy',
+                                'item_name': name,
+                                'status': 'draft'
+                            })
             else:
                 for bi in booking_items:
                     therapy_items.append({

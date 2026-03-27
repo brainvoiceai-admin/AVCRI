@@ -196,6 +196,7 @@ $(function () {
   const $confirmBtn = $('#confirmation-modal-confirm');
   const $confirmCancel = $('#confirmation-modal-cancel');
   let onConfirmAction = null;
+  let editingGroupOrder = null; // Track the order timestamp of the group being edited
 
   // New DOM refs discovered to be missing
   const $cancelEditBtn = $('#cancel-edit-btn');
@@ -1017,6 +1018,9 @@ $(function () {
     }
     isAddingGroup = true;
 
+    // Use existing order if editing, otherwise new timestamp
+    const effectiveOrder = editingGroupOrder !== null ? editingGroupOrder : Date.now();
+
     const selected = $itemBuilder.select2('data') || [];
     const dosage = $('#item-builder-dosage').val().trim();
     const time = $('#item-builder-time').val().trim();
@@ -1067,24 +1071,33 @@ $(function () {
     console.log('editingGroupId:', editingGroupId);
     console.log('editingGroupIndex:', editingGroupIndex);
 
-    const grp = { id: Math.random().toString(36).slice(2, 9), items, dosage, time, uno, oil_class: oilClass, procured_from: procuredFrom, ingredients, ingredient_ids: ingredientIds };
+    const grp = { 
+      id: Math.random().toString(36).slice(2, 9), 
+      items, dosage, time, uno, 
+      oil_class: oilClass, 
+      procured_from: procuredFrom, 
+      ingredients, 
+      ingredient_ids: ingredientIds,
+      _order: effectiveOrder // Use consistent order
+    };
 
     // If editing a group, insert at the original position; otherwise, add to the end
     if (editingGroupIndex !== null && editingGroupIndex >= 0) {
       itemGroups.splice(editingGroupIndex, 0, grp); // Insert at original position
-      console.log(`Inserted group at position ${editingGroupIndex}`);
+      console.log(`Inserted group at position ${editingGroupIndex} with order ${effectiveOrder}`);
     } else {
       itemGroups.push(grp); // Add to end
-      console.log('Added group to end');
+      console.log(`Added group to end with order ${effectiveOrder}`);
     }
 
     console.log('After adding - itemGroups count:', itemGroups.length);
     console.log('New group ID:', grp.id);
     console.log('=======================');
 
-    // Clear editing group ID and index after adding
+    // Clear editing group state after adding
     editingGroupId = null;
     editingGroupIndex = null;
+    editingGroupOrder = null;
 
     $itemBuilder.val(null).trigger('change');
     $('#item-builder-dosage').val('');
@@ -1117,7 +1130,13 @@ $(function () {
       const scoreA = getTimeScore(a.time);
       const scoreB = getTimeScore(b.time);
       if (scoreA !== scoreB) return scoreA - scoreB;
-      // Secondary sort: alphabetical by item names
+      
+      // Tie-breaker: Use creation order (_order) to preserve entry sequence
+      const orderA = a._order || 0;
+      const orderB = b._order || 0;
+      if (orderA !== orderB) return orderA - orderB;
+      
+      // Final fallback: alphabetical by item names (though _order should handle it)
       const nameA = (a.items || []).map(it => it.item_name).join(', ');
       const nameB = (b.items || []).map(it => it.item_name).join(', ');
       return nameA.localeCompare(nameB);
@@ -1201,6 +1220,7 @@ $(function () {
         if (editingGroupId === id) {
           editingGroupId = null;
           editingGroupIndex = null;
+          editingGroupOrder = null;
         }
         renderItemGroups();
       }
@@ -1236,8 +1256,9 @@ $(function () {
       // Restore button state
       $btn.html(originalText).prop('disabled', false);
 
-      // Set the editing group ID so duplicate checking excludes this group
+      // Set the editing group ID and its original order
       editingGroupId = id;
+      editingGroupOrder = g._order || null;
 
       // Completely clear Select2 - remove all options and values
       $itemBuilder.empty(); // Remove all option elements
@@ -1363,7 +1384,8 @@ $(function () {
         oil_class: g.oil_class || '',
         procured_from: g.procured_from || '',
         ingredient_ids: g.ingredient_ids || [],
-        ingredients: g.ingredients || []
+        ingredients: g.ingredients || [],
+        _order: g._order // Persist order to DB
       })),
       notes: ''
     };
@@ -1532,6 +1554,11 @@ $(function () {
       
       if (scoreA !== scoreB) return scoreA - scoreB;
       
+      // Tie-breaker: creation timestamp for stable entry order
+      const orderA = a.created_at ? new Date(a.created_at).getTime() : 0;
+      const orderB = b.created_at ? new Date(b.created_at).getTime() : 0;
+      if (orderA !== orderB && orderA !== 0 && orderB !== 0) return orderA - orderB;
+      
       // Fallback: alphabetical by name
       return (a.prescription_name || '').localeCompare(b.prescription_name || '');
     });
@@ -1563,7 +1590,14 @@ $(function () {
       // Build clearer, per‑group blocks:
       //   Line 1: item names (highlighted)
       //   Line 2: Dosage / Time / Ext-Int / Ingredients
-      const groupsHtml = (p.items_groups || []).map((g, idx) => {
+      const sortedItemGroups = [...(p.items_groups || [])].sort((ga, gb) => {
+        const sA = getTimeScore(ga.time);
+        const sB = getTimeScore(gb.time);
+        if (sA !== sB) return sA - sB;
+        return (ga._order || 0) - (gb._order || 0);
+      });
+
+      const groupsHtml = sortedItemGroups.map((g, idx) => {
         const items = g.items || [];
         const itemNames = items.map(it => esc(it.item_name)).join(', ');
 

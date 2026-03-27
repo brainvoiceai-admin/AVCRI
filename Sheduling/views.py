@@ -2679,7 +2679,16 @@ def prescription_entry_page(request):
                     patient_id=p.patient_id, prescription_date__gte=p.from_date, prescription_date__lte=p.to_date
                 )
                 for rec in recs:
-                    if p.cancelled_date_from and p.cancelled_date_to and p.cancelled_date_from <= rec.prescription_date <= p.cancelled_date_to:
+                    is_cancelled = False
+                    if p.cancelled_date_from and p.cancelled_date_to:
+                        # Date range is the source of truth for THIS specific date
+                        if p.cancelled_date_from <= rec.prescription_date <= p.cancelled_date_to:
+                            is_cancelled = True
+                    elif p.status == 'cancelled':
+                        # Fallback for header status without specific range
+                        is_cancelled = True
+                    
+                    if is_cancelled:
                         sc['cancelled'] += 1
                     elif rec.status in sc:
                         sc[rec.status] += 1
@@ -3099,48 +3108,43 @@ def prescription_entry_page(request):
 
                     if not turn_on:
                         # Turning OFF: determine start date based on dispatch status
+                        # If today's row is not dispatched, we CAN cancel from today.
                         cancel_from = effective_today
                         
-                        # Only proceed if cancel_from is within the allocation range
-                        if cancel_from <= allocation.to_date:
-                            # Update cancellation range for this allocation
-                            allocation.cancelled_date_from = cancel_from
-                            allocation.cancelled_date_to = allocation.to_date
-                            allocation.status = 'cancelled'
-                            base_reason = reason if reason else f"Turned OFF by {active_user.username if active_user else 'system'} on {today}"
-                            allocation.cancellation_reason = f"{base_reason} (effective {cancel_from})"
-                            allocation.cancelled_by = active_user
-                            allocation.cancelled_at = timezone.now()
-                            allocation.save()
+                        # Set cancellation range for this allocation
+                        allocation.cancelled_date_from = cancel_from
+                        allocation.cancelled_date_to = allocation.to_date
+                        allocation.status = 'cancelled'
+                        base_reason = reason if reason else f"Turned OFF by {active_user.username if active_user else 'system'} on {today}"
+                        allocation.cancellation_reason = f"{base_reason} (effective {cancel_from})"
+                        allocation.cancelled_by = active_user
+                        allocation.cancelled_at = timezone.now()
+                        allocation.save()
+                        
+                        # Sync scheduling day-by-day (Safety check: don't cancel day if other active medicines exist)
+                        cd = cancel_from
+                        while cd <= allocation.to_date:
+                            # Check if any OTHER allocation for this patient is NOT cancelled for this date
+                            other_active_exists = PrescriptionAllocation.objects.filter(
+                                patient_id=patient_id,
+                                from_date__lte=cd,
+                                to_date__gte=cd
+                            ).exclude(id=allocation.id).exclude(
+                                status='cancelled',
+                                cancelled_date_from__lte=cd,
+                                cancelled_date_to__gte=cd
+                            ).exists()
                             
-                            # Sync scheduling day-by-day (Safety check: don't cancel day if other active medicines exist)
-                            cd = cancel_from
-                            while cd <= allocation.to_date:
-                                # Check if any OTHER allocation for this patient is NOT cancelled for this date
-                                other_active_exists = PrescriptionAllocation.objects.filter(
+                            if not other_active_exists:
+                                # No other medicines active, safe to cancel the day's schedule row
+                                PrescriptionScheduling.objects.filter(
                                     patient_id=patient_id,
-                                    from_date__lte=cd,
-                                    to_date__gte=cd
-                                ).exclude(id=allocation.id).exclude(
-                                    status='cancelled',
-                                    cancelled_date_from__lte=cd,
-                                    cancelled_date_to__gte=cd
-                                ).exists()
-                                
-                                if not other_active_exists:
-                                    # No other medicines active, safe to cancel the day's schedule row
-                                    PrescriptionScheduling.objects.filter(
-                                        patient_id=patient_id,
-                                        prescription_date=cd
-                                    ).exclude(status__in=['dispatched', 'cancelled']).update(status='cancelled')
-                                
-                                cd += timedelta(days=1)
+                                    prescription_date=cd
+                                ).exclude(status__in=['dispatched', 'cancelled']).update(status='cancelled')
                             
-                            message = f"Turned OFF successfully from {cancel_from}"
-                        else:
-                            message = "Turned OFF, but no future dates were available to cancel"
-                            allocation.status = 'cancelled'
-                            allocation.save()
+                            cd += timedelta(days=1)
+                        
+                        message = f"Turned OFF successfully from {cancel_from}"
                     else:
                         # Turning ON: resume from resume_from onwards
                         resume_from = effective_today
@@ -3686,11 +3690,15 @@ def prescription_entry_page(request):
                 sched = PrescriptionScheduling.objects.filter(patient_id=allocation.patient_id, prescription_date=current_date).first()
                 sched_status = (sched.status if sched else 'draft').capitalize()
                 
-                # Check cancellation
+                # Check cancellation (Robust check: Range + Header status)
                 is_cancelled = False
                 if allocation.cancelled_date_from and allocation.cancelled_date_to:
+                    # If we have a range, it is the definitive source of truth for THIS date
                     if allocation.cancelled_date_from <= current_date <= allocation.cancelled_date_to:
                         is_cancelled = True
+                elif allocation.status == 'cancelled':
+                    # Fallback for old/header-level cancellation without range
+                    is_cancelled = True
                 
                 # Determine final status badge text
                 if is_cancelled:

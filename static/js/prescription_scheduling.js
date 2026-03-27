@@ -115,7 +115,7 @@ function loadPrescriptionData(status, date, search = '') {
             if (data.success) {
                 updateTable(status, data.data, date);
                 updateStats(data.data, status);
-                
+
                 // Update final schedule button state if in draft tab
                 if (status === 'draft') {
                     updateFinalScheduleButtonState(data.final_schedule_generated);
@@ -260,7 +260,7 @@ function getStatusLabel(status) {
 function updateFinalScheduleButtonState(isGenerated) {
     const btn = document.getElementById('send-final-prescription');
     if (!btn) return;
-    
+
     if (isGenerated) {
         btn.disabled = true;
         btn.classList.remove('btn-primary');
@@ -290,7 +290,7 @@ function sendFinalPrescriptionWithDate(date) {
     }
 
     const isSync = document.activeElement && (document.activeElement.id === 'resend-scheduled-prescriptions');
-    const msg = isSync 
+    const msg = isSync
         ? `Syncing will update the procurement records with the LATEST medicines for ${formatDate(date)}. This updates the PDF records too. Continue?`
         : `Are you sure you want to send all draft prescriptions for ${formatDate(date)} to procurement departments?`;
 
@@ -1199,6 +1199,9 @@ function printPrescriptionScheduleToPDF() {
                                     const merged = { ...item };
                                     if (detailData.success && detailData.patient_info) {
                                         merged.details = detailData;
+                                        if (detailData.time_order_map) {
+                                            window.PRESCRIPTION_TIME_ORDER_MAP = detailData.time_order_map;
+                                        }
                                         merged.age = merged.age || detailData.patient_info.age;
                                         merged.sex = merged.sex || detailData.patient_info.sex;
                                         if (!merged.doctor_name && detailData.patient_info.doctor_name) {
@@ -1408,19 +1411,21 @@ function printPrescriptionScheduleToPDF() {
 
                                     // Helper function to merge properties
                                     function mergeTherapyItems(target, source) {
-                                        // Prioritize fields that are present in Source but missing in Target
-                                        if (!target.timeslot && source.timeslot) target.timeslot = source.timeslot;
-                                        if ((!target.time || target.time === '—') && source.time) target.time = source.time;
+                                        // Helper defined below is available here due to hoisting
+
+                                        // Prioritize fields that are present in Source but missing/placeholder in Target
+                                        if (!isNonEmptyString(target.timeslot) && isNonEmptyString(source.timeslot)) target.timeslot = source.timeslot;
+                                        if (!isNonEmptyString(target.time) && isNonEmptyString(source.time)) target.time = source.time;
 
                                         // Usage merging
-                                        if (!target.usage && source.usage) target.usage = source.usage;
+                                        if (!isNonEmptyString(target.usage) && isNonEmptyString(source.usage)) target.usage = source.usage;
                                         if ((!target.usage_array || target.usage_array.length === 0) && source.usage_array && source.usage_array.length > 0) {
                                             target.usage_array = source.usage_array;
                                         }
 
                                         // Dates
-                                        if ((!target.from_date || target.from_date === '—') && source.from_date) target.from_date = source.from_date;
-                                        if ((!target.to_date || target.to_date === '—') && source.to_date) target.to_date = source.to_date;
+                                        if (!isNonEmptyString(target.from_date) && isNonEmptyString(source.from_date)) target.from_date = source.from_date;
+                                        if (!isNonEmptyString(target.to_date) && isNonEmptyString(source.to_date)) target.to_date = source.to_date;
 
                                         // Booking status
                                         if (source.booking_status === 'scheduled' || source.booking_status === 'allocated') {
@@ -1437,7 +1442,10 @@ function printPrescriptionScheduleToPDF() {
                                         // - usage notes / ingredients (ingredients column)
                                         // Only overwrite items if the source contains meaningful details.
                                         function isNonEmptyString(v) {
-                                            return v !== null && v !== undefined && String(v).trim() !== '' && String(v).trim() !== '—';
+                                            if (v === null || v === undefined) return false;
+                                            const s = String(v).trim();
+                                            // Reject empty or common placeholders
+                                            return s !== '' && s !== '—' && s !== '-' && s !== 'null' && s !== 'None';
                                         }
                                         function hasMeaningfulNestedGroupDetails(items) {
                                             if (!Array.isArray(items) || items.length === 0) return false;
@@ -1447,6 +1455,14 @@ function printPrescriptionScheduleToPDF() {
 
                                             return items.some(group => {
                                                 if (!group || typeof group !== 'object') return false;
+
+                                                // MAJOR FIX: Count actual medicine products as a meaningful detail
+                                                const medicineCount = (group.items || []).filter(it =>
+                                                    it.item_name &&
+                                                    it.type !== 'therapy' &&
+                                                    !it.item_name.toLowerCase().includes('unknown')
+                                                ).length;
+
                                                 const dosage = group.dosage ?? group.dose ?? group.quantity ?? '';
                                                 const oilClass = group.oil_class ?? group.oilClass ?? group.oil_class_name ?? '';
                                                 const usage = group.usage ?? '';
@@ -1455,24 +1471,32 @@ function printPrescriptionScheduleToPDF() {
                                                 const ingredientsNonEmpty = (() => {
                                                     if (!ingredients) return false;
                                                     if (Array.isArray(ingredients)) return ingredients.length > 0;
-                                                    if (typeof ingredients === 'string') return ingredients.trim().length > 0;
+                                                    if (typeof ingredients === 'string') return isNonEmptyString(ingredients);
                                                     return false;
                                                 })();
 
-                                                // Consider it "real" if we have at least 2 meaningful fields.
-                                                // This avoids overwriting the fully-populated details payload with minimal placeholders.
+                                                // Consider it "real" if we have at least 2 meaningful fields OR a medicine product.
+                                                // This avoids overwriting the fully-populated details payload with minimal placeholders,
+                                                // but ensures we take the data if it contains actual products or medicine names.
                                                 const detailsCount = [
                                                     isNonEmptyString(dosage),
                                                     isNonEmptyString(oilClass),
                                                     ingredientsNonEmpty,
                                                     isNonEmptyString(usage)
                                                 ].filter(Boolean).length;
-                                                return detailsCount >= 2;
+
+                                                // If we have medicines, count it strongly
+                                                return (detailsCount >= 2) || (medicineCount > 0);
                                             });
                                         }
 
                                         const sourceHasRealItems = hasMeaningfulNestedGroupDetails(source.items);
-                                        if (sourceHasRealItems) target.items = source.items;
+                                        const targetHasRealItems = hasMeaningfulNestedGroupDetails(target.items);
+
+                                        // Overwrite if source has real items, OR if target currently has NO items/empty items
+                                        if (sourceHasRealItems || (!targetHasRealItems && (source.items && source.items.length > 0))) {
+                                            target.items = source.items;
+                                        }
                                     }
 
                                     allTherapyItems.forEach(item => {

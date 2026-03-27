@@ -161,12 +161,15 @@ def get_prescription_data_api(request):
             reg_to_digits[reg_str] = ''.join(ch for ch in reg_str if ch.isdigit())
         
         all_digits = [d for d in reg_to_digits.values() if d]
-        all_ints = []
+        all_ints = []  # IP registration numbers (integers)
+        op_regs = []   # OP registration numbers (strings)
         for d in all_digits:
             try:
                 # IPs are usually longer than 5 digits
                 if len(d) > 5:
                     all_ints.append(int(d))
+                else:
+                    op_regs.append(d)
             except: pass
             
         # 2. Bulk fetch Registration data (therapy_db) - ONLY ACTIVE PATIENTS
@@ -185,6 +188,33 @@ def get_prescription_data_api(request):
                     'reg_date': r.pat_reg_date,
                     'is_active': True
                 }
+
+        # 2b. Bulk fetch OP Treatment status (iptherapy_db) - NEW: filter out inactive OPs
+        op_status_cache = {}
+        if op_regs:
+            try:
+                from MySql_Data_pull.models import Treatment
+                # Expand op_regs with common padding versions (matching final_allocation.is_patient_active)
+                expanded_op_regs = set(op_regs)
+                for r in op_regs:
+                    expanded_op_regs.add(r.zfill(4))
+                    expanded_op_regs.add(r.zfill(5))
+                    expanded_op_regs.add(r.zfill(6))
+                
+                # Check for patients with Status='ON' (Active)
+                ops = Treatment.objects.using('iptherapy_db').filter(
+                    Pat_Reg_No__in=list(expanded_op_regs),
+                    Status='ON'
+                ).values_list('Pat_Reg_No', flat=True).distinct()
+                
+                for o in ops:
+                    # Normalize back to unpadded for cache lookup
+                    val = str(o).strip().lstrip('0') or '0'
+                    op_status_cache[val] = True
+            except Exception as e:
+                print(f"Error fetching OP status cache: {e}")
+                # Fail-open: if DB unreachable, don't filter anyone
+                for r in op_regs: op_status_cache[r] = True
         
         # 3. Bulk fetch Doctor info (therapy_db)
         doctor_cache = {}
@@ -208,10 +238,17 @@ def get_prescription_data_api(request):
         
         allocations_by_patient = defaultdict(list)
         for alloc in all_allocations:
-            # Check cancellation for this date
-            if alloc.status == 'cancelled' and alloc.cancelled_date_from and alloc.cancelled_date_to:
+            # Check cancellation for this date - Range check takes priority
+            is_cancelled_for_date = False
+            if alloc.cancelled_date_from and alloc.cancelled_date_to:
                 if alloc.cancelled_date_from <= filter_date <= alloc.cancelled_date_to:
-                    continue
+                    is_cancelled_for_date = True
+            elif alloc.status == 'cancelled':
+                # No specific range recorded: overall cancel
+                is_cancelled_for_date = True
+                    
+            if is_cancelled_for_date:
+                continue
             allocations_by_patient[alloc.patient_id].append(alloc)
             
         # 6. Pre-check for changes (bulk might be hard if we need per-patient)
@@ -265,8 +302,17 @@ def get_prescription_data_api(request):
                     if rc.get('reg_date'):
                         doa = rc['reg_date'].strftime('%d/%m/%Y')
                 else:
-                    # For OP patients (5 digits) or others, just populate what we can
-                    pass
+                    # For OP patients (5 digits) or others
+                    if digits and len(digits) <= 5:
+                        # If not in active OP cache and currently in a non-terminal state, skip him
+                        if digits not in op_status_cache:
+                            if ps.status in ['draft', 'scheduled']:
+                                # Exclude inactive/discharged OP from future workload
+                                continue
+                            elif ps.status == 'dispatched':
+                                pass
+                            else:
+                                continue
             except Exception as e:
                 print(f"Error checking patient status for {reg_str}: {e}")
                 pass
@@ -296,12 +342,12 @@ def get_prescription_data_api(request):
                 elif isinstance(groups, dict):
                     prescription_count += len(groups.get('items', []))
 
+            # SKIP check: If no active medicines and NOT dispatched, we skip this patient from the dashboard list
+            # This ensures that if all prescriptions were turned OFF, the patient doesn't clutter the draft/scheduled list.
+            if ps.status in ['draft', 'scheduled'] and not has_active_medicines:
+                continue
+            
             p_name_display = prescription_names[0] if prescription_names else ('Cancelled' if ps.status == 'cancelled' else 'No Active Items')
-            if len(prescription_names) > 1:
-                p_name_display += f' (+{len(prescription_names) - 1} more)'
-
-            # FINAL CHECK: If no active medicines and not technically "cancelled" by status?
-            # We show them as "No Active Items"
             
             data.append({
                 'patient_id': patient_id,
@@ -366,6 +412,17 @@ def get_prescription_details_api(request):
         filter_date = parse_date(date)
         if not filter_date:
             return JsonResponse({'error': 'Invalid date format'}, status=400)
+            
+        # Fetch Master Order Map for chronological sorting
+        time_order_map = {}
+        try:
+            from masters.models import PrescriptionUsage, PrescriptionTime
+            for u in PrescriptionUsage.objects.filter(is_active=True):
+                time_order_map[u.name.upper().strip()] = u.order_no
+            for t in PrescriptionTime.objects.filter(is_active=True):
+                time_order_map[t.name.upper().strip()] = t.order_no
+        except Exception as e:
+            print(f"Error fetching time_order_map: {e}")
         
         # Get patient - try PatientSnapshot first, then fall back to therapy data
         patient = None
@@ -559,9 +616,11 @@ def get_prescription_details_api(request):
         entered_by = '-'
         for allocation in allocations:
             is_cancelled_for_date = False
-            if allocation.status == 'cancelled' and allocation.cancelled_date_from and allocation.cancelled_date_to:
+            if allocation.cancelled_date_from and allocation.cancelled_date_to:
                 if allocation.cancelled_date_from <= filter_date <= allocation.cancelled_date_to:
                     is_cancelled_for_date = True
+            elif allocation.status == 'cancelled':
+                is_cancelled_for_date = True
             
             if not is_cancelled_for_date and allocation.allocated_by:
                 entered_by = allocation.allocated_by.get_full_name() or allocation.allocated_by.username
@@ -576,9 +635,11 @@ def get_prescription_details_api(request):
         for allocation in allocations:
             # Check if this allocation is cancelled for the current date
             is_cancelled_for_this_date = False
-            if allocation.status == 'cancelled' and allocation.cancelled_date_from and allocation.cancelled_date_to:
+            if allocation.cancelled_date_from and allocation.cancelled_date_to:
                 if allocation.cancelled_date_from <= filter_date <= allocation.cancelled_date_to:
                     is_cancelled_for_this_date = True
+            elif allocation.status == 'cancelled':
+                is_cancelled_for_this_date = True
             
             # Include the allocation in active_allocations regardless of cancellation status
             # We'll use is_cancelled_for_this_date when setting is_cancelled flag for groups
@@ -592,9 +653,12 @@ def get_prescription_details_api(request):
             all_cancelled_for_date = True
             for a in active_allocations:
                 is_cancelled_for_date = False
-                if a.status == 'cancelled' and a.cancelled_date_from and a.cancelled_date_to:
+                if a.cancelled_date_from and a.cancelled_date_to:
                     if a.cancelled_date_from <= filter_date <= a.cancelled_date_to:
                         is_cancelled_for_date = True
+                elif a.status == 'cancelled':
+                    is_cancelled_for_date = True
+                    
                 if not is_cancelled_for_date:
                     all_cancelled_for_date = False
                     break
@@ -604,9 +668,12 @@ def get_prescription_details_api(request):
             non_cancel_statuses = []
             for a in active_allocations:
                 is_cancelled_for_date = False
-                if a.status == 'cancelled' and a.cancelled_date_from and a.cancelled_date_to:
+                if a.cancelled_date_from and a.cancelled_date_to:
                     if a.cancelled_date_from <= filter_date <= a.cancelled_date_to:
                         is_cancelled_for_date = True
+                elif a.status == 'cancelled':
+                    is_cancelled_for_date = True
+                    
                 if not is_cancelled_for_date:
                     non_cancel_statuses.append(a.status)
             prescription_status = non_cancel_statuses[0] if non_cancel_statuses else 'cancelled'
@@ -728,13 +795,17 @@ def get_prescription_details_api(request):
                     usage_array = group.get('usage_array', [])
                     internal_external = group.get('internal_external', '') or alloc_scope
                     
-                    # Check if this allocation is cancelled for the current date
-                    # Only mark as cancelled if the current date falls within the cancelled date range
+                    # SKIP if cancelled for this specific date
                     is_cancelled_for_date = False
-                    if allocation.status == 'cancelled' and allocation.cancelled_date_from and allocation.cancelled_date_to:
+                    if allocation.cancelled_date_from and allocation.cancelled_date_to:
                         if allocation.cancelled_date_from <= filter_date <= allocation.cancelled_date_to:
                             is_cancelled_for_date = True
+                    elif allocation.status == 'cancelled':
+                        is_cancelled_for_date = True
                     
+                    if is_cancelled_for_date:
+                        continue
+                        
                     # Determine change status
                     change_type = 'unchanged'
                     if not only_scheduled and baseline_groups:
@@ -757,7 +828,7 @@ def get_prescription_details_api(request):
                         'ingredients': group.get('ingredients', []),
                         'ingredient_ids': group.get('ingredient_ids', []),
                         'items': group_items,
-                        'is_cancelled': is_cancelled_for_date,
+                        'is_cancelled': False, # We skipped cancelled ones above
                         'is_group': True,
                         'change_type': change_type
                     })
@@ -860,6 +931,10 @@ def get_prescription_details_api(request):
             if not booking.allocation:
                 continue
                 
+            # Skip if booking is cancelled
+            if booking.status == 'cancelled':
+                continue
+                
             allocation = booking.allocation
             therapy_name = allocation.therapy_name
 
@@ -881,7 +956,7 @@ def get_prescription_details_api(request):
             booking_items = booking.items.all()
             
             # If we have items_groups, try to match BookingItems to groups
-            if items_groups and booking_items.exists():
+            if items_groups:
                 item_map = {item.item_code: item for item in booking_items}
                 item_map.update({item.item_name: item for item in booking_items if item.item_name not in item_map})
                 
@@ -1033,6 +1108,7 @@ def get_prescription_details_api(request):
             'prescription_items': prescription_items,  # Flattened for backward compatibility
             'prescription_groups': prescription_groups,  # Grouped prescription items
             'therapy_items': therapy_items,  # Grouped therapy items
+            'time_order_map': time_order_map,  # Chronological order ranking from masters
             'counts': {
                 'total': len(prescription_items) + sum(len(g['items']) for g in therapy_items),
                 'prescription': len(prescription_items),
