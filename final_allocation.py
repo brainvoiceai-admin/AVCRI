@@ -26,7 +26,7 @@ def is_patient_active(pat_reg_no):
     Check if a patient is active by querying the external Registration / Treatment tables.
     
     IP patients: Registration.pat_status == 'Y' (from therapy_db)
-    OP patients: Treatment.Status == 'ON' (from iptherapy_db)
+    OP patients: always treated as active (client requirement)
     
     Returns True if the patient is active and scheduling should proceed.
     Returns True on any lookup error (fail-open: don't block scheduling if DB is unreachable).
@@ -57,40 +57,8 @@ def is_patient_active(pat_reg_no):
     except Exception as e:
         print(f"[PATIENT STATUS] Error checking IP status for {pat_reg_no_str}: {e}")
 
-    # --- Check OP patients (Treatment table) ---
-    try:
-        from MySql_Data_pull.models import Treatment
-        # Check if patient has active treatment status
-        has_active = Treatment.objects.using('iptherapy_db').filter(
-            Pat_Reg_No=pat_reg_no_str,
-            Status='ON'
-        ).exists()
-        if not has_active:
-            # Try padded versions
-            for pad in [4, 5, 6]:
-                has_active = Treatment.objects.using('iptherapy_db').filter(
-                    Pat_Reg_No=pat_reg_no_str.zfill(pad),
-                    Status='ON'
-                ).exists()
-                if has_active:
-                    break
-        if not has_active:
-            # Check if any Treatment record exists at all
-            has_any = Treatment.objects.using('iptherapy_db').filter(
-                Pat_Reg_No=pat_reg_no_str
-            ).exists()
-            if not has_any:
-                for pad in [4, 5, 6]:
-                    has_any = Treatment.objects.using('iptherapy_db').filter(
-                        Pat_Reg_No=pat_reg_no_str.zfill(pad)
-                    ).exists()
-                    if has_any:
-                        break
-            if has_any and not has_active:
-                print(f"[PATIENT STATUS] OP Patient {pat_reg_no_str} is INACTIVE (Treatment.Status != 'ON')")
-                return False
-    except Exception as e:
-        print(f"[PATIENT STATUS] Error checking OP status for {pat_reg_no_str}: {e}")
+    # OP patients should not be filtered by active/inactive status.
+    # We intentionally skip Treatment.Status checks for OP.
 
     # Default: treat as active (fail-open)
     return True
