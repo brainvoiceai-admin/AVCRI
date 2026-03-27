@@ -434,11 +434,12 @@
     function checkLeaves() {
       const date = document.getElementById('leaveDate').value;
       const gender = document.getElementById('leaveGender').value;
+      const leaveType = document.getElementById('leaveType').value;
       const resultDiv = document.getElementById('therapistLeaves');
       const btn = document.getElementById('leaveBtn');
 
-      if (!date || !gender) {
-        alert('Please select both filters');
+      if (!date || !gender || !leaveType) {
+        alert('Please select all filters');
         return;
       }
 
@@ -455,7 +456,7 @@
       `;
 
       // Build API URL
-      const apiUrl = `/sheduling/therapist-availability/api/therapists-on-leave/?date=${date}&gender=${gender}`;
+      const apiUrl = `/sheduling/therapist-availability/api/therapists-on-leave/?date=${date}&gender=${gender}&leave_type=${leaveType}`;
       
       fetch(apiUrl)
         .then(response => response.json())

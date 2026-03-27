@@ -435,7 +435,8 @@ function updateTable(status, data) {
             }
         });
 
-        // Sort both arrays by room hierarchy (STRICT), then timeslot, then name
+        // Keep same-patient draft therapies contiguous:
+        // room hierarchy first, then patient, then slot/therapy inside that patient.
         const draftSort = (a, b) => {
             // 1. Room Hierarchy
             const roomA = a.patient_room_no || '';
@@ -443,18 +444,25 @@ function updateTable(status, data) {
             const roomCompare = compareRooms(roomA, roomB);
             if (roomCompare !== 0) return roomCompare;
 
-            // 2. Timeslot (preferred)
+            // 2. Patient Reg No (primary patient grouping key)
+            const regA = String(a.patient_reg_no || '');
+            const regB = String(b.patient_reg_no || '');
+            if (regA !== regB) return regA.localeCompare(regB);
+
+            // 3. Patient Name (secondary grouping key)
+            const nameA = (a.patient_name || '').toLowerCase();
+            const nameB = (b.patient_name || '').toLowerCase();
+            if (nameA !== nameB) return nameA.localeCompare(nameB);
+
+            // 4. Timeslot (inside same patient)
             const timeA = a.timeslot || '23:59';
             const timeB = b.timeslot || '23:59';
             if (timeA !== timeB) return timeA.localeCompare(timeB);
 
-            // 3. Patient Name
-            const nameA = (a.patient_name || '').toLowerCase();
-            const nameB = (b.patient_name || '').toLowerCase();
-            if (nameA !== nameB) return nameA.localeCompare(nameB);
-            
-            // 4. Reg No
-            return (a.patient_reg_no || '').localeCompare(b.patient_reg_no || '');
+            // 5. Therapy name (stable ordering for same patient+slot)
+            const thA = (a.therapy_name || '').toLowerCase();
+            const thB = (b.therapy_name || '').toLowerCase();
+            return thA.localeCompare(thB);
         };
         therapistData.sort(draftSort);
         nurseData.sort(draftSort);
@@ -1903,6 +1911,14 @@ function generateTherapyPDF(therapyData, date) {
             if (isNurseTreatment) {
                 nurseTreatments.push(item);
             } else {
+                // Do not print therapist therapies that require zero therapists.
+                const rawReq = item.therapists_required;
+                const reqVal = rawReq === null || typeof rawReq === 'undefined' || String(rawReq).trim() === ''
+                    ? 0
+                    : parseInt(String(rawReq).trim(), 10);
+                if (!Number.isFinite(reqVal) || reqVal <= 0) {
+                    return;
+                }
                 therapistTreatments.push(item);
             }
         });
