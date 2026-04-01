@@ -4,7 +4,19 @@ document.addEventListener('DOMContentLoaded', function () {
     setupTabs();
     setupFilters();
     setupPatientSearch();
+    setupDraftSearchInput();
 });
+
+/** Live filter for draft tables (scheduling.js provides filterDraftTables when loaded). */
+function setupDraftSearchInput() {
+    const draftIn = document.getElementById('draft-search');
+    if (!draftIn || typeof filterDraftTables !== 'function') {
+        return;
+    }
+    draftIn.addEventListener('input', function () {
+        filterDraftTables((draftIn.value || '').trim().toLowerCase());
+    });
+}
 
 function getTabFromUrl() {
     const params = new URLSearchParams(window.location.search);
@@ -174,7 +186,10 @@ document.addEventListener('DOMContentLoaded', function () {
             }
 
             const today = new Date().toISOString().split('T')[0];
-            XLSX.writeFile(wb, `User_Scheduled_Therapies_${today}.xlsx`);
+            const prefix = (typeof window.userTherapyExportFilePrefix === 'string' && window.userTherapyExportFilePrefix)
+                ? window.userTherapyExportFilePrefix
+                : 'User_Scheduled_Therapies';
+            XLSX.writeFile(wb, `${prefix}_${today}.xlsx`);
         });
     }
 
@@ -224,7 +239,10 @@ document.addEventListener('DOMContentLoaded', function () {
             }
 
             const today = new Date().toISOString().split('T')[0];
-            doc.save(`User_Scheduled_Therapies_${today}.pdf`);
+            const prefix = (typeof window.userTherapyExportFilePrefix === 'string' && window.userTherapyExportFilePrefix)
+                ? window.userTherapyExportFilePrefix
+                : 'User_Scheduled_Therapies';
+            doc.save(`${prefix}_${today}.pdf`);
         });
     }
 });

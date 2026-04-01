@@ -100,6 +100,36 @@ def api_access_required(view_func):
         return view_func(request, *args, **kwargs)
     return wrapper
 
+
+def therapy_data_api_access(view_func):
+    """
+    Like api_access_required, but also allows scoped read-only therapy-data for:
+    - scope=user_entry (current user's allocations) — no therapy_scheduling module required
+    - scope=doctor_patients (doctor role + hospital doctor code patients)
+    """
+    @wraps(view_func)
+    def wrapper(request, *args, **kwargs):
+        if not request.user.is_authenticated:
+            return JsonResponse({'error': 'Authentication required'}, status=401)
+        scope = (request.GET.get('scope') or '').strip()
+        if scope == 'user_entry':
+            return view_func(request, *args, **kwargs)
+        if scope == 'doctor_patients':
+            if getattr(request.user, 'role', None) in ('doctor', 'super_admin'):
+                return view_func(request, *args, **kwargs)
+            return JsonResponse({
+                'error': 'Access denied',
+                'message': 'Doctor role required for this scope',
+            }, status=403)
+        if hasattr(request.user, 'has_module_access'):
+            if not request.user.has_module_access('therapy_scheduling'):
+                return JsonResponse({
+                    'error': 'Access denied',
+                    'message': 'You do not have permission to access therapy scheduling',
+                }, status=403)
+        return view_func(request, *args, **kwargs)
+    return wrapper
+
 def procurement_access_required(view_func):
     """
     Decorator to check if user has access to procurement dashboard.
