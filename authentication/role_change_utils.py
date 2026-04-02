@@ -126,14 +126,17 @@ def create_minimal_profile(user, new_role, profile_data):
             raise Exception("Active Therapist with provided Therapist Code does not exist in Therapist Master.")
     
     elif new_role == 'doctor':
-        # Mandatory fields: doctor_id, specialization, department, qualification, experience_years
+        try:
+            exp_years = int(profile_data.get('experience_years', 0) or 0)
+        except (TypeError, ValueError):
+            exp_years = 0
         return DoctorProfile.objects.create(
             user=user,
             doctor_id=profile_data.get('doctor_id', f"DOC{user.id:06d}"),
             specialization=profile_data.get('specialization', 'General Medicine'),
             department=profile_data.get('department', 'Medical'),
             qualification=profile_data.get('qualification', 'MBBS'),
-            experience_years=profile_data.get('experience_years', 0)
+            experience_years=exp_years,
         )
     
     elif new_role in ['admin', 'super_admin']:

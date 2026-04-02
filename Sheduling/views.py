@@ -13,11 +13,24 @@ from django.views.decorators.http import require_http_methods
 from django.utils.dateparse import parse_date
 from django.utils import timezone
 from django.db import transaction, IntegrityError
+from django.contrib.auth.decorators import login_required
 from authentication.models import AuditLog as AuthAuditLog
-from .decorators import scheduling_access_required, scheduling_admin_required, therapist_access_required, api_access_required
+from authentication.decorators import role_required
+from .decorators import (
+    api_access_required,
+    scheduling_access_required,
+    scheduling_admin_required,
+    therapist_access_required,
+    therapy_data_api_access,
+)
+from .hospital_doctor_lookup import (
+    chunked_q_pat_reg_in,
+    pat_reg_nos_for_hospital_doctor as _pat_reg_nos_for_hospital_doctor,
+)
 from masters.models import get_staying_room_display_number
 
 EXTERNAL_DB_ALIAS = 'therapy_db'  # external SQL Server alias
+
 
 def _schedule_lock_upto_date():
     """Return (lock_upto_date, first_editable_date). After 5:30 AM (in schedule timezone), today and past are locked."""
@@ -4476,7 +4489,16 @@ def user_therapy_entry_dashboard(request):
             'failed_date_filter': failed_date_filter,
             'scheduled_date_filter': scheduled_date_filter,
             'stats': {'draft_count': 0, 'failed_count': 0, 'scheduled_count': 0},
+            'draft_therapist_bookings': [],
+            'draft_nurse_bookings': [],
         }
+        context.update({
+            'dashboard_title': 'User Therapy Entry Dashboard',
+            'dashboard_subtitle': 'View draft, reschedule-needed and scheduled therapies that <strong>you</strong> have entered, with the same layout as the scheduling dashboard.',
+            'is_doctor_patients_dashboard': False,
+            'export_file_prefix': 'User_Scheduled_Therapies',
+            'doctor_dashboard_hint': '',
+        })
         return render(request, 'dashboards/user_therapy_entry/user_therapy_entry.html', context)
 
     # Refresh staying rooms for draft patients on this user's draft-date load.
@@ -4575,7 +4597,15 @@ def user_therapy_entry_dashboard(request):
     # Convert querysets to lists and sort
     draft_bookings = list(draft_bookings)
     draft_bookings.sort(key=user_booking_sort_key)
-    
+
+    draft_therapist_bookings = []
+    draft_nurse_bookings = []
+    for booking in draft_bookings:
+        if is_nurse_treatment(booking.allocation.therapy_code, booking.allocation.therapy_name):
+            draft_nurse_bookings.append(booking)
+        else:
+            draft_therapist_bookings.append(booking)
+
     failed_bookings = list(failed_bookings)
     failed_bookings.sort(key=user_booking_sort_key)
     
@@ -4591,6 +4621,8 @@ def user_therapy_entry_dashboard(request):
     context = {
         'draft_allocations': draft_allocations,
         'draft_bookings': draft_bookings,
+        'draft_therapist_bookings': draft_therapist_bookings,
+        'draft_nurse_bookings': draft_nurse_bookings,
         'scheduled_allocations': scheduled_allocations,
         'scheduled_bookings': scheduled_bookings,
         'therapist_bookings': therapist_bookings_list,
@@ -4602,6 +4634,230 @@ def user_therapy_entry_dashboard(request):
         'scheduled_date_filter': scheduled_date_filter,
         'stats': stats,
         'current_user': current_user,
+    }
+    context.update({
+        'dashboard_title': 'User Therapy Entry Dashboard',
+        'dashboard_subtitle': 'View draft, reschedule-needed and scheduled therapies that <strong>you</strong> have entered, with the same layout as the scheduling dashboard.',
+        'is_doctor_patients_dashboard': False,
+        'export_file_prefix': 'User_Scheduled_Therapies',
+        'doctor_dashboard_hint': '',
+    })
+    return render(request, 'dashboards/user_therapy_entry/user_therapy_entry.html', context)
+
+
+@login_required
+@role_required(['doctor'])
+def doctor_patients_therapy_dashboard(request):
+    """
+    Same layout as user therapy entry dashboard, but scoped to patients linked to this
+    doctor's hospital code (Treatment.Treat_Doc_Code / Registration.doctcode vs DoctorProfile.doctor_id).
+    """
+    from .models import Booking, TherapyAllocation
+    from django.utils import timezone
+    from reshedule import therapist_requirements
+    from .nurse_allocation import is_nurse_treatment
+
+    today = timezone.now().date()
+    single = request.GET.get('date', '')
+    draft_date_str = request.GET.get('draft_date', single)
+    failed_date_str = request.GET.get('failed_date', single)
+    scheduled_date_str = request.GET.get('scheduled_date', single)
+
+    draft_date, draft_date_filter = _parse_date_or_today(draft_date_str, today)
+    failed_date, failed_date_filter = _parse_date_or_today(failed_date_str, today)
+    scheduled_date, scheduled_date_filter = _parse_date_or_today(scheduled_date_str, today)
+
+    doctor_id_str = ''
+    hint = ''
+    if hasattr(request.user, 'doctor_profile') and request.user.doctor_profile:
+        doctor_id_str = (request.user.doctor_profile.doctor_id or '').strip()
+    if not doctor_id_str:
+        hint = (
+            'No doctor ID is set on your profile. Ask an administrator to set your '
+            'Doctor ID (hospital code) so your patients can be matched from the hospital system.'
+        )
+
+    my_patients = _pat_reg_nos_for_hospital_doctor(doctor_id_str) if doctor_id_str else []
+    if doctor_id_str and not my_patients and not hint:
+        hint = (
+            'No patient registration numbers were found for your doctor code in the hospital '
+            'Treatment / Registration data. Your Doctor ID must match Treat_Doc_Code (Treatment) or '
+            'Doctcode (Registration)—not the auto DOC000123 style unless that value exists in hospital data. '
+            'To list real codes and sample Pat_Reg_No, run: '
+            'python manage.py list_hospital_doctor_patient_regs --registration'
+        )
+    patient_q = chunked_q_pat_reg_in(my_patients, 'patient__pat_reg_no')
+    booking_patient_q = chunked_q_pat_reg_in(my_patients, 'allocation__patient__pat_reg_no')
+
+    def empty_dashboard_context():
+        return {
+            'draft_allocations': TherapyAllocation.objects.none(),
+            'draft_bookings': [],
+            'scheduled_allocations': TherapyAllocation.objects.none(),
+            'scheduled_bookings': [],
+            'therapist_bookings': [],
+            'nurse_bookings': [],
+            'failed_allocations': [],
+            'failed_bookings': [],
+            'draft_date_filter': draft_date_filter,
+            'failed_date_filter': failed_date_filter,
+            'scheduled_date_filter': scheduled_date_filter,
+            'stats': {'draft_count': 0, 'failed_count': 0, 'scheduled_count': 0},
+            'draft_therapist_bookings': [],
+            'draft_nurse_bookings': [],
+            'current_user': request.user,
+            'dashboard_title': 'My Patients — Therapy sessions',
+            'dashboard_subtitle': (
+                'Draft, to reschedule, and scheduled therapy bookings for patients linked to your '
+                'hospital doctor code (<strong>{}</strong>).'.format(doctor_id_str or '—')
+            ),
+            'is_doctor_patients_dashboard': True,
+            'export_file_prefix': 'Doctor_Patients_Scheduled_Therapies',
+            'doctor_dashboard_hint': hint,
+        }
+
+    if not my_patients:
+        return render(
+            request,
+            'dashboards/user_therapy_entry/user_therapy_entry.html',
+            empty_dashboard_context(),
+        )
+
+    try:
+        doctor_draft_reg_nos = list(
+            TherapyAllocation.objects.filter(patient_q)
+            .filter(
+                from_date__lte=draft_date,
+                to_date__gte=draft_date,
+                bookings__status='draft',
+                bookings__date=draft_date,
+            )
+            .exclude(patient__pat_reg_no__isnull=True)
+            .exclude(patient__pat_reg_no__exact='')
+            .values_list('patient__pat_reg_no', flat=True)
+            .distinct()
+        )
+        _refresh_patient_staying_rooms(doctor_draft_reg_nos)
+    except Exception:
+        pass
+
+    base_draft = TherapyAllocation.objects.filter(patient_q).filter(
+        Q(from_date__lte=draft_date) & Q(to_date__gte=draft_date)
+    )
+    draft_allocations = base_draft.filter(bookings__status='draft').distinct().select_related(
+        'patient', 'room', 'timeslot', 'allocated_by'
+    ).prefetch_related('bookings__assignments__therapist')
+
+    booking_draft = Booking.objects.filter(
+        booking_patient_q, date=draft_date, status='draft'
+    )
+    draft_bookings = booking_draft.select_related(
+        'allocation__patient', 'allocation', 'timeslot', 'room', 'allocation__allocated_by'
+    ).prefetch_related('assignments__therapist').order_by('-date', '-created_at')
+
+    base_failed = TherapyAllocation.objects.filter(patient_q).filter(
+        Q(from_date__lte=failed_date) & Q(to_date__gte=failed_date)
+    )
+    failed_allocations = base_failed.filter(bookings__status='failed').distinct().select_related(
+        'patient', 'room', 'timeslot', 'allocated_by'
+    ).prefetch_related('bookings__assignments__therapist')
+    failed_allocations = [a for a in failed_allocations if therapist_requirements(a).get('total', 1) > 0]
+
+    booking_failed = Booking.objects.filter(
+        booking_patient_q, date=failed_date, status='failed'
+    )
+    failed_bookings = booking_failed.select_related(
+        'allocation__patient', 'allocation', 'timeslot', 'room', 'allocation__allocated_by'
+    ).prefetch_related('assignments__therapist').order_by('-date', '-created_at')
+
+    base_scheduled = TherapyAllocation.objects.filter(patient_q).filter(
+        Q(from_date__lte=scheduled_date) & Q(to_date__gte=scheduled_date)
+    )
+    scheduled_allocations = base_scheduled.filter(bookings__status='scheduled').distinct().select_related(
+        'patient', 'room', 'timeslot', 'allocated_by'
+    ).prefetch_related(
+        'bookings__assignments__therapist',
+        'bookings__timeslot',
+        'bookings__room',
+    )
+
+    booking_scheduled = Booking.objects.filter(
+        booking_patient_q, date=scheduled_date, status='scheduled'
+    )
+    scheduled_bookings = booking_scheduled.select_related(
+        'allocation__patient', 'allocation', 'timeslot', 'room', 'allocation__allocated_by'
+    ).prefetch_related(
+        'assignments__therapist',
+        'nurse_assignments__nurse',
+        'room_bookings__room',
+    ).order_by('-date', '-created_at')
+
+    therapist_bookings_list = []
+    nurse_bookings_list = []
+    for booking in scheduled_bookings:
+        is_nurse = is_nurse_treatment(booking.allocation.therapy_code, booking.allocation.therapy_name)
+        therapy_req = therapist_requirements(booking.allocation)
+        if not is_nurse and therapy_req.get('total', 1) == 0:
+            continue
+        if is_nurse:
+            nurse_bookings_list.append(booking)
+        else:
+            therapist_bookings_list.append(booking)
+
+    def doctor_booking_sort_key(booking):
+        room_no = get_staying_room_display_number(booking.allocation.patient.pat_room_no)
+        room_key = get_room_sort_key(room_no)
+        ts = booking.timeslot.slot_time.strftime('%H:%M') if booking.timeslot else '23:59'
+        name = (booking.allocation.patient.pat_name or '').lower()
+        reg_no = (booking.allocation.patient.pat_reg_no or '').lower()
+        return (room_key, ts, name, reg_no)
+
+    draft_bookings = list(draft_bookings)
+    draft_bookings.sort(key=doctor_booking_sort_key)
+
+    draft_therapist_bookings = []
+    draft_nurse_bookings = []
+    for booking in draft_bookings:
+        if is_nurse_treatment(booking.allocation.therapy_code, booking.allocation.therapy_name):
+            draft_nurse_bookings.append(booking)
+        else:
+            draft_therapist_bookings.append(booking)
+
+    failed_bookings = list(failed_bookings)
+    failed_bookings.sort(key=doctor_booking_sort_key)
+    therapist_bookings_list.sort(key=doctor_booking_sort_key)
+    nurse_bookings_list.sort(key=doctor_booking_sort_key)
+
+    stats = {
+        'draft_count': len(draft_bookings),
+        'failed_count': len(failed_bookings),
+        'scheduled_count': scheduled_bookings.count(),
+    }
+
+    context = {
+        'draft_allocations': draft_allocations,
+        'draft_bookings': draft_bookings,
+        'draft_therapist_bookings': draft_therapist_bookings,
+        'draft_nurse_bookings': draft_nurse_bookings,
+        'scheduled_allocations': scheduled_allocations,
+        'scheduled_bookings': scheduled_bookings,
+        'therapist_bookings': therapist_bookings_list,
+        'nurse_bookings': nurse_bookings_list,
+        'failed_allocations': failed_allocations,
+        'failed_bookings': failed_bookings,
+        'draft_date_filter': draft_date_filter,
+        'failed_date_filter': failed_date_filter,
+        'scheduled_date_filter': scheduled_date_filter,
+        'stats': stats,
+        'current_user': request.user,
+        'dashboard_title': 'My Patients — Therapy sessions',
+        'dashboard_subtitle': (
+            'Draft, to reschedule, and scheduled therapy bookings for patients linked to your '
+            'hospital doctor code (<strong>{}</strong>).'.format(doctor_id_str)
+        ),
+        'is_doctor_patients_dashboard': True,
+        'export_file_prefix': 'Doctor_Patients_Scheduled_Therapies',
+        'doctor_dashboard_hint': hint,
     }
     return render(request, 'dashboards/user_therapy_entry/user_therapy_entry.html', context)
 
@@ -4977,7 +5233,7 @@ def schedule_therapies_api(request):
 
 
 @csrf_exempt
-@api_access_required
+@therapy_data_api_access
 def get_therapy_data_api(request):
     """
     API endpoint to fetch therapy data for the scheduling dashboard.
@@ -5022,6 +5278,23 @@ def get_therapy_data_api(request):
                 ).prefetch_related(
                     'assignments__therapist'
                 ).order_by('allocation__patient__pat_name', 'allocation__patient__pat_reg_no', 'allocation__therapy_name')
+
+                scope = (request.GET.get('scope') or '').strip()
+                if scope == 'user_entry':
+                    base_bookings_qs = base_bookings_qs.filter(allocation__allocated_by=request.user)
+                elif scope == 'doctor_patients':
+                    doc_id = ''
+                    if hasattr(request.user, 'doctor_profile') and request.user.doctor_profile:
+                        doc_id = (request.user.doctor_profile.doctor_id or '').strip()
+                    reg_nos = (
+                        _pat_reg_nos_for_hospital_doctor(doc_id) if doc_id else []
+                    )
+                    if reg_nos:
+                        base_bookings_qs = base_bookings_qs.filter(
+                            chunked_q_pat_reg_in(reg_nos, 'allocation__patient__pat_reg_no')
+                        )
+                    else:
+                        base_bookings_qs = base_bookings_qs.none()
                 
                 if status_filter in ('failed', 'all'):
                     base_bookings_qs = base_bookings_qs.exclude(failure_reason='Patient Inactive')

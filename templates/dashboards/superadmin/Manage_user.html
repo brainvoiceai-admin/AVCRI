@@ -1,4 +1,4 @@
-﻿{% load static %}
+{% load static %}
 <!DOCTYPE html>
 <html lang="en">
 
@@ -144,6 +144,8 @@
                       <span class="badge bg-info">Reg: {{ user.patient_registration_number }}</span>
                       {% elif user.role == 'therapist' and user.therapist_code %}
                       <span class="badge bg-warning">Code: {{ user.therapist_code }}</span>
+                      {% elif user.role == 'doctor' and user.doctor_profile %}
+                      <span class="badge bg-info">Dr ID: {{ user.doctor_profile.doctor_id }}</span>
                       {% else %}
                       <span class="text-muted">-</span>
                       {% endif %}
@@ -331,6 +333,33 @@
                 </div>
               </div>
 
+              <div class="col-md-12" id="doctorProfileField" style="display: none;">
+                <div class="row">
+                  <div class="col-md-6 mb-3">
+                    <label for="doctor_id" class="form-label">Doctor ID (hospital code)</label>
+                    <input type="text" class="form-control" id="doctor_id" name="doctor_id" maxlength="20"
+                      placeholder="e.g. code from Doctor_Master / Pres_Doc_Code">
+                    <div class="form-text">Must match the doctor code in hospital data (e.g. <code>Doctor_Master_New.Doct_Code</code>) so dashboards can filter “my patients”. Leave blank to auto-assign <code>DOC000123</code> from user id.</div>
+                  </div>
+                  <div class="col-md-6 mb-3">
+                    <label for="doctor_experience_years" class="form-label">Experience (years)</label>
+                    <input type="number" class="form-control" id="doctor_experience_years" name="experience_years" min="0" value="0">
+                  </div>
+                  <div class="col-md-6 mb-3">
+                    <label for="doctor_specialization" class="form-label">Specialization</label>
+                    <input type="text" class="form-control" id="doctor_specialization" name="specialization" value="General Medicine">
+                  </div>
+                  <div class="col-md-6 mb-3">
+                    <label for="doctor_department" class="form-label">Department</label>
+                    <input type="text" class="form-control" id="doctor_department" name="doctor_department" value="Medical">
+                  </div>
+                  <div class="col-md-12 mb-3">
+                    <label for="doctor_qualification" class="form-label">Qualification</label>
+                    <input type="text" class="form-control" id="doctor_qualification" name="qualification" value="MBBS">
+                  </div>
+                </div>
+              </div>
+
               <div class="col-md-6" id="pharmacyDepartmentField" style="display: none;">
                 <div class="mb-3">
                   <label for="department" class="form-label">Department *</label>
@@ -508,6 +537,37 @@
                   <input type="text" class="form-control" id="edit_employee_code{{ user.id }}" name="employee_code"
                     value="{% if user.therapist_profile %}{{ user.therapist_profile.employee_code }}{% endif %}">
                   <div class="form-text">Required for therapist role for emergency leave API mapping</div>
+                </div>
+              </div>
+
+              <div class="col-md-12" id="editDoctorProfileField{{ user.id }}" style="display: none;">
+                <div class="row">
+                  <div class="col-md-6 mb-3">
+                    <label for="edit_doctor_id{{ user.id }}" class="form-label">Doctor ID (hospital code)</label>
+                    <input type="text" class="form-control" id="edit_doctor_id{{ user.id }}" name="doctor_id" maxlength="20"
+                      value="{% if user.doctor_profile %}{{ user.doctor_profile.doctor_id }}{% endif %}">
+                    <div class="form-text">Match <code>Doctor_Master_New.Doct_Code</code> / prescription doctor codes for patient lists.</div>
+                  </div>
+                  <div class="col-md-6 mb-3">
+                    <label for="edit_experience_years{{ user.id }}" class="form-label">Experience (years)</label>
+                    <input type="number" class="form-control" id="edit_experience_years{{ user.id }}" name="experience_years" min="0"
+                      value="{% if user.doctor_profile %}{{ user.doctor_profile.experience_years }}{% else %}0{% endif %}">
+                  </div>
+                  <div class="col-md-6 mb-3">
+                    <label for="edit_specialization{{ user.id }}" class="form-label">Specialization</label>
+                    <input type="text" class="form-control" id="edit_specialization{{ user.id }}" name="specialization"
+                      value="{% if user.doctor_profile %}{{ user.doctor_profile.specialization }}{% else %}General Medicine{% endif %}">
+                  </div>
+                  <div class="col-md-6 mb-3">
+                    <label for="edit_department_doctor{{ user.id }}" class="form-label">Department</label>
+                    <input type="text" class="form-control" id="edit_department_doctor{{ user.id }}" name="doctor_department"
+                      value="{% if user.doctor_profile %}{{ user.doctor_profile.department }}{% else %}Medical{% endif %}">
+                  </div>
+                  <div class="col-md-12 mb-3">
+                    <label for="edit_qualification{{ user.id }}" class="form-label">Qualification</label>
+                    <input type="text" class="form-control" id="edit_qualification{{ user.id }}" name="qualification"
+                      value="{% if user.doctor_profile %}{{ user.doctor_profile.qualification }}{% else %}MBBS{% endif %}">
+                  </div>
                 </div>
               </div>
 

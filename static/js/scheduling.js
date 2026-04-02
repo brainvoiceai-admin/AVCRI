@@ -152,6 +152,10 @@ function _bindChange(id, handler) {
 
 // Tab switching
 function setupEventListeners() {
+    // User therapy entry / doctor patients pages reuse draft PDF export only — no scheduling UI.
+    if (!document.getElementById('draft-loading')) {
+        return;
+    }
     // Tab switching
     document.querySelectorAll('.tab').forEach(tab => {
         tab.addEventListener('click', function () {
@@ -1511,7 +1515,11 @@ function exportDraftTherapyTimeslotPDF() {
         btn.disabled = true;
         btn.innerHTML = '<span>⏳</span> Generating...';
     }
-    fetch(`/sheduling/scheduling/api/therapy-data/?status=draft&date=${encodeURIComponent(draftDate)}`)
+    let therapyDraftUrl = `/sheduling/scheduling/api/therapy-data/?status=draft&date=${encodeURIComponent(draftDate)}`;
+    if (typeof window.THERAPY_DATA_API_SCOPE === 'string' && window.THERAPY_DATA_API_SCOPE.trim()) {
+        therapyDraftUrl += `&scope=${encodeURIComponent(window.THERAPY_DATA_API_SCOPE.trim())}`;
+    }
+    fetch(therapyDraftUrl)
         .then(r => r.json())
         .then(data => {
             if (!data.success) {

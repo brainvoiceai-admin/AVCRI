@@ -31,6 +31,7 @@ SECTIONS = [
 MODULES = [
     # --- Therapy & Prescription ---
     {"name": "add_therapy",        "display_name": "Add Therapy",        "url_path": "/sheduling/therapy-entry/",        "url_name": "patient_therapy",            "icon": "\U0001f3e5", "order": 2,   "section": "therapy_prescription"},
+    {"name": "doctor_patients_therapy", "display_name": "My patients — therapy sessions", "url_path": "/sheduling/doctor-patients-therapy/", "url_name": "doctor_patients_therapy_dashboard", "icon": "\U0001f465", "order": 4,   "section": "therapy_prescription"},
     {"name": "add_prescription",   "display_name": "Add Prescription",   "url_path": "/sheduling/prescriptions/",        "url_name": "prescription_entry_page",    "icon": "\U0001f3e5", "order": 3,   "section": "therapy_prescription"},
     {"name": "ip_pharmacy",        "display_name": "In-Patient Pharmacy","url_path": "/authentication/ip_pharmacy/dashboard/", "url_name": "ip_pharmacy",           "icon": "\U0001f48a", "order": 11,  "section": "therapy_prescription"},
 
@@ -122,6 +123,7 @@ ROLES = [
         "display_name": "Doctor",
         "modules": [
             "Room availability", "add_therapy", "add_prescription",
+            "doctor_patients_therapy",
             "therapy_master_manage", "item_master_manage",
             "therapist_master_manage", "oilclass_manage",
         ],

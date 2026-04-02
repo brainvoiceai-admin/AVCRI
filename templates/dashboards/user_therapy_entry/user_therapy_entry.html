@@ -1,11 +1,11 @@
-{% load static %}
+{% load static custom_tags %}
 <!DOCTYPE html>
 <html lang="en">
 
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>User Therapy Entry Dashboard</title>
+    <title>{{ dashboard_title|default:"User Therapy Entry Dashboard" }}</title>
 
     <!-- Use the exact same styles as therapy scheduling -->
     <link rel="stylesheet" href="{% static 'css/scheduling.css' %}">
@@ -17,10 +17,17 @@
     <div class="main-content">
         <div class="container">
             <header>
-                <h1>User Therapy Entry Dashboard</h1>
+                <h1>{{ dashboard_title|default:"User Therapy Entry Dashboard" }}</h1>
                 <div class="subtitle">
-                    View draft, reschedule-needed and scheduled therapies that <strong>you</strong> have entered, with the same layout as the scheduling dashboard.
+                    {% if dashboard_subtitle %}
+                        {{ dashboard_subtitle|safe }}
+                    {% else %}
+                        View draft, reschedule-needed and scheduled therapies that <strong>you</strong> have entered, with the same layout as the scheduling dashboard.
+                    {% endif %}
                 </div>
+                {% if doctor_dashboard_hint %}
+                <div class="alert alert-info mt-3 mb-0" role="alert">{{ doctor_dashboard_hint }}</div>
+                {% endif %}
             </header>
 
             <div class="stats">
@@ -46,13 +53,17 @@
                         <button class="tab" data-tab="scheduled">Scheduled Therapies</button>
                     </div>
 
-                    <!-- Draft Therapies Tab -->
+                    <!-- Draft Therapies Tab (layout aligned with therapy scheduling draft) -->
                     <div id="draft" class="tab-content active">
                         <div class="card-header">
                             <div>
                                 <div class="card-title">Draft Therapies</div>
                                 <div class="card-subtitle">
+                                    {% if is_doctor_patients_dashboard %}
+                                    Draft therapy bookings for your patients (by hospital doctor code). Use the date filter to change the day.
+                                    {% else %}
                                     Therapies you entered that are still in draft status. Use date filter to view therapies for specific dates.
+                                    {% endif %}
                                 </div>
                             </div>
                         </div>
@@ -62,56 +73,146 @@
                                 <label class="filter-label">Filter by Date</label>
                                 <input type="date" id="draft-date" value="{{ draft_date_filter }}">
                             </div>
+                            <div class="filter-group">
+                                <label class="filter-label">Search</label>
+                                <div style="display: flex; gap: 6px; align-items: center;">
+                                    <input type="text" id="draft-search" placeholder="Search patient, therapy..." style="padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px; min-width: 220px;">
+                                    <button type="button" class="btn btn-outline" id="draft-search-btn" style="padding: 8px 16px; white-space: nowrap;" onclick="draftSearchClick()">
+                                        🔍 Search
+                                    </button>
+                                    <button type="button" class="btn btn-outline" id="draft-search-clear" style="padding: 8px 12px; white-space: nowrap;" onclick="draftSearchClear()">
+                                        ✕ Clear
+                                    </button>
+                                </div>
+                            </div>
+                            <button class="btn btn-secondary" id="export-draft-excel" title="Export draft therapies to Excel"
+                                style="padding: 8px 18px; white-space: nowrap; display: flex; align-items: center; gap: 6px;">
+                                <span style="font-size: 16px;">📊</span> Export Draft
+                            </button>
+                            <button class="btn btn-secondary" id="export-draft-pdf" title="Download draft therapy PDF for the selected date"
+                                style="padding: 8px 18px; white-space: nowrap; display: flex; align-items: center; gap: 6px;">
+                                <span style="font-size: 16px;">🖨️</span> Export PDF
+                            </button>
                         </div>
 
-                        <div class="table-container">
+                        <div style="margin-bottom: 32px;">
+                            <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px;">
+                                <h3 style="font-size: 18px; font-weight: 600; color: var(--primary); margin: 0;">👨‍⚕️
+                                    Therapist Treatments</h3>
+                                <span id="draft-therapist-count" class="badge"
+                                    style="background: var(--primary-light); color: var(--primary);">{{ draft_therapist_bookings|length }}</span>
+                            </div>
+                            <div class="table-container">
                                 <table id="draft-therapist-table">
-                                <thead>
-                                    <tr>
-                                        <th>Patient</th>
-                                        <th>Therapy</th>
-                                        <th>Date</th>
-                                        <th>Time Slot</th>
-                                        <th>Room</th>
-                                            <th>Entered By</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="draft-therapist-body">
-                                    {% if draft_bookings %}
-                                        {% for booking in draft_bookings %}
+                                    <thead>
+                                        <tr>
+                                            <th>Patient</th>
+                                            <th>Therapy</th>
+                                            <th>From Date</th>
+                                            <th>To Date</th>
+                                            <th>Time Slot</th>
+                                            <th>Room</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="draft-therapist-body">
+                                        {% if draft_therapist_bookings %}
+                                            {% for booking in draft_therapist_bookings %}
+                                                {% ifchanged booking.allocation.patient_id %}{% cycle '' ' patient-group-alt' as draft_t_pat_grp silent %}{% endifchanged %}
+                                                <tr class="draft-row{{ draft_t_pat_grp }}"
+                                                    data-patient="{{ booking.allocation.patient.pat_name|default:''|lower }}"
+                                                    data-therapy="{{ booking.allocation.therapy_name|default:''|lower }}"
+                                                    data-regno="{{ booking.allocation.patient.pat_reg_no|default:''|lower }}">
+                                                    <td>
+                                                        {% if booking.allocation.patient %}
+                                                            <div style="font-weight: 500;">{{ booking.allocation.patient.pat_name }}</div>
+                                                            <div style="font-size: 12px; color: var(--gray);">{{ booking.allocation.patient.pat_reg_no }}</div>
+                                                        {% else %}
+                                                            <div>—</div>
+                                                        {% endif %}
+                                                    </td>
+                                                    <td>{{ booking.allocation.therapy_name }}</td>
+                                                    <td>{{ booking.allocation.from_date|date:"d-m-Y" }}</td>
+                                                    <td>{{ booking.allocation.to_date|date:"d-m-Y" }}</td>
+                                                    <td>{% if booking.timeslot %}{{ booking.timeslot.slot_time|time:"g:i A" }}{% else %}—{% endif %}</td>
+                                                    <td>
+                                                        {% if booking.allocation.patient.pat_room_no %}
+                                                            {% with room_disp=booking.allocation.patient.pat_room_no|get_staying_room_display %}
+                                                                {{ room_disp|default:booking.allocation.patient.pat_room_no }}
+                                                            {% endwith %}
+                                                        {% else %}—{% endif %}
+                                                    </td>
+                                                </tr>
+                                            {% endfor %}
+                                        {% else %}
                                             <tr>
-                                                <td>
-                                                    {% if booking.allocation.patient %}
-                                                        {{ booking.allocation.patient.pat_name }} ({{ booking.allocation.patient.pat_reg_no }})
-                                                    {% else %}-{% endif %}
-                                                </td>
-                                                <td>{{ booking.allocation.therapy_name }}</td>
-                                                <td>{{ booking.date|date:"Y-m-d" }}</td>
-                                                <td>{{ booking.timeslot.slot_time|default:"—" }}</td>
-                                                <td>
-                                                    {% if booking.room %}
-                                                        {{ booking.room.room_no }}
-                                                    {% else %}
-                                                        {% with rb=booking.room_bookings.first %}
-                                                            {% if rb %}{{ rb.room.room_no }}{% else %}—{% endif %}
-                                                        {% endwith %}
-                                                    {% endif %}
-                                                </td>
-                                                <td>
-                                                    {{ booking.allocation.allocated_by.username|default:"System" }}
+                                                <td colspan="6" class="empty-state">
+                                                    <div class="empty-state-icon">📋</div>
+                                                    <div>{% if is_doctor_patients_dashboard %}No draft therapist treatments for your patients on this date.{% else %}No draft therapist treatments for this date.{% endif %}</div>
                                                 </td>
                                             </tr>
-                                        {% endfor %}
-                                    {% else %}
+                                        {% endif %}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <div>
+                            <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px;">
+                                <h3 style="font-size: 18px; font-weight: 600; color: var(--secondary); margin: 0;">👩‍⚕️
+                                    Nurse Treatments</h3>
+                                <span id="draft-nurse-count" class="badge"
+                                    style="background: #d1fae5; color: var(--secondary);">{{ draft_nurse_bookings|length }}</span>
+                            </div>
+                            <div class="table-container">
+                                <table id="draft-nurse-table">
+                                    <thead>
                                         <tr>
-                                            <td colspan="6" class="empty-state">
-                                                <div class="empty-state-icon">📋</div>
-                                                <div>No draft therapies found for this date/user.</div>
-                                            </td>
+                                            <th>Patient</th>
+                                            <th>Therapy</th>
+                                            <th>From Date</th>
+                                            <th>To Date</th>
+                                            <th>Patient Room</th>
                                         </tr>
-                                    {% endif %}
-                                </tbody>
-                            </table>
+                                    </thead>
+                                    <tbody id="draft-nurse-body">
+                                        {% if draft_nurse_bookings %}
+                                            {% for booking in draft_nurse_bookings %}
+                                                {% ifchanged booking.allocation.patient_id %}{% cycle '' ' patient-group-alt' as draft_n_pat_grp silent %}{% endifchanged %}
+                                                <tr class="draft-row{{ draft_n_pat_grp }}"
+                                                    data-patient="{{ booking.allocation.patient.pat_name|default:''|lower }}"
+                                                    data-therapy="{{ booking.allocation.therapy_name|default:''|lower }}"
+                                                    data-regno="{{ booking.allocation.patient.pat_reg_no|default:''|lower }}">
+                                                    <td>
+                                                        {% if booking.allocation.patient %}
+                                                            <div style="font-weight: 500;">{{ booking.allocation.patient.pat_name }}</div>
+                                                            <div style="font-size: 12px; color: var(--gray);">{{ booking.allocation.patient.pat_reg_no }}</div>
+                                                        {% else %}
+                                                            <div>—</div>
+                                                        {% endif %}
+                                                    </td>
+                                                    <td>{{ booking.allocation.therapy_name }}</td>
+                                                    <td>{{ booking.allocation.from_date|date:"d-m-Y" }}</td>
+                                                    <td>{{ booking.allocation.to_date|date:"d-m-Y" }}</td>
+                                                    <td>
+                                                        {% if booking.allocation.patient.pat_room_no %}
+                                                            {% with room_disp=booking.allocation.patient.pat_room_no|get_staying_room_display %}
+                                                                {{ room_disp|default:booking.allocation.patient.pat_room_no }}
+                                                            {% endwith %}
+                                                        {% else %}—{% endif %}
+                                                    </td>
+                                                </tr>
+                                            {% endfor %}
+                                        {% else %}
+                                            <tr>
+                                                <td colspan="5" class="empty-state">
+                                                    <div class="empty-state-icon">📋</div>
+                                                    <div>{% if is_doctor_patients_dashboard %}No draft nurse treatments for your patients on this date.{% else %}No draft nurse treatments for this date.{% endif %}</div>
+                                                </td>
+                                            </tr>
+                                        {% endif %}
+                                    </tbody>
+                                </table>
+                            </div>
                         </div>
                     </div>
 
@@ -121,7 +222,11 @@
                             <div>
                                 <div class="card-title">Therapies to Reschedule</div>
                                 <div class="card-subtitle">
+                                    {% if is_doctor_patients_dashboard %}
+                                    Your patients’ therapies that need rescheduling. Use the date filter to change the day.
+                                    {% else %}
                                     Therapies you entered that need rescheduling. Use date filter to view these therapies and see the original reason.
+                                    {% endif %}
                                 </div>
                             </div>
                         </div>
@@ -175,7 +280,7 @@
                                         <tr>
                                             <td colspan="7" class="empty-state">
                                                 <div class="empty-state-icon">⚠️</div>
-                                                <div>No therapies needing reschedule found for this date/user.</div>
+                                                <div>{% if is_doctor_patients_dashboard %}No therapies needing reschedule for your patients on this date.{% else %}No therapies needing reschedule found for this date/user.{% endif %}</div>
                                             </td>
                                         </tr>
                                     {% endif %}
@@ -190,7 +295,11 @@
                             <div>
                                 <div class="card-title">Scheduled Therapies</div>
                                 <div class="card-subtitle">
+                                    {% if is_doctor_patients_dashboard %}
+                                    Scheduled therapies for your patients. Use date and patient search to refine the view.
+                                    {% else %}
                                     Successfully scheduled therapies you entered. Use date and patient filters to refine the view.
+                                    {% endif %}
                                 </div>
                             </div>
                         </div>
@@ -285,7 +394,7 @@
                                             <tr>
                                             <td colspan="8" class="empty-state">
                                                     <div class="empty-state-icon">✅</div>
-                                                    <div>No therapist schedules found for this date/user.</div>
+                                                    <div>{% if is_doctor_patients_dashboard %}No therapist schedules for your patients on this date.{% else %}No therapist schedules found for this date/user.{% endif %}</div>
                                                 </td>
                                             </tr>
                                         {% endif %}
@@ -347,7 +456,7 @@
                                             <tr>
                                             <td colspan="6" class="empty-state">
                                                     <div class="empty-state-icon">✅</div>
-                                                    <div>No nurse schedules found for this date/user.</div>
+                                                    <div>{% if is_doctor_patients_dashboard %}No nurse schedules for your patients on this date.{% else %}No nurse schedules found for this date/user.{% endif %}</div>
                                                 </td>
                                             </tr>
                                         {% endif %}
@@ -361,11 +470,99 @@
         </div>
     </div>
 
+    <script>
+        window.userTherapyExportFilePrefix = "{{ export_file_prefix|default:'User_Scheduled_Therapies'|escapejs }}";
+        window.THERAPY_DATA_API_SCOPE = "{% if is_doctor_patients_dashboard %}doctor_patients{% else %}user_entry{% endif %}";
+    </script>
     <!-- jsPDF & SheetJS for exports -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            const draftExportBtn = document.getElementById('export-draft-excel');
+            if (!draftExportBtn) return;
+
+            draftExportBtn.addEventListener('click', function () {
+                if (typeof XLSX === 'undefined') {
+                    alert('Excel export library not loaded.');
+                    return;
+                }
+
+                const therapistTable = document.getElementById('draft-therapist-table');
+                const nurseTable = document.getElementById('draft-nurse-table');
+
+                if (!therapistTable && !nurseTable) {
+                    alert('No draft therapy tables found.');
+                    return;
+                }
+
+                function tableToAoA(tableEl) {
+                    if (!tableEl) return null;
+                    const rows = [];
+                    const headerRow = tableEl.querySelector('thead tr');
+                    if (headerRow) {
+                        const headerCells = Array.from(headerRow.querySelectorAll('th')).map(th =>
+                            (th.innerText || '').trim()
+                        );
+                        rows.push(headerCells);
+                    }
+                    const bodyRows = tableEl.querySelectorAll('tbody tr');
+                    if (!bodyRows.length) return rows;
+
+                    if (bodyRows.length === 1) {
+                        const onlyRow = bodyRows[0];
+                        const onlyCell = onlyRow.querySelector('td');
+                        if (onlyCell && onlyCell.classList.contains('empty-state')) {
+                            return rows;
+                        }
+                    }
+
+                    bodyRows.forEach(tr => {
+                        const cells = Array.from(tr.querySelectorAll('td')).map(td =>
+                            (td.innerText || '').trim()
+                        );
+                        rows.push(cells);
+                    });
+                    return rows;
+                }
+
+                const therapistAoA = tableToAoA(therapistTable);
+                const nurseAoA = tableToAoA(nurseTable);
+
+                const hasTherapistData = therapistAoA && therapistAoA.length > 1;
+                const hasNurseData = nurseAoA && nurseAoA.length > 1;
+
+                if (!hasTherapistData && !hasNurseData) {
+                    alert('No draft therapies to export for the selected filters.');
+                    return;
+                }
+
+                const wb = XLSX.utils.book_new();
+
+                if (hasTherapistData) {
+                    const wsTherapist = XLSX.utils.aoa_to_sheet(therapistAoA);
+                    XLSX.utils.book_append_sheet(wb, wsTherapist, 'Draft Therapist');
+                }
+
+                if (hasNurseData) {
+                    const wsNurse = XLSX.utils.aoa_to_sheet(nurseAoA);
+                    XLSX.utils.book_append_sheet(wb, wsNurse, 'Draft Nurse');
+                }
+
+                const draftDate = document.getElementById('draft-date')?.value || '';
+                let filename = 'Draft_Therapies';
+                if (draftDate) {
+                    filename += '_' + draftDate.replace(/-/g, '');
+                }
+                filename += '.xlsx';
+
+                XLSX.writeFile(wb, filename);
+            });
+        });
+    </script>
+    <script src="{% static 'js/scheduling.js' %}"></script>
     <script src="{% static 'js/user_therapy_entry.js' %}"></script>
     <script src="{% static 'js/dashboards_nav.js' %}"></script>
 </body>

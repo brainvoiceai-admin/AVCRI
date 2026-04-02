@@ -5,7 +5,7 @@ from django.http import JsonResponse
 from django.views.decorators.http import require_http_methods
 from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.forms import AuthenticationForm
-from .models import Role, Module, NavSection, CustomUser, AuditLog
+from .models import Role, Module, NavSection, CustomUser, AuditLog, DoctorProfile
 from .decorators import super_admin_required, role_required
 from django.core.paginator import Paginator
 from django.utils import timezone
@@ -671,7 +671,7 @@ def Manage_user(request):
                     user.save()
                 
                 # Create appropriate profile based on role
-                from authentication.models import PatientProfile, TherapistProfile, DoctorProfile, AdminProfile, NurseProfile, StaffProfile
+                from authentication.models import PatientProfile, TherapistProfile, AdminProfile, NurseProfile, StaffProfile
                 
                 if role == 'patient' and patient_registration_number:
                     PatientProfile.objects.create(
@@ -699,13 +699,25 @@ def Manage_user(request):
                         is_bathing_therapist=True
                     )
                 elif role == 'doctor':
+                    doctor_id_in = (request.POST.get('doctor_id') or '').strip() or f"DOC{user.id:06d}"
+                    if DoctorProfile.objects.filter(doctor_id=doctor_id_in).exists():
+                        user.delete()
+                        messages.error(
+                            request,
+                            f'Doctor ID "{doctor_id_in}" is already assigned. Use the hospital code from Doctor Master or leave blank for auto ID.',
+                        )
+                        return redirect('authentication:Manage_user')
+                    try:
+                        exp_years = int(request.POST.get('experience_years') or 0)
+                    except (TypeError, ValueError):
+                        exp_years = 0
                     DoctorProfile.objects.create(
                         user=user,
-                        doctor_id=f"DOC{user.id:06d}",
-                        specialization="General Medicine",
-                        department="Medical",
-                        qualification="MBBS",
-                        experience_years=0
+                        doctor_id=doctor_id_in,
+                        specialization=(request.POST.get('specialization') or 'General Medicine').strip() or 'General Medicine',
+                        department=(request.POST.get('doctor_department') or 'Medical').strip() or 'Medical',
+                        qualification=(request.POST.get('qualification') or 'MBBS').strip() or 'MBBS',
+                        experience_years=exp_years,
                     )
                 elif role in ['admin', 'super_admin']:
                     AdminProfile.objects.create(
@@ -819,11 +831,20 @@ def Manage_user(request):
                     profile_data['therapist_code'] = therapist_code
                     profile_data['employee_code'] = employee_code or f"EMP{user.id:06d}"
                 elif new_role == 'doctor':
-                    profile_data['doctor_id'] = request.POST.get('doctor_id', f"DOC{user.id:06d}")
+                    profile_data['doctor_id'] = (request.POST.get('doctor_id') or '').strip() or f"DOC{user.id:06d}"
                     profile_data['specialization'] = request.POST.get('specialization', 'General Medicine')
-                    profile_data['department'] = request.POST.get('department', 'Medical')
+                    profile_data['department'] = request.POST.get('doctor_department') or request.POST.get('department', 'Medical')
                     profile_data['qualification'] = request.POST.get('qualification', 'MBBS')
-                    profile_data['experience_years'] = request.POST.get('experience_years', 0)
+                    try:
+                        profile_data['experience_years'] = int(request.POST.get('experience_years') or 0)
+                    except (TypeError, ValueError):
+                        profile_data['experience_years'] = 0
+                    if DoctorProfile.objects.filter(doctor_id=profile_data['doctor_id']).exists():
+                        messages.error(
+                            request,
+                            f'Doctor ID "{profile_data["doctor_id"]}" is already assigned to another user.',
+                        )
+                        return redirect('authentication:Manage_user')
                 elif new_role in ['admin', 'super_admin']:
                     profile_data['admin_id'] = request.POST.get('admin_id', f"ADM{user.id:06d}")
                     profile_data['department'] = request.POST.get('department', 'Administration')
@@ -916,7 +937,49 @@ def Manage_user(request):
                     if hasattr(user, 'patient_profile') and patient_registration_number:
                         user.patient_profile.patient_reg_no = patient_registration_number
                         user.patient_profile.save()
-                # Add similar logic for other roles if needed
+                elif user.role == 'doctor':
+                    doctor_id_new = (request.POST.get('doctor_id') or '').strip()
+                    spec = (request.POST.get('specialization') or '').strip()
+                    dept = (request.POST.get('doctor_department') or '').strip()
+                    qual = (request.POST.get('qualification') or '').strip()
+                    try:
+                        exp_years = int(request.POST.get('experience_years') or 0)
+                    except (TypeError, ValueError):
+                        exp_years = 0
+                    if hasattr(user, 'doctor_profile'):
+                        prof = user.doctor_profile
+                        if doctor_id_new and doctor_id_new != prof.doctor_id:
+                            if DoctorProfile.objects.filter(doctor_id=doctor_id_new).exclude(pk=prof.pk).exists():
+                                messages.error(
+                                    request,
+                                    f'Doctor ID "{doctor_id_new}" is already assigned to another user.',
+                                )
+                                return redirect('authentication:Manage_user')
+                            prof.doctor_id = doctor_id_new
+                        if spec:
+                            prof.specialization = spec
+                        if dept:
+                            prof.department = dept
+                        if qual:
+                            prof.qualification = qual
+                        prof.experience_years = exp_years
+                        prof.save()
+                    else:
+                        fallback_id = doctor_id_new or f"DOC{user.id:06d}"
+                        if DoctorProfile.objects.filter(doctor_id=fallback_id).exists():
+                            messages.error(
+                                request,
+                                f'Doctor ID "{fallback_id}" is already in use. Set a unique hospital doctor code.',
+                            )
+                            return redirect('authentication:Manage_user')
+                        DoctorProfile.objects.create(
+                            user=user,
+                            doctor_id=fallback_id,
+                            specialization=spec or 'General Medicine',
+                            department=dept or 'Medical',
+                            qualification=qual or 'MBBS',
+                            experience_years=exp_years,
+                        )
             
             # Update custom role
             custom_role_id = request.POST.get('custom_role')
@@ -2888,6 +2951,16 @@ def execute_role_change(request):
         return redirect('authentication:Manage_user')
     
     user = get_object_or_404(CustomUser, id=user_id)
+
+    from authentication.models import DoctorProfile
+    if new_role == 'doctor':
+        doctor_id_in = (request.POST.get('doctor_id') or '').strip() or f"DOC{user.id:06d}"
+        if DoctorProfile.objects.filter(doctor_id=doctor_id_in).exclude(user=user).exists():
+            messages.error(
+                request,
+                f'Doctor ID "{doctor_id_in}" is already assigned to another user.',
+            )
+            return redirect('authentication:Manage_user')
     
     # Update user role
     user.role = new_role
@@ -2908,11 +2981,14 @@ def execute_role_change(request):
         profile_data['therapist_code'] = request.POST.get('therapist_code', f"TH{user.id:06d}")
         profile_data['employee_code'] = request.POST.get('employee_code', f"EMP{user.id:06d}")
     elif new_role == 'doctor':
-        profile_data['doctor_id'] = request.POST.get('doctor_id', f"DOC{user.id:06d}")
+        profile_data['doctor_id'] = (request.POST.get('doctor_id') or '').strip() or f"DOC{user.id:06d}"
         profile_data['specialization'] = request.POST.get('specialization', 'General Medicine')
-        profile_data['department'] = request.POST.get('department', 'Medical')
+        profile_data['department'] = request.POST.get('doctor_department') or request.POST.get('department', 'Medical')
         profile_data['qualification'] = request.POST.get('qualification', 'MBBS')
-        profile_data['experience_years'] = request.POST.get('experience_years', 0)
+        try:
+            profile_data['experience_years'] = int(request.POST.get('experience_years') or 0)
+        except (TypeError, ValueError):
+            profile_data['experience_years'] = 0
     elif new_role in ['admin', 'super_admin']:
         profile_data['admin_id'] = request.POST.get('admin_id', f"ADM{user.id:06d}")
         profile_data['department'] = request.POST.get('department', 'Administration')
