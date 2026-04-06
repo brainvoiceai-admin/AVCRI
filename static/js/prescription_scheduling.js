@@ -625,6 +625,21 @@ function showPrescriptionModal(patientInfo, prescriptionGroups, therapyItems) {
                     therapyGroupDiv.appendChild(dosageLabel);
                 }
 
+                const medUsageRaw = (group.medication_usage || '').trim();
+                if (medUsageRaw) {
+                    const medUsageLabel = document.createElement('div');
+                    medUsageLabel.style.fontSize = '14px';
+                    medUsageLabel.style.fontWeight = '500';
+                    medUsageLabel.style.color = '#666';
+                    medUsageLabel.style.marginTop = '6px';
+                    medUsageLabel.style.marginBottom = '6px';
+                    medUsageLabel.textContent = `Medication usage: ${escapeHtml(medUsageRaw)}`;
+                    if (groupIsCancelled) {
+                        medUsageLabel.style.opacity = '0.7';
+                    }
+                    therapyGroupDiv.appendChild(medUsageLabel);
+                }
+
                 // Render items as single group
                 const itemCard = document.createElement('div');
                 itemCard.className = 'medicine-card';
@@ -656,6 +671,7 @@ function showPrescriptionModal(patientInfo, prescriptionGroups, therapyItems) {
                 }
                 const uno = group.uno || items[0]?.notes || 'N/A';
                 const internalExternal = group.internal_external || items[0]?.internal_external || 'N/A';
+                const medicationUsageMeta = (group.medication_usage || '').trim();
 
                 itemCard.innerHTML = `
                             <div style="display:flex;align-items:flex-start;gap:12px;">
@@ -666,6 +682,7 @@ function showPrescriptionModal(patientInfo, prescriptionGroups, therapyItems) {
                                     <div class="medicine-meta" style="font-size:0.9em;color:#666;display:flex;flex-wrap:wrap;gap:12px;">
                                         ${dosage !== 'N/A' || uno !== 'N/A' ? `<span><strong>Dosage:</strong> ${escapeHtml(dosage !== 'N/A' && uno !== 'N/A' ? `${dosage} (${uno})` : (dosage !== 'N/A' ? dosage : '') + (uno !== 'N/A' ? ` (${uno})` : ''))}</span>` : ''}
                                         ${usage !== 'N/A' ? `<span><strong>Usage:</strong> ${escapeHtml(usage)}</span>` : ''}
+                                        ${medicationUsageMeta ? `<span><strong>Medication usage:</strong> ${escapeHtml(medicationUsageMeta)}</span>` : ''}
                                         ${internalExternal !== 'N/A' ? `<span><strong>Ext/Int:</strong> ${escapeHtml(internalExternal)}</span>` : ''}
                                         ${items[0]?.item_code ? `<span><strong>Item Code:</strong> ${escapeHtml(items[0].item_code)}</span>` : ''}
                                     </div>
@@ -744,6 +761,10 @@ function formatChangeLogValues(values) {
             }
             if (dosage) {
                 lines.push(`  Dosage: ${dosage}`);
+            }
+            const medicationUsage = (group.medication_usage || '').trim();
+            if (medicationUsage) {
+                lines.push(`  Medication usage: ${medicationUsage}`);
             }
             if (time) {
                 lines.push(`  Time: ${time}`);
@@ -1292,7 +1313,8 @@ function printPrescriptionScheduleToPDF() {
                                             usage: group.usage || '',
                                             usage_array: group.usage_array || [],
                                             oil_class: group.oil_class || '',
-                                            ingredients: group.ingredients || []
+                                            ingredients: group.ingredients || [],
+                                            medication_usage: group.medication_usage || ''
                                         }));
                                     } else if (therapy.items && Array.isArray(therapy.items)) {
                                         // If items array exists, wrap it
@@ -1482,7 +1504,8 @@ function printPrescriptionScheduleToPDF() {
                                                     isNonEmptyString(dosage),
                                                     isNonEmptyString(oilClass),
                                                     ingredientsNonEmpty,
-                                                    isNonEmptyString(usage)
+                                                    isNonEmptyString(usage),
+                                                    isNonEmptyString(group.medication_usage)
                                                 ].filter(Boolean).length;
 
                                                 // If we have medicines, count it strongly

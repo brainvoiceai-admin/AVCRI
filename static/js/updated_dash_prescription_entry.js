@@ -1023,6 +1023,7 @@ $(function () {
 
     const selected = $itemBuilder.select2('data') || [];
     const dosage = $('#item-builder-dosage').val().trim();
+    const medicationUsage = $('#item-builder-medication-usage').val().trim();
     const time = $('#item-builder-time').val().trim();
     const uno = $('#item-builder-uno').val().trim();
     const oilClass = $itemBuilderOilClass.val() || '';
@@ -1073,7 +1074,7 @@ $(function () {
 
     const grp = { 
       id: Math.random().toString(36).slice(2, 9), 
-      items, dosage, time, uno, 
+      items, dosage, medication_usage: medicationUsage, time, uno, 
       oil_class: oilClass, 
       procured_from: procuredFrom, 
       ingredients, 
@@ -1101,6 +1102,7 @@ $(function () {
 
     $itemBuilder.val(null).trigger('change');
     $('#item-builder-dosage').val('');
+    $('#item-builder-medication-usage').val('');
     $('#item-builder-time').val('');
     $('#item-builder-uno').val('');
     $itemBuilderOilClass.val('');
@@ -1182,6 +1184,10 @@ $(function () {
       }
       if (oilClassDisplay !== '—') {
         parts.push(`Oil Class: ${oilClassDisplay}`);
+      }
+      const medUsageDisplay = (g.medication_usage && String(g.medication_usage).trim()) ? esc(String(g.medication_usage).trim()) : '';
+      if (medUsageDisplay) {
+        parts.push(`Medication usage: ${medUsageDisplay}`);
       }
       const groupDisplay = parts.join(', ');
 
@@ -1288,6 +1294,8 @@ $(function () {
       // Let's set the saved values LAST, so they override auto-fill if present.
 
       if (g.dosage) $('#item-builder-dosage').val(g.dosage);
+      if (g.medication_usage) $('#item-builder-medication-usage').val(g.medication_usage);
+      else $('#item-builder-medication-usage').val('');
       if (g.time) $('#item-builder-time').val(g.time);
       if (g.uno) $('#item-builder-uno').val(g.uno).trigger('change');
       if (g.oil_class) $itemBuilderOilClass.val(g.oil_class).trigger('change');
@@ -1379,6 +1387,7 @@ $(function () {
       items_groups: itemGroups.map(g => ({
         items: g.items,
         dosage: g.dosage,
+        medication_usage: (g.medication_usage || '').trim(),
         time: g.time,
         uno: g.uno,
         oil_class: g.oil_class || '',
@@ -1452,6 +1461,7 @@ $(function () {
         $daysInput.val('');
         // procured_from is now per group, not global - no need to clear global field 
         $scopeSelect.val('');
+        $('#item-builder-medication-usage').val('');
         $commonUsageSelect.val(null).trigger('change');
         usageSelectionOrder = []; // Reset selection order
 
@@ -1633,6 +1643,8 @@ $(function () {
         const details = [];
         const oilClass = g.oil_class ? esc(g.oil_class) : '';
         if (doseDisplay) details.push(`Dosage: ${doseDisplay}`);
+        const medUsage = (g.medication_usage && String(g.medication_usage).trim()) ? esc(String(g.medication_usage).trim()) : '';
+        if (medUsage) details.push(`Medication usage: ${medUsage}`);
         if (procuredFrom) details.push(`Procured From: ${procuredFrom}`);
         if (time) details.push(`Time: ${time}`);
         if (extInt) details.push(`Ext/Int: ${extInt}`);
@@ -1981,6 +1993,7 @@ $(function () {
       ingredients: g.ingredients || [],
       items: g.items,
       dosage: g.dosage,
+      medication_usage: (g.medication_usage || '').trim(),
       time: g.time,
       procured_from: g.procured_from || '',
       uno: g.uno,
@@ -2151,6 +2164,7 @@ $(function () {
     const today = new Date().toISOString().split('T')[0];
     $fromDate.val(today); $toDate.val(''); $daysInput.val('');
     // procured_from is now per group, not global - no need to clear global field
+    $('#item-builder-medication-usage').val('');
     $scopeSelect.val('');
     $commonUsageSelect.val(null).trigger('change');
     usageSelectionOrder = []; // Reset selection order

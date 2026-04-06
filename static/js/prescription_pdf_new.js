@@ -435,6 +435,10 @@ function generatePrescriptionPDF_NEW(prescriptionData, date) {
                             if (currentDosage) {
                                 line += ` [${currentDosage}]`;
                             }
+                            const medUsagePresc = (group.medication_usage || '').trim();
+                            if (medUsagePresc) {
+                                line += ` (Medication usage: ${medUsagePresc})`;
+                            }
 
                             // Add prefix for subsequent groups (visual separation)
                             if (idx > 0) {
@@ -764,6 +768,10 @@ function generatePrescriptionPDF_NEW(prescriptionData, date) {
 
                                 let itemsWithDosage = itemNames;
                                 if (dosage) itemsWithDosage += ` [${dosage}]`;
+                                const medUsageTher = (group.medication_usage || '').trim();
+                                if (medUsageTher) {
+                                    itemsWithDosage += ` (Medication usage: ${medUsageTher})`;
+                                }
                                 if (!itemsWithDosage) itemsWithDosage = '—';
 
                                 // Get oil class for THIS group

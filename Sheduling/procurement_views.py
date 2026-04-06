@@ -549,6 +549,7 @@ def get_prescription_details_api(request):
                         'notes': group.get('uno', ''),
                         'oil_class': group.get('oil_class', ''),
                         'ingredients': group.get('ingredients', []),
+                        'medication_usage': (group.get('medication_usage') or '').strip(),
                         'items': group_items,
                         'is_dispatched': is_dispatched,
                         'is_group': True
@@ -604,6 +605,7 @@ def get_prescription_details_api(request):
                             'therapy_name': alloc.therapy_name,
                             'dosage': grp.get('dosage', ''),
                             'uno': grp.get('uno', ''),
+                            'medication_usage': (grp.get('medication_usage') or '').strip(),
                             'booking_status': booking.status,
                             'items': []
                         }
@@ -642,6 +644,7 @@ def get_prescription_details_api(request):
                 'therapy_name': gdata['therapy_name'],
                 'dosage': gdata['dosage'],
                 'uno': gdata['uno'],
+                'medication_usage': gdata.get('medication_usage', ''),
                 'booking_status': gdata['booking_status'],
                 'booking_is_cancelled': gdata['booking_status'] == 'cancelled',
                 'items': gdata['items'],
@@ -837,7 +840,7 @@ def get_prescription_change_log_api(request):
                     b = b if isinstance(b, dict) else {}
                     a = a if isinstance(a, dict) else {}
                     group_changes = []
-                    for f in ['dosage', 'usage', 'time', 'uno']:
+                    for f in ['dosage', 'usage', 'time', 'uno', 'medication_usage']:
                         if (b.get(f) or '') != (a.get(f) or ''):
                             group_changes.append({
                                 'field': f,
