@@ -1646,8 +1646,16 @@ def therapy_entry(request):
                 if not fdate or not tdate or fdate > tdate:
                     return JsonResponse({'error': 'invalid_dates'}, status=400)
 
-                # Schedule lock window: after 5:30 AM (schedule TZ), today is locked (auto-cancel today for NEW therapies).
-                lock_upto_date, first_editable_date = _schedule_lock_upto_date()
+                # For NEW therapy creation, keep only past dates locked.
+                # (Do not auto-cancel today's booking after 5:30 AM.)
+                try:
+                    from django.conf import settings
+                    tz_name = getattr(settings, 'SCHEDULE_LOCK_TIMEZONE', 'Asia/Kolkata')
+                    from zoneinfo import ZoneInfo
+                    today_in_schedule_tz = timezone.now().astimezone(ZoneInfo(tz_name)).date()
+                except Exception:
+                    today_in_schedule_tz = timezone.localtime(timezone.now()).date()
+                lock_upto_date = today_in_schedule_tz - timedelta(days=1)
 
                 # resolve timeslot (accept "HH:MM" or slot_number)
                 timeslot_obj = None
@@ -1784,7 +1792,7 @@ def therapy_entry(request):
                     any_auto_cancelled = False
                     for i in range((tdate - fdate).days + 1):
                         single_date = fdate + timedelta(days=i)
-                        # Default: draft. If date is locked (past, or today after 5:30AM), auto-cancel it.
+                        # Default: draft. Only past dates are auto-cancelled for NEW therapies.
                         if single_date <= lock_upto_date:
                             booking_status = 'cancelled'
                             any_auto_cancelled = True
@@ -1825,7 +1833,7 @@ def therapy_entry(request):
                             status_counts[booking_status] += 1
 
                     # If we auto-cancelled any locked date(s), record it at allocation level as well (so UI shows cancellations).
-                    # Current business rule expects: after 5:30 AM, "today" should be auto-cancelled for newly added therapies.
+                    # Keep allocation-level cancellation metadata only for truly locked (past) dates.
                     if any_auto_cancelled:
                         # Only set cancellation range if today is in the allocation range and is locked.
                         # (Avoid setting cancellation metadata for unrelated future-only therapies.)
@@ -1837,7 +1845,7 @@ def therapy_entry(request):
                             else:
                                 alloc.cancelled_date_from = lock_upto_date
                                 alloc.cancelled_date_to = lock_upto_date
-                            auto_reason = "Auto-cancelled (schedule locked after 5:30 AM)."
+                            auto_reason = "Auto-cancelled (past date is schedule-locked)."
                             alloc.cancellation_reason = (auto_reason if not alloc.cancellation_reason else (alloc.cancellation_reason + " | " + auto_reason))[:1000]
                             alloc.cancelled_by = request.user if request.user.is_authenticated else None
                             alloc.cancelled_at = timezone.now()
@@ -1856,7 +1864,7 @@ def therapy_entry(request):
                         # Group dates by Final Schedule status
                         dates_with_final_schedule = []
                         for d in daterange(fdate, tdate):
-                            # Skip locked dates (past and, after 5:30AM, today). They must remain unchanged / cancelled.
+                            # Skip locked past dates only (today remains schedulable for new therapies).
                             if d <= lock_upto_date:
                                 continue
                             if FinalScheduleRun.objects.filter(run_date=d).exists():
