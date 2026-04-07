@@ -453,8 +453,9 @@ function showPrescriptionModal(patientInfo, prescriptionGroups, therapyItems) {
                 allocationDiv.style.opacity = '0.7';
             }
 
-            // Common usage/ext-int for this allocation (from first group)
+            // Common usage / medication_usage / ext-int for this allocation (from first group)
             let commonUsage = '';
+            let commonMedicationUsage = '';
             let commonExtInt = '';
             if (allocationGroups.length > 0) {
                 const g0 = allocationGroups[0];
@@ -463,17 +464,21 @@ function showPrescriptionModal(patientInfo, prescriptionGroups, therapyItems) {
                 } else if (g0.usage_array && Array.isArray(g0.usage_array) && g0.usage_array.length > 0) {
                     commonUsage = g0.usage_array.join(', ');
                 }
+                if (g0.medication_usage) {
+                    commonMedicationUsage = g0.medication_usage.trim();
+                }
                 if (g0.internal_external) {
                     commonExtInt = g0.internal_external;
                 }
             }
-            if (commonUsage || commonExtInt) {
+            if (commonUsage || commonMedicationUsage || commonExtInt) {
                 const metaDiv = document.createElement('div');
                 metaDiv.style.fontSize = '0.85rem';
                 metaDiv.style.color = '#4b5563';
                 metaDiv.style.marginBottom = '6px';
                 const metaParts = [];
                 if (commonUsage) metaParts.push(`Usage: ${commonUsage}`);
+                if (commonMedicationUsage) metaParts.push(`Usage Instruction: ${commonMedicationUsage}`);
                 if (commonExtInt) metaParts.push(`Ext/Int: ${commonExtInt}`);
                 metaDiv.textContent = metaParts.join(' | ');
                 allocationDiv.appendChild(metaDiv);
@@ -633,7 +638,7 @@ function showPrescriptionModal(patientInfo, prescriptionGroups, therapyItems) {
                     medUsageLabel.style.color = '#666';
                     medUsageLabel.style.marginTop = '6px';
                     medUsageLabel.style.marginBottom = '6px';
-                    medUsageLabel.textContent = `Medication usage: ${escapeHtml(medUsageRaw)}`;
+                    medUsageLabel.textContent = `Usage Instruction: ${escapeHtml(medUsageRaw)}`;
                     if (groupIsCancelled) {
                         medUsageLabel.style.opacity = '0.7';
                     }
@@ -682,7 +687,7 @@ function showPrescriptionModal(patientInfo, prescriptionGroups, therapyItems) {
                                     <div class="medicine-meta" style="font-size:0.9em;color:#666;display:flex;flex-wrap:wrap;gap:12px;">
                                         ${dosage !== 'N/A' || uno !== 'N/A' ? `<span><strong>Dosage:</strong> ${escapeHtml(dosage !== 'N/A' && uno !== 'N/A' ? `${dosage} (${uno})` : (dosage !== 'N/A' ? dosage : '') + (uno !== 'N/A' ? ` (${uno})` : ''))}</span>` : ''}
                                         ${usage !== 'N/A' ? `<span><strong>Usage:</strong> ${escapeHtml(usage)}</span>` : ''}
-                                        ${medicationUsageMeta ? `<span><strong>Medication usage:</strong> ${escapeHtml(medicationUsageMeta)}</span>` : ''}
+                                        ${medicationUsageMeta ? `<span><strong>Usage Instruction:</strong> ${escapeHtml(medicationUsageMeta)}</span>` : ''}
                                         ${internalExternal !== 'N/A' ? `<span><strong>Ext/Int:</strong> ${escapeHtml(internalExternal)}</span>` : ''}
                                         ${items[0]?.item_code ? `<span><strong>Item Code:</strong> ${escapeHtml(items[0].item_code)}</span>` : ''}
                                     </div>
@@ -764,7 +769,7 @@ function formatChangeLogValues(values) {
             }
             const medicationUsage = (group.medication_usage || '').trim();
             if (medicationUsage) {
-                lines.push(`  Medication usage: ${medicationUsage}`);
+                lines.push(`  Usage Instruction: ${medicationUsage}`);
             }
             if (time) {
                 lines.push(`  Time: ${time}`);

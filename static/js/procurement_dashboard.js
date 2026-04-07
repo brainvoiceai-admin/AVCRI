@@ -478,7 +478,7 @@
                         const oilClass = group.oil_class || '';
                         if (dosageDisplay) details.push(`Dosage: ${escapeHtml(dosageDisplay)}`);
                         const medUsageProc = (group.medication_usage || '').trim();
-                        if (medUsageProc) details.push(`Medication usage: ${escapeHtml(medUsageProc)}`);
+                        if (medUsageProc) details.push(`Usage Instruction: ${escapeHtml(medUsageProc)}`);
                         if (time) details.push(`Time: ${escapeHtml(time)}`);
                         if (internalExternal) details.push(`Ext/Int: ${escapeHtml(internalExternal)}`);
                         if (ingredientsDisplay) details.push(`Ingredients: ${ingredientsDisplay}`);
@@ -583,7 +583,7 @@
                             medUsageLabel.style.color = '#666';
                             medUsageLabel.style.marginTop = '6px';
                             medUsageLabel.style.marginBottom = '6px';
-                            medUsageLabel.textContent = `Medication usage: ${escapeHtml(medUsageTherProc)}`;
+                            medUsageLabel.textContent = `Usage Instruction: ${escapeHtml(medUsageTherProc)}`;
                             if (groupIsCancelled) {
                                 medUsageLabel.style.opacity = '0.7';
                             }
@@ -659,7 +659,7 @@
                                         <div class="medicine-meta" style="font-size:0.9em;color:#666;display:flex;flex-wrap:wrap;gap:12px;">
                                             ${dosage !== 'N/A' || uno !== 'N/A' ? `<span><strong>Dosage:</strong> ${escapeHtml(dosage !== 'N/A' && uno !== 'N/A' ? `${dosage} (${uno})` : (dosage !== 'N/A' ? dosage : '') + (uno !== 'N/A' ? ` (${uno})` : ''))}</span>` : ''}
                                             ${usage !== 'N/A' ? `<span><strong>Usage:</strong> ${escapeHtml(usage)}</span>` : ''}
-                                            ${medicationUsageTherMeta ? `<span><strong>Medication usage:</strong> ${escapeHtml(medicationUsageTherMeta)}</span>` : ''}
+                                            ${medicationUsageTherMeta ? `<span><strong>Usage Instruction:</strong> ${escapeHtml(medicationUsageTherMeta)}</span>` : ''}
                                             ${internalExternal !== 'N/A' ? `<span><strong>Ext/Int:</strong> ${escapeHtml(internalExternal)}</span>` : ''}
                                             ${items[0]?.item_code ? `<span><strong>Item Code:</strong> ${escapeHtml(items[0].item_code)}</span>` : ''}
                                         </div>

@@ -145,11 +145,6 @@
                 <label for="item-builder-dosage">Dosage</label>
                 <input id="item-builder-dosage" type="text" placeholder="e.g. 2 tsp">
               </div>
-              <div class="form-group">
-                <label for="item-builder-medication-usage">Medication usage</label>
-                <input type="text" id="item-builder-medication-usage" class="form-control"
-                  placeholder="e.g. After food, with warm water" style="width:100%;">
-              </div>
               <div class="form-group small">
                 <label for="item-builder-uno">Unit</label>
                 <select id="item-builder-uno">
@@ -184,9 +179,14 @@
           </div>
 
           <div class="form-row" style="margin-top: 24px;">
-            <div class="form-group">
+            <div class="form-group" style="flex: 0 0 280px;">
               <label for="common-usage-select">Usage</label>
               <select id="common-usage-select" multiple style="width:100%;"></select>
+            </div>
+            <div class="form-group">
+              <label for="item-builder-medication-usage">Usage Instruction</label>
+              <input type="text" id="item-builder-medication-usage" class="form-control"
+                placeholder="e.g. After food, with warm water" style="width:100%;">
             </div>
           </div>
 
@@ -248,6 +248,7 @@
                   <th>Procured From</th>
                   <th>Scope (Ext/Int)</th>
                   <th>Usage</th>
+                  <th>Usage Instruction</th>
                   <th>Medications</th>
                   <th>From</th>
                   <th>To</th>
@@ -258,7 +259,7 @@
               </thead>
               <tbody id="prescriptions-table-body">
                 <tr>
-                  <td colspan="11">
+                  <td colspan="12">
                     <div class="empty-state">
                       <i class="fas fa-prescription-bottle"></i>
                       <h3>No Prescriptions Found</h3>

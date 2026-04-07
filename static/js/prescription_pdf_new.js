@@ -397,7 +397,8 @@ function generatePrescriptionPDF_NEW(prescriptionData, date) {
                     Object.values(groupsByAllocation).forEach(allocationGroups => {
                         let commonUsage = '';
                         let commonTime = '';
-                        // Try to find common usage/time from the first group that has them
+                        let commonMedUsage = '';
+                        // Try to find common usage/time/medication_usage from the first group that has them
                         for (const g of allocationGroups) {
                             if (g.usage) {
                                 commonUsage = g.usage;
@@ -405,6 +406,7 @@ function generatePrescriptionPDF_NEW(prescriptionData, date) {
                                 commonUsage = g.usage_array.join(', ');
                             }
                             if (g.time) commonTime = g.time;
+                            if (g.medication_usage) commonMedUsage = g.medication_usage.trim();
                             if (commonUsage && commonTime) break;
                         }
 
@@ -434,10 +436,6 @@ function generatePrescriptionPDF_NEW(prescriptionData, date) {
                             let line = itemNames;
                             if (currentDosage) {
                                 line += ` [${currentDosage}]`;
-                            }
-                            const medUsagePresc = (group.medication_usage || '').trim();
-                            if (medUsagePresc) {
-                                line += ` (Medication usage: ${medUsagePresc})`;
                             }
 
                             // Add prefix for subsequent groups (visual separation)
@@ -509,6 +507,7 @@ function generatePrescriptionPDF_NEW(prescriptionData, date) {
 
                         tableData.push([
                             timeUsageText || '—',
+                            commonMedUsage || '—',
                             itemsWithDosage,
                             groupOilClass || '—',
                             ingredientsText || '—'
@@ -525,7 +524,7 @@ function generatePrescriptionPDF_NEW(prescriptionData, date) {
                     // Draw prescription table using autoTable
                     doc.autoTable({
                         startY: yPos,
-                        head: [['Time / Usage', 'Items', 'Oil Class', 'Ingredients']],
+                        head: [['Time / Usage', 'Usage Instruction', 'Items', 'Oil Class', 'Ingredients']],
                         body: tableData,
                         theme: 'grid',
                         styles: {
@@ -542,10 +541,11 @@ function generatePrescriptionPDF_NEW(prescriptionData, date) {
                             halign: 'left'
                         },
                         columnStyles: {
-                            0: { cellWidth: 28.5 }, // 15% - Time/Usage
-                            1: { cellWidth: 104.5 },// 55% - Items
-                            2: { cellWidth: 28.5 }, // 15% - Oil Class
-                            3: { cellWidth: 28.5 }  // 15% - Ingredients
+                            0: { cellWidth: 24 }, // Time/Usage
+                            1: { cellWidth: 24 }, // Med. Usage
+                            2: { cellWidth: 90 }, // Items
+                            3: { cellWidth: 26 }, // Oil Class
+                            4: { cellWidth: 26 }  // Ingredients
                         },
                         margin: { left: margin, right: margin },
                         tableWidth: 'auto'
@@ -616,6 +616,9 @@ function generatePrescriptionPDF_NEW(prescriptionData, date) {
                                     if (dosage) itemsWithDosage += ` [${dosage}]`;
                                     if (!itemsWithDosage) itemsWithDosage = '—';
 
+                                    // Get medication_usage for THIS group
+                                    const groupMedUsage = (group.medication_usage || '').trim() || '—';
+
                                     // Get oil class for THIS group
                                     let oilClass = group.oil_class || group.oilClass || group.oil_class_name || '';
                                     if (!oilClass && therapyItem.oil_class) {
@@ -656,6 +659,7 @@ function generatePrescriptionPDF_NEW(prescriptionData, date) {
                                     therapyTableData.push([
                                         idx === 0 ? therapyName : '',  // Therapy name only on first row
                                         groupUsage,                    // Usage for this group
+                                        groupMedUsage,                 // Med. Usage for this group
                                         itemsWithDosage,               // Items with dosage for this group
                                         oilClass,                      // Oil class for this group
                                         idx === 0 ? timeslot : '',     // Time only on first row
@@ -673,6 +677,9 @@ function generatePrescriptionPDF_NEW(prescriptionData, date) {
                                     usage = therapyItem.usage_array.filter(u => u).join(', ');
                                 }
                                 if (!usage) usage = '—';
+
+                                // Get medication_usage
+                                const flatMedUsage = (therapyItem.medication_usage || '').trim() || '—';
 
                                 // Get dosage
                                 let dosage = therapyItem.dosage || therapyItem.dose || '';
@@ -710,7 +717,7 @@ function generatePrescriptionPDF_NEW(prescriptionData, date) {
                                 }
                                 if (!ingredients || ingredients === '') ingredients = '—';
 
-                                therapyTableData.push([therapyName, usage, itemsWithDosage, oilClass, timeslot, fromDate, toDate]);
+                                therapyTableData.push([therapyName, usage, flatMedUsage, itemsWithDosage, oilClass, timeslot, fromDate, toDate]);
                             }
                         } else {
                             // No items - fallback to therapy-level data
@@ -723,7 +730,7 @@ function generatePrescriptionPDF_NEW(prescriptionData, date) {
                             let itemsWithDosage = therapyItem.dosage || therapyItem.dose || '—';
                             let oilClass = therapyItem.oil_class || therapyItem.oilClass || '—';
 
-                            therapyTableData.push([therapyName, usage, itemsWithDosage, oilClass, timeslot, fromDate, toDate]);
+                            therapyTableData.push([therapyName, usage, '—', itemsWithDosage, oilClass, timeslot, fromDate, toDate]);
                         }
                     });
 
@@ -768,11 +775,10 @@ function generatePrescriptionPDF_NEW(prescriptionData, date) {
 
                                 let itemsWithDosage = itemNames;
                                 if (dosage) itemsWithDosage += ` [${dosage}]`;
-                                const medUsageTher = (group.medication_usage || '').trim();
-                                if (medUsageTher) {
-                                    itemsWithDosage += ` (Medication usage: ${medUsageTher})`;
-                                }
                                 if (!itemsWithDosage) itemsWithDosage = '—';
+
+                                // Get medication_usage for THIS group
+                                const zeroGroupMedUsage = (group.medication_usage || '').trim() || '—';
 
                                 // Get oil class for THIS group
                                 let oilClass = group.oil_class || group.oilClass || group.oil_class_name || '';
@@ -814,6 +820,7 @@ function generatePrescriptionPDF_NEW(prescriptionData, date) {
                                 therapyTableData.push([
                                     idx === 0 ? therapyName : '',  // Therapy name only on first row
                                     groupUsage,                    // Usage for this group
+                                    zeroGroupMedUsage,             // Med. Usage for this group
                                     itemsWithDosage,               // Items with dosage for this group
                                     oilClass,                      // Oil class for this group
                                     idx === 0 ? timeslot : '',     // Time only on first row
@@ -832,7 +839,7 @@ function generatePrescriptionPDF_NEW(prescriptionData, date) {
                             let itemsWithDosage = therapy.dosage || therapy.dose || '—';
                             let oilClass = therapy.oil_class || therapy.oilClass || '—';
 
-                            therapyTableData.push([therapyName, usage, itemsWithDosage, oilClass, timeslot, fromDate, toDate]);
+                            therapyTableData.push([therapyName, usage, '—', itemsWithDosage, oilClass, timeslot, fromDate, toDate]);
                         }
                     });
 
@@ -843,16 +850,16 @@ function generatePrescriptionPDF_NEW(prescriptionData, date) {
                         let scoreA = getTimeScore(a[1]);
                         let scoreB = getTimeScore(b[1]);
                         
-                        // Fallback to timeslot (index 4) if usage doesn't have codes
-                        if (scoreA === 999 && a[4] && a[4] !== '—') {
+                        // Fallback to timeslot (index 5) if usage doesn't have codes
+                        if (scoreA === 999 && a[5] && a[5] !== '—') {
                             // Extract hour for simple numeric sort
-                            const hA = parseInt(a[4].split(':')[0]);
-                            const isPM_A = a[4].includes('PM');
+                            const hA = parseInt(a[5].split(':')[0]);
+                            const isPM_A = a[5].includes('PM');
                             scoreA = (hA % 12 + (isPM_A ? 12 : 0)) * 100;
                         }
-                        if (scoreB === 999 && b[4] && b[4] !== '—') {
-                            const hB = parseInt(b[4].split(':')[0]);
-                            const isPM_B = b[4].includes('PM');
+                        if (scoreB === 999 && b[5] && b[5] !== '—') {
+                            const hB = parseInt(b[5].split(':')[0]);
+                            const isPM_B = b[5].includes('PM');
                             scoreB = (hB % 12 + (isPM_B ? 12 : 0)) * 100;
                         }
 
@@ -864,7 +871,7 @@ function generatePrescriptionPDF_NEW(prescriptionData, date) {
 
                         doc.autoTable({
                             startY: yPos,
-                            head: [['Therapy', 'Usage', 'Items (Dosage)', 'Oil Class', 'Time', 'From', 'To']],
+                            head: [['Therapy', 'Usage', 'Usage Instruction', 'Items (Dosage)', 'Oil Class', 'Time', 'From', 'To']],
                             body: therapyTableData,
                             theme: 'grid',
                             styles: {
@@ -881,16 +888,17 @@ function generatePrescriptionPDF_NEW(prescriptionData, date) {
                                 halign: 'left'
                             },
                             columnStyles: {
-                                0: { cellWidth: 32 },   // Therapy
-                                1: { cellWidth: 32 },   // Usage
-                                2: { cellWidth: 46 },   // Items
-                                3: { cellWidth: 20 },   // Oil Class
-                                4: { cellWidth: 20, halign: 'center' }, // Time
-                                5: { cellWidth: 20, halign: 'center' }, // From
-                                6: { cellWidth: 20, halign: 'center' }  // To
+                                0: { cellWidth: 28 },   // Therapy
+                                1: { cellWidth: 22 },   // Usage
+                                2: { cellWidth: 22 },   // Med. Usage
+                                3: { cellWidth: 42 },   // Items
+                                4: { cellWidth: 18 },   // Oil Class
+                                5: { cellWidth: 20, halign: 'center' }, // Time
+                                6: { cellWidth: 19, halign: 'center' }, // From
+                                7: { cellWidth: 19, halign: 'center' }  // To
                             },
                             didParseCell: function(data) {
-                                if (data.section === 'head' && (data.column.index >= 4)) {
+                                if (data.section === 'head' && (data.column.index >= 5)) {
                                     data.cell.styles.halign = 'center';
                                 }
                             },
