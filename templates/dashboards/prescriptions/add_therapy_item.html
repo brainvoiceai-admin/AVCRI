@@ -42,7 +42,7 @@
                         data-from="{{ th.from_date|date:'Y-m-d' }}"
                         data-to="{{ th.to_date|date:'Y-m-d' }}"
                         data-days="{{ th.days }}">
-                  {{ th.therapy_name }} — {{ th.from_date|date:"M j, Y" }} → {{ th.to_date|date:"M j, Y" }}
+                  {{ th.therapy_name }} — {{ th.from_date|date:"d/m/Y" }} → {{ th.to_date|date:"d/m/Y" }}
                 </option>
               {% endfor %}
             </select>

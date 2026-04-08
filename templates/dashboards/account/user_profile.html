@@ -104,8 +104,8 @@
 								<ul class="list-group list-group-flush">
 									<li class="list-group-item d-flex justify-content-between"><span>Username</span><span>{{ user_obj.username }}</span></li>
 									<li class="list-group-item d-flex justify-content-between"><span>Role</span><span>{{ user_obj.get_role_display }}</span></li>
-									<li class="list-group-item d-flex justify-content-between"><span>Joined</span><span>{{ user_obj.date_joined|date:"M d, Y" }}</span></li>
-									<li class="list-group-item d-flex justify-content-between"><span>Last Updated</span><span>{{ user_obj.updated_at|date:"M d, Y H:i" }}</span></li>
+									<li class="list-group-item d-flex justify-content-between"><span>Joined</span><span>{{ user_obj.date_joined|date:"d/m/Y" }}</span></li>
+									<li class="list-group-item d-flex justify-content-between"><span>Last Updated</span><span>{{ user_obj.updated_at|date:"d/m/Y H:i" }}</span></li>
 								</ul>
 							</div>
 						</div>

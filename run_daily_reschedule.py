@@ -27,7 +27,7 @@ if PROJECT_ROOT not in sys.path:
 
 def run_reschedule_morning():
     """Execute the morning reschedule command (today)."""
-    print(f"\n[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Running reschedule_morning...")
+    print(f"\n[{datetime.now().strftime('%d/%m/%Y %H:%M:%S')}] Running reschedule_morning...")
     try:
         result = subprocess.run(
             [sys.executable, "manage.py", "reschedule_morning"],
@@ -44,7 +44,7 @@ def run_reschedule_morning():
 
 def run_reschedule_night():
     """Execute the night reschedule command (tomorrow)."""
-    print(f"\n[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Running reschedule_night...")
+    print(f"\n[{datetime.now().strftime('%d/%m/%Y %H:%M:%S')}] Running reschedule_night...")
     try:
         result = subprocess.run(
             [sys.executable, "manage.py", "reschedule_night"],

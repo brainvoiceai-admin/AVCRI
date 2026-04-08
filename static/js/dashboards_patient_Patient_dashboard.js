@@ -139,7 +139,7 @@
       if (upcomingSessions.length > 0) {
         const next = upcomingSessions[0];
         document.getElementById('nextSessionLabel').textContent = 
-          `${next.date} • ${slotToDisplay(next.slot)} • ${next.room_id}`;
+          `${formatDate(next.date)} • ${slotToDisplay(next.slot)} • ${next.room_id}`;
       } else {
         document.getElementById('nextSessionLabel').textContent = 'No upcoming session';
       }
@@ -176,7 +176,7 @@
           <div class="d-flex w-100 justify-content-between align-items-center">
             <div class="flex-grow-1">
               <h6 class="mb-1 fw-semibold">${session.therapy}</h6>
-              <div class="small text-muted">${session.date} • ${slotToDisplay(session.slot)}</div>
+              <div class="small text-muted">${formatDate(session.date)} • ${slotToDisplay(session.slot)}</div>
               <div class="small text-muted mt-1"><strong>Room-ID:</strong> ${session.room_id}</div>
             </div>
             <div class="ms-3">
@@ -234,7 +234,7 @@
           ((session.therapists || []).length > 3 ? (' +' + (session.therapists.length - 3)) : '');
         
         tr.innerHTML = `
-          <td>${session.date}</td>
+          <td>${formatDate(session.date)}</td>
           <td>${slotToDisplay(session.slot)}</td>
           <td>${session.therapy}</td>
           <td>${therapists}</td>
@@ -316,7 +316,7 @@
       const modalDate = document.getElementById('modalDate');
       const modalBody = document.getElementById('modalBody');
       
-      modalDate.textContent = new Date(iso + 'T00:00:00').toLocaleDateString();
+      modalDate.textContent = formatDate(iso);
       modalBody.innerHTML = '';
       
       const sessions = sessionsData.filter(s => s.date === iso);
@@ -368,6 +368,13 @@
 
     function initials(name) {
       return name.split(' ').map(p => p[0] || '').slice(0, 2).join('').toUpperCase();
+    }
+
+    function formatDate(iso) {
+      if (!iso) return '—';
+      const parts = iso.split('T')[0].split('-');
+      if (parts.length !== 3) return iso;
+      return `${parts[2]}/${parts[1]}/${parts[0]}`;
     }
 
     function showError(message) {

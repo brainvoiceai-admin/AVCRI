@@ -141,7 +141,7 @@
         totalPredictionsEl.textContent = summary.total_predictions || "–";
       }
       
-      const tStr = nextDay.toLocaleDateString('en-GB', {day:'2-digit', month:'short', year:'numeric'});
+      const tStr = nextDay.getDate().toString().padStart(2, '0') + '/' + (nextDay.getMonth()+1).toString().padStart(2, '0') + '/' + nextDay.getFullYear();
       nextDayLabel.textContent = `Tomorrow (${tStr})`;
     }
 
@@ -209,7 +209,7 @@
           <div>
             <strong>${run.run_type.charAt(0).toUpperCase() + run.run_type.slice(1)} Forecast</strong>
             <br>
-            <small>Started: ${new Date(run.started_at).toLocaleString()}</small>
+            <small>Started: ${new Date(run.started_at).getDate().toString().padStart(2, '0')}/${(new Date(run.started_at).getMonth()+1).toString().padStart(2, '0')}/${new Date(run.started_at).getFullYear()} ${new Date(run.started_at).toLocaleTimeString()}</small>
             ${run.completed_at ? `<br><small>Duration: ${run.duration_display || 'N/A'}</small>` : ''}
           </div>
           <div>
@@ -247,11 +247,12 @@
         const lastDate = prep.labels[prep.labels.length - 1];
         if (!startInput.value) startInput.value = firstDate;
         if (!endInput.value) endInput.value = lastDate;
-        rangeLabel.textContent = `📅 Showing predictions from ${firstDate} to ${lastDate}`;
+        const formatDate = (ds) => ds ? ds.split('-').reverse().join('/') : ds;
+        rangeLabel.textContent = `📅 Showing predictions from ${formatDate(firstDate)} to ${formatDate(lastDate)}`;
 
         const { labels } = prep;
         const sparse = sparseLabels(labels, 7);
-        const displayLabels = sparse.map(s => s.show ? s.label : '');
+        const displayLabels = sparse.map(s => s.show ? formatDate(s.label) : '');
         const { datasets, suggestedMax, hasOutlier } = buildDatasets(prep);
         
         if (chart) chart.destroy();

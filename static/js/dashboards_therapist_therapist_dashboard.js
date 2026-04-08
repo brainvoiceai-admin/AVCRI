@@ -131,16 +131,7 @@
       
       // Format date for display
       if (date) {
-        try {
-          document.getElementById('todayDate').textContent = new Date(date + 'T00:00:00').toLocaleDateString(undefined, { 
-            weekday: 'long', 
-            year: 'numeric', 
-            month: 'long', 
-            day: 'numeric' 
-          });
-        } catch (e) {
-          document.getElementById('todayDate').textContent = date;
-        }
+          document.getElementById('todayDate').textContent = formatDate(date);
       }
       
       todayTimeline.innerHTML = '';
@@ -227,7 +218,7 @@
                       ${session.therapy}${session.is_bathing === true ? '<span class="bathing-flag">(bathing)</span>' : ''}
                     </div>
               <div class="small">
-                <span class="me-3"><i class="bi bi-calendar me-1"></i> ${session.date}</span>
+                <span class="me-3"><i class="bi bi-calendar me-1"></i> ${formatDate(session.date)}</span>
                 <span class="me-3"><i class="bi bi-clock me-1"></i> ${session.slot}</span>
                 <span><i class="bi bi-geo-alt me-1"></i> ${session.room}</span>
               </div>
@@ -265,7 +256,7 @@
       pastSessions.forEach(session => {
         const tr = document.createElement('tr');
         tr.innerHTML = `
-          <td>${session.date}</td>
+          <td>${formatDate(session.date)}</td>
           <td>${session.slot}</td>
           <td>${session.patient_name} (${session.patient_id})</td>
           <td>
@@ -357,7 +348,7 @@
       const modalDate = document.getElementById('modalDate');
       const modalBody = document.getElementById('modalBody');
       
-      modalDate.textContent = new Date(iso + 'T00:00:00').toLocaleDateString();
+      modalDate.textContent = formatDate(iso);
       modalBody.innerHTML = '';
       
       const sessions = sessionsData.filter(s => s.date === iso);
@@ -433,6 +424,13 @@
 
     function initials(name) {
       return name.split(' ').map(p => p[0] || '').slice(0, 2).join('').toUpperCase();
+    }
+
+    function formatDate(iso) {
+      if (!iso) return '—';
+      const parts = iso.split('T')[0].split('-');
+      if (parts.length !== 3) return iso;
+      return `${parts[2]}/${parts[1]}/${parts[0]}`;
     }
 
     function showError(message) {

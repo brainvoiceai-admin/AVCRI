@@ -651,7 +651,7 @@ $(function () {
 
         grouped.forEach(row => {
           // Format date if needed, but keeping original for now as requested
-          const displayDate = row.date || '—';
+          const displayDate = formatDate(row.date) || '—';
           const therapistList = row.therapists.join(', ');
 
           tableHtml += `
@@ -1382,8 +1382,8 @@ $(function () {
         <td>${esc(format12Hour(t.slot || ''))}</td>
         <td>${groupsHtml}</td>
         <td>${esc(t.procured || '—')}</td>
-        <td>${esc(t.from_date || '')}</td>
-        <td>${esc(t.to_date || '')}</td>
+        <td>${formatDate(t.from_date)}</td>
+        <td>${formatDate(t.to_date)}</td>
         <td>${esc(t.days || '')}</td>
         <td>${statusHtml}</td>
         <td>
@@ -1431,7 +1431,7 @@ $(function () {
     const t = addedTherapies[index]; if (!t) return;
     if (!t.allocation_id) {
       // fallback: show local bookings (existing behavior)
-      $statusModalInfo.text(`Therapy: ${t.therapy_name} — ${t.from_date} → ${t.to_date}`);
+      $statusModalInfo.text(`Therapy: ${t.therapy_name} — ${formatDate(t.from_date)} → ${formatDate(t.to_date)}`);
       $statusDatesList.empty();
       const rows = bookings.filter(b => b.therapyIndex === index).sort((a, b) => a.date.localeCompare(b.date));
       if (!rows.length) $statusDatesList.append('<div class="empty-state" style="padding:20px;"><i class="fas fa-calendar-times"></i><p>No per-day allocations for this therapy.</p></div>');
@@ -1441,7 +1441,7 @@ $(function () {
         const $row = $(`
           <div class="status-date-row" data-id="${b.id}">
             <div style="display:flex;gap:8px;align-items:center;min-width:1110px;">
-              <div style="width:140px"><strong>${b.date}</strong></div>
+              <div style="width:140px"><strong>${formatDate(b.date)}</strong></div>
               <div style="width:120px">${esc(format12Hour(b.slot || ''))}</div>
               <div style="width:200px">${esc(t.therapy_name || '—')}</div>
               <div style="width:200px">${esc(b.room || '—')}</div>
@@ -1478,7 +1478,7 @@ $(function () {
       if (statusSummary.draft) summaryParts.push(`${statusSummary.draft} Draft`);
 
       $statusModalInfo.html(`
-        <strong>Therapy: ${esc(data.therapy_name)}</strong> — ${data.from_date} → ${data.to_date}<br/>
+        <strong>Therapy: ${esc(data.therapy_name)}</strong> — ${formatDate(data.from_date)} → ${formatDate(data.to_date)}<br/>
         <small style="color:#6c757d;margin-top:4px;display:block;">
           ${summaryParts.length > 0 ? summaryParts.join(', ') : 'Status: ' + (data.overall_status || 'Unknown')}
           &nbsp;|&nbsp; <em>Edits apply from the next editable date; past/locked sessions remain unchanged.</em>
@@ -1535,7 +1535,7 @@ $(function () {
           const $row = $(`
             <div class="status-date-row" data-id="${b.booking_id}">
               <div style="display:flex;gap:8px;align-items:center;min-width:1110px;">
-                <div style="width:140px"><strong>${b.date}</strong></div>
+                <div style="width:140px"><strong>${formatDate(b.date)}</strong></div>
                 <div style="width:120px">${esc(format12Hour(b.slot || ''))}</div>
                 <div style="width:200px">${esc(treatmentName)}</div>
                 <div style="width:200px">${esc(b.room || '—')}</div>
