@@ -1647,7 +1647,7 @@ def therapy_entry(request):
                     return JsonResponse({'error': 'invalid_dates'}, status=400)
 
                 # Schedule lock window: after 5:30 AM (schedule TZ), today is locked (auto-cancel today for NEW therapies).
-                lock_upto_date, first_editable_date = _schedule_lock_upto_date()
+                lock_upto_date, _ = _schedule_lock_upto_date()
 
                 # resolve timeslot (accept "HH:MM" or slot_number)
                 timeslot_obj = None
@@ -1825,7 +1825,7 @@ def therapy_entry(request):
                             status_counts[booking_status] += 1
 
                     # If we auto-cancelled any locked date(s), record it at allocation level as well (so UI shows cancellations).
-                    # Current business rule expects: after 5:30 AM, "today" should be auto-cancelled for newly added therapies.
+                    # Current business rule: after 5:30 AM, "today" should be auto-cancelled for newly added therapies.
                     if any_auto_cancelled:
                         # Only set cancellation range if today is in the allocation range and is locked.
                         # (Avoid setting cancellation metadata for unrelated future-only therapies.)
@@ -2806,6 +2806,12 @@ def prescription_entry_page(request):
                             cleaned_group = {**group, 'items': unique_items}
                             cleaned_groups.append(cleaned_group)
                     items_groups = cleaned_groups
+                    # Common usage instruction: apply root payload to every group (matches add-prescription UI)
+                    root_medication_usage = (payload.get('medication_usage') or '').strip()
+                    if root_medication_usage:
+                        for g in items_groups:
+                            if isinstance(g, dict):
+                                g['medication_usage'] = root_medication_usage
                     
                     # Create prescription allocation
                     from_date_parsed = parse_date(from_date)
@@ -3300,6 +3306,11 @@ def prescription_entry_page(request):
                         items_groups = cleaned_groups
                     else:
                         items_groups = old_items_groups
+                    root_medication_usage = (payload.get('medication_usage') or '').strip()
+                    if root_medication_usage and isinstance(items_groups, list):
+                        for g in items_groups:
+                            if isinstance(g, dict):
+                                g['medication_usage'] = root_medication_usage
                     save_from_date = parse_date(from_date) if from_date else allocation.from_date
                     save_to_date = parse_date(to_date) if to_date else allocation.to_date
 

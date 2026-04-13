@@ -1205,8 +1205,8 @@ $(function () {
 
           // Reset form
           itemGroups = []; renderItemGroups();
-          const today = new Date().toISOString().split('T')[0];
-          $therapySelect.val(null).trigger('change'); $('#ext-int-select').val(''); $slotSelect.val(''); $fromDate.val(today); $toDate.val(''); $daysInput.val(''); $therapyUsageInput.val(''); $procuredSelect.val('');
+          const _defDateAfterSave = _defaultFromDate();
+          $therapySelect.val(null).trigger('change'); $('#ext-int-select').val(''); $slotSelect.val(''); $fromDate.val(_defDateAfterSave).prop('value', _defDateAfterSave); $toDate.val(''); $daysInput.val(''); $therapyUsageInput.val(''); $procuredSelect.val('');
 
           renderAll();
 

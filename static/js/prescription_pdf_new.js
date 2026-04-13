@@ -397,7 +397,8 @@ function generatePrescriptionPDF_NEW(prescriptionData, date) {
                     Object.values(groupsByAllocation).forEach(allocationGroups => {
                         let commonUsage = '';
                         let commonTime = '';
-                        // Try to find common usage/time from the first group that has them
+                        let commonMedUsage = '';
+                        // Try to find common usage/time/medication_usage from the first group that has them
                         for (const g of allocationGroups) {
                             if (g.usage) {
                                 commonUsage = g.usage;
@@ -405,6 +406,7 @@ function generatePrescriptionPDF_NEW(prescriptionData, date) {
                                 commonUsage = g.usage_array.join(', ');
                             }
                             if (g.time) commonTime = g.time;
+                            if (g.medication_usage) commonMedUsage = g.medication_usage.trim();
                             if (commonUsage && commonTime) break;
                         }
 
@@ -502,9 +504,12 @@ function generatePrescriptionPDF_NEW(prescriptionData, date) {
                         const ingredientsText = allIngredients.join('\n'); // Join ingredients with newline to match structure if possible
 
                         const timeUsageText = commonTime ? `${commonTime}\n${commonUsage}` : commonUsage;
+                        const timeUsageWithInstruction = (commonMedUsage && commonMedUsage !== '—')
+                            ? `${timeUsageText || '—'}\n(${commonMedUsage})`
+                            : (timeUsageText || '—');
 
                         tableData.push([
-                            timeUsageText || '—',
+                            timeUsageWithInstruction,
                             itemsWithDosage,
                             groupOilClass || '—',
                             ingredientsText || '—'
@@ -538,10 +543,10 @@ function generatePrescriptionPDF_NEW(prescriptionData, date) {
                             halign: 'left'
                         },
                         columnStyles: {
-                            0: { cellWidth: 28.5 }, // 15% - Time/Usage
-                            1: { cellWidth: 104.5 },// 55% - Items
-                            2: { cellWidth: 28.5 }, // 15% - Oil Class
-                            3: { cellWidth: 28.5 }  // 15% - Ingredients
+                            0: { cellWidth: 28.5 }, // Time/Usage
+                            1: { cellWidth: 104.5 }, // Items
+                            2: { cellWidth: 28.5 }, // Oil Class
+                            3: { cellWidth: 28.5 }  // Ingredients
                         },
                         margin: { left: margin, right: margin },
                         tableWidth: 'auto'
@@ -612,6 +617,9 @@ function generatePrescriptionPDF_NEW(prescriptionData, date) {
                                     if (dosage) itemsWithDosage += ` [${dosage}]`;
                                     if (!itemsWithDosage) itemsWithDosage = '—';
 
+                                    // Get medication_usage for THIS group
+                                    const groupMedUsage = (group.medication_usage || '').trim() || '—';
+
                                     // Get oil class for THIS group
                                     let oilClass = group.oil_class || group.oilClass || group.oil_class_name || '';
                                     if (!oilClass && therapyItem.oil_class) {
@@ -649,9 +657,12 @@ function generatePrescriptionPDF_NEW(prescriptionData, date) {
 
                                     // Create a separate row for this group
                                     // Only show therapy name, time, and dates on first row
+                                    const groupUsageWithInstruction = (groupMedUsage && groupMedUsage !== '—')
+                                        ? `${groupUsage}\n(${groupMedUsage})`
+                                        : groupUsage;
                                     therapyTableData.push([
                                         idx === 0 ? therapyName : '',  // Therapy name only on first row
-                                        groupUsage,                    // Usage for this group
+                                        groupUsageWithInstruction,     // Usage (+ instruction) for this group
                                         itemsWithDosage,               // Items with dosage for this group
                                         oilClass,                      // Oil class for this group
                                         idx === 0 ? timeslot : '',     // Time only on first row
@@ -669,6 +680,9 @@ function generatePrescriptionPDF_NEW(prescriptionData, date) {
                                     usage = therapyItem.usage_array.filter(u => u).join(', ');
                                 }
                                 if (!usage) usage = '—';
+
+                                // Get medication_usage
+                                const flatMedUsage = (therapyItem.medication_usage || '').trim() || '—';
 
                                 // Get dosage
                                 let dosage = therapyItem.dosage || therapyItem.dose || '';
@@ -706,7 +720,10 @@ function generatePrescriptionPDF_NEW(prescriptionData, date) {
                                 }
                                 if (!ingredients || ingredients === '') ingredients = '—';
 
-                                therapyTableData.push([therapyName, usage, itemsWithDosage, oilClass, timeslot, fromDate, toDate]);
+                                const flatUsageWithInstruction = (flatMedUsage && flatMedUsage !== '—')
+                                    ? `${usage}\n(${flatMedUsage})`
+                                    : usage;
+                                therapyTableData.push([therapyName, flatUsageWithInstruction, itemsWithDosage, oilClass, timeslot, fromDate, toDate]);
                             }
                         } else {
                             // No items - fallback to therapy-level data
@@ -766,6 +783,9 @@ function generatePrescriptionPDF_NEW(prescriptionData, date) {
                                 if (dosage) itemsWithDosage += ` [${dosage}]`;
                                 if (!itemsWithDosage) itemsWithDosage = '—';
 
+                                // Get medication_usage for THIS group
+                                const zeroGroupMedUsage = (group.medication_usage || '').trim() || '—';
+
                                 // Get oil class for THIS group
                                 let oilClass = group.oil_class || group.oilClass || group.oil_class_name || '';
                                 if (!oilClass && therapy.oil_class) {
@@ -803,9 +823,12 @@ function generatePrescriptionPDF_NEW(prescriptionData, date) {
 
                                 // Create a separate row for this group
                                 // Only show therapy name, time, and dates on first row
+                                const zeroGroupUsageWithInstruction = (zeroGroupMedUsage && zeroGroupMedUsage !== '—')
+                                    ? `${groupUsage}\n(${zeroGroupMedUsage})`
+                                    : groupUsage;
                                 therapyTableData.push([
                                     idx === 0 ? therapyName : '',  // Therapy name only on first row
-                                    groupUsage,                    // Usage for this group
+                                    zeroGroupUsageWithInstruction, // Usage (+ instruction) for this group
                                     itemsWithDosage,               // Items with dosage for this group
                                     oilClass,                      // Oil class for this group
                                     idx === 0 ? timeslot : '',     // Time only on first row

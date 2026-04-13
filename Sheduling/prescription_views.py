@@ -682,7 +682,7 @@ def get_prescription_details_api(request):
 
         # Helper to check if group details changed
         def has_group_changed(g1, g2):
-            fields = ['dosage', 'time', 'usage', 'uno', 'internal_external', 'oil_class']
+            fields = ['dosage', 'time', 'usage', 'uno', 'internal_external', 'oil_class', 'medication_usage']
             for f in fields:
                 if str(g1.get(f, '')).strip() != str(g2.get(f, '')).strip():
                     return True
@@ -795,6 +795,7 @@ def get_prescription_details_api(request):
                         'oil_class': group.get('oil_class', ''),
                         'ingredients': group.get('ingredients', []),
                         'ingredient_ids': group.get('ingredient_ids', []),
+                        'medication_usage': (group.get('medication_usage') or '').strip(),
                         'items': group_items,
                         'is_cancelled': False, # We skipped cancelled ones above
                         'is_group': True,
@@ -842,6 +843,7 @@ def get_prescription_details_api(request):
                             'notes': bg.get('uno', ''),
                             'oil_class': bg.get('oil_class', ''),
                             'ingredients': bg.get('ingredients', []),
+                            'medication_usage': (bg.get('medication_usage') or '').strip(),
                             'items': group_items,
                             'is_cancelled': True,
                             'is_group': True,
@@ -944,6 +946,7 @@ def get_prescription_details_api(request):
                             'uno': uno,
                             'oil_class': group.get('oil_class', '') or allocation.oil_class or '',
                             'ingredients': group.get('ingredients', []) or [],
+                            'medication_usage': (group.get('medication_usage') or '').strip(),
                             'booking_id': booking.id,
                             'booking_status': booking.status,
                             # Used by prescription PDF generator.
@@ -1011,6 +1014,7 @@ def get_prescription_details_api(request):
                         'uno': '',
                         'oil_class': allocation.oil_class or '',
                         'ingredients': [],
+                        'medication_usage': '',
                         'booking_id': booking.id,
                         'booking_status': booking.status,
                         # Used by prescription PDF generator.

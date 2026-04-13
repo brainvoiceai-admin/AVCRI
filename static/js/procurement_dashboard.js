@@ -477,6 +477,8 @@
                         const details = [];
                         const oilClass = group.oil_class || '';
                         if (dosageDisplay) details.push(`Dosage: ${escapeHtml(dosageDisplay)}`);
+                        const medUsageProc = (group.medication_usage || '').trim();
+                        if (medUsageProc) details.push(`Usage Instruction: ${escapeHtml(medUsageProc)}`);
                         if (time) details.push(`Time: ${escapeHtml(time)}`);
                         if (internalExternal) details.push(`Ext/Int: ${escapeHtml(internalExternal)}`);
                         if (ingredientsDisplay) details.push(`Ingredients: ${ingredientsDisplay}`);
@@ -572,6 +574,21 @@
                             }
                             therapyGroupDiv.appendChild(dosageLabel);
                         }
+
+                        const medUsageTherProc = (group.medication_usage || '').trim();
+                        if (medUsageTherProc) {
+                            const medUsageLabel = document.createElement('div');
+                            medUsageLabel.style.fontSize = '14px';
+                            medUsageLabel.style.fontWeight = '500';
+                            medUsageLabel.style.color = '#666';
+                            medUsageLabel.style.marginTop = '6px';
+                            medUsageLabel.style.marginBottom = '6px';
+                            medUsageLabel.textContent = `Usage Instruction: ${escapeHtml(medUsageTherProc)}`;
+                            if (groupIsCancelled) {
+                                medUsageLabel.style.opacity = '0.7';
+                            }
+                            therapyGroupDiv.appendChild(medUsageLabel);
+                        }
                         
                         // Render items in this group - display as single group with multiple items
                         if (items.length > 0) {
@@ -628,6 +645,7 @@
                             }
                             const uno = group.uno || items[0]?.notes || 'N/A';
                             const internalExternal = group.internal_external || items[0]?.internal_external || 'N/A';
+                            const medicationUsageTherMeta = (group.medication_usage || '').trim();
                             
                             itemCard.innerHTML = `
                                 <div style="display:flex;align-items:flex-start;gap:12px;">
@@ -641,6 +659,7 @@
                                         <div class="medicine-meta" style="font-size:0.9em;color:#666;display:flex;flex-wrap:wrap;gap:12px;">
                                             ${dosage !== 'N/A' || uno !== 'N/A' ? `<span><strong>Dosage:</strong> ${escapeHtml(dosage !== 'N/A' && uno !== 'N/A' ? `${dosage} (${uno})` : (dosage !== 'N/A' ? dosage : '') + (uno !== 'N/A' ? ` (${uno})` : ''))}</span>` : ''}
                                             ${usage !== 'N/A' ? `<span><strong>Usage:</strong> ${escapeHtml(usage)}</span>` : ''}
+                                            ${medicationUsageTherMeta ? `<span><strong>Usage Instruction:</strong> ${escapeHtml(medicationUsageTherMeta)}</span>` : ''}
                                             ${internalExternal !== 'N/A' ? `<span><strong>Ext/Int:</strong> ${escapeHtml(internalExternal)}</span>` : ''}
                                             ${items[0]?.item_code ? `<span><strong>Item Code:</strong> ${escapeHtml(items[0].item_code)}</span>` : ''}
                                         </div>
@@ -988,7 +1007,7 @@
                                                         const groupChanges = [];
                                                         
                                                         // Compare each field
-                                                        const fields = ['dosage', 'time', 'uno', 'oil_class'];
+                                                        const fields = ['dosage', 'time', 'uno', 'oil_class', 'medication_usage'];
                                                         fields.forEach(field => {
                                                             const beforeVal = beforeGroup[field] || '';
                                                             const afterVal = afterGroup[field] || '';

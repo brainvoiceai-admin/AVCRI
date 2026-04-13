@@ -1023,6 +1023,7 @@ $(function () {
 
     const selected = $itemBuilder.select2('data') || [];
     const dosage = $('#item-builder-dosage').val().trim();
+    const medicationUsage = $('#item-builder-medication-usage').val().trim();
     const time = $('#item-builder-time').val().trim();
     const uno = $('#item-builder-uno').val().trim();
     const oilClass = $itemBuilderOilClass.val() || '';
@@ -1073,7 +1074,7 @@ $(function () {
 
     const grp = { 
       id: Math.random().toString(36).slice(2, 9), 
-      items, dosage, time, uno, 
+      items, dosage, medication_usage: medicationUsage, time, uno, 
       oil_class: oilClass, 
       procured_from: procuredFrom, 
       ingredients, 
@@ -1101,6 +1102,7 @@ $(function () {
 
     $itemBuilder.val(null).trigger('change');
     $('#item-builder-dosage').val('');
+    // medication-usage is now a common field; do not clear after each group addition
     $('#item-builder-time').val('');
     $('#item-builder-uno').val('');
     $itemBuilderOilClass.val('');
@@ -1288,6 +1290,8 @@ $(function () {
       // Let's set the saved values LAST, so they override auto-fill if present.
 
       if (g.dosage) $('#item-builder-dosage').val(g.dosage);
+      if (g.medication_usage) $('#item-builder-medication-usage').val(g.medication_usage);
+      else $('#item-builder-medication-usage').val('');
       if (g.time) $('#item-builder-time').val(g.time);
       if (g.uno) $('#item-builder-uno').val(g.uno).trigger('change');
       if (g.oil_class) $itemBuilderOilClass.val(g.oil_class).trigger('change');
@@ -1367,6 +1371,9 @@ $(function () {
     });
     const commonUsage = commonUsageValues.join(', ');
 
+    // Common usage instruction: always take current form value so it applies even if filled after groups were added
+    const usageInstructionCommon = ($('#item-builder-medication-usage').val() || '').trim();
+
     // Prepare prescription data
     const prescriptionData = {
       from_date: from,
@@ -1379,6 +1386,7 @@ $(function () {
       items_groups: itemGroups.map(g => ({
         items: g.items,
         dosage: g.dosage,
+        medication_usage: usageInstructionCommon || (g.medication_usage || '').trim(),
         time: g.time,
         uno: g.uno,
         oil_class: g.oil_class || '',
@@ -1387,6 +1395,7 @@ $(function () {
         ingredients: g.ingredients || [],
         _order: g._order // Persist order to DB
       })),
+      medication_usage: usageInstructionCommon,
       notes: ''
     };
 
@@ -1452,6 +1461,7 @@ $(function () {
         $daysInput.val('');
         // procured_from is now per group, not global - no need to clear global field 
         $scopeSelect.val('');
+        $('#item-builder-medication-usage').val('');
         $commonUsageSelect.val(null).trigger('change');
         usageSelectionOrder = []; // Reset selection order
 
@@ -1706,6 +1716,18 @@ $(function () {
       const procuredFromValues = [...new Set((p.items_groups || []).map(g => g.procured_from).filter(pf => pf))];
       const procuredFromDisplay = procuredFromValues.length > 0 ? procuredFromValues.join(', ') : '—';
 
+      // Usage Instruction: common field stored on each group — show first non-empty
+      let usageInstructionDisplay = '—';
+      const groupsForInstr = p.items_groups || [];
+      for (let gi = 0; gi < groupsForInstr.length; gi++) {
+        const g = groupsForInstr[gi];
+        const raw = g && g.medication_usage != null ? String(g.medication_usage).trim() : '';
+        if (raw) {
+          usageInstructionDisplay = esc(raw);
+          break;
+        }
+      }
+
       const actionClass = getTodayPrescriptionColorClass(p);
 
       const row = `<tr class="${statusClass} ${actionClass}">
@@ -1714,6 +1736,7 @@ $(function () {
         <td>${esc(procuredFromDisplay)}</td>
         <td>${esc(p.scope || '')}</td>
         <td>${commonUsageDisplay || '—'}</td>
+        <td>${usageInstructionDisplay}</td>
         <td>
           <div>${groupsHtml}</div>
         </td>
@@ -1964,6 +1987,9 @@ $(function () {
     });
     const commonUsage = commonUsageValues.join(', ');
 
+    // Common usage instruction: current form value (same as save — applies to all groups)
+    const usageInstructionCommon = ($('#item-builder-medication-usage').val() || '').trim();
+
     // Get dates and days from form
     const fromDate = $fromDate.val() || '';
     const toDate = $toDate.val() || '';
@@ -1981,6 +2007,7 @@ $(function () {
       ingredients: g.ingredients || [],
       items: g.items,
       dosage: g.dosage,
+      medication_usage: usageInstructionCommon || (g.medication_usage || '').trim(),
       time: g.time,
       procured_from: g.procured_from || '',
       uno: g.uno,
@@ -1999,6 +2026,7 @@ $(function () {
         from_date: p.from_date,
         to_date: p.to_date,
         days: p.days,
+        medication_usage: usageInstructionCommon,
         notes: p.notes || ''
       };
 
@@ -2151,6 +2179,7 @@ $(function () {
     const today = new Date().toISOString().split('T')[0];
     $fromDate.val(today); $toDate.val(''); $daysInput.val('');
     // procured_from is now per group, not global - no need to clear global field
+    $('#item-builder-medication-usage').val('');
     $scopeSelect.val('');
     $commonUsageSelect.val(null).trigger('change');
     usageSelectionOrder = []; // Reset selection order
