@@ -81,7 +81,7 @@ function exportLogs() {
         
         // Get current date for title
         const today = new Date();
-        const dateStr = today.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+        const dateStr = formatDate(today);
         
         // Get filter info
         const hasFilters = urlParams.toString() && urlParams.toString().length > 0;
@@ -166,7 +166,7 @@ function exportLogs() {
             doc.setFontSize(8);
             doc.setTextColor(128, 128, 128);
             doc.text(
-              `Page ${pageNum} of ${totalPages} | Generated on ${new Date().toLocaleString()}`,
+              `Page ${pageNum} of ${totalPages} | Generated on ${formatDateTime(new Date())}`,
               pageWidth / 2,
               pageHeight - 10,
               { align: 'center' }
@@ -181,6 +181,19 @@ function exportLogs() {
         console.error('Error generating PDF:', error);
         alert('Error generating PDF: ' + error.message + '\nPlease check the browser console for details.');
       }
+    }
+
+    function formatDate(dateObj) {
+      const d = dateObj.getDate().toString().padStart(2, '0');
+      const m = (dateObj.getMonth() + 1).toString().padStart(2, '0');
+      const y = dateObj.getFullYear();
+      return `${d}/${m}/${y}`;
+    }
+
+    function formatDateTime(dateObj) {
+      const date = formatDate(dateObj);
+      const time = dateObj.toLocaleTimeString();
+      return `${date} ${time}`;
     }
 
     // Auto-refresh every 30 seconds (only for today's view)

@@ -97,7 +97,7 @@
                                         <span class="badge bg-danger">Inactive</span>
                                     {% endif %}
                                 </td>
-                                <td><small class="text-muted">{{ shift.created_at|date:"M d, Y" }}</small></td>
+                                <td><small class="text-muted">{{ shift.created_at|date:"d/m/Y" }}</small></td>
                                 <td>
                                     <div class="btn-group" role="group">
                                         <a href="{% url 'shift_master_update' shift.pk %}" class="btn btn-sm btn-outline-primary" title="Edit">

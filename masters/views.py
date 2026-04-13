@@ -2978,8 +2978,8 @@ def therapist_master_export_excel(request):
                 'Status': 'Active' if therapist.is_active else 'Inactive',
                 'Username': username,
                 'Email': email,
-                'Created At': therapist.created_at.strftime('%Y-%m-%d %H:%M:%S') if therapist.created_at else '',
-                'Updated At': therapist.updated_at.strftime('%Y-%m-%d %H:%M:%S') if therapist.updated_at else '',
+                'Created At': therapist.created_at.strftime('%d/%m/%Y %H:%M:%S') if therapist.created_at else '',
+                'Updated At': therapist.updated_at.strftime('%d/%m/%Y %H:%M:%S') if therapist.updated_at else '',
             })
         
         # Create DataFrame

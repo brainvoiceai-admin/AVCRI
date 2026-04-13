@@ -125,7 +125,7 @@
                                                 <span class="badge bg-danger">Inactive</span>
                                             {% endif %}
                                         </td>
-                                        <td>{{ role.created_at|date:"M d, Y" }}</td>
+                                        <td>{{ role.created_at|date:"d/m/Y" }}</td>
                                         <td>
                                             {% if role.is_active %}
                                                 <form method="post" action="{% url 'authentication:toggle_role_status' role.id %}" class="d-inline me-1">

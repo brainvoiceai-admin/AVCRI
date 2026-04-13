@@ -696,7 +696,7 @@ function updateTable(status, data) {
                             </td>
                             <td>${therapyNameHtml}</td>
                             <td>${slotDisplay}</td>
-                            <td>${item.date || item.from_date}</td>
+                            <td>${formatDateDMYForDraftPdf(item.date || item.from_date)}</td>
                             <td>${escapeHtml(item.room_no || '—')}</td>
                             <td>${escapeHtml(item.patient_room_no || '—')}</td>
                             <td>${therapistsHtml}</td>
@@ -750,7 +750,7 @@ function updateTable(status, data) {
                                 </button>
                             </td>
                             <td>${therapyNameHtml}</td>
-                            <td>${scheduleDate || '—'}</td>
+                            <td>${formatDateDMYForDraftPdf(scheduleDate) || '—'}</td>
                             <td>${escapeHtml(item.patient_room_no || '—')}</td>
                             <td>${nursesHtml}</td>
                         `;
@@ -851,7 +851,7 @@ function updateTable(status, data) {
                         </td>
                         <td>${escapeHtml(item.therapy_name)}</td>
                         <td>${format12Hour(item.timeslot) || '—'}</td>
-                        <td>${displayDate}</td>
+                        <td>${formatDateDMYForDraftPdf(displayDate)}</td>
                         <td>${item.room_no || '—'}</td>
                         <td>${item.patient_room_no || '—'}</td>
                         <td>${therapistsHtml}</td>
@@ -1457,7 +1457,7 @@ function formatDateDMYForDraftPdf(iso) {
     if (!iso) return '—';
     const p = String(iso).split('T')[0].split('-');
     if (p.length !== 3) return String(iso);
-    return `${p[2]}-${p[1]}-${p[0]}`;
+    return `${p[2]}/${p[1]}/${p[0]}`;
 }
 
 function draftWardCategoryFromRoom(roomNo) {
@@ -1984,9 +1984,10 @@ function generateTherapyPDF(therapyData, date) {
 
         // Helper function to format date
         function formatDate(dateStr) {
-            const d = new Date(dateStr + 'T00:00:00');
-            const options = { year: 'numeric', month: 'long', day: 'numeric' };
-            return d.toLocaleDateString('en-US', options);
+            if (!dateStr) return '—';
+            const parts = dateStr.split('T')[0].split('-');
+            if (parts.length !== 3) return dateStr;
+            return `${parts[2]}/${parts[1]}/${parts[0]}`;
         }
 
         // Header function

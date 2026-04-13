@@ -1274,7 +1274,7 @@ def Audit_Log(request):
                 log.get_action_display(),
                 (log.description or '').replace('\n', ' ').replace('\r', ' '),
                 object_info,
-                ts_display.strftime('%Y-%m-%d %H:%M:%S'),
+                ts_display.strftime('%d/%m/%Y %H:%M:%S'),
                 log.ip_address or '',
                 log.get_status_display(),
             ])
@@ -1413,7 +1413,7 @@ def audit_log_api(request):
             'action': log.get_action_display(),
             'description': log.description[:100] if log.description else '',  # Limit description length
             'object': object_info,
-            'timestamp': ts_display.strftime('%b %d, %Y'),
+            'timestamp': ts_display.strftime('%d/%m/%Y'),
             'time': ts_display.strftime('%H:%M:%S'),
             'ip_address': log.ip_address or '-',
             'status': log.get_status_display(),
@@ -1532,7 +1532,7 @@ def Therapy_Audit_Log(request):
                 log.get_action_display(),
                 (log.description or '').replace('\n', ' ').replace('\r', ' '),
                 details,
-                ts_display.strftime('%Y-%m-%d %H:%M:%S'),
+                ts_display.strftime('%d/%m/%Y %H:%M:%S'),
                 log.ip_address or '',
                 log.get_status_display(),
             ])
@@ -1651,7 +1651,7 @@ def therapy_audit_log_api(request):
             'description': (log.description or '')[:100],
             'details': details,
             'object': object_info,
-            'timestamp': ts.strftime('%b %d, %Y'),
+            'timestamp': ts.strftime('%d/%m/%Y'),
             'time': ts.strftime('%H:%M:%S'),
             'ip_address': log.ip_address or '-',
             'status': log.get_status_display(),

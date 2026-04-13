@@ -286,7 +286,7 @@ def generate_debug_pdf(debug_output, title="Debug Output", date=None):
         elements.append(Paragraph(title, title_style))
         if date:
             elements.append(Paragraph(f"Date: {date}", styles['Normal']))
-            elements.append(Paragraph(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", styles['Normal']))
+            elements.append(Paragraph(f"Generated: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}", styles['Normal']))
         elements.append(Spacer(1, 0.2*inch))
         
         # Split output into lines and add to PDF
@@ -6496,8 +6496,8 @@ def therapy_change_log_api(request):
                     if allocation.from_date <= booking.date <= allocation.to_date:
                         changes.append({
                             'field': 'Date',
-                            'before': allocation.from_date.strftime('%d-%m-%Y'),
-                            'after': booking.date.strftime('%d-%m-%Y'),
+                            'before': allocation.from_date.strftime('%d/%m/%Y'),
+                            'after': booking.date.strftime('%d/%m/%Y'),
                             'changed': False  # Date progression is normal, not a reschedule indicator
                         })
                 
@@ -6514,7 +6514,7 @@ def therapy_change_log_api(request):
                 if is_rescheduled or changes:
                     change_log.append({
                         'booking_id': booking.id,
-                        'date': booking.date.strftime('%d-%m-%Y'),
+                        'date': booking.date.strftime('%d/%m/%Y'),
                         'changes': changes,
                         'rescheduled_at': booking.updated_at.isoformat() if booking.updated_at else None,
                         'rescheduled_by': booking.allocation.allocated_by.username if booking.allocation.allocated_by else 'System',
@@ -6539,8 +6539,8 @@ def therapy_change_log_api(request):
             if record.before_date and record.after_date:
                 changes.append({
                     'field': 'Date',
-                    'before': record.before_date.strftime('%d-%m-%Y'),
-                    'after': record.after_date.strftime('%d-%m-%Y'),
+                    'before': record.before_date.strftime('%d/%m/%Y'),
+                    'after': record.after_date.strftime('%d/%m/%Y'),
                     'changed': record.before_date != record.after_date
                 })
             
@@ -6579,7 +6579,7 @@ def therapy_change_log_api(request):
             
             change_log.append({
                 'booking_id': record.booking_id,
-                'date': record.after_date.strftime('%d-%m-%Y') if record.after_date else '—',
+                'date': record.after_date.strftime('%d/%m/%Y') if record.after_date else '—',
                 'changes': changes,
                 'rescheduled_at': record.rescheduled_at.isoformat(),
                 'rescheduled_by': record.rescheduled_by.username if record.rescheduled_by else 'System',

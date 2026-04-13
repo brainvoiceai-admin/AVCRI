@@ -357,7 +357,7 @@
                                             </td>
                                             <td>{{ booking.allocation.therapy_name }}</td>
                                             <td>{% if booking.timeslot %}{{ booking.timeslot.slot_time|format_12hour }}{% else %}—{% endif %}</td>
-                                            <td>{{ booking.date|date:"Y-m-d" }}</td>
+                                            <td>{{ booking.date|date:"d/m/Y" }}</td>
                                             <td>
                                                 {% if booking.room %}
                                                 {{ booking.room.room_no }}
@@ -450,7 +450,7 @@
                                                 </button>
                                             </td>
                                             <td>{{ booking.allocation.therapy_name }}</td>
-                                            <td>{{ booking.date|date:"Y-m-d" }}</td>
+                                            <td>{{ booking.date|date:"d/m/Y" }}</td>
                                             <td>
                                                 {% if booking.allocation.patient.pat_room_no %}
                                                 {% with room_no=booking.allocation.patient.pat_room_no|get_staying_room_display %}
