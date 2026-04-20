@@ -128,6 +128,23 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     }
     setupEventListeners();
+    // Main scheduling dashboard: default draft filter to tomorrow (template may pre-fill) and load grid.
+    const draftDateInput = document.getElementById('draft-date');
+    if (draftDateInput && document.getElementById('draft-loading')) {
+        if (!draftDateInput.value || !String(draftDateInput.value).trim()) {
+            const t = new Date();
+            t.setDate(t.getDate() + 1);
+            const y = t.getFullYear();
+            const m = String(t.getMonth() + 1).padStart(2, '0');
+            const d = String(t.getDate()).padStart(2, '0');
+            draftDateInput.value = `${y}-${m}-${d}`;
+        }
+        const dv = String(draftDateInput.value).trim();
+        if (dv) {
+            loadTherapyData('draft', dv);
+            checkFinalScheduleStatus(dv);
+        }
+    }
     updateScheduleButtonsState();
     setTimeout(updateScheduleButtonsState, 50);
 });
@@ -1587,7 +1604,8 @@ function generateDraftTherapyTimeslotPDF(therapyData, dateIso) {
         const scheduleLabel = formatDateDMYForDraftPdf(dateIso);
 
         function addFooterPage(pageNum) {
-            doc.setFontSize(8);
+            doc.setTextColor(0, 0, 0);
+            doc.setFontSize(11);
             doc.setFont(undefined, 'normal');
             doc.text(`Page ${pageNum}`, pageWidth / 2, pageHeight - 8, { align: 'center' });
             doc.text(scheduleLabel, margin, pageHeight - 8);
@@ -1605,14 +1623,15 @@ function generateDraftTherapyTimeslotPDF(therapyData, dateIso) {
         }
 
         function drawReportHeader() {
-            doc.setFontSize(12);
+            doc.setTextColor(0, 0, 0);
+            doc.setFontSize(17);
             doc.setFont(undefined, 'bold');
             doc.text('Draft therapy', pageWidth / 2, yPos, { align: 'center' });
-            yPos += 6;
-            doc.setFontSize(10);
+            yPos += 8;
+            doc.setFontSize(15);
             doc.setFont(undefined, 'normal');
             doc.text(scheduleLabel, pageWidth / 2, yPos, { align: 'center' });
-            yPos += 6;
+            yPos += 8;
             doc.setTextColor(0, 0, 0);
         }
 
@@ -1620,10 +1639,11 @@ function generateDraftTherapyTimeslotPDF(therapyData, dateIso) {
 
         // Draw centered column heading UNDER the main header (once),
         // then print time slots and room tables.
+        // Wider Room No / date / therapists columns so headings are not cramped (mm).
         const draftColumnHeaders = ['Treatment', 'Patient', 'Room No', 'From Date', 'To Date', 'Therapists req.'];
-        const draftColWidths = [56, 44, 18, 24, 24, 22];
+        const draftColWidths = [52, 40, 24, 30, 30, 28];
         // Client requested: larger + black column heading.
-        doc.setFontSize(10);
+        doc.setFontSize(13);
         doc.setFont(undefined, 'bold');
         doc.setTextColor(0, 0, 0);
         let headerX = margin;
@@ -1634,7 +1654,7 @@ function generateDraftTherapyTimeslotPDF(therapyData, dateIso) {
         });
         doc.setTextColor(0, 0, 0);
         doc.setFont(undefined, 'normal');
-        yPos += 4;
+        yPos += 6;
 
         function sortItemsInGroup(arr) {
             return arr.slice().sort((a, b) => {
@@ -1672,20 +1692,22 @@ function generateDraftTherapyTimeslotPDF(therapyData, dateIso) {
         sortedSlots.forEach((slot, slotIdx) => {
             const items = sortItemsInGroup(slotGroups[slot]);
             checkNewPage(18);
-            doc.setFontSize(10);
+            doc.setTextColor(0, 0, 0);
+            doc.setFontSize(14);
             doc.setFont(undefined, 'bold');
             const slotLabel = slot === NO_SLOT_KEY ? 'No time slot' : format12Hour(slot);
             doc.text(`Time: ${slotLabel}`, margin, yPos);
-            yPos += 5;
+            yPos += 7;
 
             sexOrder.forEach(sexLabel => {
                 const sexItems = items.filter(it => normalizeDraftSexLabel(it.patient_sex) === sexLabel);
                 if (!sexItems.length) return;
                 checkNewPage(12);
-                doc.setFontSize(9);
+                doc.setTextColor(0, 0, 0);
+                doc.setFontSize(12);
                 doc.setFont(undefined, 'bold');
                 doc.text(sexLabel, margin + 2, yPos);
-                yPos += 4;
+                yPos += 5;
 
                 // Total therapists required for this time slot + sex.
                 // Printed AFTER all ward tables for this sex (not at the start).
@@ -1697,9 +1719,8 @@ function generateDraftTherapyTimeslotPDF(therapyData, dateIso) {
                     const n = parseInt(s, 10);
                     return acc + (Number.isFinite(n) ? n : 0);
                 }, 0);
-                // Column widths match the autoTable columnStyles below:
-                // [Treatment, Patient, Room No, From Date, To Date, Therapists req]
-                const colWidths = [56, 44, 18, 24, 24, 22];
+                // Column widths match draftColWidths / autoTable columnStyles below.
+                const colWidths = draftColWidths;
                 const lastColCenterX =
                     margin + colWidths.slice(0, 5).reduce((a, b) => a + b, 0) + (colWidths[5] / 2);
 
@@ -1717,11 +1738,11 @@ function generateDraftTherapyTimeslotPDF(therapyData, dateIso) {
                 wards.forEach(ward => {
                     const wardItems = sortItemsInGroup(byWard[ward]);
                     checkNewPage(14);
-                    doc.setFontSize(8);
+                    doc.setFontSize(12);
                     doc.setFont(undefined, 'bold');
-                    doc.setTextColor(55, 65, 81);
+                    doc.setTextColor(15, 23, 42);
                     doc.text(ward, margin + 4, yPos);
-                    yPos += 3.5;
+                    yPos += 4.5;
                     doc.setTextColor(0, 0, 0);
 
                     const body = wardItems.map(it => {
@@ -1747,16 +1768,26 @@ function generateDraftTherapyTimeslotPDF(therapyData, dateIso) {
                         body: body,
                         startY: yPos,
                         margin: { left: margin, right: margin },
-                        styles: { fontSize: 7, cellPadding: 1.2, overflow: 'linebreak' },
-                        headStyles: { fillColor: [71, 85, 105], fontSize: 7 },
-                        alternateRowStyles: { fillColor: [248, 250, 252] },
+                        styles: {
+                            fontSize: 12,
+                            cellPadding: { top: 1.8, right: 2.6, bottom: 1.8, left: 2.6 },
+                            overflow: 'linebreak',
+                            textColor: [0, 0, 0],
+                        },
+                        headStyles: {
+                            fillColor: [30, 41, 59],
+                            fontSize: 12,
+                            textColor: [255, 255, 255],
+                            cellPadding: { top: 2, right: 2.6, bottom: 2, left: 2.6 },
+                        },
+                        alternateRowStyles: { fillColor: [248, 250, 252], textColor: [0, 0, 0] },
                         columnStyles: {
-                            0: { cellWidth: 56 },
-                            1: { cellWidth: 44 },
-                            2: { cellWidth: 18 },
-                            3: { cellWidth: 24 },
-                            4: { cellWidth: 24 },
-                            5: { cellWidth: 22, halign: 'center' }, // Therapists req last
+                            0: { cellWidth: draftColWidths[0] },
+                            1: { cellWidth: draftColWidths[1] },
+                            2: { cellWidth: draftColWidths[2], halign: 'center' },
+                            3: { cellWidth: draftColWidths[3], halign: 'center' },
+                            4: { cellWidth: draftColWidths[4], halign: 'center' },
+                            5: { cellWidth: draftColWidths[5], halign: 'center' },
                         },
                         didDrawPage: (data) => {
                             const actual = tableStartPage + data.pageNumber - 1;
@@ -1769,12 +1800,12 @@ function generateDraftTherapyTimeslotPDF(therapyData, dateIso) {
                 });
                 // Sex total required after finishing all wards for this sex.
                 checkNewPage(6);
-                doc.setFontSize(8);
+                doc.setFontSize(12);
                 doc.setFont(undefined, 'bold');
                 doc.setTextColor(0, 0, 0);
                 doc.text(String(sexTotalReq), lastColCenterX, yPos, { align: 'center' });
                 doc.setFont(undefined, 'normal');
-                yPos += 3.5;
+                yPos += 4.5;
             });
 
             if (slotIdx < sortedSlots.length - 1) {
@@ -1786,7 +1817,8 @@ function generateDraftTherapyTimeslotPDF(therapyData, dateIso) {
         });
 
         if (therapistRows.length === 0 && nurseRows.length > 0) {
-            doc.setFontSize(9);
+            doc.setTextColor(0, 0, 0);
+            doc.setFontSize(12);
             doc.setFont(undefined, 'italic');
             doc.text('No draft therapist treatments for this date (nurse list follows).', margin, yPos);
             yPos += 6;
@@ -1798,11 +1830,12 @@ function generateDraftTherapyTimeslotPDF(therapyData, dateIso) {
             doc.addPage();
             currentPage = doc.internal.getNumberOfPages();
             yPos = margin;
-            doc.setFontSize(11);
+            doc.setTextColor(0, 0, 0);
+            doc.setFontSize(16);
             doc.setFont(undefined, 'bold');
             doc.text('Draft — Nurse treatments', pageWidth / 2, yPos, { align: 'center' });
-            yPos += 6;
-            doc.setFontSize(9);
+            yPos += 8;
+            doc.setFontSize(14);
             doc.setFont(undefined, 'normal');
             doc.text(scheduleLabel, pageWidth / 2, yPos, { align: 'center' });
             yPos += 8;
@@ -1820,8 +1853,12 @@ function generateDraftTherapyTimeslotPDF(therapyData, dateIso) {
                 body: nurseBody,
                 startY: yPos,
                 margin: { left: margin, right: margin },
-                styles: { fontSize: 8, cellPadding: 2 },
-                headStyles: { fillColor: [16, 185, 129] },
+                styles: { fontSize: 13, cellPadding: 2.2, textColor: [0, 0, 0] },
+                headStyles: {
+                    fillColor: [5, 150, 105],
+                    fontSize: 13,
+                    textColor: [255, 255, 255],
+                },
                 didDrawPage: (data) => {
                     const actual = nurseTableStart + data.pageNumber - 1;
                     addFooterPage(actual);

@@ -4425,6 +4425,8 @@ def scheduling_dashboard(request):
     if nurse_bookings_list:
         nurse_bookings_list.sort(key=dashboard_sort_key)
     
+    draft_date_default = (timezone.localdate() + timedelta(days=1)).isoformat()
+
     context = {
         'draft_allocations': draft_allocations,
         'draft_bookings': draft_bookings,  # Pass bookings separately for per-date display
@@ -4435,6 +4437,7 @@ def scheduling_dashboard(request):
         'failed_allocations': failed_allocations,
         'failed_bookings': failed_bookings,
         'date_filter': date_filter or '',
+        'draft_date_default': draft_date_default,
         'stats': {
             # For drafts, only use date-based count when user explicitly filtered by date;
             # otherwise show total drafts across all dates.
@@ -4474,6 +4477,7 @@ def user_therapy_entry_dashboard(request):
     from .nurse_allocation import is_nurse_treatment
 
     today = timezone.now().date()
+    tomorrow = today + timedelta(days=1)
 
     # Separate date for each tab; fallback to single 'date' then today
     single = request.GET.get('date', '')
@@ -4481,7 +4485,7 @@ def user_therapy_entry_dashboard(request):
     failed_date_str = request.GET.get('failed_date', single)
     scheduled_date_str = request.GET.get('scheduled_date', single)
 
-    draft_date, draft_date_filter = _parse_date_or_today(draft_date_str, today)
+    draft_date, draft_date_filter = _parse_date_or_today(draft_date_str, tomorrow)
     failed_date, failed_date_filter = _parse_date_or_today(failed_date_str, today)
     scheduled_date, scheduled_date_filter = _parse_date_or_today(scheduled_date_str, today)
 
@@ -4669,12 +4673,13 @@ def doctor_patients_therapy_dashboard(request):
     from .nurse_allocation import is_nurse_treatment
 
     today = timezone.now().date()
+    tomorrow = today + timedelta(days=1)
     single = request.GET.get('date', '')
     draft_date_str = request.GET.get('draft_date', single)
     failed_date_str = request.GET.get('failed_date', single)
     scheduled_date_str = request.GET.get('scheduled_date', single)
 
-    draft_date, draft_date_filter = _parse_date_or_today(draft_date_str, today)
+    draft_date, draft_date_filter = _parse_date_or_today(draft_date_str, tomorrow)
     failed_date, failed_date_filter = _parse_date_or_today(failed_date_str, today)
     scheduled_date, scheduled_date_filter = _parse_date_or_today(scheduled_date_str, today)
 
