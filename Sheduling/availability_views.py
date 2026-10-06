@@ -94,16 +94,22 @@ def get_available_therapists_api(request):
         # Combine both sets
         emergency_leave_therapist_ids = emergency_leave_therapist_ids | emergency_leave_by_emp_code
         
-        # Exclude therapists on recurring leave
-        available_therapists = therapists_query.exclude(
-            pk__in=recurring_leave_therapist_ids
-        )
-        
-        # Exclude therapists on emergency leave
-        if emergency_leave_therapist_ids:
-            available_therapists = available_therapists.exclude(
-                pk__in=emergency_leave_therapist_ids
+        # Check if caller requested to ignore leave (e.g. for therapist preference/exclusion dropdowns)
+        ignore_leave = request.GET.get('ignore_leave') in ['1', 'true', 'True'] or request.GET.get('all') in ['1', 'true', 'True']
+
+        if not ignore_leave:
+            # Exclude therapists on recurring leave
+            available_therapists = therapists_query.exclude(
+                pk__in=recurring_leave_therapist_ids
             )
+            
+            # Exclude therapists on emergency leave
+            if emergency_leave_therapist_ids:
+                available_therapists = available_therapists.exclude(
+                    pk__in=emergency_leave_therapist_ids
+                )
+        else:
+            available_therapists = therapists_query
         
         # If time slot is specified, check availability using SlotMaster and TherapistBooking
         if time_slot:

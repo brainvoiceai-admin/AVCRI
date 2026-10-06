@@ -54,6 +54,21 @@
         {% endif %}
         {% endfor %}
 
+        {% if request.user.role in "doctor admin super_admin scheduling_staff" %}
+        <div class="menu-section">
+            <div class="menu-section-header" onclick="toggleSection('section-therapist-pref')">
+                <span class="section-icon">👨‍⚕️</span>
+                <span class="section-title">Doctor Approvals</span>
+                <span class="section-arrow" id="section-therapist-pref-arrow">▼</span>
+            </div>
+            <div class="menu-subsection" id="section-therapist-pref">
+                <a href="{% url 'therapist_preference_approvals' %}" class="menu-item" data-url="{% url 'therapist_preference_approvals' %}">
+                    <span>👨‍⚕️</span> Therapist Preference Approvals
+                </a>
+            </div>
+        </div>
+        {% endif %}
+
         {# ---------- Administration (role/module mgmt) - super_admin only ---------- #}
         {% if request.user.role == "super_admin" %}
         <div class="menu-section">

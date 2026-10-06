@@ -727,12 +727,25 @@ def get_allowed_slot_values(patient_type, therapy_category, used_slots=None, the
 # -----------------------
 # Therapist allocation with Trainee -> Junior substitution (MODIFIED)
 # -----------------------
-def allocate_therapists(date, time_slot, therapy_requirements, last_therapists=None, needs_bathing=False, patient_gender=None):
+def allocate_therapists(date, time_slot, therapy_requirements, last_therapists=None, needs_bathing=False, patient_gender=None, patient_id=None):
     from masters.models import TherapistMaster, TherapistLeaveMaster, EmergencyLeave, TherapyMaster
     from Patient.models import TherapistBooking
 
     day_of_week = date.weekday()
     allocated = []
+
+    unpreferred_codes = set()
+    if patient_id:
+        try:
+            from Sheduling.preference_views import get_active_patient_therapist_preferences
+            _, pref_u = get_active_patient_therapist_preferences(patient_id)
+            unpreferred_codes.update(pref_u)
+        except Exception as e:
+            print(f"[DEBUG TherapistPref] Error in reshedule.py for patient {patient_id}: {e}")
+
+    exclusion_set = set(unpreferred_codes)
+    if last_therapists and unpreferred_codes:
+        last_therapists = [c for c in last_therapists if c not in unpreferred_codes]
 
     # Shift eligibility (additive): only enforced when shift masters/mappings are configured.
     shift_filter_enabled = False
@@ -1243,6 +1256,8 @@ def allocate_therapists_with_grade_substitution(date, time_slot, therapy_require
                 break
             
             candidates_qs = TherapistMaster.objects.filter(therapist_grade__name=search_grade, is_active=True)
+            if exclusion_set:
+                candidates_qs = candidates_qs.exclude(therapist_code__in=exclusion_set)
             
             if desired_gender:
                 candidates_qs = candidates_qs.filter(therapist_gender__istartswith=desired_gender[0])
@@ -1271,8 +1286,13 @@ def allocate_therapists_with_grade_substitution(date, time_slot, therapy_require
                 session_count = get_therapist_daily_session_count(t)
                 scored_candidates.append((t, session_count))
             
-            # Sort by session count (prefer therapists with fewer sessions)
-            scored_candidates.sort(key=lambda x: (x[1], getattr(x[0], "id", 0) or 0))
+            # Sort by session count, then id
+            scored_candidates.sort(
+                key=lambda x: (
+                    x[1],
+                    getattr(x[0], "id", 0) or 0
+                )
+            )
             
             for t, session_count in scored_candidates:
                 if needed <= 0:
@@ -1821,6 +1841,7 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
                     remaining_last_therapists if remaining_last_therapists else None,
                     needs_bath_flag and not pass1_continuity_assigned.get('bath_assigned'),
                     patient_gender=pat_sex,
+                    patient_id=patient_reg_no,
                 )
                 candidate_therapists.extend(additional)
                 print(f"[RESCHEDULE PASS2] Added {len(additional)} additional therapists for remaining slots")
@@ -1831,7 +1852,8 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
                 therapy_req,
                 last_therapists if last_therapists else None,
                 needs_bath_flag,
-                patient_gender=pat_sex
+                patient_gender=pat_sex,
+                patient_id=patient_reg_no,
             )
     except Exception:
         candidate_therapists = []

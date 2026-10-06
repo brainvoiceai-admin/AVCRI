@@ -819,12 +819,31 @@ def allocate_therapists(
     needs_bathing=False,
     patient_gender=None,
     avoid_therapists=None,
+    patient_id=None,
 ):
     from masters.models import TherapistMaster, TherapistLeaveMaster, EmergencyLeave, TherapyMaster
     from Patient.models import TherapistBooking
 
     day_of_week = date.weekday()
     allocated = []
+
+    # Retrieve active doctor-approved unpreferred therapist preferences for exclusion
+    unpreferred_codes = set()
+    if patient_id:
+        try:
+            from Sheduling.preference_views import get_active_patient_therapist_preferences
+            _, pref_u = get_active_patient_therapist_preferences(patient_id)
+            unpreferred_codes.update(pref_u)
+        except Exception as e:
+            print(f"[DEBUG TherapistPref] Error fetching preferences for patient {patient_id}: {e}")
+
+    exclusion_set = set(avoid_therapists or [])
+    if unpreferred_codes:
+        exclusion_set.update(unpreferred_codes)
+
+    # Exclude unpreferred therapists from continuity list
+    if last_therapists and unpreferred_codes:
+        last_therapists = [c for c in last_therapists if c not in unpreferred_codes]
 
     shift_filter_enabled = _shift_enforcement_enabled()
     mapped_ids, eligible_ids = (set(), set())
@@ -1140,6 +1159,8 @@ def allocate_therapists(
 
         # Search for therapists with strict gender matching
         candidates_qs = TherapistMaster.objects.filter(therapist_grade__name=current_grade_search, is_active=True)
+        if exclusion_set:
+            candidates_qs = candidates_qs.exclude(therapist_code__in=exclusion_set)
         
         # STRICT GENDER FILTER - never remove this
         if desired_gender:
@@ -1180,8 +1201,7 @@ def allocate_therapists(
                 # Keep track of therapists at limit (5 sessions) for potential extra assignment
                 available_candidates.append((t, category_session_count, session_count))
         
-        # Sort by difficulty-specific count first, then total sessions, then id for stability.
-        # This ensures per-day Easy/Medium/Hard load is spread fairly across therapists.
+        # Sort by difficulty-specific count, then total sessions, then id for stability.
         available_candidates.sort(
             key=lambda x: (
                 x[1],                                   # category_session_count
@@ -1422,7 +1442,20 @@ def assign_continuity_therapists_pass1(booking, allocation, target_date, locked_
         except Exception as e:
             print(f"[CONTINUITY PASS1] Error reading continuity plan: {e}")
             continuity_therapists = []
-    
+
+    # Check active doctor-approved unpreferred therapist preferences for patient
+    unpreferred_codes = set()
+    if patient_id:
+        try:
+            from Sheduling.preference_views import get_active_patient_therapist_preferences
+            _, pref_u = get_active_patient_therapist_preferences(patient_id)
+            unpreferred_codes.update(pref_u)
+        except Exception as e:
+            print(f"[CONTINUITY PASS1] Error fetching active preferences for patient {patient_id}: {e}")
+
+    if unpreferred_codes:
+        continuity_therapists = [t for t in continuity_therapists if getattr(t, 'therapist_code', None) not in unpreferred_codes]
+
     if not continuity_therapists:
         # No continuity therapists - skip this booking in PASS 1
         result['remaining_requirements'] = therapy_req.copy()
@@ -2292,6 +2325,7 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                         needs_bathing=needs_bath_flag and (result_bath_assigned is None),  # Only if no bathing therapist yet
                         patient_gender=pat_sex,
                         avoid_therapists=continuity_codes_to_avoid if continuity_codes_to_avoid else None,
+                        patient_id=pat_reg_id,
                     )
                     candidate_therapists.extend(additional_therapists)
                     print(f"[CONTINUITY PASS2] Booking {booking.pk}: Added {len(additional_therapists)} additional therapists")
@@ -2549,6 +2583,7 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                     except Exception as e:
                         print(f"[DEBUG ContinuityPlan] Error building avoid_for_slot for therapy continuity: {e}")
 
+                pat_reg_id = getattr(getattr(allocation, 'patient', None), 'pat_reg_no', None) or getattr(allocation, 'patient_id', None)
                 candidate_therapists = allocate_therapists(
                     target_date,
                     allocate_slot,
@@ -2557,6 +2592,7 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                     needs_bath_flag,
                     patient_gender=pat_sex,
                     avoid_therapists=avoid_for_slot,
+                    patient_id=pat_reg_id,
                 )
             except Exception:
                 candidate_therapists = []

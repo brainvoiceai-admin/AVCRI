@@ -1,0 +1,443 @@
+{% load static custom_tags %}
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Therapist Preference Approvals - AVCRI</title>
+
+    <link rel="stylesheet" href="{% static 'css/scheduling.css' %}">
+    <link rel="stylesheet" href="{% static 'css/dashboards_nav.css' %}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <style>
+        .modal-backdrop {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: rgba(15, 23, 42, 0.6);
+            backdrop-filter: blur(4px);
+            z-index: 99999;
+            display: none;
+            align-items: center;
+            justify-content: center;
+        }
+        .modal-backdrop.active {
+            display: flex !important;
+        }
+        .modal-card {
+            background: #ffffff;
+            border-radius: 12px;
+            padding: 24px;
+            width: 90%;
+            max-width: 500px;
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+            animation: modalSlideIn 0.2s ease-out;
+        }
+        @keyframes modalSlideIn {
+            from { opacity: 0; transform: translateY(-12px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .btn-action-approve {
+            background-color: #10b981 !important;
+            color: #ffffff !important;
+            border: none !important;
+            padding: 6px 14px !important;
+            font-size: 13px !important;
+            font-weight: 600 !important;
+            border-radius: 6px !important;
+            cursor: pointer !important;
+            display: inline-flex !important;
+            align-items: center !important;
+            gap: 4px !important;
+            margin-right: 6px !important;
+            transition: all 0.15s ease-in-out !important;
+        }
+        .btn-action-approve:hover {
+            background-color: #059669 !important;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 6px -1px rgba(16, 185, 129, 0.25);
+        }
+        .btn-action-reject {
+            background-color: #dc2626 !important;
+            color: #ffffff !important;
+            border: none !important;
+            padding: 6px 14px !important;
+            font-size: 13px !important;
+            font-weight: 600 !important;
+            border-radius: 6px !important;
+            cursor: pointer !important;
+            display: inline-flex !important;
+            align-items: center !important;
+            gap: 4px !important;
+            transition: all 0.15s ease-in-out !important;
+        }
+        .btn-action-reject:hover {
+            background-color: #b91c1c !important;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 6px -1px rgba(220, 38, 38, 0.25);
+        }
+    </style>
+</head>
+
+<body>
+    {% include 'dashboards/nav.html' %}
+    <div class="main-content">
+        <div class="container">
+            <header>
+                <h1>👨‍⚕️ Unpreferred Therapist Approvals</h1>
+                <div class="subtitle">
+                    Review, approve, or reject unpreferred therapist exclusion requests submitted for patients.
+                </div>
+            </header>
+
+            <div class="stats">
+                <div class="stat-card stat-draft" style="border-left: 4px solid #f59e0b;">
+                    <div class="stat-value" id="pending-count">{{ pending_count|default:0 }}</div>
+                    <div class="stat-label">Pending Approvals</div>
+                </div>
+                <div class="stat-card stat-allocated" style="border-left: 4px solid #10b981;">
+                    <div class="stat-value" id="approved-count">{{ approved_count|default:0 }}</div>
+                    <div class="stat-label">Approved & Active</div>
+                </div>
+                <div class="stat-card stat-failed" style="border-left: 4px solid #ef4444;">
+                    <div class="stat-value" id="rejected-count">{{ rejected_count|default:0 }}</div>
+                    <div class="stat-label">Rejected Requests</div>
+                </div>
+            </div>
+
+            <div class="dashboard">
+                <div class="card">
+                    <div class="tabs">
+                        <button class="tab active" data-status="PENDING" onclick="filterTab('PENDING', this)">⏳ Pending Approvals</button>
+                        <button class="tab" data-status="APPROVED" onclick="filterTab('APPROVED', this)">✓ Approved Exclusions</button>
+                        <button class="tab" data-status="REJECTED" onclick="filterTab('REJECTED', this)">✕ Rejected Requests</button>
+                        <button class="tab" data-status="ALL" onclick="filterTab('ALL', this)">📋 All Requests</button>
+                    </div>
+
+                    <div class="card-header" style="margin-top: 16px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+                            <div class="card-title">
+                                <i class="fas fa-list-check" style="color: var(--primary);"></i>
+                                <span id="section-title-text">Pending Exclusion Approvals</span>
+                            </div>
+                            <div style="display: flex; gap: 8px;">
+                                <input type="text" id="search-input" placeholder="Search patient name, ID, doctor..." style="padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px; min-width: 260px;">
+                                <button type="button" class="btn btn-outline" onclick="loadRequests()">🔍 Search</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="table-container" style="margin-top: 16px;">
+                        <table id="requests-table">
+                            <thead>
+                                <tr>
+                                    <th>Patient</th>
+                                    <th>Treating Doctor</th>
+                                    <th>Treatment</th>
+                                    <th>Requested Unpreferred Therapist(s) (Excluded)</th>
+                                    <th>Requested By & Date</th>
+                                    <th>Status</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="requests-table-body">
+                                <tr>
+                                    <td colspan="7" class="empty-state">
+                                        <div class="empty-state-icon">📋</div>
+                                        <div>Loading requests...</div>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Approve Modal -->
+    <div id="approve-modal-backdrop" class="modal-backdrop">
+        <div class="modal-card" role="dialog" aria-modal="true">
+            <h3 style="margin: 0; color: #0f172a; font-size: 1.2rem; display: flex; align-items: center; gap: 8px;">
+                <i class="fas fa-check-circle" style="color: #10b981;"></i> Approve Therapist Preference
+            </h3>
+            <p id="approve-modal-patient" style="margin-top: 12px; font-weight: 600; font-size: 1rem; color: #334155;"></p>
+            <div style="margin-top: 14px;">
+                <label class="form-label" style="font-weight: 500; font-size: 13px; color: #475569; display: block; margin-bottom: 6px;">Approval Notes (Optional)</label>
+                <textarea id="approve-notes-input" rows="3" style="width: 100%; border-radius: 6px; padding: 10px; border: 1px solid #cbd5e1; font-family: inherit;" placeholder="Enter any instructions or notes..."></textarea>
+            </div>
+            <div class="modal-footer" style="margin-top: 20px; display: flex; justify-content: flex-end; gap: 10px;">
+                <button type="button" class="btn btn-outline" onclick="closeApproveModal()">Cancel</button>
+                <button type="button" class="btn btn-success" id="confirm-approve-btn" onclick="submitApproval()" style="background: #10b981; color: #fff; border: none; padding: 8px 16px; border-radius: 6px; font-weight: 600;">Confirm Approval</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Reject Modal -->
+    <div id="reject-modal-backdrop" class="modal-backdrop">
+        <div class="modal-card" role="dialog" aria-modal="true">
+            <h3 style="margin: 0; color: #0f172a; font-size: 1.2rem; display: flex; align-items: center; gap: 8px;">
+                <i class="fas fa-times-circle" style="color: #ef4444;"></i> Reject Therapist Preference
+            </h3>
+            <p id="reject-modal-patient" style="margin-top: 12px; font-weight: 600; font-size: 1rem; color: #334155;"></p>
+            <div style="margin-top: 14px;">
+                <label class="form-label" style="font-weight: 500; font-size: 13px; color: #dc2626; display: block; margin-bottom: 6px;">Rejection Reason (Required)</label>
+                <textarea id="reject-reason-input" rows="3" style="width: 100%; border-radius: 6px; padding: 10px; border: 1px solid #fca5a5; font-family: inherit;" placeholder="Enter reason for rejection..."></textarea>
+            </div>
+            <div class="modal-footer" style="margin-top: 20px; display: flex; justify-content: flex-end; gap: 10px;">
+                <button type="button" class="btn btn-outline" onclick="closeRejectModal()">Cancel</button>
+                <button type="button" class="btn btn-danger" id="confirm-reject-btn" onclick="submitRejection()" style="background: #dc2626; color: #fff; border: none; padding: 8px 16px; border-radius: 6px; font-weight: 600;">Reject Request</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="{% static 'js/dashboards_nav.js' %}"></script>
+    <script>
+        let currentStatusFilter = 'PENDING';
+        let activeRequestId = null;
+
+        document.addEventListener('DOMContentLoaded', function () {
+            loadRequests();
+
+            document.getElementById('search-input').addEventListener('keyup', function(e) {
+                if (e.key === 'Enter') loadRequests();
+            });
+        });
+
+        function filterTab(status, btnEl) {
+            currentStatusFilter = status;
+            document.querySelectorAll('.tabs .tab').forEach(t => t.classList.remove('active'));
+            if (btnEl) btnEl.classList.add('active');
+
+            const titles = {
+                'PENDING': 'Pending Preference Approvals',
+                'APPROVED': 'Approved Therapist Preferences',
+                'REJECTED': 'Rejected Preference Requests',
+                'ALL': 'All Therapist Preference Requests'
+            };
+            document.getElementById('section-title-text').innerText = titles[status] || 'Therapist Preference Requests';
+            loadRequests();
+        }
+
+        function escapeAttr(str) {
+            if (!str) return '';
+            return String(str)
+                .replace(/&/g, '&amp;')
+                .replace(/'/g, '&#39;')
+                .replace(/"/g, '&quot;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;');
+        }
+
+        function loadRequests() {
+            const tbody = document.getElementById('requests-table-body');
+            const search = document.getElementById('search-input').value.trim().toLowerCase();
+
+            fetch('/sheduling/api/therapist-preference/pending-list/?status=' + currentStatusFilter)
+                .then(r => r.json())
+                .then(data => {
+                    if (data.status !== 'success' || !data.requests || data.requests.length === 0) {
+                        tbody.innerHTML = `
+                            <tr>
+                                <td colspan="7" class="empty-state">
+                                    <div class="empty-state-icon">📋</div>
+                                    <div>No preference requests found.</div>
+                                </td>
+                            </tr>`;
+                        return;
+                    }
+
+                    let filtered = data.requests;
+                    if (search) {
+                        filtered = filtered.filter(r => 
+                            (r.patient_name || '').toLowerCase().includes(search) ||
+                            (r.patient_id || '').toLowerCase().includes(search) ||
+                            (r.treating_doctor_name || '').toLowerCase().includes(search) ||
+                            (r.unpreferred_therapists_display || '').toLowerCase().includes(search)
+                        );
+                    }
+
+                    if (filtered.length === 0) {
+                        tbody.innerHTML = `
+                            <tr>
+                                <td colspan="7" class="empty-state">
+                                    <div class="empty-state-icon">🔍</div>
+                                    <div>No matching requests found.</div>
+                                </td>
+                            </tr>`;
+                        return;
+                    }
+
+                    let html = '';
+                    filtered.forEach(r => {
+                        let statusBadge = '';
+                        if (r.status === 'PENDING') {
+                            statusBadge = '<span class="badge" style="background: #fef3c7; color: #b45309; border: 1px solid #fde68a;">⏳ Pending Approval</span>';
+                        } else if (r.status === 'APPROVED') {
+                            statusBadge = '<span class="badge" style="background: #dcfce7; color: #15803d; border: 1px solid #bbf7d0;">✓ Approved</span>';
+                        } else if (r.status === 'REJECTED') {
+                            statusBadge = '<span class="badge" style="background: #fee2e2; color: #b91c1c; border: 1px solid #fca5a5;">✕ Rejected</span>';
+                        } else {
+                            statusBadge = `<span class="badge" style="background: #f1f5f9; color: #64748b;">${r.status_display}</span>`;
+                        }
+
+                        let unprefBadge = `<span style="background: #fef2f2; color: #991b1b; padding: 4px 8px; border-radius: 4px; font-weight: 600; font-size: 13px;">${escapeAttr(r.unpreferred_therapists_display)}</span>`;
+
+                        const safeName = escapeAttr(r.patient_name);
+                        const safePatId = escapeAttr(r.patient_id);
+
+                        let actions = '—';
+                        if (r.status === 'PENDING') {
+                            if (r.can_approve) {
+                                actions = `
+                                    <button type="button" class="btn-action-approve" onclick="openApproveModal(${r.id}, '${safeName}', '${safePatId}')">✓ Approve</button>
+                                    <button type="button" class="btn-action-reject" onclick="openRejectModal(${r.id}, '${safeName}', '${safePatId}')">✕ Reject</button>
+                                `;
+                            } else {
+                                const docLabel = escapeAttr(r.treating_doctor_name) || 'assigned doctor';
+                                actions = `<span style="font-size: 12px; color: #b45309; background: #fffbeb; padding: 4px 8px; border-radius: 4px; border: 1px solid #fde68a; font-weight: 500; display: inline-block;"><i class="fas fa-lock" style="margin-right: 4px;"></i>Requires Treating Doctor (${docLabel})</span>`;
+                            }
+                        } else if (r.status === 'APPROVED') {
+                            actions = `<span style="font-size: 12px; color: var(--gray);">Approved by Dr. ${escapeAttr(r.approved_by)} on ${r.action_date}</span>`;
+                        } else if (r.status === 'REJECTED') {
+                            actions = `<span style="font-size: 12px; color: var(--gray);">Rejected by Dr. ${escapeAttr(r.approved_by)}<br><i style="color:#ef4444;">${escapeAttr(r.rejection_reason)}</i></span>`;
+                        }
+
+                        html += `
+                            <tr>
+                                <td>
+                                    <div style="font-weight: 600; color: var(--primary);">${escapeAttr(r.patient_name)}</div>
+                                    <div style="font-size: 12px; color: var(--gray);">ID: ${escapeAttr(r.patient_id)}</div>
+                                </td>
+                                <td>
+                                    <div style="font-weight: 600; color: #1e293b;">👨‍⚕️ ${escapeAttr(r.treating_doctor_name) || '—'}</div>
+                                </td>
+                                <td>${escapeAttr(r.treatment_name)}</td>
+                                <td>${unprefBadge}</td>
+                                <td>
+                                    <div style="font-weight: 500;">${escapeAttr(r.requested_by)} (${escapeAttr(r.requested_by_role)})</div>
+                                    <div style="font-size: 12px; color: var(--gray);">${r.request_date}</div>
+                                </td>
+                                <td>${statusBadge}</td>
+                                <td>${actions}</td>
+                            </tr>
+                        `;
+                    });
+
+                    tbody.innerHTML = html;
+                })
+                .catch(err => {
+                    console.error(err);
+                    tbody.innerHTML = `<tr><td colspan="7" class="empty-state">Error loading requests. Please refresh.</td></tr>`;
+                });
+        }
+
+        function openApproveModal(id, name, patId) {
+            activeRequestId = id;
+            document.getElementById('approve-modal-patient').innerText = `Patient: ${name} (${patId})`;
+            document.getElementById('approve-notes-input').value = '';
+            const backdrop = document.getElementById('approve-modal-backdrop');
+            backdrop.classList.add('active');
+        }
+
+        function closeApproveModal() {
+            activeRequestId = null;
+            const backdrop = document.getElementById('approve-modal-backdrop');
+            backdrop.classList.remove('active');
+        }
+
+        function submitApproval() {
+            if (!activeRequestId) return;
+            const notes = document.getElementById('approve-notes-input').value;
+
+            fetch(`/sheduling/api/therapist-preference/${activeRequestId}/approve/`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': getCsrfToken()
+                },
+                body: JSON.stringify({ notes: notes })
+            })
+            .then(r => r.json())
+            .then(res => {
+                closeApproveModal();
+                if (res.status === 'success') {
+                    alert(res.message);
+                    loadRequests();
+                } else {
+                    alert('Error approving request: ' + (res.message || 'Unknown error'));
+                }
+            })
+            .catch(err => {
+                alert('Error connecting to server.');
+            });
+        }
+
+        function openRejectModal(id, name, patId) {
+            activeRequestId = id;
+            document.getElementById('reject-modal-patient').innerText = `Patient: ${name} (${patId})`;
+            document.getElementById('reject-reason-input').value = '';
+            const backdrop = document.getElementById('reject-modal-backdrop');
+            backdrop.classList.add('active');
+        }
+
+        function closeRejectModal() {
+            activeRequestId = null;
+            const backdrop = document.getElementById('reject-modal-backdrop');
+            backdrop.classList.remove('active');
+        }
+
+        function submitRejection() {
+            if (!activeRequestId) return;
+            const reason = document.getElementById('reject-reason-input').value.trim();
+            if (!reason) {
+                alert('Please enter a rejection reason.');
+                return;
+            }
+
+            fetch(`/sheduling/api/therapist-preference/${activeRequestId}/reject/`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': getCsrfToken()
+                },
+                body: JSON.stringify({ rejection_reason: reason })
+            })
+            .then(r => r.json())
+            .then(res => {
+                closeRejectModal();
+                if (res.status === 'success') {
+                    alert(res.message);
+                    loadRequests();
+                } else {
+                    alert('Error rejecting request: ' + (res.message || 'Unknown error'));
+                }
+            })
+            .catch(err => {
+                alert('Error connecting to server.');
+            });
+        }
+
+        function getCsrfToken() {
+            let cookieValue = null;
+            if (document.cookie && document.cookie !== '') {
+                const cookies = document.cookie.split(';');
+                for (let i = 0; i < cookies.length; i++) {
+                    const cookie = cookies[i].trim();
+                    if (cookie.substring(0, 10) === ('csrftoken=')) {
+                        cookieValue = decodeURIComponent(cookie.substring(10));
+                        break;
+                    }
+                }
+            }
+            return cookieValue || '';
+        }
+    </script>
+</body>
+
+</html>

@@ -16,6 +16,107 @@
 
   <link rel="stylesheet" href="{% static 'css/updated_dash_therapy_entry.css' %}?v=2.5">
   <link rel="stylesheet" href="{% static 'css/dashboards_nav.css' %}">
+  <style>
+    /* Custom Searchable Checkbox Multi-Select Widget */
+    .custom-multiselect-container {
+      position: relative;
+      width: 100%;
+    }
+    .custom-multiselect-trigger {
+      min-height: 46px;
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      background: #ffffff;
+      padding: 6px 12px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      transition: all 0.2s ease-in-out;
+      outline: none;
+    }
+    .custom-multiselect-trigger:hover {
+      border-color: #ef4444;
+    }
+    .custom-multiselect-trigger.active {
+      border-color: #ef4444;
+      box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.15);
+    }
+    .custom-multiselect-trigger.disabled {
+      background: #f8fafc;
+      cursor: not-allowed;
+      opacity: 0.7;
+      border-color: #e2e8f0;
+    }
+    .selected-tag-pill {
+      background-color: #fef2f2;
+      border: 1px solid #fca5a5;
+      color: #991b1b;
+      border-radius: 6px;
+      padding: 4px 10px;
+      font-size: 13px;
+      font-weight: 600;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+    }
+    .selected-tag-pill .remove-tag-btn {
+      color: #ef4444;
+      cursor: pointer;
+      font-size: 12px;
+      padding: 2px;
+      border-radius: 50%;
+      transition: background 0.15s;
+    }
+    .selected-tag-pill .remove-tag-btn:hover {
+      background: #fee2e2;
+      color: #7f1d1d;
+    }
+    .custom-multiselect-dropdown {
+      display: none;
+      position: absolute;
+      top: calc(100% + 4px);
+      left: 0;
+      width: 100%;
+      max-height: 340px;
+      background: #ffffff;
+      border: 1px solid #cbd5e1;
+      border-radius: 10px;
+      box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.05);
+      z-index: 99999;
+      overflow: hidden;
+      flex-direction: column;
+    }
+    .custom-multiselect-dropdown.open {
+      display: flex !important;
+    }
+    .multiselect-item-row {
+      padding: 10px 14px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      cursor: pointer;
+      user-select: none;
+      border-bottom: 1px solid #f1f5f9;
+      transition: background 0.15s ease;
+      font-size: 13.5px;
+    }
+    .multiselect-item-row:hover {
+      background-color: #fef2f2;
+    }
+    .multiselect-item-row.selected {
+      background-color: #fff1f2;
+      font-weight: 600;
+    }
+    .multiselect-item-row input[type="checkbox"] {
+      accent-color: #dc2626;
+      width: 17px;
+      height: 17px;
+      cursor: pointer;
+    }
+  </style>
 </head>
 
 <body>
@@ -171,6 +272,78 @@
               </select>
             </div>
           </div>
+
+          <!-- Therapist Preferences Section -->
+          <h4 style="margin: 24px 0 12px; color: var(--text-dark); display: flex; align-items: center; justify-content: space-between;">
+            <span><i class="fas fa-user-md" style="color: var(--primary);"></i> Unpreferred Therapist Preference</span>
+            <span id="therapist-pref-status-badge" style="background: #f1f5f9; color: #64748b; font-size: 0.85rem; padding: 4px 12px; border-radius: 6px; font-weight: 600; border: 1px solid #cbd5e1;">
+              Not Requested
+            </span>
+          </h4>
+
+          <div class="form-row" id="therapist-preference-section" style="background: #f8fafc; padding: 16px; border-radius: 8px; border: 1px solid var(--border-light); margin-bottom: 8px; align-items: flex-end;">
+            <select id="preferred-therapist-select" style="display: none;"></select>
+
+            <div class="form-group" style="flex: 2; position: relative;">
+              <label for="custom-multiselect-trigger" style="font-weight: 600; color: #1e293b; display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
+                <span><i class="fas fa-user-slash" style="color: #dc2626; margin-right: 6px;"></i> Unpreferred Therapist(s) (Exclude Completely)</span>
+                <span id="custom-unpref-count-badge" style="background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 12px; display: none;">0 Selected</span>
+              </label>
+
+              <!-- Hidden select for form value binding -->
+              <select id="unpreferred-therapist-select" multiple="multiple" style="display: none;"></select>
+
+              <!-- Custom Multi-Select Checkbox Dropdown Container -->
+              <div class="custom-multiselect-container" id="custom-multiselect-container">
+                <!-- Trigger Box -->
+                <div id="custom-multiselect-trigger" class="custom-multiselect-trigger" tabindex="0">
+                  <div id="selected-badges-wrapper" style="display: flex; flex-wrap: wrap; gap: 6px; align-items: center; flex: 1;">
+                    <span id="multiselect-placeholder" style="color: #94a3b8; font-size: 13.5px; font-style: italic;">
+                      <i class="fas fa-search me-1" style="color: #cbd5e1;"></i> Search and select 1 or more therapists to exclude...
+                    </span>
+                  </div>
+                  <div style="display: flex; align-items: center; gap: 8px; color: #64748b; flex-shrink: 0;">
+                    <span id="trigger-clear-all" title="Clear All" style="display: none; cursor: pointer; color: #ef4444; font-size: 12px; font-weight: 600; background: #fee2e2; padding: 2px 8px; border-radius: 4px; border: 1px solid #fca5a5;">Clear All</span>
+                    <i id="trigger-chevron" class="fas fa-chevron-down" style="font-size: 12px; transition: transform 0.2s;"></i>
+                  </div>
+                </div>
+
+                <!-- Dropdown Panel -->
+                <div id="custom-multiselect-dropdown" class="custom-multiselect-dropdown">
+                  <!-- Search Header -->
+                  <div style="padding: 10px; background: #f8fafc; border-bottom: 1px solid #e2e8f0; display: flex; flex-direction: column; gap: 8px;">
+                    <div style="position: relative;">
+                      <i class="fas fa-search" style="position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: #94a3b8; font-size: 13px;"></i>
+                      <input type="text" id="multiselect-search-input" placeholder="Type name or code to filter (e.g., Bindu, THP1282)..." style="width: 100%; padding: 8px 12px 8px 34px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 13px; outline: none; background: #ffffff;" autocomplete="off">
+                    </div>
+                    <div style="display: flex; justify-content: space-between; align-items: center; font-size: 12px;">
+                      <span id="multiselect-stats" style="color: #64748b; font-weight: 500;">Showing 0 therapists</span>
+                      <div style="display: flex; gap: 10px;">
+                        <button type="button" id="btn-select-all" style="background: none; border: none; color: #2563eb; font-weight: 600; cursor: pointer; padding: 0; font-size: 12px;">Select All</button>
+                        <span style="color: #cbd5e1;">|</span>
+                        <button type="button" id="btn-deselect-all" style="background: none; border: none; color: #ef4444; font-weight: 600; cursor: pointer; padding: 0; font-size: 12px;">Clear Selection</button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- Scrollable Checkbox List -->
+                  <div id="multiselect-options-list" style="overflow-y: auto; max-height: 220px;">
+                    <!-- Dynamically populated rows -->
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div style="display:flex; align-items:flex-end; gap: 8px;">
+              <button id="save-therapist-pref-btn" type="button" class="btn btn-primary" style="white-space: nowrap; padding: 8px 16px;">
+                <i class="fas fa-paper-plane me-1"></i> Submit Exclusion Request
+              </button>
+              <button id="change-therapist-pref-btn" type="button" class="btn btn-outline" style="white-space: nowrap; padding: 8px 16px; display: none;">
+                <i class="fas fa-edit me-1"></i> Request Preference Change
+              </button>
+            </div>
+          </div>
+          <div id="pref-status-notes" class="small-muted" style="margin-bottom: 20px; font-style: italic; font-size: 0.85rem; min-height: 18px;"></div>
 
           <h4 style="margin: 20px 0 12px; color: var(--text-dark);">
             <i class="fas fa-pills"></i> Therapy Items
@@ -381,6 +554,477 @@
     </div>
   </div>
 
+
+  <script>
+    document.addEventListener('DOMContentLoaded', function () {
+      const prefStatusBadge = document.getElementById('therapist-pref-status-badge');
+      const prefStatusNotes = document.getElementById('pref-status-notes');
+      const prefSelectPreferred = document.getElementById('preferred-therapist-select');
+      const prefSelectUnpreferred = document.getElementById('unpreferred-therapist-select');
+      const savePrefBtn = document.getElementById('save-therapist-pref-btn');
+      const changePrefBtn = document.getElementById('change-therapist-pref-btn');
+
+      // Custom Searchable Checkbox Dropdown Logic
+      let masterTherapistsList = [];
+      let selectedTherapistCodes = new Set();
+      let isMultiselectDisabled = false;
+
+      const triggerEl = document.getElementById('custom-multiselect-trigger');
+      const dropdownEl = document.getElementById('custom-multiselect-dropdown');
+      const searchInputEl = document.getElementById('multiselect-search-input');
+      const optionsListEl = document.getElementById('multiselect-options-list');
+      const badgesWrapperEl = document.getElementById('selected-badges-wrapper');
+      const countBadgeEl = document.getElementById('custom-unpref-count-badge');
+      const clearAllTriggerEl = document.getElementById('trigger-clear-all');
+      const statsEl = document.getElementById('multiselect-stats');
+      const btnSelectAll = document.getElementById('btn-select-all');
+      const btnDeselectAll = document.getElementById('btn-deselect-all');
+      const chevronEl = document.getElementById('trigger-chevron');
+
+      function escapeAttr(str) {
+        if (!str) return '';
+        return String(str)
+          .replace(/&/g, '&amp;')
+          .replace(/'/g, '&#39;')
+          .replace(/"/g, '&quot;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;');
+      }
+
+      if (triggerEl) {
+        triggerEl.addEventListener('click', function(e) {
+          if (isMultiselectDisabled) return;
+          if (e.target.closest('#trigger-clear-all') || e.target.closest('.remove-tag-btn')) return;
+          const isOpen = dropdownEl.classList.contains('open');
+          if (isOpen) {
+            closeCustomDropdown();
+          } else {
+            openCustomDropdown();
+          }
+        });
+      }
+
+      function openCustomDropdown() {
+        if (isMultiselectDisabled) return;
+        dropdownEl.classList.add('open');
+        triggerEl.classList.add('active');
+        if (chevronEl) chevronEl.style.transform = 'rotate(180deg)';
+        if (searchInputEl) {
+          searchInputEl.focus();
+        }
+      }
+
+      function closeCustomDropdown() {
+        if (dropdownEl) dropdownEl.classList.remove('open');
+        if (triggerEl) triggerEl.classList.remove('active');
+        if (chevronEl) chevronEl.style.transform = 'rotate(0deg)';
+      }
+
+      document.addEventListener('click', function(e) {
+        const path = (e.composedPath && e.composedPath()) || [];
+        const container = document.getElementById('custom-multiselect-container');
+        if (container) {
+          if (path.length > 0) {
+            if (!path.includes(container)) closeCustomDropdown();
+          } else if (!e.target.closest('#custom-multiselect-container')) {
+            closeCustomDropdown();
+          }
+        }
+      });
+
+      if (searchInputEl) {
+        searchInputEl.addEventListener('input', function() {
+          renderMultiselectOptions(this.value.trim());
+        });
+      }
+
+      if (clearAllTriggerEl) {
+        clearAllTriggerEl.addEventListener('click', function(e) {
+          e.stopPropagation();
+          if (isMultiselectDisabled) return;
+          selectedTherapistCodes.clear();
+          updateMultiselectUI();
+          renderMultiselectOptions(searchInputEl ? searchInputEl.value.trim() : '');
+        });
+      }
+
+      if (btnSelectAll) {
+        btnSelectAll.addEventListener('click', function() {
+          if (isMultiselectDisabled) return;
+          const search = searchInputEl ? searchInputEl.value.trim().toLowerCase() : '';
+          masterTherapistsList.forEach(t => {
+            const code = (t.therapist_code || t.code || t.id).toString();
+            const name = (t.therapist_name || t.name || '').toString().toLowerCase();
+            if (!search || name.includes(search) || code.toLowerCase().includes(search)) {
+              selectedTherapistCodes.add(code);
+            }
+          });
+          updateMultiselectUI();
+          renderMultiselectOptions(search);
+        });
+      }
+
+      if (btnDeselectAll) {
+        btnDeselectAll.addEventListener('click', function() {
+          if (isMultiselectDisabled) return;
+          selectedTherapistCodes.clear();
+          updateMultiselectUI();
+          renderMultiselectOptions(searchInputEl ? searchInputEl.value.trim() : '');
+        });
+      }
+
+      function renderMultiselectOptions(search = '') {
+        if (!optionsListEl) return;
+        const searchLower = search.toLowerCase();
+        const filtered = masterTherapistsList.filter(t => {
+          const code = (t.therapist_code || t.code || t.id).toString();
+          const name = (t.therapist_name || t.name || '').toString();
+          return !searchLower || name.toLowerCase().includes(searchLower) || code.toLowerCase().includes(searchLower);
+        });
+
+        if (statsEl) {
+          statsEl.innerText = `Showing ${filtered.length} of ${masterTherapistsList.length} therapists`;
+        }
+
+        if (filtered.length === 0) {
+          optionsListEl.innerHTML = `<div style="padding: 16px; text-align: center; color: #94a3b8; font-style: italic; font-size: 13px;">No therapists match "${escapeAttr(search)}"</div>`;
+          return;
+        }
+
+        let html = '';
+        filtered.forEach(t => {
+          const code = (t.therapist_code || t.code || t.id).toString();
+          const name = (t.therapist_name || t.name || code).toString();
+          const isSelected = selectedTherapistCodes.has(code);
+
+          html += `
+            <div class="multiselect-item-row ${isSelected ? 'selected' : ''}" data-code="${escapeAttr(code)}" onclick="toggleTherapistSelection('${escapeAttr(code)}', event)">
+              <input type="checkbox" id="chk-${escapeAttr(code)}" ${isSelected ? 'checked' : ''} ${isMultiselectDisabled ? 'disabled' : ''} onclick="event.stopPropagation(); toggleTherapistSelection('${escapeAttr(code)}', event)">
+              <label for="chk-${escapeAttr(code)}" style="cursor: pointer; flex: 1; display: flex; justify-content: space-between; align-items: center; margin: 0;" onclick="event.stopPropagation(); toggleTherapistSelection('${escapeAttr(code)}', event)">
+                <span style="color: #1e293b; font-weight: 500;">${escapeAttr(name)}</span>
+                <span style="font-size: 12px; color: #64748b; font-weight: 600; background: #f1f5f9; padding: 2px 6px; border-radius: 4px;">${escapeAttr(code)}</span>
+              </label>
+            </div>
+          `;
+        });
+
+        optionsListEl.innerHTML = html;
+      }
+
+      window.toggleTherapistSelection = function(code, ev) {
+        if (ev) ev.stopPropagation();
+        if (isMultiselectDisabled) return;
+
+        if (selectedTherapistCodes.has(code)) {
+          selectedTherapistCodes.delete(code);
+        } else {
+          selectedTherapistCodes.add(code);
+        }
+
+        const rowEl = optionsListEl ? optionsListEl.querySelector(`.multiselect-item-row[data-code="${code}"]`) : null;
+        if (rowEl) {
+          const chk = rowEl.querySelector('input[type="checkbox"]');
+          const isSel = selectedTherapistCodes.has(code);
+          if (chk) chk.checked = isSel;
+          if (isSel) {
+            rowEl.classList.add('selected');
+          } else {
+            rowEl.classList.remove('selected');
+          }
+        }
+
+        updateMultiselectUI();
+      };
+
+      window.removeUnpreferredCode = function(code) {
+        if (isMultiselectDisabled) return;
+        selectedTherapistCodes.delete(code);
+        updateMultiselectUI();
+        renderMultiselectOptions(searchInputEl ? searchInputEl.value.trim() : '');
+      };
+
+      function updateMultiselectUI() {
+        const selectedArr = Array.from(selectedTherapistCodes);
+
+        if (prefSelectUnpreferred) {
+          Array.from(prefSelectUnpreferred.options).forEach(opt => {
+            opt.selected = selectedTherapistCodes.has(opt.value);
+          });
+        }
+
+        if (countBadgeEl) {
+          if (selectedArr.length > 0) {
+            countBadgeEl.innerText = `${selectedArr.length} Selected`;
+            countBadgeEl.style.display = 'inline-block';
+          } else {
+            countBadgeEl.style.display = 'none';
+          }
+        }
+
+        if (clearAllTriggerEl) {
+          clearAllTriggerEl.style.display = (selectedArr.length > 0 && !isMultiselectDisabled) ? 'inline-block' : 'none';
+        }
+
+        if (badgesWrapperEl) {
+          if (selectedArr.length === 0) {
+            badgesWrapperEl.innerHTML = `
+              <span id="multiselect-placeholder" style="color: #94a3b8; font-size: 13.5px; font-style: italic;">
+                <i class="fas fa-search me-1" style="color: #cbd5e1;"></i> Search and select 1 or more therapists to exclude...
+              </span>
+            `;
+          } else {
+            let tagsHtml = '';
+            selectedArr.forEach(code => {
+              const item = masterTherapistsList.find(t => (t.therapist_code || t.code || t.id).toString() === code);
+              const name = item ? (item.therapist_name || item.name || code) : code;
+              const removeBtn = !isMultiselectDisabled 
+                ? `<i class="fas fa-times remove-tag-btn" onclick="event.stopPropagation(); removeUnpreferredCode('${escapeAttr(code)}')"></i>` 
+                : '';
+              tagsHtml += `
+                <span class="selected-tag-pill">
+                  ${escapeAttr(name)} (${escapeAttr(code)})
+                  ${removeBtn}
+                </span>
+              `;
+            });
+            badgesWrapperEl.innerHTML = tagsHtml;
+          }
+        }
+      }
+
+      function setMultiselectDisabledState(disabled) {
+        isMultiselectDisabled = disabled;
+        if (triggerEl) {
+          if (disabled) {
+            triggerEl.classList.add('disabled');
+          } else {
+            triggerEl.classList.remove('disabled');
+          }
+        }
+        if (disabled) {
+          closeCustomDropdown();
+        }
+        updateMultiselectUI();
+      }
+
+      // Populate therapist dropdowns with gender filtering
+      window.loadTherapistsMaster = function(gender) {
+        if (!gender || gender === '—') {
+          const genderEl = document.getElementById('hdr-pat-gender');
+          if (genderEl && genderEl.innerText && genderEl.innerText !== '—') {
+            gender = genderEl.innerText.trim();
+          }
+        }
+
+        let dateStr = new Date().toISOString().split('T')[0];
+        let url = '/sheduling/therapist-availability/api/available-therapists/?date=' + dateStr + '&ignore_leave=1';
+        if (gender && gender !== '—') {
+          url += '&gender=' + encodeURIComponent(gender);
+        }
+
+        fetch(url)
+          .then(r => r.json())
+          .then(data => {
+            let list = data.therapists || data.available_therapists || [];
+            if (gender && gender !== '—') {
+              const targetG = String(gender).trim().toLowerCase();
+              list = list.filter(t => {
+                const tG = String(t.therapist_gender || t.gender || '').trim().toLowerCase();
+                if (!tG) return true;
+                if (targetG.startsWith('m')) return tG.startsWith('m');
+                if (targetG.startsWith('f')) return tG.startsWith('f');
+                return true;
+              });
+            }
+            masterTherapistsList = list;
+            let optionsHtml = '';
+            list.forEach(t => {
+              const code = (t.therapist_code || t.code || t.id).toString();
+              const name = (t.therapist_name || t.name || code).toString();
+              optionsHtml += `<option value="${code}">${name} (${code})</option>`;
+            });
+            if (prefSelectUnpreferred) {
+              prefSelectUnpreferred.innerHTML = optionsHtml;
+            }
+            renderMultiselectOptions(searchInputEl ? searchInputEl.value.trim() : '');
+            updateMultiselectUI();
+          })
+          .catch(err => {
+            console.error('Error loading therapists master:', err);
+          });
+      };
+
+      window.loadTherapistsMaster();
+
+      // Function to check patient preference status
+      window.fetchPatientTherapistPreference = function (patientId, patientGender) {
+        if (!patientId) {
+          resetPrefUI('NONE');
+          window.loadTherapistsMaster(null);
+          return;
+        }
+
+        window.loadTherapistsMaster(patientGender);
+
+        fetch('/sheduling/api/therapist-preference/patient/' + encodeURIComponent(patientId) + '/')
+          .then(r => r.json())
+          .then(data => {
+            if (!data.has_preference || data.status === 'NONE') {
+              resetPrefUI('NONE');
+              return;
+            }
+
+            const status = data.status;
+            const unprefCodes = (data.unpreferred_therapists || []).map(u => u.code);
+
+            selectedTherapistCodes = new Set(unprefCodes);
+            updateMultiselectUI();
+            renderMultiselectOptions(searchInputEl ? searchInputEl.value.trim() : '');
+
+            if (status === 'PENDING') {
+              prefStatusBadge.innerHTML = '⏳ Approval Pending';
+              prefStatusBadge.style.background = '#fef3c7';
+              prefStatusBadge.style.color = '#b45309';
+              prefStatusBadge.style.borderColor = '#fde68a';
+              const docNameStr = data.treating_doctor_name ? ` (${data.treating_doctor_name})` : '';
+              prefStatusNotes.innerHTML = `Exclusion request submitted on ${data.request_date} by ${data.requested_by}. Pending Treating Doctor${docNameStr} approval.`;
+
+              setMultiselectDisabledState(true);
+              savePrefBtn.style.display = 'inline-block';
+              savePrefBtn.disabled = true;
+              changePrefBtn.style.display = 'none';
+            } else if (status === 'APPROVED') {
+              prefStatusBadge.innerHTML = '✓ Approved';
+              prefStatusBadge.style.background = '#dcfce7';
+              prefStatusBadge.style.color = '#15803d';
+              prefStatusBadge.style.borderColor = '#bbf7d0';
+              prefStatusNotes.innerHTML = `Active therapist exclusion preference approved by Dr. ${data.approved_by} on ${data.action_date}.`;
+
+              setMultiselectDisabledState(true);
+              savePrefBtn.style.display = 'none';
+              changePrefBtn.style.display = 'inline-block';
+            } else if (status === 'REJECTED') {
+              prefStatusBadge.innerHTML = '✕ Rejected';
+              prefStatusBadge.style.background = '#fee2e2';
+              prefStatusBadge.style.color = '#b91c1c';
+              prefStatusBadge.style.borderColor = '#fca5a5';
+              prefStatusNotes.innerHTML = `Request rejected by Dr. ${data.approved_by}. Reason: ${data.rejection_reason || 'N/A'}`;
+
+              setMultiselectDisabledState(false);
+              savePrefBtn.style.display = 'inline-block';
+              savePrefBtn.disabled = false;
+              changePrefBtn.style.display = 'none';
+            } else {
+              resetPrefUI('NONE');
+            }
+          })
+          .catch(err => {
+            console.error('Error fetching therapist preference:', err);
+            resetPrefUI('NONE');
+          });
+      };
+
+      function resetPrefUI(status) {
+        if (prefStatusBadge) {
+          prefStatusBadge.innerHTML = 'Not Requested';
+          prefStatusBadge.style.background = '#f1f5f9';
+          prefStatusBadge.style.color = '#64748b';
+          prefStatusBadge.style.borderColor = '#cbd5e1';
+        }
+        if (prefStatusNotes) prefStatusNotes.innerHTML = 'Select one or more unpreferred therapists to request Treating Doctor approval.';
+        selectedTherapistCodes.clear();
+        setMultiselectDisabledState(false);
+        if (savePrefBtn) { savePrefBtn.style.display = 'inline-block'; savePrefBtn.disabled = false; }
+        if (changePrefBtn) { changePrefBtn.style.display = 'none'; }
+      }
+
+      if (changePrefBtn) {
+        changePrefBtn.addEventListener('click', function () {
+          setMultiselectDisabledState(false);
+          savePrefBtn.style.display = 'inline-block';
+          savePrefBtn.disabled = false;
+          changePrefBtn.style.display = 'none';
+          prefStatusNotes.innerHTML = 'Modify unpreferred therapist exclusions and submit for Doctor re-approval.';
+        });
+      }
+
+      if (savePrefBtn) {
+        savePrefBtn.addEventListener('click', function () {
+          const patRegEl = document.getElementById('hdr-pat-reg');
+          let patId = patRegEl ? patRegEl.innerText.trim() : '';
+          if (!patId || patId === '—') {
+            alert('Please select a patient first.');
+            return;
+          }
+
+          let unpreferredVals = Array.from(selectedTherapistCodes);
+
+          if (!unpreferredVals || unpreferredVals.length === 0) {
+            alert('Please select at least one Unpreferred Therapist to exclude.');
+            return;
+          }
+
+          const patName = document.getElementById('hdr-pat-name') ? document.getElementById('hdr-pat-name').innerText.trim() : '';
+
+          const payload = {
+            patient_id: patId,
+            patient_name: patName,
+            preferred_therapist_codes: [],
+            unpreferred_therapist_codes: unpreferredVals,
+            notes: 'Exclusion preference request submitted from Add Therapy page'
+          };
+
+          fetch('/sheduling/api/therapist-preference/request/', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-CSRFToken': getCsrfToken()
+            },
+            body: JSON.stringify(payload)
+          })
+            .then(r => r.json())
+            .then(res => {
+              if (res.status === 'success') {
+                alert('Unpreferred therapist request submitted successfully! Sent to Treating Doctor for approval.');
+                fetchPatientTherapistPreference(patId);
+              } else {
+                alert('Error submitting preference request: ' + (res.message || 'Unknown error'));
+              }
+            })
+            .catch(err => {
+              alert('Error connecting to server. Please try again.');
+            });
+        });
+      }
+
+      function getCsrfToken() {
+        let cookieValue = null;
+        if (document.cookie && document.cookie !== '') {
+          const cookies = document.cookie.split(';');
+          for (let i = 0; i < cookies.length; i++) {
+            const cookie = cookies[i].trim();
+            if (cookie.substring(0, 10) === ('csrftoken=')) {
+              cookieValue = decodeURIComponent(cookie.substring(10));
+              break;
+            }
+          }
+        }
+        return cookieValue || '';
+      }
+
+      // Check header reg number periodically or on load
+      setInterval(function () {
+        const patRegEl = document.getElementById('hdr-pat-reg');
+        if (patRegEl && patRegEl.innerText && patRegEl.innerText !== '—') {
+          const currentId = patRegEl.innerText.trim();
+          if (window.lastCheckedPrefPatId !== currentId) {
+            window.lastCheckedPrefPatId = currentId;
+            fetchPatientTherapistPreference(currentId);
+          }
+        }
+      }, 1500);
+    });
+  </script>
 
   <script src="{% static 'js/updated_dash_therapy_entry.js' %}?v=4.2"></script>
   <script src="{% static 'js/dashboards_nav.js' %}"></script>

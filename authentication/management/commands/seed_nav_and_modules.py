@@ -43,6 +43,7 @@ MODULES = [
     {"name": "therapist_difficulty_dashboard",   "display_name": "Therapist Distribution",      "url_path": "/sheduling/therapist-difficulty/",       "url_name": "therapist_difficulty_dashboard",  "icon": "\U0001f4ca", "order": 45, "section": "scheduling"},
     {"name": "therapy_bulk_excel",               "display_name": "Therapy Bulk Excel",          "url_path": "/sheduling/therapy-bulk-excel/",         "url_name": "therapy_bulk_excel",              "icon": "\U0001f4e5", "order": 46, "section": "scheduling"},
     {"name": "prescription_scheduling",          "display_name": "Prescription Scheduling",     "url_path": "/sheduling/prescription-scheduling/",    "url_name": "prescription_scheduling_dashboard","icon": "\U0001f4cb", "order": 50, "section": "scheduling"},
+    {"name": "therapist_preference_approvals",   "display_name": "Therapist Preference Approvals", "url_path": "/sheduling/therapist-preference-approvals/", "url_name": "therapist_preference_approvals", "icon": "👨‍⚕️", "order": 55, "section": "scheduling"},
 
     # --- Masters ---
     {"name": "prescription_usage_manage",   "display_name": "Prescription Usage Master", "url_path": "/Masters/prescription-usages/",  "url_name": "prescriptionusage_manage",    "icon": "\U0001f48a", "order": 55,  "section": "masters"},
@@ -107,7 +108,7 @@ ROLES = [
             "therapist_availability", "hr_dashboard", "housekeeping",
             "procurement_dashboard", "user_management", "demand_prediction",
             "audit_log", "therapist_difficulty_dashboard", "therapy_bulk_excel",
-            "prescription_scheduling", "Therapy_Audit_Log",
+            "prescription_scheduling", "therapist_preference_approvals", "Therapy_Audit_Log",
             "master_management_dashboard", "therapy_master_manage",
             "item_master_manage", "slot_master_manage", "shift_master_manage", "therapist_master_manage",
             "procured_manage", "oilclass_manage", "usagetype_manage",
@@ -123,7 +124,7 @@ ROLES = [
         "display_name": "Doctor",
         "modules": [
             "Room availability", "add_therapy", "add_prescription",
-            "doctor_patients_therapy",
+            "doctor_patients_therapy", "therapist_preference_approvals",
             "therapy_master_manage", "item_master_manage",
             "therapist_master_manage", "oilclass_manage",
         ],
@@ -133,7 +134,7 @@ ROLES = [
         "display_name": "Scheduling Staff",
         "modules": [
             "add_therapy", "add_prescription",
-            "prescription_scheduling", "therapy_master_manage", "shift_master_manage",
+            "prescription_scheduling", "therapist_preference_approvals", "therapy_master_manage", "shift_master_manage",
         ],
     },
     {
@@ -156,7 +157,7 @@ ROLES = [
         "display_name": "Admin (Administrative GM / Management)",
         "modules": [
             "reports", "patient_profiles", "patient_dashboard",
-            "prescription_scheduling",
+            "prescription_scheduling", "therapist_preference_approvals",
         ],
     },
     {

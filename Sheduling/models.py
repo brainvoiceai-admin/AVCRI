@@ -705,3 +705,77 @@ class PrescriptionFinalScheduleRun(models.Model):
 
     def __str__(self) -> str:
         return f"PrescriptionFinalScheduleRun {self.run_date} ({self.status})"
+
+
+# -----------------------------------------------------------------------------
+# Therapist Preference Request & Doctor Approval Models
+# -----------------------------------------------------------------------------
+class TherapistPreferenceRequest(models.Model):
+    STATUS_CHOICES = [
+        ('PENDING', 'Approval Pending'),
+        ('APPROVED', 'Approved'),
+        ('REJECTED', 'Rejected'),
+        ('DEACTIVATED', 'Deactivated'),
+    ]
+
+    patient_id = models.CharField(max_length=50, db_index=True)
+    patient_name = models.CharField(max_length=255, blank=True, null=True)
+    treating_doctor_code = models.CharField(max_length=100, blank=True, null=True)
+    treating_doctor_name = models.CharField(max_length=200, blank=True, null=True)
+    visit = models.ForeignKey('MySql_Data_pull.Visit', null=True, blank=True, on_delete=models.SET_NULL, related_name='therapist_preferences')
+    treatment_name = models.CharField(max_length=255, blank=True, null=True)
+    
+    preferred_therapists = models.ManyToManyField('masters.TherapistMaster', related_name='preferred_requests', blank=True)
+    unpreferred_therapists = models.ManyToManyField('masters.TherapistMaster', related_name='unpreferred_requests', blank=True)
+    
+    preferred_therapist_codes = models.JSONField(default=list, blank=True)
+    preferred_therapist_names = models.JSONField(default=list, blank=True)
+    unpreferred_therapist_codes = models.JSONField(default=list, blank=True)
+    unpreferred_therapist_names = models.JSONField(default=list, blank=True)
+    
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='PENDING', db_index=True)
+    is_active = models.BooleanField(default=False, help_text="True if approved and currently active for scheduling")
+    
+    requested_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name='therapist_pref_requests')
+    requested_by_name = models.CharField(max_length=200, blank=True, null=True)
+    requested_by_role = models.CharField(max_length=100, blank=True, null=True)
+    request_date = models.DateTimeField(default=timezone.now)
+    request_notes = models.TextField(blank=True, null=True)
+    
+    approved_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name='therapist_pref_approvals')
+    approved_by_name = models.CharField(max_length=200, blank=True, null=True)
+    action_date = models.DateTimeField(null=True, blank=True)
+    rejection_reason = models.TextField(blank=True, null=True)
+    
+    deactivated_at = models.DateTimeField(null=True, blank=True)
+    deactivated_reason = models.CharField(max_length=255, blank=True, null=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-request_date"]
+        verbose_name = "Therapist Preference Request"
+        verbose_name_plural = "Therapist Preference Requests"
+
+    def __str__(self):
+        return f"TherapistPref ({self.patient_id} - {self.patient_name}): {self.get_status_display()}"
+
+
+class TherapistPreferenceAuditLog(models.Model):
+    preference_request = models.ForeignKey(TherapistPreferenceRequest, on_delete=models.CASCADE, related_name='audit_logs')
+    patient_id = models.CharField(max_length=50, db_index=True)
+    action = models.CharField(max_length=50)  # CREATED, APPROVED, REJECTED, UPDATED, DEACTIVATED_DISCHARGE
+    action_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL)
+    action_by_name = models.CharField(max_length=200, blank=True, null=True)
+    action_date = models.DateTimeField(default=timezone.now)
+    details = models.JSONField(default=dict, blank=True)
+    notes = models.TextField(blank=True, null=True)
+
+    class Meta:
+        ordering = ["-action_date"]
+        verbose_name = "Therapist Preference Audit Log"
+        verbose_name_plural = "Therapist Preference Audit Logs"
+
+    def __str__(self):
+        return f"PrefAuditLog: {self.patient_id} - {self.action} at {self.action_date}"
