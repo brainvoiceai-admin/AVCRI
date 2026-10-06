@@ -565,6 +565,12 @@ def reallocate_patient_future_bookings(patient_id):
                     time_slot=booking.timeslot
                 ).delete()
 
+                try:
+                    from Sheduling.models import BookingAssignment
+                    BookingAssignment.objects.filter(booking=booking).delete()
+                except Exception:
+                    pass
+
                 for t in allocated_therapists:
                     create_therapist_booking_safe(
                         therapist=t,
@@ -574,6 +580,18 @@ def reallocate_patient_future_bookings(patient_id):
                         therapy_name=alloc.therapy_name,
                         patient_id=patient_id_str
                     )
+                    try:
+                        from Sheduling.models import BookingAssignment
+                        BookingAssignment.objects.create(
+                            booking=booking,
+                            therapist=t,
+                            role=getattr(getattr(t, 'therapist_grade', None), 'name', '') or '',
+                            assigned_for='booking',
+                            status='assigned'
+                        )
+                    except Exception as ba_err:
+                        print(f"[REALLOCATE PREF] Warning creating BookingAssignment: {ba_err}")
+
                 booking.status = 'scheduled'
                 booking.save(update_fields=['status', 'updated_at'])
             else:
