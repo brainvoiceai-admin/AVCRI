@@ -569,6 +569,30 @@ def _compute_patient_type_from_reg(reg_val):
     return 'IP'
 
 
+def _get_patient_visit_date(reg_val):
+    """
+    Fetch the current visit date (pat_visit_date) from the Registration table.
+    Used to restrict therapy and prescription details to the patient's current visit only.
+    Returns datetime.date or None.
+    """
+    if not reg_val:
+        return None
+    try:
+        from MySql_Data_pull.models import Registration
+        clean_reg = ''.join(ch for ch in str(reg_val).strip() if ch.isdigit())
+        if not clean_reg:
+            return None
+        reg_record = Registration.objects.using('therapy_db').filter(
+            pat_reg_no=int(clean_reg)
+        ).values('pat_visit_date').first()
+        if reg_record and reg_record.get('pat_visit_date'):
+            v_date = reg_record['pat_visit_date']
+            return v_date.date() if hasattr(v_date, 'date') else v_date
+    except Exception as e:
+        print(f"Error fetching pat_visit_date for reg_no {reg_val}: {e}")
+    return None
+
+
 @csrf_exempt
 def therapy_entry(request):
     """
@@ -2389,8 +2413,11 @@ def therapy_entry(request):
         reg = (request.GET.get('patient_reg_no') or '').strip()
         if not reg:
             return JsonResponse([], safe=False)
+        visit_date = _get_patient_visit_date(reg)
         if TherapyAllocation is not None:
             qs = TherapyAllocation.objects.filter(patient__pat_reg_no=str(reg)).select_related('timeslot','room').prefetch_related('bookings')
+            if visit_date:
+                qs = qs.filter(from_date__gte=visit_date)
             out = []
             for a in qs:
                 # Calculate status counts from bookings
@@ -2458,7 +2485,10 @@ def therapy_entry(request):
         if PatientTherapy is not None:
             out = []
             try:
-                qs = PatientTherapy.objects.filter(patient__pat_reg_no=reg)[:200]
+                qs = PatientTherapy.objects.filter(patient__pat_reg_no=reg)
+                if visit_date:
+                    qs = qs.filter(from_date__gte=visit_date)
+                qs = qs[:200]
                 for pt in qs:
                     # Get slot value - handle both slot_time and start_time for backward compatibility
                     slot_val = ''
@@ -2678,10 +2708,22 @@ def prescription_entry_page(request):
         
         # Build query: filter by patient_id OR registration number if provided
         q_obj = Q(patient_id=p_id)
+        target_reg = reg_no
         if reg_no:
             q_obj |= Q(patient__pat_reg_no=str(reg_no))
-            
-        plist = list(PrescriptionAllocation.objects.filter(q_obj).order_by('from_date', 'created_at').distinct())
+        elif p_id:
+            try:
+                ps = PatientSnapshot.objects.filter(id=p_id).first()
+                if ps:
+                    target_reg = ps.pat_reg_no
+            except Exception:
+                pass
+
+        visit_date = _get_patient_visit_date(target_reg)
+        if visit_date:
+            plist = list(PrescriptionAllocation.objects.filter(q_obj, from_date__gte=visit_date).order_by('from_date', 'created_at').distinct())
+        else:
+            plist = list(PrescriptionAllocation.objects.filter(q_obj).order_by('from_date', 'created_at').distinct())
 
         res_list = []
         for p in plist:
@@ -3582,6 +3624,9 @@ def prescription_entry_page(request):
         try:
             patient = PatientSnapshot.objects.get(pat_reg_no=patient_reg_no)
             prescriptions = PrescriptionAllocation.objects.filter(patient=patient).order_by('created_at')
+            visit_date = _get_patient_visit_date(patient_reg_no)
+            if visit_date:
+                prescriptions = prescriptions.filter(from_date__gte=visit_date)
             
             # Already imported at top
             
