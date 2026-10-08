@@ -44,6 +44,16 @@ def get_available_therapists_api(request):
         # Use select_related to get grade information efficiently
         therapists_query = TherapistMaster.objects.filter(is_active=True).select_related('therapist_grade')
         
+        # Primary vs Helping Therapist filtering
+        therapist_type = (request.GET.get('therapist_type') or 'primary').strip().lower()
+        include_helping = request.GET.get('include_helping') in ['1', 'true', 'True'] or request.GET.get('ignore_leave') in ['1', 'true', 'True'] or request.GET.get('include_all') in ['1', 'true', 'True']
+        
+        if not include_helping:
+            if therapist_type == 'primary':
+                therapists_query = therapists_query.filter(is_helping_therapist=False)
+            elif therapist_type == 'helping':
+                therapists_query = therapists_query.filter(is_helping_therapist=True)
+        
         # Filter by gender if specified - use therapist_gender column from TherapistMaster
         if gender and gender != 'all':
             # Normalize gender values for comparison
@@ -213,6 +223,7 @@ def get_available_therapists_api(request):
                 'gender': gender_display,  # This should be 'Male', 'Female', or 'Unknown'
                 'grade': grade_name,  # Grade name from TherapistGrade model
                 'is_bathing': therapist.is_bathing_therapist,
+                'is_helping_therapist': getattr(therapist, 'is_helping_therapist', False),
                 'is_active': therapist.is_active,
                 'specialization': 'General Therapy'  # Default specialization
             }

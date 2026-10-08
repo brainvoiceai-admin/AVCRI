@@ -491,7 +491,8 @@ def cancel_full_treatment_for_patient_slot(patient_id, target_date, time_slot, b
 def available_candidates_by_level_and_bathing(target_date, time_slot, level, require_bathing, 
                                                desired_gender=None, patient_gender=None, 
                                                em_therapist_ids=None, em_emp_codes=None,
-                                               allow_trainee_substitution=False):
+                                               allow_trainee_substitution=False,
+                                               is_helping_flag=None):
     """
     Return list of TherapistMaster candidates that:
       - have therapist_grade == level (or Junior if Trainee needed and allow_trainee_substitution=True)
@@ -500,7 +501,29 @@ def available_candidates_by_level_and_bathing(target_date, time_slot, level, req
       - are NOT on emergency leave (by FK or emp code)
       - do NOT have weekly leave on that weekday
       - NOT already BOOKED at date+slot
+      - Step 1: Normal Primary Therapists (is_helping_therapist=False)
+      - Step 2: Fallback to Helping Therapists (is_helping_therapist=True) on shortage
     """
+    if is_helping_flag is None:
+        # Step 1: Try primary therapists first
+        primary_candidates = available_candidates_by_level_and_bathing(
+            target_date, time_slot, level, require_bathing,
+            desired_gender=desired_gender, patient_gender=patient_gender,
+            em_therapist_ids=em_therapist_ids, em_emp_codes=em_emp_codes,
+            allow_trainee_substitution=allow_trainee_substitution,
+            is_helping_flag=False
+        )
+        if primary_candidates:
+            return primary_candidates
+        # Step 2: Fallback to Helping Therapists on shortage
+        return available_candidates_by_level_and_bathing(
+            target_date, time_slot, level, require_bathing,
+            desired_gender=desired_gender, patient_gender=patient_gender,
+            em_therapist_ids=em_therapist_ids, em_emp_codes=em_emp_codes,
+            allow_trainee_substitution=allow_trainee_substitution,
+            is_helping_flag=True
+        )
+
     try:
         # Handle trainee substitution: if level is Trainee and desired_gender is male, search for Junior instead
         search_level = level
@@ -518,7 +541,7 @@ def available_candidates_by_level_and_bathing(target_date, time_slot, level, req
                 except Exception:
                     pass
         
-        qs = TherapistMaster.objects.filter(therapist_grade=search_level, is_active=True)
+        qs = TherapistMaster.objects.filter(therapist_grade=search_level, is_active=True, is_helping_therapist=is_helping_flag)
         
         # STRICT GENDER FILTER
         if desired_gender:
@@ -659,6 +682,8 @@ def get_continuity_therapists_from_plan(allocation, patient_id, target_date, slo
             t = row.therapist
             if not getattr(t, 'is_active', True):
                 continue
+            if getattr(t, 'is_helping_therapist', False):
+                continue
             if getattr(t, 'pk', None) in em_therapist_ids or getattr(t, 'employee_code', None) in em_emp_codes:
                 continue
             if therapist_has_weekly_leave_on(t, target_date):
@@ -704,6 +729,8 @@ def find_bathing_therapist_from_start_of_therapy(booking, allocation, target_dat
                 continue
             t = prev_bath_booking.therapist
             if not getattr(t, 'is_active', True):
+                continue
+            if getattr(t, 'is_helping_therapist', False):
                 continue
             tid = getattr(t, 'pk', None)
             if tid in seen:
@@ -1142,6 +1169,25 @@ def process_reassignments(target_date=None, dry_run=True, max_daily_normal=5, ma
                             if hasattr(booking, 'is_bathing'):
                                 booking.is_bathing = original_is_bathing
                             booking.save(update_fields=['therapist', 'updated_at'] + (['is_bathing'] if hasattr(booking, 'is_bathing') else []))
+                        if getattr(prev, 'is_helping_therapist', False):
+                            if hasattr(booking, 'is_helping_therapist_assignment'):
+                                booking.is_helping_therapist_assignment = True
+                                booking.save(update_fields=['is_helping_therapist_assignment'])
+                            try:
+                                from Sheduling.models import HelpingTherapistAllocationLog
+                                HelpingTherapistAllocationLog.objects.create(
+                                    patient_id=str(booking.patient_id or ''),
+                                    helping_therapist=prev,
+                                    date=target_date,
+                                    time_slot=str(getattr(slot, 'slot_number', slot) or ''),
+                                    therapy_name=str(therapy_name or ''),
+                                    shortage_condition="Emergency leave primary therapist shortage",
+                                    fallback_reason="Primary therapist on emergency leave and helping therapist chosen from continuity",
+                                    is_supporting=True,
+                                    treatment_id=str(getattr(allocation, 'pk', '') or getattr(booking, 'pk', ''))
+                                )
+                            except Exception as log_err:
+                                logger.warning("Could not log HelpingTherapistAllocationLog: %s", log_err)
                         sync_booking_assignment_after_reassign(booking, old, prev, target_date)
                         summary['reassigned'].append((booking.pk, old_code, prev_code))
                         logger.info("Reassigned booking %s -> therapist %s", booking.pk, prev_code)
@@ -1545,6 +1591,25 @@ def process_reassignments(target_date=None, dry_run=True, max_daily_normal=5, ma
                                 logger.info("Special treatment: Senior therapist %s NOT marked as bathing", pick_code)
                                 print(f"      [WARNING] Special treatment: Senior {pick_code} NOT marked as bathing")
                     booking.save(update_fields=['therapist', 'updated_at'] + (['is_bathing'] if hasattr(booking, 'is_bathing') else []))
+                if getattr(pick, 'is_helping_therapist', False):
+                    if hasattr(booking, 'is_helping_therapist_assignment'):
+                        booking.is_helping_therapist_assignment = True
+                        booking.save(update_fields=['is_helping_therapist_assignment'])
+                    try:
+                        from Sheduling.models import HelpingTherapistAllocationLog
+                        HelpingTherapistAllocationLog.objects.create(
+                            patient_id=str(booking.patient_id or ''),
+                            helping_therapist=pick,
+                            date=target_date,
+                            time_slot=str(getattr(slot, 'slot_number', slot) or ''),
+                            therapy_name=str(therapy_name or ''),
+                            shortage_condition="Emergency leave primary therapist shortage",
+                            fallback_reason="Primary therapist on emergency leave and no primary candidate available at slot",
+                            is_supporting=True,
+                            treatment_id=str(getattr(allocation, 'pk', '') or getattr(booking, 'pk', ''))
+                        )
+                    except Exception as log_err:
+                        logger.warning("Could not log HelpingTherapistAllocationLog: %s", log_err)
                 sync_booking_assignment_after_reassign(booking, old, pick, target_date)
                 summary['reassigned'].append((booking.pk, old_code, pick_code))
                 logger.info("Reassigned booking %s -> therapist %s", booking.pk, pick_code)

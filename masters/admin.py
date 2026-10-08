@@ -166,10 +166,10 @@ class TherapistShiftMappingAdmin(admin.ModelAdmin):
 
 @admin.register(TherapistMaster)
 class TherapistMasterAdmin(admin.ModelAdmin):
-    list_display = ['therapist_code', 'therapist_name', 'therapist_grade', 'employee_code', 'get_gender', 'is_bathing_therapist', 'is_active', 'created_at']
-    list_filter = ['is_active', 'is_bathing_therapist', 'therapist_grade', 'user__gender', 'created_at']
+    list_display = ['therapist_code', 'therapist_name', 'therapist_grade', 'employee_code', 'get_gender', 'is_bathing_therapist', 'is_helping_therapist', 'is_active', 'created_at']
+    list_filter = ['is_active', 'is_helping_therapist', 'is_bathing_therapist', 'therapist_grade', 'user__gender', 'created_at']
     search_fields = ['therapist_code', 'therapist_name', 'employee_code']
-    list_editable = ['is_active', 'is_bathing_therapist']
+    list_editable = ['is_active', 'is_bathing_therapist', 'is_helping_therapist']
     ordering = ['therapist_name']
     fieldsets = (
         ('Basic Information', {
@@ -180,7 +180,7 @@ class TherapistMasterAdmin(admin.ModelAdmin):
             'description': 'Link to user account for gender and other user details'
         }),
         ('Therapist Details', {
-            'fields': ('is_bathing_therapist',)
+            'fields': ('is_bathing_therapist', 'is_helping_therapist')
         }),
         ('Status', {
             'fields': ('is_active',)

@@ -410,8 +410,21 @@ def get_pending_preference_requests_api(request):
 
     requests_data = []
     for r in qs.order_by('-request_date')[:100]:
-        pref_names = ", ".join(r.preferred_therapist_names or r.preferred_therapist_codes or []) or "None"
-        unpref_names = ", ".join(r.unpreferred_therapist_names or r.unpreferred_therapist_codes or []) or "None"
+        pref_list = []
+        for code, name in zip(r.preferred_therapist_codes or [], r.preferred_therapist_names or []):
+            if name and name != code:
+                pref_list.append(f"{name} ({code})")
+            else:
+                pref_list.append(code)
+        pref_names = ", ".join(pref_list) if pref_list else (", ".join(r.preferred_therapist_codes) if r.preferred_therapist_codes else "None")
+
+        unpref_list = []
+        for code, name in zip(r.unpreferred_therapist_codes or [], r.unpreferred_therapist_names or []):
+            if name and name != code:
+                unpref_list.append(f"{name} ({code})")
+            else:
+                unpref_list.append(code)
+        unpref_names = ", ".join(unpref_list) if unpref_list else (", ".join(r.unpreferred_therapist_codes) if r.unpreferred_therapist_codes else "None")
 
         doc_name = r.treating_doctor_name
         if not doc_name and r.patient_id:
@@ -531,24 +544,54 @@ def reallocate_patient_future_bookings(patient_id):
         return
     try:
         from datetime import date
-        from Sheduling.models import Booking
+        from Sheduling.models import Booking, BookingAssignment, TherapyAllocation
         from final_allocation import allocate_therapists, therapist_requirements, create_therapist_booking_safe
-        from Patient.models import TherapistBooking
+        from Patient.models import TherapistBooking, Therapist
 
         patient_id_str = str(patient_id).strip()
         today = date.today()
+
+        # Query all upcoming non-cancelled bookings for this patient
+        from Sheduling.models import FinalScheduleRun
         upcoming_bookings = Booking.objects.filter(
             allocation__patient__pat_reg_no=patient_id_str,
             date__gte=today
-        ).select_related('allocation', 'timeslot', 'allocation__patient').order_by('date', 'timeslot_id')
+        ).exclude(status='cancelled').select_related('allocation', 'timeslot', 'allocation__patient').order_by('date', 'timeslot_id')
+
+        affected_allocations = set()
 
         for booking in upcoming_bookings:
             alloc = booking.allocation
             if not alloc or not booking.timeslot:
                 continue
 
+            affected_allocations.add(alloc)
+
+            # Check if Final Schedule was actually run for this booking's date
+            has_final_schedule = FinalScheduleRun.objects.filter(run_date=booking.date).exists()
+
+            if not has_final_schedule:
+                # Final Schedule has NOT been run for this date -> MUST remain/be set to 'draft'
+                TherapistBooking.objects.filter(
+                    visit_id=alloc.id,
+                    date=booking.date,
+                    time_slot=booking.timeslot
+                ).delete()
+                try:
+                    BookingAssignment.objects.filter(booking=booking).delete()
+                except Exception:
+                    pass
+                booking.status = 'draft'
+                booking.save(update_fields=['status', 'updated_at'])
+                continue
+
+            # FinalScheduleRun EXISTS for this date -> re-evaluate scheduled therapists excluding unpreferred ones
             pat_sex = getattr(getattr(alloc, 'patient', None), 'pat_sex', None)
             req = therapist_requirements(alloc)
+            req_total = int(req.get("total", 1) or 1)
+
+            if req_total == 0:
+                continue
 
             allocated_therapists = allocate_therapists(
                 booking.date,
@@ -558,7 +601,7 @@ def reallocate_patient_future_bookings(patient_id):
                 patient_id=patient_id_str
             )
 
-            if allocated_therapists:
+            if allocated_therapists and len(allocated_therapists) >= req_total:
                 TherapistBooking.objects.filter(
                     visit_id=alloc.id,
                     date=booking.date,
@@ -566,11 +609,11 @@ def reallocate_patient_future_bookings(patient_id):
                 ).delete()
 
                 try:
-                    from Sheduling.models import BookingAssignment
                     BookingAssignment.objects.filter(booking=booking).delete()
                 except Exception:
                     pass
 
+                ba_count = 0
                 for t in allocated_therapists:
                     create_therapist_booking_safe(
                         therapist=t,
@@ -581,23 +624,63 @@ def reallocate_patient_future_bookings(patient_id):
                         patient_id=patient_id_str
                     )
                     try:
-                        from Sheduling.models import BookingAssignment
+                        therapist_obj, _ = Therapist.objects.get_or_create(
+                            therapist_code=t.therapist_code,
+                            defaults={
+                                'therapist_name': getattr(t, 'therapist_name', t.therapist_code),
+                                'therapist_grade': getattr(getattr(t, 'therapist_grade', None), 'name', '') or '',
+                                'is_bathing_therapist': getattr(t, 'is_bathing_therapist', False)
+                            }
+                        )
                         BookingAssignment.objects.create(
                             booking=booking,
-                            therapist=t,
+                            therapist=therapist_obj,
+                            booking_date=booking.date,
+                            booking_timeslot=booking.timeslot,
                             role=getattr(getattr(t, 'therapist_grade', None), 'name', '') or '',
                             assigned_for='booking',
                             status='assigned'
                         )
+                        ba_count += 1
                     except Exception as ba_err:
-                        print(f"[REALLOCATE PREF] Warning creating BookingAssignment: {ba_err}")
+                        print(f"[REALLOCATE PREF] Error creating BookingAssignment for therapist {getattr(t, 'therapist_code', 'unknown')}: {ba_err}")
 
-                booking.status = 'scheduled'
-                booking.save(update_fields=['status', 'updated_at'])
+                if ba_count >= req_total:
+                    booking.status = 'scheduled'
+                    booking.save(update_fields=['status', 'updated_at'])
+                else:
+                    booking.status = 'failed'
+                    booking.failure_reason = 'insufficient_therapists_assigned'
+                    booking.save(update_fields=['status', 'failure_reason', 'updated_at'])
             else:
+                TherapistBooking.objects.filter(
+                    visit_id=alloc.id,
+                    date=booking.date,
+                    time_slot=booking.timeslot
+                ).delete()
+                try:
+                    BookingAssignment.objects.filter(booking=booking).delete()
+                except Exception:
+                    pass
                 booking.status = 'failed'
-                booking.failure_reason = 'insufficient_therapists_available'
+                booking.failure_reason = 'Excluded/unpreferred therapist restriction - no eligible therapist available'
                 booking.save(update_fields=['status', 'failure_reason', 'updated_at'])
+
+        # Update parent allocation status based on booking status summary
+        for alloc in affected_allocations:
+            b_statuses = set(Booking.objects.filter(allocation=alloc).exclude(status='cancelled').values_list('status', flat=True))
+            if 'scheduled' in b_statuses:
+                if alloc.status != 'allocated':
+                    alloc.status = 'allocated'
+                    alloc.save(update_fields=['status'])
+            elif 'draft' in b_statuses or not b_statuses:
+                if alloc.status != 'draft':
+                    alloc.status = 'draft'
+                    alloc.save(update_fields=['status'])
+            elif b_statuses and b_statuses.issubset({'failed'}):
+                if alloc.status != 'failed':
+                    alloc.status = 'failed'
+                    alloc.save(update_fields=['status'])
     except Exception as e:
         print(f"[REALLOCATE PREF] Error reallocating future bookings for patient {patient_id}: {e}")
 

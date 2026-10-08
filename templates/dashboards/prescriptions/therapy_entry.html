@@ -319,8 +319,6 @@
                     <div style="display: flex; justify-content: space-between; align-items: center; font-size: 12px;">
                       <span id="multiselect-stats" style="color: #64748b; font-weight: 500;">Showing 0 therapists</span>
                       <div style="display: flex; gap: 10px;">
-                        <button type="button" id="btn-select-all" style="background: none; border: none; color: #2563eb; font-weight: 600; cursor: pointer; padding: 0; font-size: 12px;">Select All</button>
-                        <span style="color: #cbd5e1;">|</span>
                         <button type="button" id="btn-deselect-all" style="background: none; border: none; color: #ef4444; font-weight: 600; cursor: pointer; padding: 0; font-size: 12px;">Clear Selection</button>
                       </div>
                     </div>
@@ -567,6 +565,7 @@
       // Custom Searchable Checkbox Dropdown Logic
       let masterTherapistsList = [];
       let selectedTherapistCodes = new Set();
+      let therapistNamesMap = {};
       let isMultiselectDisabled = false;
 
       const triggerEl = document.getElementById('custom-multiselect-trigger');
@@ -776,13 +775,17 @@
             let tagsHtml = '';
             selectedArr.forEach(code => {
               const item = masterTherapistsList.find(t => (t.therapist_code || t.code || t.id).toString() === code);
-              const name = item ? (item.therapist_name || item.name || code) : code;
+              let name = therapistNamesMap[code] || (item ? (item.therapist_name || item.name) : null);
+              if (!name || name === code) {
+                name = code;
+              }
+              const displayName = (name && name !== code) ? `${name} (${code})` : code;
               const removeBtn = !isMultiselectDisabled 
                 ? `<i class="fas fa-times remove-tag-btn" onclick="event.stopPropagation(); removeUnpreferredCode('${escapeAttr(code)}')"></i>` 
                 : '';
               tagsHtml += `
                 <span class="selected-tag-pill">
-                  ${escapeAttr(name)} (${escapeAttr(code)})
+                  ${escapeAttr(displayName)}
                   ${removeBtn}
                 </span>
               `;
@@ -817,7 +820,7 @@
         }
 
         let dateStr = new Date().toISOString().split('T')[0];
-        let url = '/sheduling/therapist-availability/api/available-therapists/?date=' + dateStr + '&ignore_leave=1';
+        let url = '/sheduling/therapist-availability/api/available-therapists/?date=' + dateStr + '&ignore_leave=1&include_helping=1&include_all=1';
         if (gender && gender !== '—') {
           url += '&gender=' + encodeURIComponent(gender);
         }
@@ -841,6 +844,7 @@
             list.forEach(t => {
               const code = (t.therapist_code || t.code || t.id).toString();
               const name = (t.therapist_name || t.name || code).toString();
+              therapistNamesMap[code] = name;
               optionsHtml += `<option value="${code}">${name} (${code})</option>`;
             });
             if (prefSelectUnpreferred) {
@@ -873,6 +877,17 @@
               resetPrefUI('NONE');
               return;
             }
+
+            (data.unpreferred_therapists || []).forEach(u => {
+              if (u.code && u.name) {
+                therapistNamesMap[u.code] = u.name;
+              }
+            });
+            (data.preferred_therapists || []).forEach(p => {
+              if (p.code && p.name) {
+                therapistNamesMap[p.code] = p.name;
+              }
+            });
 
             const status = data.status;
             const unprefCodes = (data.unpreferred_therapists || []).map(u => u.code);

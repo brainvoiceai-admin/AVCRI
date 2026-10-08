@@ -148,7 +148,7 @@
                         </h5>
                         
                         <div class="row">
-                            <div class="col-md-6 mb-3">
+                            <div class="col-md-4 mb-3">
                                 <div class="form-check">
                                     <input class="form-check-input" type="checkbox" id="id_is_bathing_therapist" 
                                            name="is_bathing_therapist" {% if form.is_bathing_therapist.value %}checked{% endif %}>
@@ -159,7 +159,18 @@
                                 </div>
                             </div>
                             
-                            <div class="col-md-6 mb-3">
+                            <div class="col-md-4 mb-3">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="id_is_helping_therapist" 
+                                           name="is_helping_therapist" {% if form.is_helping_therapist.value %}checked{% endif %}>
+                                    <label class="form-check-label fw-bold text-primary" for="id_is_helping_therapist">
+                                        <i class="fas fa-user-shield me-1"></i>Mark as Helping Therapist
+                                    </label>
+                                    <small class="form-text text-muted d-block">Backup/supporting therapist for fallback allocation</small>
+                                </div>
+                            </div>
+
+                            <div class="col-md-4 mb-3">
                                 <div class="form-check">
                                     <input class="form-check-input" type="checkbox" id="id_is_active" 
                                            name="is_active" {% if form.is_active.value|default:True %}checked{% endif %}>

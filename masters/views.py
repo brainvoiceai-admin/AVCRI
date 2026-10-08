@@ -133,7 +133,7 @@ def get_master_data(request):
             data = list(UnitNo.objects.filter(is_active=True).values('id', 'unit_name'))
         elif master_type == 'therapist':
             data = list(TherapistMaster.objects.filter(is_active=True).values(
-                'therapist_code', 'therapist_name', 'therapist_grade', 'employee_code', 'is_bathing_therapist'
+                'therapist_code', 'therapist_name', 'therapist_grade', 'employee_code', 'is_bathing_therapist', 'is_helping_therapist'
             ))
         elif master_type == 'therapist_leave':
             therapist_code = request.GET.get('therapist_code', '')
@@ -2671,6 +2671,10 @@ class TherapistMasterManagementView(ListView):
             queryset = TherapistMaster.objects.filter(is_active=True)
         elif status == 'inactive':
             queryset = TherapistMaster.objects.filter(is_active=False)
+        elif status == 'helping':
+            queryset = TherapistMaster.objects.filter(is_helping_therapist=True)
+        elif status == 'primary':
+            queryset = TherapistMaster.objects.filter(is_helping_therapist=False)
         else:
             # No status filter - show all
             queryset = TherapistMaster.objects.all()
@@ -2705,12 +2709,12 @@ class TherapistMasterManagementView(ListView):
         context['master_type'] = 'therapist'
         context['master_name'] = 'Therapist Master'
         context['required_fields'] = ['therapist_code', 'therapist_name']
-        context['optional_fields'] = ['employee_code', 'therapist_gender', 'is_bathing_therapist', 'is_active']
+        context['optional_fields'] = ['employee_code', 'therapist_gender', 'is_bathing_therapist', 'is_helping_therapist', 'is_active']
         return context
 
 class TherapistMasterCreateView(CreateView):
     model = TherapistMaster
-    fields = ['therapist_name', 'therapist_grade', 'employee_code', 'therapist_gender', 'is_bathing_therapist', 'is_active']
+    fields = ['therapist_name', 'therapist_grade', 'employee_code', 'therapist_gender', 'is_bathing_therapist', 'is_helping_therapist', 'is_active']
     template_name = 'masters/therapist_master_form.html'
     success_url = reverse_lazy('therapist_master_manage')
     
@@ -2849,7 +2853,7 @@ class TherapistMasterCreateView(CreateView):
 
 class TherapistMasterUpdateView(UpdateView):
     model = TherapistMaster
-    fields = ['therapist_name', 'therapist_grade', 'employee_code', 'therapist_gender', 'is_bathing_therapist', 'is_active']
+    fields = ['therapist_name', 'therapist_grade', 'employee_code', 'therapist_gender', 'is_bathing_therapist', 'is_helping_therapist', 'is_active']
     template_name = 'masters/therapist_master_form.html'
     success_url = reverse_lazy('therapist_master_manage')
     
@@ -4125,6 +4129,7 @@ def create_therapist(request):
         therapist_grade = data.get('therapist_grade', 'Junior')
         employee_code = data['employee_code']
         is_bathing_therapist = data.get('is_bathing_therapist', True)
+        is_helping_therapist = data.get('is_helping_therapist', False)
         is_active = data.get('is_active', True)
         
         # Check if therapist already exists
@@ -4181,6 +4186,7 @@ def create_therapist(request):
             therapist_grade=therapist_grade,
             employee_code=employee_code,
             is_bathing_therapist=is_bathing_therapist,
+            is_helping_therapist=is_helping_therapist,
             is_active=is_active
         )
         _log_master_audit(request, 'create', 'TherapistMaster', str(therapist.id), f'Created TherapistMaster (API): {therapist_name} ({therapist_code})')
@@ -4223,7 +4229,7 @@ def create_therapist_leave(request):
 
 @login_required
 @super_admin_required
-@require_http_methods(["PUT"])
+@require_http_methods(["PUT", "POST"])
 @csrf_exempt
 def update_therapist(request, therapist_id):
     """API endpoint to update therapist (Super Admin only)"""
@@ -4235,14 +4241,51 @@ def update_therapist(request, therapist_id):
         therapist.therapist_grade = data.get('therapist_grade', therapist.therapist_grade)
         therapist.employee_code = data.get('employee_code', therapist.employee_code)
         therapist.is_bathing_therapist = data.get('is_bathing_therapist', therapist.is_bathing_therapist)
+        therapist.is_helping_therapist = data.get('is_helping_therapist', therapist.is_helping_therapist)
         therapist.is_active = data.get('is_active', therapist.is_active)
         therapist.save()
-        _log_master_audit(request, 'update', 'TherapistMaster', str(therapist_id), f'Updated TherapistMaster (API): {therapist.therapist_name} ({therapist.therapist_code})')
+        _log_master_audit(request, 'update', 'TherapistMaster', str(therapist_id), f'Updated TherapistMaster (API): {therapist.therapist_name} ({therapist.therapist_code}), is_helping_therapist={therapist.is_helping_therapist}')
         
-        return JsonResponse({'success': True})
+        return JsonResponse({'success': True, 'is_helping_therapist': therapist.is_helping_therapist})
         
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=500)
+
+@login_required
+@super_admin_required
+@require_http_methods(["GET", "POST"])
+@csrf_exempt
+def toggle_helping_therapist_status(request, pk):
+    """API/View endpoint to toggle or explicitly set 'Mark as Helping Therapist' status."""
+    try:
+        therapist = get_object_or_404(TherapistMaster, pk=pk)
+        if request.body:
+            try:
+                data = json.loads(request.body)
+                if 'is_helping_therapist' in data:
+                    therapist.is_helping_therapist = bool(data['is_helping_therapist'])
+                else:
+                    therapist.is_helping_therapist = not therapist.is_helping_therapist
+            except Exception:
+                therapist.is_helping_therapist = not therapist.is_helping_therapist
+        else:
+            therapist.is_helping_therapist = not therapist.is_helping_therapist
+            
+        therapist.save(update_fields=['is_helping_therapist', 'updated_at'])
+        
+        status_str = "Helping Therapist" if therapist.is_helping_therapist else "Normal/Primary Therapist"
+        _log_master_audit(request, 'update', 'TherapistMaster', str(pk), f'Changed TherapistMaster designation: {therapist.therapist_name} ({therapist.therapist_code}) to {status_str}')
+        
+        if request.headers.get('x-requested-with') == 'XMLHttpRequest' or request.content_type == 'application/json':
+            return JsonResponse({'success': True, 'is_helping_therapist': therapist.is_helping_therapist, 'message': f'Therapist {therapist.therapist_name} is now designated as {status_str}.'})
+        
+        messages.success(request, f'Therapist "{therapist.therapist_name}" ({therapist.therapist_code}) updated to {status_str}.')
+        return redirect('therapist_master_manage')
+    except Exception as e:
+        if request.headers.get('x-requested-with') == 'XMLHttpRequest' or request.content_type == 'application/json':
+            return JsonResponse({'error': str(e)}, status=500)
+        messages.error(request, f'Error updating therapist: {str(e)}')
+        return redirect('therapist_master_manage')
 
 @login_required
 @super_admin_required

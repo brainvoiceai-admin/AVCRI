@@ -282,53 +282,111 @@ def allocate_therapists(date, time_slot, therapy_requirements, last_therapists=N
             return True
         return False
 
-    # Use last therapists first (preserve your existing logic)
+    total_required = sum(v for v in grade_map.values() if v > 0)
+
+    # Helper function for grade allocation
+    def _allocate_per_grade(is_helping_flag=False):
+        for grade, needed in list(grade_map.items()):
+            if needed <= 0:
+                continue
+            candidates_qs = TherapistMaster.objects.filter(
+                therapist_grade=grade, 
+                is_active=True,
+                is_helping_therapist=is_helping_flag
+            )
+            if needs_bathing:
+                candidates_qs = candidates_qs.filter(is_bathing_therapist=True)
+
+            for t in candidates_qs:
+                if t in allocated:
+                    continue
+                if therapist_on_leave(t):
+                    continue
+                if shift_filter_enabled and t.id in mapped_ids and t.id not in eligible_ids:
+                    continue
+                if TherapistBooking.objects.filter(therapist=t, date=date, time_slot=time_slot, status='BOOKED').exists():
+                    continue
+
+                allocated.append(t)
+                grade_map[grade] -= 1
+
+                if is_helping_flag:
+                    try:
+                        from Sheduling.models import HelpingTherapistAllocationLog
+                        HelpingTherapistAllocationLog.objects.create(
+                            patient_id='',
+                            helping_therapist=t,
+                            date=date,
+                            time_slot=str(getattr(time_slot, 'slot_number', time_slot) or ''),
+                            therapy_name=str(therapy_requirements.get('therapy_name', '')),
+                            reason_for_fallback="Primary therapist shortage/failure",
+                            shortage_condition=f"Shortage detected during normal therapist allocation for date {date} slot {time_slot}.",
+                            is_supporting_backup=True
+                        )
+                    except Exception as log_err:
+                        print(f"[ERROR HelpingTherapistLog in allocation_logic.py] {log_err}")
+
+                if grade_map[grade] <= 0:
+                    break
+
+    # STEP 1: Normal Scheduling (Primary Therapists: is_helping_therapist=False)
     if last_therapists:
         for code in last_therapists:
             try:
                 t = TherapistMaster.objects.get(therapist_code=code, is_active=True)
+                if getattr(t, 'is_helping_therapist', False):
+                    continue
             except TherapistMaster.DoesNotExist:
                 continue
 
-            # grade must still be required
             if grade_map.get(t.therapist_grade, 0) > 0:
-                # skip if on leave (recurring or emergency)
                 if therapist_on_leave(t):
                     continue
-                # Shift eligibility: if therapist is explicitly tagged to shifts, enforce slot membership.
                 if shift_filter_enabled and t.id in mapped_ids and t.id not in eligible_ids:
                     continue
-                # skip if booked at this date+slot
                 if TherapistBooking.objects.filter(therapist=t, date=date, time_slot=time_slot, status='BOOKED').exists():
                     continue
                 allocated.append(t)
                 grade_map[t.therapist_grade] -= 1
 
-    # Allocate new therapists per-grade
-    for grade, needed in list(grade_map.items()):
-        if needed <= 0:
-            continue
-        # base queryset for grade
-        candidates_qs = TherapistMaster.objects.filter(therapist_grade=grade, is_active=True)
-        if needs_bathing:
-            candidates_qs = candidates_qs.filter(is_bathing_therapist=True)
+    # Allocate remaining normal primary therapists
+    _allocate_per_grade(is_helping_flag=False)
 
-        # iterate candidates avoiding DB hits inside loop (we still query leave/bookings per therapist, but leave checks are fast due to prefetch)
-        for t in candidates_qs:
-            if t in allocated:
-                continue
-            if therapist_on_leave(t):
-                continue
-            if shift_filter_enabled and t.id in mapped_ids and t.id not in eligible_ids:
-                continue
-            # check booked (BOOKED blocks)
-            if TherapistBooking.objects.filter(therapist=t, date=date, time_slot=time_slot, status='BOOKED').exists():
-                continue
-            # accept therapist
-            allocated.append(t)
-            needed -= 1
-            if needed <= 0:
-                break
+    # STEP 2 & 3: Shortage Detection and Helping Therapist Fallback (is_helping_therapist=True)
+    shortage = total_required - len(allocated)
+    if shortage > 0:
+        if last_therapists:
+            for code in last_therapists:
+                if len(allocated) >= total_required:
+                    break
+                try:
+                    t = TherapistMaster.objects.get(therapist_code=code, is_active=True, is_helping_therapist=True)
+                except TherapistMaster.DoesNotExist:
+                    continue
+                if t in allocated or therapist_on_leave(t):
+                    continue
+                if shift_filter_enabled and t.id in mapped_ids and t.id not in eligible_ids:
+                    continue
+                if TherapistBooking.objects.filter(therapist=t, date=date, time_slot=time_slot, status='BOOKED').exists():
+                    continue
+
+                allocated.append(t)
+                try:
+                    from Sheduling.models import HelpingTherapistAllocationLog
+                    HelpingTherapistAllocationLog.objects.create(
+                        patient_id='',
+                        helping_therapist=t,
+                        date=date,
+                        time_slot=str(getattr(time_slot, 'slot_number', time_slot) or ''),
+                        therapy_name=str(therapy_requirements.get('therapy_name', '')),
+                        reason_for_fallback="Primary therapist shortage/failure",
+                        shortage_condition="Continuity Helping Therapist fallback triggered due to primary therapist shortage.",
+                        is_supporting_backup=True
+                    )
+                except Exception as log_err:
+                    print(f"[ERROR HelpingTherapistLog in allocation_logic.py] {log_err}")
+
+        _allocate_per_grade(is_helping_flag=True)
 
     return allocated
 

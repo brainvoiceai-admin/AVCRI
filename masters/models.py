@@ -427,6 +427,7 @@ class TherapistMaster(models.Model):
     therapist_grade = models.ForeignKey(TherapistGrade, on_delete=models.PROTECT, related_name='therapists', verbose_name="Therapist Grade", null=True, blank=True)
     employee_code = models.CharField(max_length=50, unique=True, verbose_name="Employee Code", help_text="Used for emergency leave API mapping")
     is_bathing_therapist = models.BooleanField(default=True, verbose_name="Bathing Therapist")
+    is_helping_therapist = models.BooleanField(default=False, verbose_name="Mark as Helping Therapist", help_text="Designates whether this therapist is a backup/supporting Helping Therapist")
     is_active = models.BooleanField(default=True, verbose_name="Active")
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="Created At")
     updated_at = models.DateTimeField(auto_now=True, verbose_name="Updated At")

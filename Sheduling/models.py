@@ -778,4 +778,38 @@ class TherapistPreferenceAuditLog(models.Model):
         verbose_name_plural = "Therapist Preference Audit Logs"
 
     def __str__(self):
-        return f"PrefAuditLog: {self.patient_id} - {self.action} at {self.action_date}"
+        return f"PrefAuditLog: {self.patient_id} - {self.action} at {self.action_date}"
+
+
+class HelpingTherapistAllocationLog(models.Model):
+    """
+    Audit & Traceability log for Helping Therapist allocations.
+    Captures patient/treatment ID, helping therapist ID, date/time,
+    reason for fallback allocation, shortage/failure condition, and supporting/backup status.
+    """
+    patient_id = models.CharField(max_length=100, db_index=True)
+    treatment_id = models.CharField(max_length=100, null=True, blank=True)
+    visit_id = models.CharField(max_length=100, null=True, blank=True)
+    booking_id = models.CharField(max_length=100, null=True, blank=True)
+    therapy_name = models.CharField(max_length=255, null=True, blank=True)
+    helping_therapist = models.ForeignKey('masters.TherapistMaster', on_delete=models.CASCADE, related_name='helping_allocation_logs')
+    date = models.DateField(db_index=True)
+    time_slot = models.CharField(max_length=100, null=True, blank=True)
+    reason_for_fallback = models.TextField(help_text="Reason for fallback allocation")
+    shortage_condition = models.TextField(help_text="Shortage/failure condition that triggered the fallback")
+    is_supporting_backup = models.BooleanField(default=True, verbose_name="Assigned as Supporting/Backup")
+    allocated_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-allocated_at']
+        verbose_name = "Helping Therapist Allocation Log"
+        verbose_name_plural = "Helping Therapist Allocation Logs"
+        indexes = [
+            models.Index(fields=['patient_id']),
+            models.Index(fields=['date']),
+            models.Index(fields=['helping_therapist']),
+        ]
+
+    def __str__(self):
+        return f"Helping Therapist {self.helping_therapist.therapist_code} for Patient {self.patient_id} on {self.date}"
+

@@ -7,7 +7,8 @@ from .models import (
     PrescriptionAllocation, PatientSnapshot, CancellationRequest,
     NotificationQueue, TherapyNotification, AuditLog, AllocationChange,
     PrescriptionNotification, PrescriptionChange,
-    PrescriptionScheduling, PrescriptionChangeLog, PrescriptionItem, PrescriptionDispatch
+    PrescriptionScheduling, PrescriptionChangeLog, PrescriptionItem, PrescriptionDispatch,
+    HelpingTherapistAllocationLog
 )
 
 @admin.register(PatientSnapshot)
@@ -381,6 +382,14 @@ class PrescriptionDispatchAdmin(admin.ModelAdmin):
     readonly_fields = ['dispatched_at']
     ordering = ['-dispatched_at']
     raw_id_fields = ['prescription_scheduling', 'dispatched_by']
+
+@admin.register(HelpingTherapistAllocationLog)
+class HelpingTherapistAllocationLogAdmin(admin.ModelAdmin):
+    list_display = ['patient_id', 'helping_therapist', 'date', 'time_slot', 'therapy_name', 'shortage_condition', 'allocated_at']
+    list_filter = ['date', 'is_supporting_backup', 'allocated_at']
+    search_fields = ['patient_id', 'helping_therapist__therapist_code', 'helping_therapist__therapist_name', 'therapy_name', 'reason_for_fallback']
+    readonly_fields = ['allocated_at']
+    ordering = ['-allocated_at']
 
 # Customize admin site
 admin.site.site_header = "AVCRI Therapy Management System"
