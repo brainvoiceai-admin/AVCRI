@@ -592,3 +592,86 @@ tr.patient-group-alt {
 tr.patient-group-alt:hover {
     background-color: #e2eafc;
 }
+
+/* ==========================================================
+   Single Reschedule Modal - Responsive, Centered & Legible
+   ========================================================== */
+#singleRescheduleModal.modal {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: 100vw;
+    height: 100vh;
+    background-color: rgba(15, 23, 42, 0.65);
+    backdrop-filter: blur(4px);
+    z-index: 10000;
+    padding: 20px;
+    box-sizing: border-box;
+    overflow-y: auto;
+}
+
+#singleRescheduleModal.modal[style*="display: block"],
+#singleRescheduleModal.modal[style*="display: flex"] {
+    display: flex !important;
+    align-items: center;
+    justify-content: center;
+}
+
+#singleRescheduleModal .modal-content {
+    background-color: #ffffff !important;
+    margin: auto !important;
+    padding: 0 !important;
+    border-radius: 16px !important;
+    width: 100% !important;
+    max-width: 660px !important;
+    max-height: 90vh !important;
+    display: flex !important;
+    flex-direction: column !important;
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25), 0 0 0 1px rgba(0, 0, 0, 0.08) !important;
+    border: none !important;
+    overflow: hidden !important;
+    position: relative;
+    animation: rescheduleModalIn 0.22s ease-out;
+}
+
+#singleRescheduleModal .modal-header {
+    padding: 20px 24px !important;
+    border-bottom: 1px solid #e2e8f0 !important;
+    display: flex !important;
+    justify-content: space-between !important;
+    align-items: center !important;
+    background: #ffffff !important;
+    flex-shrink: 0 !important;
+    margin-bottom: 0 !important;
+}
+
+#singleRescheduleModal .modal-title {
+    font-size: 21px !important;
+    font-weight: 700 !important;
+    color: #0f172a !important;
+    margin: 0 !important;
+    letter-spacing: -0.01em;
+}
+
+#singleRescheduleModal .modal-body {
+    padding: 22px 24px !important;
+    overflow-y: auto !important;
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+    margin-bottom: 0 !important;
+}
+
+#singleRescheduleModal .modal-footer {
+    padding: 16px 24px !important;
+    border-top: 1px solid #e2e8f0 !important;
+    background: #ffffff !important;
+    display: flex !important;
+    justify-content: flex-end !important;
+    align-items: center !important;
+    gap: 12px !important;
+    flex-shrink: 0 !important;
+}
+

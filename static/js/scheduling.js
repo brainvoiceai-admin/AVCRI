@@ -1079,7 +1079,7 @@ function openSingleRescheduleModal(id, targetDate) {
     
     if (!modal) return;
 
-    modal.style.display = 'block';
+    modal.style.display = 'flex';
     loading.style.display = 'block';
     content.style.display = 'none';
 
@@ -1143,17 +1143,11 @@ function openSingleRescheduleModal(id, targetDate) {
                 choiceHelping.disabled = false;
                 choiceHelping.checked = true;
                 choiceAvailableSlot.checked = false;
-                helpingContainer.style.opacity = '1';
-                helpingContainer.style.background = '#ffffff';
-                helpingContainer.style.cursor = 'pointer';
                 if (helpingMsg) helpingMsg.style.display = 'none';
             } else {
                 choiceHelping.disabled = true;
                 choiceHelping.checked = false;
                 choiceAvailableSlot.checked = true;
-                helpingContainer.style.opacity = '0.65';
-                helpingContainer.style.background = '#f1f5f9';
-                helpingContainer.style.cursor = 'not-allowed';
                 if (helpingMsg) {
                     helpingMsg.style.display = 'block';
                     helpingMsg.textContent = data.helping_unavailable_reason || 'Helping therapist not available in registered slot';
@@ -1167,12 +1161,7 @@ function openSingleRescheduleModal(id, targetDate) {
             if (helpingMsg) helpingMsg.style.display = 'none';
         }
 
-        helpingContainer.onclick = function (e) {
-            if (choiceHelping.disabled) {
-                e.preventDefault();
-                return false;
-            }
-        };
+        syncRescheduleCardStyles();
     })
     .catch(error => {
         loading.style.display = 'none';
@@ -1180,6 +1169,67 @@ function openSingleRescheduleModal(id, targetDate) {
         showAlert('error', 'Error loading reschedule options: ' + error.message);
         closeSingleRescheduleModal();
     });
+}
+
+function syncRescheduleCardStyles() {
+    const helpingContainer = document.getElementById('optionHelpingTherapistContainer');
+    const slotContainer = document.getElementById('optionAvailableSlotContainer');
+    const choiceHelping = document.getElementById('choice_helping');
+    const choiceSlot = document.getElementById('choice_available_slot');
+
+    if (helpingContainer) {
+        if (choiceHelping && choiceHelping.disabled) {
+            helpingContainer.classList.add('disabled');
+            helpingContainer.classList.remove('selected');
+        } else if (choiceHelping && choiceHelping.checked) {
+            helpingContainer.classList.add('selected');
+            helpingContainer.classList.remove('disabled');
+        } else {
+            helpingContainer.classList.remove('selected', 'disabled');
+        }
+    }
+
+    if (slotContainer) {
+        if (choiceSlot && choiceSlot.checked) {
+            slotContainer.classList.add('selected');
+        } else {
+            slotContainer.classList.remove('selected');
+        }
+    }
+}
+
+function selectRescheduleChoice(choice) {
+    const choiceHelping = document.getElementById('choice_helping');
+    const choiceSlot = document.getElementById('choice_available_slot');
+    const dropdown = document.getElementById('availableSlotsDropdown');
+
+    if (choice === 'helping') {
+        if (choiceHelping && !choiceHelping.disabled) {
+            choiceHelping.checked = true;
+            if (choiceSlot) choiceSlot.checked = false;
+            syncRescheduleCardStyles();
+        }
+    } else if (choice === 'slot') {
+        if (choiceSlot) {
+            choiceSlot.checked = true;
+            if (choiceHelping) choiceHelping.checked = false;
+            syncRescheduleCardStyles();
+            if (dropdown && !dropdown.disabled) {
+                dropdown.focus();
+            }
+        }
+    }
+}
+
+function onAvailableSlotDropdownChange(e) {
+    if (e && e.stopPropagation) e.stopPropagation();
+    const choiceSlot = document.getElementById('choice_available_slot');
+    const choiceHelping = document.getElementById('choice_helping');
+    if (choiceSlot) {
+        choiceSlot.checked = true;
+        if (choiceHelping) choiceHelping.checked = false;
+        syncRescheduleCardStyles();
+    }
 }
 
 function closeSingleRescheduleModal() {
@@ -1441,12 +1491,16 @@ function resetFinalScheduleButton() {
 window.onclick = function (event) {
     const scheduleModal = document.getElementById('scheduleModal');
     const rescheduleModal = document.getElementById('rescheduleModal');
+    const singleRescheduleModal = document.getElementById('singleRescheduleModal');
 
     if (event.target === scheduleModal) {
         closeScheduleModal();
     }
     if (event.target === rescheduleModal) {
         closeRescheduleModal();
+    }
+    if (event.target === singleRescheduleModal) {
+        closeSingleRescheduleModal();
     }
 }
 
