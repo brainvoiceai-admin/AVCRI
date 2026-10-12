@@ -101,12 +101,13 @@ const MasterFilterHandler = (function () {
      * Reset all filters
      */
     function clearFilters() {
-        const searchInput = document.getElementById(config.searchInputId);
-        const statusFilter = document.getElementById('statusFilter');
-        const filterForm = document.getElementById(config.filterFormId);
+        const gradeFilter = document.getElementById('gradeFilter');
+        const genderFilter = document.getElementById('genderFilter');
 
         if (searchInput) searchInput.value = '';
         if (statusFilter) statusFilter.value = '';
+        if (gradeFilter) gradeFilter.value = '';
+        if (genderFilter) genderFilter.value = '';
 
         if (filterForm) {
             filterForm.submit();

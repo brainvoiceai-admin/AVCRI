@@ -366,16 +366,50 @@ def get_patient_gender_from_booking(booking):
         pass
     return None
 
-def normalize_patient_gender(pat_sex):
-    """Normalize patient gender to 'male' or 'female'"""
-    if not pat_sex:
-        return None
-    g = str(pat_sex).strip().lower()
-    if g.startswith('f'):
-        return 'female'
-    elif g.startswith('m'):
-        return 'male'
+def get_patient_age_from_booking(booking):
+    """
+    Get patient age from booking. Tries multiple sources.
+    """
+    try:
+        # Try to get from booking's patient relationship
+        if hasattr(booking, 'patient') and booking.patient:
+            if hasattr(booking.patient, 'pat_age') and booking.patient.pat_age:
+                return booking.patient.pat_age
+        # Try to get from visit (TherapyAllocation)
+        if hasattr(booking, 'visit') and booking.visit:
+            if hasattr(booking.visit, 'patient') and booking.visit.patient:
+                if hasattr(booking.visit.patient, 'pat_age') and booking.visit.patient.pat_age:
+                    return booking.visit.patient.pat_age
+        # Try from PatientSnapshot via patient_id
+        try:
+            from Sheduling.models import PatientSnapshot
+            if hasattr(booking, 'patient_id') and booking.patient_id:
+                patient = PatientSnapshot.objects.filter(pat_reg_no=str(booking.patient_id)).first()
+                if patient and hasattr(patient, 'pat_age') and patient.pat_age:
+                    return patient.pat_age
+        except Exception:
+            pass
+    except Exception:
+        pass
     return None
+
+def normalize_patient_gender(pat_sex, pat_age=None):
+    """
+    Normalize patient gender to 'male' or 'female'.
+    Rule: Male children below 5 should be assigned to a female therapist.
+    """
+    try:
+        from final_allocation import resolve_desired_gender
+        return resolve_desired_gender(pat_sex, pat_age)
+    except Exception:
+        if not pat_sex:
+            return None
+        g = str(pat_sex).strip().lower()
+        if g.startswith('f'):
+            return 'female'
+        elif g.startswith('m'):
+            return 'male'
+        return None
 
 def get_therapist_gender(therapist):
     """Get therapist gender from TherapistMaster"""
@@ -1106,9 +1140,10 @@ def process_reassignments(target_date=None, dry_run=True, max_daily_normal=5, ma
         if is_treatment_requiring_senior_tag and therapy_name:
             requires_senior_tag = is_treatment_requiring_senior_tag(therapy_name)
         
-        # Get patient gender
+        # Get patient gender and age (Rule: Male children below 5 assigned to female therapist)
         patient_gender = get_patient_gender_from_booking(booking)
-        desired_gender = normalize_patient_gender(patient_gender)
+        patient_age = get_patient_age_from_booking(booking)
+        desired_gender = normalize_patient_gender(patient_gender, patient_age)
         
         # Check if patient already has booking at this slot (excluding this booking and same allocation)
         exclude_allocation = None

@@ -2696,6 +2696,11 @@ class TherapistMasterManagementView(ListView):
         if grade:
             queryset = queryset.filter(therapist_grade__id=grade)
         
+        # Gender filter
+        gender = self.request.GET.get('gender', '').strip()
+        if gender:
+            queryset = queryset.filter(therapist_gender__iexact=gender)
+        
         return queryset.order_by('therapist_name')
     
     def get_context_data(self, **kwargs):
@@ -2704,6 +2709,7 @@ class TherapistMasterManagementView(ListView):
         context['search'] = self.request.GET.get('search', '')
         context['status_filter'] = self.request.GET.get('status', '')
         context['grade_filter'] = self.request.GET.get('grade', '')
+        context['gender_filter'] = self.request.GET.get('gender', '')
         # Bulk upload context
         # Note: Therapist master has complex relationships, basic bulk upload support
         context['master_type'] = 'therapist'

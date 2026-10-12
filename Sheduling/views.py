@@ -5877,7 +5877,9 @@ def reschedule_options_api(request):
 
             day_of_week = target_date.weekday()
             pat_gender = getattr(getattr(allocation, 'patient', None), 'pat_sex', None)
-            desired_gender = 'female' if str(pat_gender).strip().lower().startswith('f') else ('male' if str(pat_gender).strip().lower().startswith('m') else None)
+            pat_age = getattr(getattr(allocation, 'patient', None), 'pat_age', None)
+            from final_allocation import resolve_desired_gender
+            desired_gender = resolve_desired_gender(pat_gender, pat_age)
 
             ht_qs = TherapistMaster.objects.filter(is_active=True, is_helping_therapist=True)
             if desired_gender:

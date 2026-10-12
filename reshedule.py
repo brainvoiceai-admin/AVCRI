@@ -18,11 +18,43 @@ def daterange(start_date, end_date):
 # Reuse from final_allocation to avoid duplication
 # -----------------------
 try:
-    from final_allocation import is_patient_active
+    from final_allocation import is_patient_active, parse_patient_age, resolve_desired_gender
 except ImportError:
     # Fallback: if import fails, fail-open (treat all patients as active)
     def is_patient_active(pat_reg_no):
         return True
+
+    def parse_patient_age(age_val):
+        if age_val is None:
+            return None
+        try:
+            if isinstance(age_val, (int, float)):
+                return float(age_val)
+            s = str(age_val).strip()
+            if not s or s.lower() in ('unknown', 'none', 'null', 'na', 'n/a', 'undefined'):
+                return None
+            import re
+            m = re.search(r'(\d+(?:\.\d+)?)', s)
+            if m:
+                return float(m.group(1))
+        except Exception:
+            pass
+        return None
+
+    def resolve_desired_gender(patient_gender=None, patient_age=None):
+        try:
+            age_num = parse_patient_age(patient_age)
+            if age_num is not None and age_num < 5.0:
+                return 'female'
+            if patient_gender:
+                g = str(patient_gender).strip().lower()
+                if g.startswith('f'):
+                    return 'female'
+                elif g.startswith('m'):
+                    return 'male'
+            return 'male'
+        except Exception:
+            return 'male'
 
 # -----------------------
 # Helper: Check if treatment requires senior tag
@@ -752,12 +784,22 @@ def get_allowed_slot_values(patient_type, therapy_category, used_slots=None, the
 # -----------------------
 # Therapist allocation with Trainee -> Junior substitution (MODIFIED)
 # -----------------------
-def allocate_therapists(date, time_slot, therapy_requirements, last_therapists=None, needs_bathing=False, patient_gender=None, patient_id=None, allow_helping_fallback=False):
+def allocate_therapists(date, time_slot, therapy_requirements, last_therapists=None, needs_bathing=False, patient_gender=None, patient_id=None, allow_helping_fallback=False, patient_age=None):
     from masters.models import TherapistMaster, TherapistLeaveMaster, EmergencyLeave, TherapyMaster
     from Patient.models import TherapistBooking
 
     day_of_week = date.weekday()
     allocated = []
+
+    # If patient_age not passed directly, attempt lookup via patient_id
+    if patient_age is None and patient_id:
+        try:
+            from Sheduling.models import PatientSnapshot
+            ps = PatientSnapshot.objects.filter(pat_reg_no=str(patient_id)).first()
+            if ps and ps.pat_age:
+                patient_age = ps.pat_age
+        except Exception:
+            pass
 
     unpreferred_codes = set()
     if patient_id:
@@ -793,17 +835,8 @@ def allocate_therapists(date, time_slot, therapy_requirements, last_therapists=N
     except Exception:
         shift_filter_enabled = False
 
-    # Normalize patient gender: default to 'male' if not explicitly female
-    desired_gender = None
-    try:
-        if patient_gender:
-            g = str(patient_gender).strip().lower()
-            if g.startswith('f'):
-                desired_gender = 'female'
-            else:
-                desired_gender = 'male'
-    except Exception:
-        desired_gender = 'male'
+    # Normalize patient gender (Rule: Male children below 5 should be assigned to a female therapist)
+    desired_gender = resolve_desired_gender(patient_gender, patient_age)
 
     grade_map = {
         "Super Senior Therapist": therapy_requirements.get("super_senior", 0),
@@ -1232,7 +1265,7 @@ def allocate_therapists(date, time_slot, therapy_requirements, last_therapists=N
 # Allows Senior/Super Senior to substitute for Junior/Trainee when they're unavailable
 # This is used as a fallback when normal allocation fails
 # -----------------------
-def allocate_therapists_with_grade_substitution(date, time_slot, therapy_requirements, last_therapists=None, needs_bathing=False, patient_gender=None, allow_helping_fallback=False):
+def allocate_therapists_with_grade_substitution(date, time_slot, therapy_requirements, last_therapists=None, needs_bathing=False, patient_gender=None, allow_helping_fallback=False, patient_age=None):
     """
     Fallback allocation function that allows aggressive grade substitution:
     - Senior/Super Senior can substitute for Junior/Trainee when they're unavailable
@@ -1269,17 +1302,8 @@ def allocate_therapists_with_grade_substitution(date, time_slot, therapy_require
     except Exception:
         shift_filter_enabled = False
 
-    # Normalize patient gender
-    desired_gender = None
-    try:
-        if patient_gender:
-            g = str(patient_gender).strip().lower()
-            if g.startswith('f'):
-                desired_gender = 'female'
-            else:
-                desired_gender = 'male'
-    except Exception:
-        desired_gender = 'male'
+    # Normalize patient gender (Rule: Male children below 5 should be assigned to a female therapist)
+    desired_gender = resolve_desired_gender(patient_gender, patient_age)
 
     # Start with original requirements
     grade_map = {
@@ -1855,8 +1879,9 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
     candidate_therapists = []
     pass1_continuity_objects = []  # TherapistMaster objects from PASS 1
     try:
-        # Derive patient gender from allocation patient snapshot (e.g., 'Male'/'Female')
+        # Derive patient gender and age from allocation patient snapshot (Rule: Male children below 5 assigned to female therapist)
         pat_sex = getattr(getattr(allocation, 'patient', None), 'pat_sex', None)
+        pat_age = getattr(getattr(allocation, 'patient', None), 'pat_age', None)
         
         # First check if we have continuity therapists from PASS 1 (via last_allocation)
         last_therapists = []
@@ -2096,6 +2121,7 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
                     patient_gender=pat_sex,
                     patient_id=patient_reg_no,
                     allow_helping_fallback=allow_helping_fallback,
+                    patient_age=pat_age,
                 )
                 candidate_therapists.extend(additional)
                 print(f"[RESCHEDULE PASS2] Added {len(additional)} additional therapists for remaining slots")
@@ -2109,6 +2135,7 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
                 patient_gender=pat_sex,
                 patient_id=patient_reg_no,
                 allow_helping_fallback=allow_helping_fallback,
+                patient_age=pat_age,
             )
     except Exception:
         candidate_therapists = []
@@ -2130,6 +2157,7 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
                 needs_bath_flag,
                 patient_gender=pat_sex,
                 allow_helping_fallback=allow_helping_fallback,
+                patient_age=pat_age,
             )
             
             if len(candidate_therapists_fallback) >= req_total:
@@ -2147,13 +2175,7 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
         reason = "insufficient_therapists_available"
         # Gender availability insight (non-blocking, for debugging/UX)
         try:
-            desired_gender = None
-            if pat_sex:
-                g = str(pat_sex).strip().lower()
-                if g.startswith('m'):
-                    desired_gender = 'male'
-                elif g.startswith('f'):
-                    desired_gender = 'female'
+            desired_gender = resolve_desired_gender(pat_sex, pat_age)
             def _tg(x):
                 try:
                     # Only check therapist_gender field from TherapistMaster (values: "Male"/"Female")
@@ -2282,9 +2304,9 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
             ).count() >= 6:
                 can_add = False
                 print(f"[RESCHEDULE PASS2]   Previous bathing therapist at max sessions (6) for this date - cannot add (would fail booking creation)")
-            # Check gender match
-            elif pat_sex:
-                desired_gender = 'female' if str(pat_sex).strip().lower().startswith('f') else 'male'
+            # Check gender match (Rule: Male children below 5 assigned to female therapist)
+            elif pat_sex or pat_age:
+                desired_gender = resolve_desired_gender(pat_sex, pat_age)
                 t_gender = getattr(previous_bathing_therapist, 'therapist_gender', None)
                 if t_gender:
                     t_gender_str = str(t_gender).strip().lower()
@@ -2420,11 +2442,11 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
                         therapist_code=senior_therapist.therapist_code
                     )
                 
-                # Filter by gender if needed
+                # Filter by gender if needed (Rule: Male children below 5 assigned to female therapist)
                 pat_sex = getattr(getattr(allocation, 'patient', None), 'pat_sex', None)
-                if pat_sex:
-                    desired_gender = 'female' if str(pat_sex).strip().lower().startswith('f') else 'male'
-                    alternative_seniors = alternative_seniors.filter(therapist_gender__istartswith=desired_gender[0])
+                pat_age = getattr(getattr(allocation, 'patient', None), 'pat_age', None)
+                desired_gender = resolve_desired_gender(pat_sex, pat_age)
+                alternative_seniors = alternative_seniors.filter(therapist_gender__istartswith=desired_gender[0])
                 
                 # Filter by bathing therapist requirement
                 alternative_seniors = alternative_seniors.filter(is_bathing_therapist=True)
@@ -2991,6 +3013,7 @@ def assign_continuity_therapists_pass1(booking, allocation, target_date, locked_
     # Get patient info
     patient_id = getattr(allocation.patient, 'id', None)
     patient_gender = getattr(getattr(allocation, 'patient', None), 'pat_sex', None)
+    patient_age = getattr(getattr(allocation, 'patient', None), 'pat_age', None)
 
     # Determine if this therapy needs a bathing therapist.
     # Primary source: TherapyMaster.bathing_required via therapy_needs_bath(allocation).
@@ -3291,14 +3314,8 @@ def assign_continuity_therapists_pass1(booking, allocation, target_date, locked_
         "Trainee Therapist": therapy_req.get("trainee", 0)
     }
     
-    # Normalize patient gender
-    desired_gender = None
-    if patient_gender:
-        g = str(patient_gender).strip().lower()
-        if g.startswith('f'):
-            desired_gender = 'female'
-        else:
-            desired_gender = 'male'
+    # Normalize patient gender (Rule: Male children below 5 should be assigned to a female therapist)
+    desired_gender = resolve_desired_gender(patient_gender, patient_age)
     
     # Check emergency leaves
     try:
