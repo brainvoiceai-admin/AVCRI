@@ -118,6 +118,7 @@ urlpatterns = [
     path('therapists/<int:pk>/delete/', views.therapist_master_delete, name='therapist_master_delete'),
     path('therapists/<int:pk>/enable/', views.therapist_master_enable, name='therapist_master_enable'),
     path('therapists/<int:pk>/disable/', views.therapist_master_disable, name='therapist_master_disable'),
+    path('therapists/<int:pk>/toggle-helping/', views.toggle_helping_therapist_status, name='therapist_master_toggle_helping'),
     path('therapists/export-excel/', views.therapist_master_export_excel, name='therapist_master_export_excel'),
     # Therapist Grade CRUD
     path('therapist-grades/', views.TherapistGradeManagementView.as_view(), name='therapistgrade_manage'),

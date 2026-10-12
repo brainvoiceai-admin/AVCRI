@@ -1,5 +1,5 @@
 from django.urls import path
-from . import views, prescription_views, procurement_views, patient_views, therapist_views, availability_views, matrix_views
+from . import views, prescription_views, procurement_views, patient_views, therapist_views, availability_views, matrix_views, preference_views
 
 urlpatterns = [
    
@@ -14,8 +14,19 @@ urlpatterns = [
     path('scheduling/api/therapy-data/', views.get_therapy_data_api, name='get_therapy_data_api'),
     path('scheduling/api/final-schedule/status/', views.final_schedule_status_api, name='final_schedule_status_api'),
     path('scheduling/api/reschedule-therapy/', views.reschedule_therapy_api, name='reschedule_therapy_api'),
+    path('scheduling/api/reschedule-options/', views.reschedule_options_api, name='reschedule_options_api'),
     path('scheduling/api/reschedule-all-failed/', views.reschedule_all_failed_api, name='reschedule_all_failed_api'),
     path('scheduling/api/therapy-change-log/', views.therapy_change_log_api, name='therapy_change_log_api'),
+
+    # Therapist Preference & Doctor Approval URLs
+    path('therapist-preference-approvals/', preference_views.therapist_preference_approvals_view, name='therapist_preference_approvals'),
+    path('api/therapist-preference/request/', preference_views.create_therapist_preference_api, name='create_therapist_preference_api'),
+    path('api/therapist-preference/patient/<str:patient_id>/', preference_views.get_patient_therapist_preference_api, name='get_patient_therapist_preference_api'),
+    path('api/therapist-preference/pending-list/', preference_views.get_pending_preference_requests_api, name='get_pending_preference_requests_api'),
+    path('api/therapist-preference/<int:request_id>/approve/', preference_views.doctor_approve_therapist_preference_api, name='doctor_approve_therapist_preference_api'),
+    path('api/therapist-preference/<int:request_id>/reject/', preference_views.doctor_reject_therapist_preference_api, name='doctor_reject_therapist_preference_api'),
+    path('api/therapist-preference/<str:patient_id>/history/', preference_views.therapist_preference_history_api, name='therapist_preference_history_api'),
+
 
 
     # Continuity Matrix API

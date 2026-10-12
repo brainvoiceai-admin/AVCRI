@@ -37,7 +37,7 @@ path("therapy-item/<int:item_id>/update/", views.update_therapy_item, name="upda
 path("therapy-item/<int:item_id>/cancel/", views.cancel_therapy_item, name="cancel_therapy_item"),
 
 
-path('/patients/<visit_id>/add-therapy-item/', views.add_therapy_item, name='add_therapy_item'),
+path('patients/<visit_id>/add-therapy-item/', views.add_therapy_item, name='add_therapy_item'),
  
 
 # prescription item actions

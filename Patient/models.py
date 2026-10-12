@@ -306,6 +306,7 @@ class TherapistBooking(models.Model):
     visit = models.ForeignKey('Sheduling.TherapyAllocation', null=True, blank=True, on_delete=models.SET_NULL, related_name='therapist_bookings')
     therapy = models.ForeignKey('masters.TherapyMaster', null=True, blank=True, on_delete=models.SET_NULL, related_name='therapist_bookings')
     is_bathing = models.BooleanField(default=False)
+    is_helping_therapist_assignment = models.BooleanField(default=False, verbose_name="Is Helping Therapist Assignment")
     created_at = models.DateTimeField(auto_now_add=True,null=True,)
     updated_at = models.DateTimeField(auto_now=True,null=True,)
 

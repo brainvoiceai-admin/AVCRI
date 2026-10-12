@@ -1050,6 +1050,9 @@ function scheduleAllDrafts() {
     document.getElementById('scheduleModal').style.display = 'block';
 }
 
+let currentSingleRescheduleId = null;
+let currentRegisteredSlotId = null;
+
 function rescheduleSingleFailed(id) {
     // Get the selected date from the date filter
     const targetDate = document.getElementById('failed-date').value;
@@ -1065,57 +1068,253 @@ function rescheduleSingleFailed(id) {
         return;
     }
 
-    showLoading('failed');
+    currentSingleRescheduleId = id;
+    openSingleRescheduleModal(id, targetDate);
+}
 
-    const requestData = {
-        allocation_id: id,
+function openSingleRescheduleModal(id, targetDate) {
+    const modal = document.getElementById('singleRescheduleModal');
+    const loading = document.getElementById('singleRescheduleLoading');
+    const content = document.getElementById('singleRescheduleContent');
+    
+    if (!modal) return;
+
+    modal.style.display = 'flex';
+    loading.style.display = 'block';
+    content.style.display = 'none';
+
+    fetch('/sheduling/scheduling/api/reschedule-options/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ allocation_id: id, date: targetDate })
+    })
+    .then(response => {
+        if (!response.ok) throw new Error(`Server error: ${response.status}`);
+        return response.json();
+    })
+    .then(data => {
+        loading.style.display = 'none';
+        content.style.display = 'block';
+
+        if (!data.success) {
+            showAlert('error', data.error || 'Failed to fetch reschedule options');
+            closeSingleRescheduleModal();
+            return;
+        }
+
+        currentRegisteredSlotId = data.registered_slot_id || null;
+
+        // Set patient & therapy details
+        document.getElementById('singleReschedulePatient').textContent = data.patient_name || 'Patient';
+        document.getElementById('singleRescheduleTherapy').textContent = `${data.therapy_name || 'Therapy'} | Registered Slot: ${data.registered_slot_time || '—'}`;
+        document.getElementById('singleRescheduleReason').textContent = `Reason: ${data.failure_reason || '—'}`;
+        document.getElementById('registeredSlotLabel').textContent = data.registered_slot_time || 'Registered Slot';
+
+        const helpingContainer = document.getElementById('optionHelpingTherapistContainer');
+        const choiceHelping = document.getElementById('choice_helping');
+        const choiceAvailableSlot = document.getElementById('choice_available_slot');
+        const dropdown = document.getElementById('availableSlotsDropdown');
+        const noSlotsMsg = document.getElementById('noAvailableSlotsMsg');
+
+        // Reset dropdown
+        dropdown.innerHTML = '<option value="">-- Select Time Slot --</option>';
+
+        if (data.available_slots && data.available_slots.length > 0) {
+            data.available_slots.forEach(slot => {
+                const opt = document.createElement('option');
+                opt.value = slot.slot_id;
+                opt.textContent = slot.display || slot.slot_time;
+                dropdown.appendChild(opt);
+            });
+            noSlotsMsg.style.display = 'none';
+            dropdown.disabled = false;
+        } else {
+            noSlotsMsg.style.display = 'block';
+            dropdown.disabled = true;
+        }
+
+        // Show/hide and enable/disable Option 1 (Helping Therapist) based on shortage & availability
+        const helpingMsg = document.getElementById('helpingNotAvailableMsg');
+        const canUseHelping = data.is_shortage_failure && data.can_use_helping_in_registered_slot;
+
+        if (data.is_shortage_failure) {
+            helpingContainer.style.display = 'block';
+            if (canUseHelping) {
+                choiceHelping.disabled = false;
+                choiceHelping.checked = true;
+                choiceAvailableSlot.checked = false;
+                if (helpingMsg) helpingMsg.style.display = 'none';
+            } else {
+                choiceHelping.disabled = true;
+                choiceHelping.checked = false;
+                choiceAvailableSlot.checked = true;
+                if (helpingMsg) {
+                    helpingMsg.style.display = 'block';
+                    helpingMsg.textContent = data.helping_unavailable_reason || 'Helping therapist not available in registered slot';
+                }
+            }
+        } else {
+            helpingContainer.style.display = 'none';
+            choiceHelping.disabled = true;
+            choiceHelping.checked = false;
+            choiceAvailableSlot.checked = true;
+            if (helpingMsg) helpingMsg.style.display = 'none';
+        }
+
+        syncRescheduleCardStyles();
+    })
+    .catch(error => {
+        loading.style.display = 'none';
+        console.error('Error fetching reschedule options:', error);
+        showAlert('error', 'Error loading reschedule options: ' + error.message);
+        closeSingleRescheduleModal();
+    });
+}
+
+function syncRescheduleCardStyles() {
+    const helpingContainer = document.getElementById('optionHelpingTherapistContainer');
+    const slotContainer = document.getElementById('optionAvailableSlotContainer');
+    const choiceHelping = document.getElementById('choice_helping');
+    const choiceSlot = document.getElementById('choice_available_slot');
+
+    if (helpingContainer) {
+        if (choiceHelping && choiceHelping.disabled) {
+            helpingContainer.classList.add('disabled');
+            helpingContainer.classList.remove('selected');
+        } else if (choiceHelping && choiceHelping.checked) {
+            helpingContainer.classList.add('selected');
+            helpingContainer.classList.remove('disabled');
+        } else {
+            helpingContainer.classList.remove('selected', 'disabled');
+        }
+    }
+
+    if (slotContainer) {
+        if (choiceSlot && choiceSlot.checked) {
+            slotContainer.classList.add('selected');
+        } else {
+            slotContainer.classList.remove('selected');
+        }
+    }
+}
+
+function selectRescheduleChoice(choice) {
+    const choiceHelping = document.getElementById('choice_helping');
+    const choiceSlot = document.getElementById('choice_available_slot');
+    const dropdown = document.getElementById('availableSlotsDropdown');
+
+    if (choice === 'helping') {
+        if (choiceHelping && !choiceHelping.disabled) {
+            choiceHelping.checked = true;
+            if (choiceSlot) choiceSlot.checked = false;
+            syncRescheduleCardStyles();
+        }
+    } else if (choice === 'slot') {
+        if (choiceSlot) {
+            choiceSlot.checked = true;
+            if (choiceHelping) choiceHelping.checked = false;
+            syncRescheduleCardStyles();
+            if (dropdown && !dropdown.disabled) {
+                dropdown.focus();
+            }
+        }
+    }
+}
+
+function onAvailableSlotDropdownChange(e) {
+    if (e && e.stopPropagation) e.stopPropagation();
+    const choiceSlot = document.getElementById('choice_available_slot');
+    const choiceHelping = document.getElementById('choice_helping');
+    if (choiceSlot) {
+        choiceSlot.checked = true;
+        if (choiceHelping) choiceHelping.checked = false;
+        syncRescheduleCardStyles();
+    }
+}
+
+function closeSingleRescheduleModal() {
+    const modal = document.getElementById('singleRescheduleModal');
+    if (modal) modal.style.display = 'none';
+    currentSingleRescheduleId = null;
+    currentRegisteredSlotId = null;
+}
+
+function submitSingleReschedule() {
+    if (!currentSingleRescheduleId) return;
+
+    const targetDate = document.getElementById('failed-date').value;
+    const choiceHelping = document.getElementById('choice_helping');
+    const choiceSlot = document.getElementById('choice_available_slot');
+    const dropdown = document.getElementById('availableSlotsDropdown');
+
+    let requestData = {
+        allocation_id: currentSingleRescheduleId,
         date: targetDate
     };
 
-    console.log('Rescheduling single therapy:', requestData);
+    const helpingContainer = document.getElementById('optionHelpingTherapistContainer');
+    const isHelpingVisible = helpingContainer && helpingContainer.style.display !== 'none';
+
+    if (choiceHelping && choiceHelping.checked && !choiceHelping.disabled && isHelpingVisible) {
+        requestData.use_registered_slot = true;
+        requestData.allow_helping_fallback = true;
+        if (currentRegisteredSlotId) {
+            requestData.registered_slot_id = currentRegisteredSlotId;
+        }
+    } else if (choiceSlot && choiceSlot.checked) {
+        const selectedSlotId = dropdown.value;
+        if (!selectedSlotId) {
+            alert('Please select an available time slot from the dropdown.');
+            return;
+        }
+        requestData.target_slot_id = parseInt(selectedSlotId, 10);
+        requestData.use_registered_slot = false;
+        requestData.allow_helping_fallback = false;
+    } else {
+        alert('Please select a reschedule option.');
+        return;
+    }
+
+    closeSingleRescheduleModal();
+    showLoading('failed');
 
     fetch('/sheduling/scheduling/api/reschedule-therapy/', {
         method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(requestData)
     })
-        .then(response => {
-            if (!response.ok) {
-                return response.json().then(err => {
-                    throw new Error(err.error || `Server error: ${response.status}`);
-                });
+    .then(response => {
+        if (!response.ok) {
+            return response.json().then(err => {
+                throw new Error(err.error || `Server error: ${response.status}`);
+            });
+        }
+        return response.json();
+    })
+    .then(data => {
+        hideLoading('failed');
+        if (data.success) {
+            let message = data.message || 'Therapy successfully rescheduled';
+            if (data.tasks && data.tasks.length > 0) {
+                message += ` (${data.tasks.length} booking(s) created)`;
             }
-            return response.json();
-        })
-        .then(data => {
-            hideLoading('failed');
-            if (data.success) {
-                let message = data.message || 'Therapy successfully rescheduled';
-                if (data.tasks && data.tasks.length > 0) {
-                    message += ` (${data.tasks.length} booking(s) created)`;
-                }
-                showAlert('success', message);
-                // Reload all data to show updated status
-                loadTherapyData('failed', targetDate);
-                loadTherapyData('draft', targetDate);
-                loadTherapyData('allocated', targetDate, getPatientSearchValue());
-            } else {
-                showAlert('error', data.error || 'Rescheduling failed');
-                // Reload failed data to show updated status
-                loadTherapyData('failed', targetDate);
-            }
-        })
-        .catch(error => {
-            hideLoading('failed');
-            console.error('Error rescheduling therapy:', error);
-            showAlert('error', 'Error rescheduling therapy: ' + (error.message || error));
-            // Reload failed data to show current status
-            if (targetDate) {
-                loadTherapyData('failed', targetDate);
-            }
-        });
+            showAlert('success', message);
+            loadTherapyData('failed', targetDate);
+            loadTherapyData('draft', targetDate);
+            loadTherapyData('allocated', targetDate, getPatientSearchValue());
+        } else {
+            showAlert('error', data.error || 'Rescheduling failed');
+            loadTherapyData('failed', targetDate);
+        }
+    })
+    .catch(error => {
+        hideLoading('failed');
+        console.error('Error rescheduling therapy:', error);
+        showAlert('error', 'Error rescheduling therapy: ' + (error.message || error));
+        if (targetDate) {
+            loadTherapyData('failed', targetDate);
+        }
+    });
 }
 
 function rescheduleAllFailed() {
@@ -1137,11 +1336,21 @@ function rescheduleAllFailed() {
         return;
     }
 
+    // Collect allocation IDs where "Use Helping Therapist" checkbox is checked
+    const helpingAllocationIds = [];
+    document.querySelectorAll('#failed-table .use-helping-cb:checked').forEach(cb => {
+        const id = parseInt(cb.getAttribute('data-id'), 10);
+        if (!isNaN(id)) {
+            helpingAllocationIds.push(id);
+        }
+    });
+
     setAllocationInProgress(true, `Reschedule All Failed is running for ${targetDate}. Please do not refresh or close this page.`);
     showLoading('failed');
 
     const requestData = {
-        date: targetDate
+        date: targetDate,
+        helping_allocation_ids: helpingAllocationIds
     };
 
     console.log('Rescheduling all failed therapies for date:', targetDate);
@@ -1282,12 +1491,16 @@ function resetFinalScheduleButton() {
 window.onclick = function (event) {
     const scheduleModal = document.getElementById('scheduleModal');
     const rescheduleModal = document.getElementById('rescheduleModal');
+    const singleRescheduleModal = document.getElementById('singleRescheduleModal');
 
     if (event.target === scheduleModal) {
         closeScheduleModal();
     }
     if (event.target === rescheduleModal) {
         closeRescheduleModal();
+    }
+    if (event.target === singleRescheduleModal) {
+        closeSingleRescheduleModal();
     }
 }
 

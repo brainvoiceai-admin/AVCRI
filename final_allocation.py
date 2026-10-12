@@ -374,6 +374,11 @@ def create_therapist_booking_safe(therapist, date, time_slot, therapy_name, pati
             tb.therapy = therapy_obj
             needs_save = True
 
+        if therapist and getattr(therapist, 'is_helping_therapist', False):
+            if hasattr(tb, 'is_helping_therapist_assignment') and not tb.is_helping_therapist_assignment:
+                tb.is_helping_therapist_assignment = True
+                needs_save = True
+
         if needs_save:
             tb.save()  # Full save to ensure FKs are properly persisted
             tb.refresh_from_db()
@@ -819,12 +824,43 @@ def allocate_therapists(
     needs_bathing=False,
     patient_gender=None,
     avoid_therapists=None,
+    patient_id=None,
+    allow_helping_fallback=False,
 ):
     from masters.models import TherapistMaster, TherapistLeaveMaster, EmergencyLeave, TherapyMaster
     from Patient.models import TherapistBooking
 
     day_of_week = date.weekday()
     allocated = []
+
+    # Retrieve active doctor-approved unpreferred therapist preferences for exclusion
+    unpreferred_codes = set()
+    if patient_id:
+        try:
+            from Sheduling.preference_views import get_active_patient_therapist_preferences
+            _, pref_u = get_active_patient_therapist_preferences(patient_id)
+            unpreferred_codes.update(pref_u)
+        except Exception as e:
+            print(f"[DEBUG TherapistPref] Error fetching preferences for patient {patient_id}: {e}")
+
+    exclusion_set = set(avoid_therapists or [])
+    if unpreferred_codes:
+        exclusion_set.update(unpreferred_codes)
+
+    # Exclude unpreferred therapists and Helping Therapists from continuity list
+    if last_therapists:
+        if unpreferred_codes:
+            last_therapists = [c for c in last_therapists if c not in unpreferred_codes]
+        filtered_last = []
+        for c in last_therapists:
+            try:
+                tm = TherapistMaster.objects.filter(therapist_code=c, is_active=True).first()
+                if tm and getattr(tm, 'is_helping_therapist', False):
+                    continue
+                filtered_last.append(c)
+            except Exception:
+                filtered_last.append(c)
+        last_therapists = filtered_last
 
     shift_filter_enabled = _shift_enforcement_enabled()
     mapped_ids, eligible_ids = (set(), set())
@@ -953,9 +989,9 @@ def allocate_therapists(
         max_sessions = 6 if allow_extra else 5
         return session_count < max_sessions
 
-    def check_grade_availability(grade, gender_filter):
+    def check_grade_availability(grade, gender_filter, is_helping=False):
         """Check how many therapists of a specific grade and gender are available"""
-        candidates_qs = TherapistMaster.objects.filter(therapist_grade__name__iexact=grade, is_active=True)
+        candidates_qs = TherapistMaster.objects.filter(therapist_grade__name__iexact=grade, is_active=True, is_helping_therapist=is_helping)
         
         if gender_filter:
             candidates_qs = candidates_qs.filter(therapist_gender__istartswith=gender_filter[0])
@@ -990,251 +1026,261 @@ def allocate_therapists(
         print(f"[DEBUG Availability] {gender_filter} {grade}: {available_count} available out of {candidates_qs.count()}")
         return available_count
 
-    # Check if all therapists have 5 sessions (to allow 1 extra)
-    all_therapists_at_limit = False
+    # Calculate total required count before allocation
+    total_required = sum(v for v in grade_map.values() if v > 0)
 
-    # Use last therapists first - check ALL previous therapists and assign maximum possible
+    # Helper function to find and allocate candidate therapists per grade requirement
+    def _find_and_allocate_candidates(target_grade, needed_original, is_helping_flag=False):
+        needed = needed_original
+        if needed <= 0:
+            return 0
+
+        if not is_helping_flag:
+            substitution_hierarchy = {
+                "Trainee Therapist": ["Junior Therapist", "Senior Therapist", "Super Senior Therapist"],
+                "Junior Therapist": ["Senior Therapist", "Super Senior Therapist", "Trainee Therapist"],
+                "Senior Therapist": ["Super Senior Therapist", "Junior Therapist", "Trainee Therapist"],
+                "Super Senior Therapist": ["Senior Therapist", "Junior Therapist", "Trainee Therapist"]
+            }
+        else:
+            substitution_hierarchy = {
+                "Trainee Therapist": ["Junior Therapist", "Senior Therapist"],
+                "Junior Therapist": ["Senior Therapist"],
+                "Senior Therapist": [],
+                "Super Senior Therapist": []
+            }
+
+        search_grades = [target_grade] + substitution_hierarchy.get(target_grade, [])
+        assigned_cnt = 0
+
+        for current_grade_search in search_grades:
+            if needed <= 0:
+                break
+
+            candidates_qs = TherapistMaster.objects.filter(
+                therapist_grade__name__iexact=current_grade_search, 
+                is_active=True,
+                is_helping_therapist=is_helping_flag
+            )
+
+            if exclusion_set:
+                candidates_qs = candidates_qs.exclude(therapist_code__in=exclusion_set)
+
+            if desired_gender:
+                candidates_qs = candidates_qs.filter(therapist_gender__istartswith=desired_gender[0])
+
+            if needs_bathing:
+                candidates_qs = candidates_qs.filter(is_bathing_therapist=True)
+
+            candidates_list = list(candidates_qs)
+            available_candidates = []
+            for t in candidates_list:
+                if t in allocated:
+                    continue
+                if therapist_on_leave(t):
+                    continue
+                if shift_filter_enabled and t.id in mapped_ids and t.id not in eligible_ids:
+                    continue
+                if TherapistBooking.objects.filter(therapist=t, date=date, time_slot=time_slot, status='BOOKED').exists():
+                    continue
+
+                if desired_gender:
+                    t_gender = get_therapist_gender(t)
+                    if t_gender != desired_gender:
+                        continue
+
+                session_count = get_therapist_daily_session_count(t)
+                category_session_count = get_therapist_daily_category_count(t)
+                if session_count < 5:
+                    available_candidates.append((t, category_session_count, session_count))
+                elif session_count == 5:
+                    available_candidates.append((t, category_session_count, session_count))
+
+            available_candidates.sort(
+                key=lambda x: (
+                    x[1],
+                    x[2],
+                    getattr(x[0], "id", 0) or 0,
+                )
+            )
+
+            ordered_candidates = available_candidates
+            if avoid_therapists:
+                try:
+                    avoid_set = set(avoid_therapists)
+                except TypeError:
+                    avoid_set = set(str(c) for c in (avoid_therapists or []))
+
+                primary = []
+                secondary = []
+                for cand in available_candidates:
+                    t = cand[0]
+                    code = getattr(t, "therapist_code", None)
+                    if code and code in avoid_set:
+                        secondary.append(cand)
+                    else:
+                        primary.append(cand)
+                ordered_candidates = primary + secondary
+
+            all_at_limit = all(total_count >= 5 for _, _, total_count in ordered_candidates) if ordered_candidates else False
+            allow_extra = all_at_limit
+
+            for t, category_session_count, session_count in ordered_candidates:
+                if needed <= 0:
+                    break
+                if not allow_extra and session_count >= 5:
+                    continue
+                if allow_extra and session_count >= 6:
+                    continue
+
+                allocated.append(t)
+                needed -= 1
+                assigned_cnt += 1
+
+                if is_helping_flag:
+                    try:
+                        from Sheduling.models import HelpingTherapistAllocationLog
+                        shortage_reason = f"Therapist shortage detected for grade {target_grade} on {date} slot {time_slot}. Primary therapist pool exhausted or unavailable."
+                        HelpingTherapistAllocationLog.objects.create(
+                            patient_id=str(patient_id or ''),
+                            helping_therapist=t,
+                            date=date,
+                            time_slot=str(getattr(time_slot, 'slot_number', time_slot) or ''),
+                            therapy_name=str((therapy_requirements or {}).get('therapy_name', '')),
+                            reason_for_fallback="Primary therapist shortage/failure",
+                            shortage_condition=shortage_reason,
+                            is_supporting_backup=True
+                        )
+                        print(f"[AUDIT HelpingTherapistLog] Logged fallback allocation of Helping Therapist {t.therapist_code} for patient {patient_id}")
+                    except Exception as log_err:
+                        print(f"[ERROR HelpingTherapistLog] {log_err}")
+
+        return assigned_cnt
+
+    # -----------------------
+    # STEP 1 – Normal Scheduling (First Attempt: consider only is_helping_therapist=False)
+    # -----------------------
     if last_therapists:
-        print(f"[DEBUG Continuity] Checking {len(last_therapists)} previous therapists for continuity: {last_therapists}")
         for code in last_therapists:
             try:
                 t = TherapistMaster.objects.get(therapist_code=code, is_active=True)
+                if getattr(t, 'is_helping_therapist', False):
+                    continue
             except TherapistMaster.DoesNotExist:
-                print(f"[DEBUG Continuity] Therapist {code} not found or inactive in database - skipping")
                 continue
 
-            t_name = getattr(t, "therapist_name", "")
             therapist_grade_name = get_therapist_grade_name(t)
-
-            # PRIORITIZE CONTINUITY: Assign previous therapists regardless of grade match
-            # Check if grade is needed or can substitute, but don't skip if not needed
-            # We'll use grade substitution to handle different grades for continuity
             grade_substitution_map = {
                 "Super Senior Therapist": ["Senior Therapist", "Junior Therapist", "Trainee Therapist"],
                 "Senior Therapist": ["Junior Therapist", "Trainee Therapist"],
                 "Junior Therapist": ["Trainee Therapist"],
-                "Trainee Therapist": []  # Cannot substitute for higher grades
+                "Trainee Therapist": []
             }
             
             grade_can_be_used = False
             grade_to_decrement = None
             
-            # First check if exact grade is needed
             if grade_map.get(therapist_grade_name, 0) > 0:
                 grade_can_be_used = True
                 grade_to_decrement = therapist_grade_name
             else:
-                # Check if this grade can substitute for a needed grade (for continuity)
                 for needed_grade, substitutes in grade_substitution_map.items():
                     if therapist_grade_name in substitutes and grade_map.get(needed_grade, 0) > 0:
                         grade_can_be_used = True
                         grade_to_decrement = needed_grade
-                        print(f"[DEBUG Continuity] {t_name} ({code}, {therapist_grade_name}) - using for continuity to substitute {needed_grade}")
                         break
             
-            # If no grade can be used, still assign for continuity but log it
             if not grade_can_be_used:
-                # Find any grade that still needs therapists (for continuity)
                 for needed_grade in grade_map:
                     if grade_map.get(needed_grade, 0) > 0:
                         grade_to_decrement = needed_grade
                         grade_can_be_used = True
-                        print(f"[DEBUG Continuity] {t_name} ({code}, {therapist_grade_name}) - assigning for continuity, will use for {needed_grade} requirement")
                         break
             
-            # If still no grade available, assign anyway for continuity (will reduce total requirement)
             if not grade_can_be_used:
-                # Use the highest priority grade that's still needed
                 priority_order = ["Trainee Therapist", "Junior Therapist", "Senior Therapist", "Super Senior Therapist"]
                 for priority_grade in priority_order:
                     if grade_map.get(priority_grade, 0) > 0:
                         grade_to_decrement = priority_grade
-                        print(f"[DEBUG Continuity] {t_name} ({code}, {therapist_grade_name}) - assigning for continuity, using for {priority_grade} requirement")
                         break
 
-            # STRICT GENDER MATCH: skip if therapist gender does not match desired
-            if desired_gender:
-                t_gender = get_therapist_gender(t)
-                if t_gender != desired_gender:
-                    print(f"[DEBUG Continuity] {t_name} ({code}) - gender mismatch (therapist: {t_gender}, required: {desired_gender}) - skipping")
+            if desired_gender and get_therapist_gender(t) != desired_gender:
+                continue
+
+            if therapist_on_leave(t):
+                continue
+
+            if TherapistBooking.objects.filter(therapist=t, date=date, time_slot=time_slot, status='BOOKED').exists():
+                continue
+
+            if not can_assign_therapist(t, allow_extra=False):
+                if not can_assign_therapist(t, allow_extra=True):
                     continue
 
-            # Check if therapist is on leave
-            if therapist_on_leave(t):
-                print(f"[DEBUG Continuity] {t_name} ({code}) - on leave - skipping")
-                continue
-
-            # CHECK FOR EXISTING BOOKINGS: Do not assign if already booked at this date+time_slot
-            if TherapistBooking.objects.filter(therapist=t, date=date, time_slot=time_slot, status='BOOKED').exists():
-                print(f"[DEBUG Continuity] {t_name} ({code}) - already booked at {date} {time_slot} - skipping")
-                continue
-
-            # Check daily session limit (max 5, or 6 if all therapists are at limit)
-            if not can_assign_therapist(t, allow_extra=False):
-                # Check if we should allow extra (if all therapists have 5 sessions)
-                if not can_assign_therapist(t, allow_extra=True):
-                    print(f"[DEBUG Continuity] {t_name} ({code}) - session limit reached (6 sessions) - skipping")
-                    continue  # Therapist already has 6 sessions
-                # Otherwise, we'll allow this if all therapists are at limit
-                print(f"[DEBUG Continuity] {t_name} ({code}) - at limit (5 sessions) but allowing extra")
-
-            # All checks passed - assign this therapist for continuity
             allocated.append(t)
-            # Decrement the appropriate grade (may be different from therapist's grade for continuity)
             if grade_to_decrement and grade_map.get(grade_to_decrement, 0) > 0:
                 grade_map[grade_to_decrement] -= 1
-            print(f"[DEBUG Continuity] ✓ Assigned previous therapist {t_name} ({code}, {therapist_grade_name}) for continuity. Used for {grade_to_decrement} requirement. Remaining needs: {grade_map}")
 
-        assigned_from_previous = [a for a in allocated if a.therapist_code in last_therapists]
-        print(f"[DEBUG Continuity] Continuity assignment complete. Assigned {len(assigned_from_previous)} previous therapists out of {len(last_therapists)}")
-
-    # Allocate remaining
+    # Allocate remaining using Normal Primary Therapists (is_helping_therapist=False)
     for grade, needed_original in list(grade_map.items()):
-        
-        needed = needed_original
-        current_grade_search = grade
-        
-        if needed <= 0:
+        if needed_original <= 0:
             continue
+        assigned_cnt = _find_and_allocate_candidates(grade, needed_original, is_helping_flag=False)
+        grade_map[grade] -= assigned_cnt
 
-        # --- STRICT GENDER MATCHING WITH GRADE SUBSTITUTION ONLY ---
-        # Note: Super Senior Therapist is not treated as a replacement for Senior Therapist
-        # when selecting the one therapist to carry the \"senior\" tag for special treatments.
-        substitution_hierarchy = {
-            "Trainee Therapist": ["Junior Therapist", "Senior Therapist"],
-            "Junior Therapist": ["Senior Therapist"],
-            "Senior Therapist": [],  # no upward substitution into Super Senior for senior-tag logic
-            "Super Senior Therapist": []  # No substitution for highest grade
-        }
-        
-        is_substitution = False
-        substitution_chain = []
-        
-        # Check if we need substitution for the current grade
-        if current_grade_search in substitution_hierarchy and desired_gender:
-            # First check availability of current grade with matching gender
-            available_exact_match = check_grade_availability(current_grade_search, desired_gender)
-            print(f"[DEBUG Allocation] {desired_gender.capitalize()} {current_grade_search} required (needed={needed}). Exact match available: {available_exact_match}")
-            
-            # If exact grade+gender not available, try substitution hierarchy WITH SAME GENDER
-            if available_exact_match == 0:
-                print(f"[DEBUG Allocation] No exact {desired_gender} {current_grade_search} available. Attempting substitution with SAME GENDER...")
-                
-                # Try each grade in substitution hierarchy WITH SAME GENDER
-                substitution_found = False
-                for substitute_grade in substitution_hierarchy[current_grade_search]:
-                    available_substitute = check_grade_availability(substitute_grade, desired_gender)
-                    print(f"[DEBUG Allocation] Checking {desired_gender} {substitute_grade}: {available_substitute} available")
-                    
-                    if available_substitute > 0:
-                        print(f"[DEBUG Allocation] Substituting {current_grade_search} with {substitute_grade} for {desired_gender} patient")
-                        current_grade_search = substitute_grade
-                        is_substitution = True
-                        substitution_chain = [current_grade_search, substitute_grade]
-                        substitution_found = True
-                        break
-                
-                if not substitution_found:
-                    print(f"[DEBUG Allocation] No substitution available for {desired_gender} {current_grade_search}. Strict gender matching enforced.")
-        # --- END STRICT GENDER MATCHING LOGIC ---
+    # -----------------------
+    # STEP 2 & 3 – Check for Shortage and Helping Therapist Fallback (Second Attempt)
+    # -----------------------
+    allocated_primary_count = len(allocated)
+    shortage = total_required - allocated_primary_count
 
-        # Search for therapists with strict gender matching
-        candidates_qs = TherapistMaster.objects.filter(therapist_grade__name=current_grade_search, is_active=True)
-        
-        # STRICT GENDER FILTER - never remove this
-        if desired_gender:
-            candidates_qs = candidates_qs.filter(therapist_gender__istartswith=desired_gender[0])
-        
-        if needs_bathing:
-            # STRICT: Only return bathing therapists when bathing is required
-            candidates_qs = candidates_qs.filter(is_bathing_therapist=True)
-            
-        # First, try to find therapists with < 5 sessions
-        candidates_list = list(candidates_qs)
-        available_candidates = []
-        for t in candidates_list:
-            if t in allocated:
-                continue
-            if therapist_on_leave(t):
-                continue
-            # Shift eligibility filter (additive): if therapist is explicitly mapped to shifts
-            # then they are eligible only when the requested slot is part of one of those shifts.
-            if shift_filter_enabled and t.id in mapped_ids and t.id not in eligible_ids:
-                continue
-            # CHECK FOR EXISTING BOOKINGS: Do not assign if already booked at this date+time_slot
-            if TherapistBooking.objects.filter(therapist=t, date=date, time_slot=time_slot, status='BOOKED').exists():
-                continue
-            
-            # STRICT GENDER MATCH: Already enforced in query, but double-check
-            if desired_gender:
-                t_gender = get_therapist_gender(t)
-                if t_gender != desired_gender:
-                    continue  # This should never happen due to query filter, but safety check
-            
-            # Check daily session limit (prefer therapists with < 5 sessions)
-            session_count = get_therapist_daily_session_count(t)
-            category_session_count = get_therapist_daily_category_count(t)
-            if session_count < 5:
-                available_candidates.append((t, category_session_count, session_count))
-            elif session_count == 5:
-                # Keep track of therapists at limit (5 sessions) for potential extra assignment
-                available_candidates.append((t, category_session_count, session_count))
-        
-        # Sort by difficulty-specific count first, then total sessions, then id for stability.
-        # This ensures per-day Easy/Medium/Hard load is spread fairly across therapists.
-        available_candidates.sort(
-            key=lambda x: (
-                x[1],                                   # category_session_count
-                x[2],                                   # total session_count
-                getattr(x[0], "id", 0) or 0,           # stable tie-breaker
-            )
-        )
-        # If we have a list of therapists that should be avoided for NEW allocations
-        # (because they are needed for continuity for other patients at this slot),
-        # then deprioritise them here. We never apply this to last_therapists above,
-        # only to the remaining "new" picks.
-        ordered_candidates = available_candidates
-        if avoid_therapists:
-            try:
-                avoid_set = set(avoid_therapists)
-            except TypeError:
-                avoid_set = set(str(c) for c in (avoid_therapists or []))
+    if shortage > 0 and allow_helping_fallback:
+        print(f"[DEBUG HelpingTherapist] Primary shortage detected ({shortage} remaining needed out of {total_required}). Triggering Helping Therapist fallback...")
 
-            primary = []
-            secondary = []
-            for cand in available_candidates:
-                t = cand[0]
-                code = getattr(t, "therapist_code", None)
-                if code and code in avoid_set:
-                    secondary.append(cand)
-                else:
-                    primary.append(cand)
+        if last_therapists:
+            for code in last_therapists:
+                if len(allocated) >= total_required:
+                    break
+                try:
+                    t = TherapistMaster.objects.get(therapist_code=code, is_active=True, is_helping_therapist=True)
+                except TherapistMaster.DoesNotExist:
+                    continue
+                if t in allocated or therapist_on_leave(t):
+                    continue
+                if shift_filter_enabled and t.id in mapped_ids and t.id not in eligible_ids:
+                    continue
+                if TherapistBooking.objects.filter(therapist=t, date=date, time_slot=time_slot, status='BOOKED').exists():
+                    continue
+                if desired_gender and get_therapist_gender(t) != desired_gender:
+                    continue
+                if needs_bathing and not t.is_bathing_therapist:
+                    continue
+                if not can_assign_therapist(t, allow_extra=True):
+                    continue
 
-            # Primary (non-reserved) candidates first, then those reserved for other patients'
-            # continuity if we truly have no alternative.
-            ordered_candidates = primary + secondary
-        
-        # Check if all therapists in this grade have 5 sessions
-        all_at_limit = all(total_count >= 5 for _, _, total_count in ordered_candidates) if ordered_candidates else False
-        
-        # If all therapists have 5 sessions, allow 1 extra (max 6)
-        # Otherwise, only assign to therapists with < 5 sessions
-        allow_extra = all_at_limit
-        
-        # Iterate through ordered candidates
-        for t, category_session_count, session_count in ordered_candidates:
-            if needed <= 0:
-                break
-            
-            # Check if we can assign (max 5 normally, or 6 if allowing extra)
-            if not allow_extra and session_count >= 5:
-                continue  # Skip therapists with 5+ sessions if not allowing extra
-            if allow_extra and session_count >= 6:
-                continue  # Skip therapists with 6+ sessions even when allowing extra
-            
-            allocated.append(t)
-            needed -= 1
-            grade_map[grade] -= 1 # Decrement original grade count
+                allocated.append(t)
+                try:
+                    from Sheduling.models import HelpingTherapistAllocationLog
+                    HelpingTherapistAllocationLog.objects.create(
+                        patient_id=str(patient_id or ''),
+                        helping_therapist=t,
+                        date=date,
+                        time_slot=str(getattr(time_slot, 'slot_number', time_slot) or ''),
+                        therapy_name=str((therapy_requirements or {}).get('therapy_name', '')),
+                        reason_for_fallback="Primary therapist shortage/failure",
+                        shortage_condition=f"Continuity Helping Therapist fallback triggered due to primary therapist shortage.",
+                        is_supporting_backup=True
+                    )
+                except Exception as log_err:
+                    print(f"[ERROR HelpingTherapistLog] {log_err}")
+
+        for grade, needed_original in list(grade_map.items()):
+            if needed_original <= 0:
+                continue
+            assigned_cnt = _find_and_allocate_candidates(grade, needed_original, is_helping_flag=True)
+            grade_map[grade] -= assigned_cnt
+
+    return allocated
 
     return allocated
 
@@ -1422,7 +1468,24 @@ def assign_continuity_therapists_pass1(booking, allocation, target_date, locked_
         except Exception as e:
             print(f"[CONTINUITY PASS1] Error reading continuity plan: {e}")
             continuity_therapists = []
-    
+
+    # Check active doctor-approved unpreferred therapist preferences for patient
+    unpreferred_codes = set()
+    if patient_id:
+        try:
+            from Sheduling.preference_views import get_active_patient_therapist_preferences
+            _, pref_u = get_active_patient_therapist_preferences(patient_id)
+            unpreferred_codes.update(pref_u)
+        except Exception as e:
+            print(f"[CONTINUITY PASS1] Error fetching active preferences for patient {patient_id}: {e}")
+
+    if unpreferred_codes:
+        continuity_therapists = [t for t in continuity_therapists if getattr(t, 'therapist_code', None) not in unpreferred_codes]
+
+    # Exclude Helping Therapists from Pass 1 (Primary Continuity Pass)
+    if continuity_therapists:
+        continuity_therapists = [t for t in continuity_therapists if not getattr(t, 'is_helping_therapist', False)]
+
     if not continuity_therapists:
         # No continuity therapists - skip this booking in PASS 1
         result['remaining_requirements'] = therapy_req.copy()
@@ -2292,6 +2355,7 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                         needs_bathing=needs_bath_flag and (result_bath_assigned is None),  # Only if no bathing therapist yet
                         patient_gender=pat_sex,
                         avoid_therapists=continuity_codes_to_avoid if continuity_codes_to_avoid else None,
+                        patient_id=pat_reg_id,
                     )
                     candidate_therapists.extend(additional_therapists)
                     print(f"[CONTINUITY PASS2] Booking {booking.pk}: Added {len(additional_therapists)} additional therapists")
@@ -2415,7 +2479,8 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                                                 try:
                                                     therapist = TherapistMaster.objects.filter(
                                                         therapist_code=therapist_code,
-                                                        is_active=True
+                                                        is_active=True,
+                                                        is_helping_therapist=False
                                                     ).first()
                                                     
                                                     if not therapist:
@@ -2549,6 +2614,7 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                     except Exception as e:
                         print(f"[DEBUG ContinuityPlan] Error building avoid_for_slot for therapy continuity: {e}")
 
+                pat_reg_id = getattr(getattr(allocation, 'patient', None), 'pat_reg_no', None) or getattr(allocation, 'patient_id', None)
                 candidate_therapists = allocate_therapists(
                     target_date,
                     allocate_slot,
@@ -2557,6 +2623,7 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                     needs_bath_flag,
                     patient_gender=pat_sex,
                     avoid_therapists=avoid_for_slot,
+                    patient_id=pat_reg_id,
                 )
             except Exception:
                 candidate_therapists = []
@@ -4101,6 +4168,8 @@ def bulk_allocate_for_date(target_date_str):
                             continue
                         if not getattr(tb.therapist, 'is_active', True):
                             continue
+                        if getattr(tb.therapist, 'is_helping_therapist', False):
+                            continue
                         tid = getattr(tb.therapist, 'id', None)
                         if tid is None or tid in seen_from_start:
                             continue
@@ -4161,6 +4230,9 @@ def bulk_allocate_for_date(target_date_str):
                         continue
                     if not getattr(tb.therapist, 'is_active', True):
                         print(f"[CONTINUITY PLAN]   Skipping TherapistBooking {tb.pk} - therapist {tb.therapist.therapist_code} is INACTIVE")
+                        continue
+                    if getattr(tb.therapist, 'is_helping_therapist', False):
+                        print(f"[CONTINUITY PLAN]   Skipping TherapistBooking {tb.pk} - therapist {tb.therapist.therapist_code} is HELPING THERAPIST")
                         continue
                     # CRITICAL FIX: Only mark as bathing if the TherapistBooking record actually has is_bathing=True
                     # Do NOT use therapist.is_bathing_therapist attribute - that just means they CAN be a bathing therapist,
@@ -4227,6 +4299,9 @@ def bulk_allocate_for_date(target_date_str):
                             continue
                         if not getattr(tb.therapist, 'is_active', True):
                             print(f"[CONTINUITY PLAN]   DEBUG: Skipping TherapistBooking {tb.pk} - therapist {tb.therapist.therapist_code} is INACTIVE")
+                            continue
+                        if getattr(tb.therapist, 'is_helping_therapist', False):
+                            print(f"[CONTINUITY PLAN]   DEBUG: Skipping TherapistBooking {tb.pk} - therapist {tb.therapist.therapist_code} is HELPING THERAPIST")
                             continue
                         # CRITICAL FIX: Only mark as bathing if the TherapistBooking record actually has is_bathing=True
                         # Do NOT use therapist.is_bathing_therapist attribute - that just means they CAN be a bathing therapist,

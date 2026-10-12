@@ -1867,99 +1867,12 @@ def therapy_entry(request):
                             alloc.cancelled_at = timezone.now()
                             alloc.save(update_fields=['cancelled_date_from', 'cancelled_date_to', 'cancellation_reason', 'cancelled_by', 'cancelled_at'])
 
-                    # Check which dates have Final Schedule run - run algorithm for those dates immediately
-                    # Other dates will remain in draft and can be scheduled via Final Schedule button in dashboard
-                    # IMPORTANT: Use bulk_allocate_for_date to ensure PASS 1 (continuity) and PASS 2 are both executed
-                    try:
-                        from .models import FinalScheduleRun
-                        from final_allocation import bulk_allocate_for_date
-
-                        any_succeeded = False
-                        any_failed = False
-                        
-                        # Group dates by Final Schedule status
-                        dates_with_final_schedule = []
-                        for d in daterange(fdate, tdate):
-                            # Skip locked dates (past and, after 5:30AM, today). They must remain unchanged / cancelled.
-                            if d <= lock_upto_date:
-                                continue
-                            if FinalScheduleRun.objects.filter(run_date=d).exists():
-                                dates_with_final_schedule.append(d)
-                        
-                        # Process each date that has Final Schedule run
-                        # Use bulk_allocate_for_date which includes PASS 1 (continuity) and PASS 2
-                        for d in dates_with_final_schedule:
-                            try:
-                                print(f"[THERAPY ENTRY] Running bulk_allocate_for_date for date {d.isoformat()} to ensure continuity (PASS 1 + PASS 2)")
-                                result = bulk_allocate_for_date(d.strftime('%Y-%m-%d'))
-                                
-                                if result.get('success', False):
-                                    # Check if our allocation was processed successfully
-                                    # bulk_allocate_for_date processes all draft bookings for the date
-                                    # Check the status of bookings for this specific allocation
-                                    allocation_bookings = Booking.objects.filter(allocation=alloc, date=d)
-                                    
-                                    scheduled_count = allocation_bookings.filter(status='scheduled').count()
-                                    failed_count = allocation_bookings.filter(status='failed').count()
-                                    draft_count = allocation_bookings.filter(status='draft').count()
-                                    
-                                    if scheduled_count > 0:
-                                        any_succeeded = True
-                                        # Update booking items status for this date
-                                        BookingItem.objects.filter(booking__allocation=alloc, booking__date=d).update(status='scheduled')
-                                        status_counts['draft'] -= draft_count
-                                        status_counts['allocated'] += scheduled_count
-                                        date_status_map[d.isoformat()] = 'allocated'
-                                        print(f"[THERAPY ENTRY] ✓ Date {d.isoformat()}: {scheduled_count} booking(s) scheduled with continuity")
-                                    elif failed_count > 0:
-                                        any_failed = True
-                                        BookingItem.objects.filter(booking__allocation=alloc, booking__date=d).update(status='failed')
-                                        status_counts['draft'] -= draft_count
-                                        status_counts['failed'] += failed_count
-                                        date_status_map[d.isoformat()] = 'failed'
-                                        print(f"[THERAPY ENTRY] ✗ Date {d.isoformat()}: {failed_count} booking(s) failed")
-                                    else:
-                                        # Still in draft - might not have been processed
-                                        print(f"[THERAPY ENTRY] ? Date {d.isoformat()}: {draft_count} booking(s) still in draft")
-                                else:
-                                    # bulk_allocate_for_date returned an error
-                                    error_msg = result.get('error', 'Unknown error')
-                                    print(f"[THERAPY ENTRY] ✗ Error in bulk_allocate_for_date for {d.isoformat()}: {error_msg}")
-                                    any_failed = True
-                                    allocation_bookings = Booking.objects.filter(allocation=alloc, date=d)
-                                    draft_count = allocation_bookings.filter(status='draft').count()
-                                    Booking.objects.filter(allocation=alloc, date=d).update(status='failed', failure_reason=(str(error_msg) or '')[:512])
-                                    BookingItem.objects.filter(booking__allocation=alloc, booking__date=d).update(status='failed')
-                                    status_counts['draft'] -= draft_count
-                                    status_counts['failed'] += draft_count
-                                    date_status_map[d.isoformat()] = 'failed'
-                            except Exception as _e:
-                                # Continue to next date on error
-                                print(f"[THERAPY ENTRY] ✗ Error processing date {d.isoformat()} for allocation {alloc.id}: {_e}")
-                                import traceback
-                                print(f"[THERAPY ENTRY] Traceback: {traceback.format_exc()}")
-                                any_failed = True
-                                Booking.objects.filter(allocation=alloc, date=d).update(status='failed', failure_reason=(str(_e) or '')[:512])
-                                BookingItem.objects.filter(booking__allocation=alloc, booking__date=d).update(status='failed')
-                                status_counts['draft'] -= Booking.objects.filter(allocation=alloc, date=d, status='draft').count()
-                                status_counts['failed'] += Booking.objects.filter(allocation=alloc, date=d, status='failed').count()
-                                date_status_map[d.isoformat()] = 'failed'
-
-                        # Update overall allocation status based on results
-                        if any_succeeded:
-                            alloc.status = 'allocated'
-                            alloc.save(update_fields=['status'])
-                        elif any_failed and not any_succeeded:
-                            alloc.status = 'failed'
-                            alloc.save(update_fields=['status'])
-                        else:
-                            alloc.status = 'draft'
-                            alloc.save(update_fields=['status'])
-                    except Exception as e:
-                        # Keep as draft if auto-scheduling fails
-                        alloc.status = 'draft'
-                        alloc.save(update_fields=['status'])
-                        print(f"Automatic scheduling check failed for allocation {alloc.id}: {e}")
+                    # Newly created therapies remain in draft status until scheduling is explicitly run from the scheduling dashboard
+                    alloc.status = 'draft'
+                    alloc.save(update_fields=['status'])
+                    status_counts['draft'] = (tdate - fdate).days + 1 - (1 if any_auto_cancelled else 0)
+                    if any_auto_cancelled:
+                        status_counts['cancelled'] = 1
 
                     # Log comprehensive audit event
                     log_therapy_audit(
@@ -5854,10 +5767,15 @@ def get_therapy_data_api(request):
 
 
 @csrf_exempt
+@csrf_exempt
 @api_access_required
-def reschedule_therapy_api(request):
+def reschedule_options_api(request):
     """
-    API endpoint to reschedule a single failed therapy using the rescheduling algorithm.
+    API endpoint to fetch available reschedule options for a single failed allocation on a target date.
+    Returns:
+    - Registered slot details
+    - Failure reason & whether it's due to therapist shortage (insufficient_therapists_available)
+    - List of available time slots where BOTH room and therapists are available.
     """
     if request.method != 'POST':
         return JsonResponse({'error': 'POST method required'}, status=405)
@@ -5871,6 +5789,251 @@ def reschedule_therapy_api(request):
             return JsonResponse({'error': 'allocation_id and date are required'}, status=400)
         
         from .models import TherapyAllocation, Booking
+        from masters.models import SlotMaster
+        from reshedule import (
+            attempt_allocate_slot,
+            get_allowed_slot_values,
+            therapist_requirements,
+            therapy_needs_room,
+            therapy_needs_bath,
+            map_to_canonical_slot
+        )
+        from datetime import datetime
+        
+        allocation = TherapyAllocation.objects.filter(id=allocation_id).select_related('patient', 'timeslot', 'room').first()
+        if not allocation:
+            return JsonResponse({'error': 'Therapy allocation not found'}, status=404)
+        
+        target_date = parse_date(date)
+        if not target_date:
+            return JsonResponse({'error': 'Invalid date format. Use YYYY-MM-DD.'}, status=400)
+            
+        booking = Booking.objects.filter(allocation=allocation, date=target_date).first()
+        if booking and booking.room is not None and booking.status == 'failed':
+            booking.room = None
+            booking.save(update_fields=['room'])
+        failure_reason = (booking.failure_reason if booking else "") or (allocation.status if allocation else "")
+        
+        # Determine if failure is due to therapist shortage
+        is_shortage_failure = False
+        if failure_reason:
+            fr_lower = str(failure_reason).lower()
+            if "insufficient_therapists" in fr_lower or "therapist shortage" in fr_lower or "shortage" in fr_lower:
+                is_shortage_failure = True
+        
+        # Registered slot details
+        reg_slot = getattr(booking, 'timeslot', None) or getattr(allocation, 'timeslot', None)
+        canonical_reg_slot = map_to_canonical_slot(reg_slot) if reg_slot else None
+        registered_slot_time_str = "—"
+        registered_slot_id = None
+        if canonical_reg_slot:
+            registered_slot_id = canonical_reg_slot.id
+            st = getattr(canonical_reg_slot, 'slot_time', None) or getattr(canonical_reg_slot, 'start_time', None)
+            if st:
+                try:
+                    registered_slot_time_str = st.strftime("%I:%M %p").lstrip('0')
+                except Exception:
+                    registered_slot_time_str = str(st)
+
+        # Patient info
+        patient_name = getattr(allocation.patient, 'pat_name', 'Patient')
+        patient_reg_no = getattr(allocation.patient, 'pat_reg_no', '')
+        patient_id = getattr(allocation.patient, 'id', None)
+        
+        patient_type = "OP" if (hasattr(allocation.patient, 'is_op') and allocation.patient.is_op()) else "IP"
+        therapy_req = therapist_requirements(allocation)
+        needs_room_flag = therapy_needs_room(allocation)
+        needs_bath_flag = therapy_needs_bath(allocation)
+        
+        allowed_slot_values = get_allowed_slot_values(
+            patient_type,
+            therapy_req.get("therapy_category"),
+            used_slots=[],
+            therapy_name=allocation.therapy_name,
+            therapy_code=getattr(allocation, "therapy_code", None)
+        )
+        
+        dummy_last_allocation = {'therapists': [], 'continuity_assigned': {}}
+        try:
+            from reshedule import assign_continuity_therapists_pass1
+            p1_res = assign_continuity_therapists_pass1(booking, allocation, target_date, {})
+            if p1_res and p1_res.get('success'):
+                assigned_th = p1_res.get('assigned_therapists', [])
+                dummy_last_allocation = {
+                    'therapists': [getattr(t, 'therapist_code', None) for t in assigned_th if getattr(t, 'therapist_code', None)],
+                    'continuity_assigned': p1_res
+                }
+        except Exception:
+            pass
+
+        # Check helping therapist availability in registered slot
+        can_use_helping_in_registered_slot = False
+        helping_unavailable_reason = ""
+
+        if is_shortage_failure and canonical_reg_slot:
+            from masters.models import TherapistMaster, TherapistLeaveMaster, EmergencyLeave
+            from Patient.models import TherapistBooking
+            from django.db.models import Q
+
+            day_of_week = target_date.weekday()
+            pat_gender = getattr(getattr(allocation, 'patient', None), 'pat_sex', None)
+            desired_gender = 'female' if str(pat_gender).strip().lower().startswith('f') else ('male' if str(pat_gender).strip().lower().startswith('m') else None)
+
+            ht_qs = TherapistMaster.objects.filter(is_active=True, is_helping_therapist=True)
+            if desired_gender:
+                ht_qs = ht_qs.filter(therapist_gender__istartswith=desired_gender[0])
+            if needs_bath_flag:
+                ht_qs = ht_qs.filter(is_bathing_therapist=True)
+
+            eligible_ht_count = 0
+            for ht in ht_qs:
+                if TherapistLeaveMaster.objects.filter(therapist=ht, leave_day=day_of_week).exists():
+                    continue
+                if EmergencyLeave.objects.filter(from_date__lte=target_date, to_date__gte=target_date).filter(Q(therapist=ht) | Q(employee_code=ht.employee_code)).exists():
+                    continue
+                if TherapistBooking.objects.filter(therapist=ht, date=target_date, time_slot=canonical_reg_slot, status='BOOKED').exists():
+                    continue
+                if TherapistBooking.objects.filter(therapist=ht, date=target_date, status='BOOKED').count() >= 6:
+                    continue
+                eligible_ht_count += 1
+
+            if eligible_ht_count == 0:
+                can_use_helping_in_registered_slot = False
+                helping_unavailable_reason = "Helping therapist not available in registered slot"
+            else:
+                task_reg, success_reg, reason_reg = attempt_allocate_slot(
+                    allocation,
+                    booking,
+                    target_date,
+                    canonical_reg_slot,
+                    therapy_req,
+                    needs_room_flag,
+                    needs_bath_flag,
+                    used_slots=[],
+                    create_bookings=False,
+                    patient_id=patient_id,
+                    last_allocation=dummy_last_allocation,
+                    AllocationAttempt=None,
+                    allow_helping_fallback=True
+                )
+                if success_reg:
+                    assigned_reg_th = task_reg.get("therapists") or []
+                    reg_room = task_reg.get("room_no")
+                    req_total = int(therapy_req.get("total", 1) or 1)
+                    has_helping_assigned = any(t.get("is_helping") for t in assigned_reg_th)
+                    if len(assigned_reg_th) >= req_total and (not needs_room_flag or (reg_room and reg_room != "—")) and has_helping_assigned:
+                        can_use_helping_in_registered_slot = True
+                    else:
+                        can_use_helping_in_registered_slot = False
+                        if not has_helping_assigned:
+                            helping_unavailable_reason = "Helping therapist not available in registered slot"
+                        else:
+                            helping_unavailable_reason = "Treatment room or therapists not available in registered slot"
+                else:
+                    can_use_helping_in_registered_slot = False
+                    if reason_reg and "room" in str(reason_reg).lower():
+                        helping_unavailable_reason = "Treatment room not available in registered slot"
+                    else:
+                        helping_unavailable_reason = reason_reg or "Helping therapist not available in registered slot"
+        else:
+            can_use_helping_in_registered_slot = False
+            helping_unavailable_reason = "Helping therapist not applicable" if not is_shortage_failure else "No registered time slot"
+
+        available_slots = []
+        for sv in allowed_slot_values:
+            try:
+                parsed_time = datetime.strptime(sv, "%H:%M").time()
+                canonical_slot = SlotMaster.objects.filter(slot_time=parsed_time).first()
+            except Exception:
+                canonical_slot = None
+                
+            if not canonical_slot:
+                continue
+
+            if registered_slot_id and canonical_slot.id == registered_slot_id:
+                continue
+                
+            task, success, reason = attempt_allocate_slot(
+                allocation,
+                booking,
+                target_date,
+                canonical_slot,
+                therapy_req,
+                needs_room_flag,
+                needs_bath_flag,
+                used_slots=[],
+                create_bookings=False,
+                patient_id=patient_id,
+                last_allocation=dummy_last_allocation,
+                AllocationAttempt=None,
+                allow_helping_fallback=False
+            )
+            
+            if success:
+                room_no = task.get("room_no")
+                assigned_th = task.get("therapists") or []
+                req_total = int(therapy_req.get("total", 1) or 1)
+                if needs_room_flag and (not room_no or room_no == "—"):
+                    continue
+                if len(assigned_th) < req_total:
+                    continue
+
+                st = canonical_slot.slot_time
+                st_12h = st.strftime("%I:%M %p").lstrip('0') if hasattr(st, 'strftime') else str(st)
+                display_str = f"{st_12h} (Room: {room_no})" if needs_room_flag and room_no and room_no != "—" else f"{st_12h}"
+                
+                available_slots.append({
+                    "slot_id": canonical_slot.id,
+                    "slot_time": st_12h,
+                    "room_no": room_no or "—",
+                    "display": display_str
+                })
+                
+        return JsonResponse({
+            "success": True,
+            "allocation_id": allocation.id,
+            "patient_name": f"{patient_name} ({patient_reg_no})" if patient_reg_no else patient_name,
+            "therapy_name": allocation.therapy_name,
+            "registered_slot_id": registered_slot_id,
+            "registered_slot_time": registered_slot_time_str,
+            "failure_reason": failure_reason or "—",
+            "is_shortage_failure": is_shortage_failure,
+            "can_use_helping_in_registered_slot": can_use_helping_in_registered_slot,
+            "helping_unavailable_reason": helping_unavailable_reason,
+            "available_slots": available_slots
+        })
+        
+    except json.JSONDecodeError:
+        return JsonResponse({'error': 'Invalid JSON'}, status=400)
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return JsonResponse({'error': str(e)}, status=500)
+
+
+@csrf_exempt
+@api_access_required
+def reschedule_therapy_api(request):
+    """
+    API endpoint to reschedule a single failed therapy using the rescheduling algorithm.
+    """
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST method required'}, status=405)
+    
+    try:
+        data = json.loads(request.body)
+        allocation_id = data.get('allocation_id')
+        date = data.get('date')
+        allow_helping_fallback = bool(data.get('allow_helping_fallback', False))
+        target_slot_id = data.get('target_slot_id')
+        use_registered_slot = bool(data.get('use_registered_slot', False))
+        registered_slot_id = data.get('registered_slot_id')
+        
+        if not allocation_id or not date:
+            return JsonResponse({'error': 'allocation_id and date are required'}, status=400)
+        
+        from .models import TherapyAllocation, Booking
+        from masters.models import SlotMaster
         from reshedule import allocate_therapy_for_visit
         
         try:
@@ -5881,6 +6044,51 @@ def reschedule_therapy_api(request):
             target_date = parse_date(date)
             if not target_date:
                 return JsonResponse({'error': 'Invalid date format. Use YYYY-MM-DD.'}, status=400)
+
+            # Check if there's an existing booking for this date
+            booking = Booking.objects.filter(allocation=allocation, date=target_date).first()
+
+            target_slot_obj = None
+            force_slot_only = False
+
+            if use_registered_slot:
+                # User chose Option 1: Use Helping Therapist in Registered Slot
+                reg_slot = None
+                if registered_slot_id:
+                    try:
+                        reg_slot = SlotMaster.objects.get(id=registered_slot_id)
+                    except SlotMaster.DoesNotExist:
+                        pass
+                if not reg_slot:
+                    reg_slot = getattr(booking, 'timeslot', None) or getattr(allocation, 'timeslot', None)
+                if reg_slot:
+                    target_slot_obj = reg_slot
+                    if allocation.timeslot != reg_slot:
+                        allocation.timeslot = reg_slot
+                        allocation.save(update_fields=['timeslot'])
+                    if booking:
+                        booking.room = None
+                        booking.timeslot = reg_slot
+                        booking.save(update_fields=['room', 'timeslot'])
+                allow_helping_fallback = True
+                force_slot_only = True
+            elif target_slot_id:
+                # User chose Option 2: specific available slot from dropdown
+                try:
+                    target_slot_obj = SlotMaster.objects.get(id=target_slot_id)
+                    if allocation.timeslot != target_slot_obj:
+                        allocation.timeslot = target_slot_obj
+                        allocation.save(update_fields=['timeslot'])
+                    if booking:
+                        booking.room = None
+                        booking.timeslot = target_slot_obj
+                        booking.save(update_fields=['room', 'timeslot'])
+                except SlotMaster.DoesNotExist:
+                    pass
+                allow_helping_fallback = False
+                force_slot_only = True
+            else:
+                force_slot_only = False
 
             # Refresh patient staying room before rescheduling (keep algorithm unchanged)
             try:
@@ -5896,29 +6104,30 @@ def reschedule_therapy_api(request):
             except Exception:
                 pass
             
-            # Check if there's a failed booking for this date
-            booking = Booking.objects.filter(allocation=allocation, date=target_date).first()
             if not booking:
                 # Create booking if it doesn't exist (for rescheduling)
                 booking = Booking.objects.create(
                     allocation=allocation,
                     date=target_date,
-                    timeslot=allocation.timeslot,
-                    room=allocation.room,
+                    timeslot=target_slot_obj or allocation.timeslot,
+                    room=None,
                     status='draft',
                     snapshot_therapy_name=(allocation.therapy_name or '')[:255]
                 )
-            elif booking.status != 'failed':
-                # If booking exists but is not failed, we can still reschedule it
-                # This allows rescheduling draft or other status bookings
-                pass
+            else:
+                if target_slot_obj:
+                    booking.room = None
+                    booking.timeslot = target_slot_obj
+                    booking.save(update_fields=['room', 'timeslot'])
             
             # Call rescheduling algorithm
             try:
                 tasks = allocate_therapy_for_visit(
                     allocation.id,
                     date,
-                    create_bookings=True
+                    create_bookings=True,
+                    allow_helping_fallback=allow_helping_fallback,
+                    force_slot_only=force_slot_only
                 )
                 
                 if isinstance(tasks, dict) and "error" in tasks:
@@ -5955,6 +6164,10 @@ def reschedule_therapy_api(request):
                         # All tasks failed
                         allocation.status = 'failed'
                         allocation.save(update_fields=['status'])
+                        if booking:
+                            booking.status = 'failed'
+                            booking.room = None
+                            booking.save(update_fields=['status', 'room'])
                         reason = failed_tasks[0].get('reason', 'Unknown error') if failed_tasks else 'No available slots'
                         return JsonResponse({
                             'success': False,
@@ -5998,6 +6211,7 @@ def reschedule_all_failed_api(request):
     try:
         data = json.loads(request.body)
         date = data.get('date')
+        helping_allocation_ids = {int(x) for x in data.get('helping_allocation_ids', []) if str(x).isdigit()}
         
         if not date:
             return JsonResponse({'error': 'date is required'}, status=400)
@@ -6075,7 +6289,8 @@ def reschedule_all_failed_api(request):
         total_allocations = len(ordered_failed_allocations)
         for idx, allocation in enumerate(ordered_failed_allocations, 1):
             try:
-                print(f"\n[RESCHEDULE {idx}/{total_allocations}] Processing allocation ID: {allocation.id}, Therapy: {allocation.therapy_name}")
+                allow_helping = allocation.id in helping_allocation_ids
+                print(f"\n[RESCHEDULE {idx}/{total_allocations}] Processing allocation ID: {allocation.id}, Therapy: {allocation.therapy_name}, allow_helping={allow_helping}")
 
                 # Ensure booking exists for this date
                 booking = Booking.objects.filter(allocation=allocation, date=filter_date).first()
@@ -6092,11 +6307,12 @@ def reschedule_all_failed_api(request):
                     print(f"  Created new booking for allocation {allocation.id}")
 
                 # Call rescheduling algorithm
-                print(f"  Calling allocate_therapy_for_visit for allocation {allocation.id}...")
+                print(f"  Calling allocate_therapy_for_visit for allocation {allocation.id} (allow_helping={allow_helping})...")
                 tasks = allocate_therapy_for_visit(
                     allocation.id,
                     date,
-                    create_bookings=True
+                    create_bookings=True,
+                    allow_helping_fallback=allow_helping
                 )
 
                 if isinstance(tasks, dict) and "error" in tasks:

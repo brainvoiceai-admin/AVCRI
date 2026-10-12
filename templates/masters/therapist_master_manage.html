@@ -61,10 +61,10 @@
                         <div class="col-md-3">
                             <select class="form-select" name="status" id="statusFilter">
                                 <option value="">All Status</option>
-                                <option value="active" {% if status_filter == 'active' %}selected{% endif %}>Active
-                                </option>
-                                <option value="inactive" {% if status_filter == 'inactive' %}selected{% endif %}>Inactive
-                                </option>
+                                <option value="active" {% if status_filter == 'active' %}selected{% endif %}>Active</option>
+                                <option value="inactive" {% if status_filter == 'inactive' %}selected{% endif %}>Inactive</option>
+                                <option value="primary" {% if status_filter == 'primary' %}selected{% endif %}>Primary Therapists</option>
+                                <option value="helping" {% if status_filter == 'helping' %}selected{% endif %}>Helping Therapists</option>
                             </select>
                         </div>
                         <div class="col-md-3">
@@ -115,6 +115,7 @@
                                 <th>Employee Code</th>
                                 <th>Gender</th>
                                 <th>Bathing Therapist</th>
+                                <th>Helping Therapist</th>
                                 <th>Leave Days</th>
                                 <th>Status</th>
                                 <th>Created</th>
@@ -147,6 +148,18 @@
                                         <i class="fas fa-times"></i> No
                                     </span>
                                     {% endif %}
+                                </td>
+                                <td>
+                                    <a href="{% url 'therapist_master_toggle_helping' therapist.pk %}" 
+                                       class="badge text-decoration-none {% if therapist.is_helping_therapist %}bg-warning text-dark{% else %}bg-secondary{% endif %}" 
+                                       title="Click to toggle Helping Therapist status"
+                                       onclick="return confirm('Toggle Helping Therapist designation for {{ therapist.therapist_name }}?');">
+                                        {% if therapist.is_helping_therapist %}
+                                            <i class="fas fa-check"></i> Yes
+                                        {% else %}
+                                            <i class="fas fa-times"></i> No
+                                        {% endif %}
+                                    </a>
                                 </td>
                                 <td>
                                     {% with therapist.leaves.all as leave_days %}
@@ -201,7 +214,7 @@
                             </tr>
                             {% empty %}
                             <tr>
-                                <td colspan="10" class="text-center py-4">
+                                <td colspan="11" class="text-center py-4">
                                     <div class="text-muted">
                                         <i class="fas fa-user-md fa-3x mb-3"></i>
                                         <p>No therapists found. <a href="{% url 'therapist_master_add' %}">Add the first

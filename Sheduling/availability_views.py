@@ -44,6 +44,16 @@ def get_available_therapists_api(request):
         # Use select_related to get grade information efficiently
         therapists_query = TherapistMaster.objects.filter(is_active=True).select_related('therapist_grade')
         
+        # Primary vs Helping Therapist filtering
+        therapist_type = (request.GET.get('therapist_type') or 'primary').strip().lower()
+        include_helping = request.GET.get('include_helping') in ['1', 'true', 'True'] or request.GET.get('ignore_leave') in ['1', 'true', 'True'] or request.GET.get('include_all') in ['1', 'true', 'True']
+        
+        if not include_helping:
+            if therapist_type == 'primary':
+                therapists_query = therapists_query.filter(is_helping_therapist=False)
+            elif therapist_type == 'helping':
+                therapists_query = therapists_query.filter(is_helping_therapist=True)
+        
         # Filter by gender if specified - use therapist_gender column from TherapistMaster
         if gender and gender != 'all':
             # Normalize gender values for comparison
@@ -94,16 +104,22 @@ def get_available_therapists_api(request):
         # Combine both sets
         emergency_leave_therapist_ids = emergency_leave_therapist_ids | emergency_leave_by_emp_code
         
-        # Exclude therapists on recurring leave
-        available_therapists = therapists_query.exclude(
-            pk__in=recurring_leave_therapist_ids
-        )
-        
-        # Exclude therapists on emergency leave
-        if emergency_leave_therapist_ids:
-            available_therapists = available_therapists.exclude(
-                pk__in=emergency_leave_therapist_ids
+        # Check if caller requested to ignore leave (e.g. for therapist preference/exclusion dropdowns)
+        ignore_leave = request.GET.get('ignore_leave') in ['1', 'true', 'True'] or request.GET.get('all') in ['1', 'true', 'True']
+
+        if not ignore_leave:
+            # Exclude therapists on recurring leave
+            available_therapists = therapists_query.exclude(
+                pk__in=recurring_leave_therapist_ids
             )
+            
+            # Exclude therapists on emergency leave
+            if emergency_leave_therapist_ids:
+                available_therapists = available_therapists.exclude(
+                    pk__in=emergency_leave_therapist_ids
+                )
+        else:
+            available_therapists = therapists_query
         
         # If time slot is specified, check availability using SlotMaster and TherapistBooking
         if time_slot:
@@ -207,6 +223,7 @@ def get_available_therapists_api(request):
                 'gender': gender_display,  # This should be 'Male', 'Female', or 'Unknown'
                 'grade': grade_name,  # Grade name from TherapistGrade model
                 'is_bathing': therapist.is_bathing_therapist,
+                'is_helping_therapist': getattr(therapist, 'is_helping_therapist', False),
                 'is_active': therapist.is_active,
                 'specialization': 'General Therapy'  # Default specialization
             }
