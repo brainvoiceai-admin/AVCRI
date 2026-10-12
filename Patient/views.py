@@ -1232,6 +1232,21 @@ def add_prescription_item(request, prescription_id):
     prescription = get_object_or_404(store_Prescription, id=prescription_id)
     visit = getattr(prescription, 'visit', None)
 
+    # ----- INACTIVE PATIENT GUARD -----
+    # If the patient's pat_status is 'N' (inactive/discharged), block all access.
+    try:
+        from final_allocation import is_patient_active
+        _pat_id = getattr(visit, 'patient_id', None) if visit else None
+        if _pat_id and not is_patient_active(_pat_id):
+            messages.error(
+                request,
+                "This patient is inactive or has been discharged. "
+                "Adding prescription items is not allowed."
+            )
+            return redirect(request.META.get('HTTP_REFERER', '/'))
+    except Exception:
+        pass  # fail-open: do not block if check itself errors
+
     # default dates from visit (if present)
     default_from = getattr(visit, 'from_date', None)
     default_to = getattr(visit, 'to_date', None)
@@ -1359,6 +1374,21 @@ def add_therapy_item(request, visit_id):
     from_date/to_date/days are taken from the parent therapy (no custom dates).
     """
     visit = get_object_or_404(Visit, id=visit_id)
+
+    # ----- INACTIVE PATIENT GUARD -----
+    # If the patient's pat_status is 'N' (inactive/discharged), block all access.
+    try:
+        from final_allocation import is_patient_active
+        _pat_id = getattr(visit, 'patient_id', None)
+        if _pat_id and not is_patient_active(_pat_id):
+            messages.error(
+                request,
+                "This patient is inactive or has been discharged. "
+                "Adding therapy items is not allowed."
+            )
+            return redirect(request.META.get('HTTP_REFERER', '/'))
+    except Exception:
+        pass  # fail-open: do not block if check itself errors
 
     # Fetch therapies for this visit
     therapies_for_visit = store_Therapy.objects.filter(visit=visit).order_by("from_date", "therapy_name")
