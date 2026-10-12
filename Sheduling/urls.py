@@ -14,6 +14,7 @@ urlpatterns = [
     path('scheduling/api/therapy-data/', views.get_therapy_data_api, name='get_therapy_data_api'),
     path('scheduling/api/final-schedule/status/', views.final_schedule_status_api, name='final_schedule_status_api'),
     path('scheduling/api/reschedule-therapy/', views.reschedule_therapy_api, name='reschedule_therapy_api'),
+    path('scheduling/api/reschedule-options/', views.reschedule_options_api, name='reschedule_options_api'),
     path('scheduling/api/reschedule-all-failed/', views.reschedule_all_failed_api, name='reschedule_all_failed_api'),
     path('scheduling/api/therapy-change-log/', views.therapy_change_log_api, name='therapy_change_log_api'),
 

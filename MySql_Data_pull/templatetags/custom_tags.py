@@ -190,3 +190,37 @@ def format_12hour(time_value):
         return f"{hours_12}:{minutes} {period}"
     except (ValueError, AttributeError, TypeError):
         return str(time_value) if time_value else '—'
+
+@register.filter
+def is_helping_therapist_assignment(assignment, booking=None):
+    """Check if therapist was assigned as helping therapist or is marked as helping therapist"""
+    try:
+        if not assignment or not assignment.therapist:
+            return False
+        code = getattr(assignment.therapist, 'therapist_code', None) or str(assignment.therapist)
+        from Patient.models import TherapistBooking
+        from masters.models import TherapistMaster
+        
+        # Check TherapistBooking record if booking is provided
+        if booking:
+            allocation = getattr(booking, 'allocation', None)
+            booking_date = getattr(booking, 'date', None)
+            booking_timeslot = getattr(booking, 'timeslot', None)
+            if allocation and booking_date and booking_timeslot:
+                tb = TherapistBooking.objects.filter(
+                    visit=allocation,
+                    therapist__therapist_code=code,
+                    date=booking_date,
+                    time_slot=booking_timeslot,
+                    status='BOOKED'
+                ).first()
+                if tb and getattr(tb, 'is_helping_therapist_assignment', False):
+                    return True
+        
+        # Fallback to checking TherapistMaster directly
+        tm = TherapistMaster.objects.filter(therapist_code=code, is_active=True).first()
+        if tm and getattr(tm, 'is_helping_therapist', False):
+            return True
+    except Exception:
+        pass
+    return False

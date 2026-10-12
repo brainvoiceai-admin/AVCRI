@@ -386,8 +386,13 @@
                                                     {% with therapist_name=assignment.therapist.therapist_name|default:assignment.therapist.therapist_code %}
                                                     {% with is_bathing=assignment|get_therapist_bathing_flag:booking %}
                                                     {% with is_senior=assignment|is_senior_therapist_for_dhara:booking %}
+                                                    {% with is_helping=assignment|is_helping_therapist_assignment:booking %}
                                                     {% with clean_name=therapist_name|cut:"(bathing)" %}
-                                                    {% if is_senior %}
+                                                    {% if is_helping %}
+                                                    <span class="therapist-badge helping-therapist" style="background: #fef3c7; color: #92400e; border: 1px solid #f59e0b;">
+                                                        {% if is_bathing %}*{% endif %}{{ clean_name }} (helping)
+                                                    </span>
+                                                    {% elif is_senior %}
                                                     <span class="therapist-badge senior-therapist">
                                                         {% if is_bathing %}*{% endif %}{{ clean_name }} (senior)
                                                     </span>
@@ -397,6 +402,7 @@
                                                         {% if is_bathing %}*{% endif %}{{ clean_name }}
                                                     </span>
                                                     {% endif %}
+                                                    {% endwith %}
                                                     {% endwith %}
                                                     {% endwith %}
                                                     {% endwith %}
@@ -596,6 +602,77 @@
                 <div class="modal-footer">
                     <button type="button" class="btn btn-outline" onclick="closeRescheduleModal()">Cancel</button>
                     <button type="button" class="btn btn-primary" id="confirmRescheduleBtn">Reschedule</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Single Reschedule Options Modal -->
+        <div id="singleRescheduleModal" class="modal">
+            <div class="modal-content" style="max-width: 540px;">
+                <div class="modal-header">
+                    <h3 class="modal-title">Single Reschedule Options</h3>
+                    <span class="close" onclick="closeSingleRescheduleModal()">&times;</span>
+                </div>
+                <div class="modal-body" style="padding: 20px;">
+                    <div id="singleRescheduleLoading" style="display: none; text-align: center; padding: 20px; color: var(--gray);">
+                        <div>Loading reschedule options...</div>
+                    </div>
+
+                    <div id="singleRescheduleContent">
+                        <!-- Patient & Therapy Info Banner -->
+                        <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 12px 16px; margin-bottom: 20px;">
+                            <div style="font-weight: 600; font-size: 15px; color: #1e293b;" id="singleReschedulePatient">Patient</div>
+                            <div style="font-size: 13px; color: #64748b; margin-top: 2px;" id="singleRescheduleTherapy">Therapy</div>
+                            <div style="font-size: 12px; color: #ef4444; margin-top: 6px; font-weight: 500;" id="singleRescheduleReason">Reason</div>
+                        </div>
+
+                        <!-- Options Radio Group -->
+                        <div style="display: flex; flex-direction: column; gap: 14px;">
+                            
+                            <!-- Option A: Helping Therapist in Registered Slot (Only if shortage failure) -->
+                            <div id="optionHelpingTherapistContainer" style="border: 1px solid #cbd5e1; border-radius: 6px; padding: 12px 14px; cursor: pointer;">
+                                <label style="display: flex; align-items: flex-start; gap: 10px; cursor: pointer; margin: 0;">
+                                    <input type="radio" name="reschedule_choice" id="choice_helping" value="helping" style="margin-top: 3px;">
+                                    <div>
+                                        <div style="font-weight: 600; font-size: 14px; color: #0f172a;">Use Helping Therapist in Registered Slot (<span id="registeredSlotLabel">6:30 AM</span>)</div>
+                                        <div style="font-size: 12px; color: #64748b; margin-top: 2px;">
+                                            Book treatment in already registered time slot with the help of a Helping Therapist.
+                                        </div>
+                                        <div id="helpingNotAvailableMsg" style="display: none; color: #dc2626; font-size: 12px; margin-top: 4px; font-weight: 600;">
+                                            Helping therapist not available in registered slot
+                                        </div>
+                                    </div>
+                                </label>
+                            </div>
+
+                            <!-- Option B: Select Available Time Slot -->
+                            <div id="optionAvailableSlotContainer" style="border: 1px solid #cbd5e1; border-radius: 6px; padding: 12px 14px; cursor: pointer;">
+                                <label style="display: flex; align-items: flex-start; gap: 10px; cursor: pointer; margin: 0; width: 100%;">
+                                    <input type="radio" name="reschedule_choice" id="choice_available_slot" value="slot" style="margin-top: 3px;">
+                                    <div style="width: 100%;">
+                                        <div style="font-weight: 600; font-size: 14px; color: #0f172a;">Select Available Time Slot</div>
+                                        <div style="font-size: 12px; color: #64748b; margin-top: 2px; margin-bottom: 8px;">
+                                            Choose from slots where both room and required therapists are available.
+                                        </div>
+                                        
+                                        <!-- Available Slots Dropdown -->
+                                        <select id="availableSlotsDropdown" class="form-control" style="width: 100%; font-size: 13px; padding: 6px 10px; border-radius: 4px; border: 1px solid #cbd5e1; margin-top: 4px;">
+                                            <option value="">-- Select Time Slot --</option>
+                                        </select>
+                                        <div id="noAvailableSlotsMsg" style="display: none; color: #ef4444; font-size: 12px; margin-top: 6px; font-weight: 500;">
+                                            No alternate time slots found with both room and therapists available.
+                                        </div>
+                                    </div>
+                                </label>
+                            </div>
+
+                        </div>
+                    </div>
+                </div>
+
+                <div class="modal-footer" style="padding: 14px 20px; display: flex; justify-content: flex-end; gap: 10px;">
+                    <button type="button" class="btn btn-outline" onclick="closeSingleRescheduleModal()">Cancel</button>
+                    <button type="button" class="btn btn-primary" id="confirmSingleRescheduleBtn" onclick="submitSingleReschedule()">Confirm Reschedule</button>
                 </div>
             </div>
         </div>
