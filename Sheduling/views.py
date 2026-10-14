@@ -1203,6 +1203,23 @@ def therapy_entry(request):
                     # Only process dates >= first_editable_date (after 5:30 AM in schedule TZ, today and past are locked).
                     start_date_for_realloc = allocation.from_date if allocation.from_date >= first_editable_date else first_editable_date
 
+                    if slot_changed:
+                        try:
+                            from .models import AllocationChange
+                            AllocationChange.objects.create(
+                                allocation=allocation,
+                                changed_by=request.user if request.user.is_authenticated else None,
+                                change_type='change_slot',
+                                diff={
+                                    'old_slot_id': old_slot_id,
+                                    'new_slot_id': getattr(new_timeslot, 'id', None),
+                                    'effective_from_date': start_date_for_realloc.isoformat()
+                                },
+                                reason='Slot updated in Add Therapy'
+                            )
+                        except Exception as ac_err:
+                            print(f"Error logging AllocationChange in update_therapy: {ac_err}")
+
                     for d in daterange(start_date_for_realloc, allocation.to_date):
                         # Only run allocation for dates where FinalScheduleRun exists.
                         # If final schedule has not run for this date, keep as draft (no room/therapist allocation).
@@ -5201,6 +5218,109 @@ def schedule_therapies_api(request):
         return JsonResponse({'error': str(e)}, status=500)
 
 
+def _get_original_allocation_slot_and_room(allocation, for_date=None):
+    """
+    Returns (original_slot_obj, original_room_obj) that was originally specified
+    for this allocation, taking into account the specific booking date if slot/room
+    was modified on a later date via Add Therapy / update_therapy.
+    """
+    from .models import AllocationChange, AuditLog
+    from masters.models import SlotMaster
+    from django.utils.dateparse import parse_date
+    import re
+
+    # 1. Check if AllocationChange has records for slot changes
+    if for_date:
+        changes = AllocationChange.objects.filter(
+            allocation=allocation,
+            change_type='change_slot'
+        ).order_by('created_at')
+        for ch in changes:
+            diff = ch.diff or {}
+            eff_date_str = diff.get('effective_from_date')
+            if eff_date_str:
+                try:
+                    eff_date = parse_date(eff_date_str)
+                    if eff_date and for_date < eff_date:
+                        # This slot change took effect AFTER for_date!
+                        old_slot_id = diff.get('old_slot_id')
+                        old_slot = SlotMaster.objects.filter(id=old_slot_id).first() if old_slot_id else None
+                        return old_slot, allocation.room
+                except Exception:
+                    pass
+
+    # 2. Check AuditLog allocate_therapy log to see what was set when created
+    try:
+        log = AuditLog.objects.filter(obj_id=str(allocation.id), action='allocate_therapy').first()
+        if log and isinstance(log.data, dict):
+            raw_ts = log.data.get('timeslot')
+            if raw_ts is None:
+                # Allocation was explicitly created WITHOUT a timeslot!
+                return None, allocation.room
+            
+            # If raw_ts is a string like 'Slot 3: 10:00 AM'
+            if isinstance(raw_ts, str):
+                lock_upto_date, first_editable_date = _schedule_lock_upto_date()
+                if for_date and for_date < first_editable_date and allocation.updated_at.date() > for_date:
+                    m = re.search(r'Slot\s+(\d+)', raw_ts)
+                    if m:
+                        orig_slot_num = int(m.group(1))
+                        orig_slot = SlotMaster.objects.filter(slot_number=orig_slot_num).first()
+                        if orig_slot:
+                            return orig_slot, allocation.room
+    except Exception:
+        pass
+
+    # 3. Default to current allocation.timeslot, allocation.room
+    return allocation.timeslot, allocation.room
+
+
+def _is_booking_rescheduled(booking):
+    """
+    Returns True if this booking represents a true reschedule, False otherwise.
+    """
+    if not booking or booking.status not in ('scheduled', 'allocated', 'completed'):
+        return False
+
+    # 1. Check BookingRescheduleHistory first (primary source of truth)
+    try:
+        history_records = booking.reschedule_history.all()
+        if history_records.exists():
+            for rec in history_records:
+                # A slot change is only a reschedule if an existing slot was changed
+                if rec.before_slot_id and rec.after_slot_id and rec.before_slot_id != rec.after_slot_id:
+                    return True
+                if rec.before_room_id and rec.after_room_id and rec.before_room_id != rec.after_room_id:
+                    return True
+                # If therapists changed (e.g. helping therapist was assigned)
+                if rec.before_therapists and rec.after_therapists and rec.before_therapists != rec.after_therapists:
+                    return True
+            return False
+    except Exception:
+        pass
+
+    # 2. Fallback check (when no history record exists):
+    try:
+        orig_slot, orig_room = _get_original_allocation_slot_and_room(booking.allocation, for_date=booking.date)
+        
+        # If the allocation was originally created without a timeslot,
+        # selecting or allocating a timeslot is NOT a reschedule.
+        if orig_slot is None:
+            return False
+
+        # Compare slot
+        if orig_slot and booking.timeslot_id and orig_slot.id != booking.timeslot_id:
+            return True
+
+        # Compare room
+        if orig_room and booking.room_id and orig_room.id != booking.room_id:
+            return True
+    except Exception as e:
+        print(f"Error checking is_rescheduled: {e}")
+
+    return False
+
+
 @csrf_exempt
 @therapy_data_api_access
 def get_therapy_data_api(request):
@@ -5505,15 +5625,8 @@ def get_therapy_data_api(request):
                         is_nurse_treatment_flag = False
                     
 
-                    # Determine if rescheduled (booking differs from allocation preferences)
-                    is_rescheduled = False
-                    if booking.status in ('scheduled', 'allocated', 'completed'):
-                        # Check timeslot change
-                        if booking.allocation.timeslot_id and booking.timeslot_id and booking.allocation.timeslot_id != booking.timeslot_id:
-                            is_rescheduled = True
-                        # Check room change
-                        elif booking.allocation.room_id and booking.room_id and booking.allocation.room_id != booking.room_id:
-                            is_rescheduled = True
+                    # Determine if rescheduled
+                    is_rescheduled = _is_booking_rescheduled(booking)
 
                     item = {
                         'id': booking.allocation.id,
@@ -6048,6 +6161,20 @@ def reschedule_therapy_api(request):
             # Check if there's an existing booking for this date
             booking = Booking.objects.filter(allocation=allocation, date=target_date).first()
 
+            # Capture before state for reschedule history
+            before_date = target_date
+            before_slot = getattr(booking, 'timeslot', None)
+            before_room = getattr(booking, 'room', None)
+            before_therapists = []
+            if booking and booking.pk:
+                before_therapists = [
+                    {
+                        'code': a.therapist.therapist_code,
+                        'name': a.therapist.therapist_name or a.therapist.therapist_code
+                    }
+                    for a in booking.assignments.filter(status='assigned').select_related('therapist')
+                ]
+
             target_slot_obj = None
             force_slot_only = False
 
@@ -6063,9 +6190,6 @@ def reschedule_therapy_api(request):
                     reg_slot = getattr(booking, 'timeslot', None) or getattr(allocation, 'timeslot', None)
                 if reg_slot:
                     target_slot_obj = reg_slot
-                    if allocation.timeslot != reg_slot:
-                        allocation.timeslot = reg_slot
-                        allocation.save(update_fields=['timeslot'])
                     if booking:
                         booking.room = None
                         booking.timeslot = reg_slot
@@ -6076,9 +6200,6 @@ def reschedule_therapy_api(request):
                 # User chose Option 2: specific available slot from dropdown
                 try:
                     target_slot_obj = SlotMaster.objects.get(id=target_slot_id)
-                    if allocation.timeslot != target_slot_obj:
-                        allocation.timeslot = target_slot_obj
-                        allocation.save(update_fields=['timeslot'])
                     if booking:
                         booking.room = None
                         booking.timeslot = target_slot_obj
@@ -6154,12 +6275,45 @@ def reschedule_therapy_api(request):
                     if success_tasks:
                         allocation.status = 'allocated'
                         allocation.save(update_fields=['status'])
+
+                        # Record BookingRescheduleHistory
+                        try:
+                            from .models import BookingRescheduleHistory
+                            booking.refresh_from_db()
+                            after_therapists = [
+                                {
+                                    'code': a.therapist.therapist_code,
+                                    'name': a.therapist.therapist_name or a.therapist.therapist_code
+                                }
+                                for a in booking.assignments.filter(status='assigned').select_related('therapist')
+                            ]
+                            resched_reason = 'Single reschedule'
+                            if allow_helping_fallback:
+                                resched_reason += ' (helping therapist allowed)'
+
+                            BookingRescheduleHistory.objects.create(
+                                booking=booking,
+                                allocation=allocation,
+                                before_date=before_date,
+                                before_slot=before_slot,
+                                before_room=before_room,
+                                before_therapists=before_therapists,
+                                after_date=booking.date,
+                                after_slot=booking.timeslot,
+                                after_room=booking.room,
+                                after_therapists=after_therapists,
+                                rescheduled_by=request.user if request.user.is_authenticated else None,
+                                reason=resched_reason
+                            )
+                        except Exception as hist_err:
+                            print(f"[ERROR BookingRescheduleHistory] {hist_err}")
+
                         return JsonResponse({
                             'success': True,
-                                        'message': 'Therapy successfully rescheduled',
-                                        'tasks': success_tasks,
-                                        'failed_tasks': failed_tasks
-                                    })
+                            'message': 'Therapy successfully rescheduled',
+                            'tasks': success_tasks,
+                            'failed_tasks': failed_tasks
+                        })
                     else:
                         # All tasks failed
                         allocation.status = 'failed'
@@ -6294,6 +6448,19 @@ def reschedule_all_failed_api(request):
 
                 # Ensure booking exists for this date
                 booking = Booking.objects.filter(allocation=allocation, date=filter_date).first()
+                before_date = filter_date
+                before_slot = getattr(booking, 'timeslot', None) or allocation.timeslot
+                before_room = getattr(booking, 'room', None) or allocation.room
+                before_therapists = []
+                if booking and booking.pk:
+                    before_therapists = [
+                        {
+                            'code': a.therapist.therapist_code,
+                            'name': a.therapist.therapist_name or a.therapist.therapist_code
+                        }
+                        for a in booking.assignments.filter(status='assigned').select_related('therapist')
+                    ]
+
                 if not booking:
                     # Create booking if it doesn't exist
                     booking = Booking.objects.create(
@@ -6341,6 +6508,44 @@ def reschedule_all_failed_api(request):
                             Booking.objects.filter(allocation=allocation, date=filter_date).update(status='scheduled')
                         except Exception:
                             pass
+
+                        # Record BookingRescheduleHistory
+                        try:
+                            from .models import BookingRescheduleHistory
+                            if booking:
+                                booking.refresh_from_db()
+                            else:
+                                booking = Booking.objects.filter(allocation=allocation, date=filter_date).first()
+
+                            if booking:
+                                after_therapists = [
+                                    {
+                                        'code': a.therapist.therapist_code,
+                                        'name': a.therapist.therapist_name or a.therapist.therapist_code
+                                    }
+                                    for a in booking.assignments.filter(status='assigned').select_related('therapist')
+                                ]
+                                resched_reason = f'Reschedule All Failed on {filter_date}'
+                                if allow_helping:
+                                    resched_reason += ' (helping therapist allowed)'
+
+                                BookingRescheduleHistory.objects.create(
+                                    booking=booking,
+                                    allocation=allocation,
+                                    before_date=before_date,
+                                    before_slot=before_slot,
+                                    before_room=before_room,
+                                    before_therapists=before_therapists,
+                                    after_date=booking.date,
+                                    after_slot=booking.timeslot,
+                                    after_room=booking.room,
+                                    after_therapists=after_therapists,
+                                    rescheduled_by=request.user if request.user.is_authenticated else None,
+                                    reason=resched_reason
+                                )
+                        except Exception as hist_err:
+                            print(f"[ERROR BookingRescheduleHistory in reschedule_all_failed] {hist_err}")
+
                         success_count += 1
                         results.append({
                             'allocation_id': allocation.id,
@@ -6717,36 +6922,53 @@ def therapy_change_log_api(request):
                 is_rescheduled = False
                 changes = []
                 
+                orig_slot, orig_room = _get_original_allocation_slot_and_room(allocation, for_date=booking.date)
+
                 # Compare slot
-                if allocation.timeslot_id and booking.timeslot_id and allocation.timeslot_id != booking.timeslot_id:
+                if orig_slot is None:
+                    # Created without a timeslot - not a reschedule
+                    changes.append({
+                        'field': 'Slot / Time',
+                        'before': '—',
+                        'after': booking.timeslot.slot_time.strftime('%I:%M %p') if booking.timeslot else '—',
+                        'changed': False
+                    })
+                elif booking.timeslot and orig_slot.id != booking.timeslot_id:
                     is_rescheduled = True
                     changes.append({
                         'field': 'Slot / Time',
-                        'before': allocation.timeslot.slot_time.strftime('%I:%M %p') if allocation.timeslot else '—',
-                        'after': booking.timeslot.slot_time.strftime('%I:%M %p') if booking.timeslot else '—',
+                        'before': orig_slot.slot_time.strftime('%I:%M %p'),
+                        'after': booking.timeslot.slot_time.strftime('%I:%M %p'),
                         'changed': True
                     })
-                elif allocation.timeslot and booking.timeslot:
+                elif orig_slot and booking.timeslot:
                     changes.append({
                         'field': 'Slot / Time',
-                        'before': allocation.timeslot.slot_time.strftime('%I:%M %p'),
+                        'before': orig_slot.slot_time.strftime('%I:%M %p'),
                         'after': booking.timeslot.slot_time.strftime('%I:%M %p'),
                         'changed': False
                     })
                 
                 # Compare room
-                if allocation.room_id and booking.room_id and allocation.room_id != booking.room_id:
+                if orig_room is None:
+                    changes.append({
+                        'field': 'Room',
+                        'before': '—',
+                        'after': booking.room.room_no if booking.room else '—',
+                        'changed': False
+                    })
+                elif orig_room and booking.room and orig_room.id != booking.room_id:
                     is_rescheduled = True
                     changes.append({
                         'field': 'Room',
-                        'before': allocation.room.room_no if allocation.room else '—',
-                        'after': booking.room.room_no if booking.room else '—',
+                        'before': orig_room.room_no,
+                        'after': booking.room.room_no,
                         'changed': True
                     })
-                elif allocation.room and booking.room:
+                elif orig_room and booking.room:
                     changes.append({
                         'field': 'Room',
-                        'before': allocation.room.room_no,
+                        'before': orig_room.room_no,
                         'after': booking.room.room_no,
                         'changed': False
                     })
@@ -6772,7 +6994,7 @@ def therapy_change_log_api(request):
                     for a in therapist_assignments
                 ]
                 
-                if is_rescheduled or changes:
+                if is_rescheduled or any(c.get('changed') for c in changes):
                     change_log.append({
                         'booking_id': booking.id,
                         'date': booking.date.strftime('%d/%m/%Y'),
@@ -6809,44 +7031,48 @@ def therapy_change_log_api(request):
             if record.before_slot or record.after_slot:
                 before_slot = record.before_slot.slot_time.strftime('%I:%M %p') if record.before_slot else '—'
                 after_slot = record.after_slot.slot_time.strftime('%I:%M %p') if record.after_slot else '—'
+                slot_changed = bool(record.before_slot_id and record.after_slot_id and record.before_slot_id != record.after_slot_id)
                 changes.append({
                     'field': 'Slot / Time',
                     'before': before_slot,
                     'after': after_slot,
-                    'changed': record.before_slot_id != record.after_slot_id
+                    'changed': slot_changed
                 })
             
             # Room change
             if record.before_room or record.after_room:
                 before_room = record.before_room.room_no if record.before_room else '—'
                 after_room = record.after_room.room_no if record.after_room else '—'
+                room_changed = bool(record.before_room_id and record.after_room_id and record.before_room_id != record.after_room_id)
                 changes.append({
                     'field': 'Room',
                     'before': before_room,
                     'after': after_room,
-                    'changed': record.before_room_id != record.after_room_id
+                    'changed': room_changed
                 })
             
             # Therapists change
             if record.before_therapists or record.after_therapists:
                 before_therapists_str = ', '.join([t.get('name', t.get('code', '')) for t in record.before_therapists]) if record.before_therapists else '—'
                 after_therapists_str = ', '.join([t.get('name', t.get('code', '')) for t in record.after_therapists]) if record.after_therapists else '—'
+                therapists_changed = bool(record.before_therapists and record.after_therapists and record.before_therapists != record.after_therapists)
                 changes.append({
                     'field': 'Therapist(s)',
                     'before': before_therapists_str,
                     'after': after_therapists_str,
-                    'changed': record.before_therapists != record.after_therapists
+                    'changed': therapists_changed
                 })
             
-            change_log.append({
-                'booking_id': record.booking_id,
-                'date': record.after_date.strftime('%d/%m/%Y') if record.after_date else '—',
-                'changes': changes,
-                'rescheduled_at': record.rescheduled_at.isoformat(),
-                'rescheduled_by': record.rescheduled_by.username if record.rescheduled_by else 'System',
-                'reason': record.reason,
-                'is_from_history': True
-            })
+            if any(c.get('changed') for c in changes):
+                change_log.append({
+                    'booking_id': record.booking_id,
+                    'date': record.after_date.strftime('%d/%m/%Y') if record.after_date else '—',
+                    'changes': changes,
+                    'rescheduled_at': record.rescheduled_at.isoformat(),
+                    'rescheduled_by': record.rescheduled_by.username if record.rescheduled_by else 'System',
+                    'reason': record.reason,
+                    'is_from_history': True
+                })
         
         return JsonResponse({
             'allocation_id': allocation.id,
