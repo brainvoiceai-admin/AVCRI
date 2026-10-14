@@ -261,25 +261,36 @@ def allocate_therapists(date, time_slot, therapy_requirements, last_therapists=N
     #  - emergency_leave_employee_codes: employee_code values present in EmergencyLeave covering date
     try:
         em_leaves_qs = EmergencyLeave.objects.filter(from_date__lte=date, to_date__gte=date)
-        emergency_leave_therapist_ids = set(em_leaves_qs.exclude(therapist__isnull=True).values_list('therapist_id', flat=True))
-        emergency_leave_employee_codes = set(em_leaves_qs.exclude(employee_code__isnull=True).values_list('employee_code', flat=True))
+        full_day_leaves = []
+        half_day_leaves = []
+        for el in em_leaves_qs:
+            if el.is_half_day and (not el.half_day_date or el.half_day_date == date):
+                half_day_leaves.append(el)
+            else:
+                full_day_leaves.append(el)
+        full_leave_therapist_ids = set(el.therapist_id for el in full_day_leaves if el.therapist_id)
+        full_leave_emp_codes = set(el.employee_code for el in full_day_leaves if el.employee_code)
     except Exception:
-        # If EmergencyLeave model or query fails, fall back to empty sets
-        emergency_leave_therapist_ids = set()
-        emergency_leave_employee_codes = set()
+        full_leave_therapist_ids = set()
+        full_leave_emp_codes = set()
+        half_day_leaves = []
 
     # Helper to decide if a therapist is on leave (recurring or emergency)
-    def therapist_on_leave(t: TherapistMaster):
+    def therapist_on_leave(t: TherapistMaster, slot=None):
+        target_slot = slot if slot is not None else time_slot
         # 1) recurring leave (weekday)
         if TherapistLeaveMaster.objects.filter(therapist=t, leave_day=day_of_week).exists():
             return True
-        # 2) emergency leave via FK
-        if getattr(t, 'id', None) in emergency_leave_therapist_ids:
-            return True
-        # 3) emergency leave via employee_code mapping (if TherapistMaster has employee_code)
+        t_id = getattr(t, 'id', None)
         emp_code = getattr(t, 'employee_code', None)
-        if emp_code and emp_code in emergency_leave_employee_codes:
+        if t_id in full_leave_therapist_ids:
             return True
+        if emp_code and emp_code in full_leave_emp_codes:
+            return True
+        for el in half_day_leaves:
+            if (t_id and el.therapist_id == t_id) or (emp_code and el.employee_code == emp_code):
+                if el.is_slot_on_leave(date, target_slot):
+                    return True
         return False
 
     total_required = sum(v for v in grade_map.values() if v > 0)

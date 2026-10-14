@@ -962,20 +962,34 @@ def allocate_therapists(
     # Preload emergency leaves overlapping the date
     try:
         em_leaves_qs = EmergencyLeave.objects.filter(from_date__lte=date, to_date__gte=date)
-        emergency_leave_therapist_ids = set(em_leaves_qs.exclude(therapist__isnull=True).values_list('therapist_id', flat=True))
-        emergency_leave_employee_codes = set(em_leaves_qs.exclude(employee_code__isnull=True).values_list('employee_code', flat=True))
+        full_day_leaves = []
+        half_day_leaves = []
+        for el in em_leaves_qs:
+            if el.is_half_day and (not el.half_day_date or el.half_day_date == date):
+                half_day_leaves.append(el)
+            else:
+                full_day_leaves.append(el)
+        full_leave_therapist_ids = set(el.therapist_id for el in full_day_leaves if el.therapist_id)
+        full_leave_emp_codes = set(el.employee_code for el in full_day_leaves if el.employee_code)
     except Exception:
-        emergency_leave_therapist_ids = set()
-        emergency_leave_employee_codes = set()
+        full_leave_therapist_ids = set()
+        full_leave_emp_codes = set()
+        half_day_leaves = []
 
-    def therapist_on_leave(t: TherapistMaster):
+    def therapist_on_leave(t: TherapistMaster, slot=None):
+        target_slot = slot if slot is not None else time_slot
         if TherapistLeaveMaster.objects.filter(therapist=t, leave_day=day_of_week).exists():
             return True
-        if getattr(t, 'id', None) in emergency_leave_therapist_ids:
-            return True
+        t_id = getattr(t, 'id', None)
         emp_code = getattr(t, 'employee_code', None)
-        if emp_code and emp_code in emergency_leave_employee_codes:
+        if t_id in full_leave_therapist_ids:
             return True
+        if emp_code and emp_code in full_leave_emp_codes:
+            return True
+        for el in half_day_leaves:
+            if (t_id and el.therapist_id == t_id) or (emp_code and el.employee_code == emp_code):
+                if el.is_slot_on_leave(date, target_slot):
+                    return True
         return False
 
     def get_therapist_gender(t):
@@ -1465,12 +1479,8 @@ def assign_continuity_therapists_pass1(booking, allocation, target_date, locked_
                         is_on_leave = False
                         if TherapistLeaveMaster.objects.filter(therapist=therapist, leave_day=day_of_week).exists():
                             is_on_leave = True
-                        if not is_on_leave and EmergencyLeave.objects.filter(
-                            from_date__lte=target_date,
-                            to_date__gte=target_date
-                        ).filter(
-                            Q(therapist=therapist) | Q(employee_code=therapist.employee_code)
-                        ).exists():
+                        from masters.models import is_therapist_on_emergency_leave
+                        if not is_on_leave and is_therapist_on_emergency_leave(therapist, target_date, slot_master):
                             is_on_leave = True
                         if not is_on_leave and TherapistBooking.objects.filter(
                             therapist=therapist,
@@ -1560,20 +1570,31 @@ def assign_continuity_therapists_pass1(booking, allocation, target_date, locked_
     try:
         from masters.models import EmergencyLeave
         em_leaves_qs = EmergencyLeave.objects.filter(from_date__lte=target_date, to_date__gte=target_date)
-        emergency_leave_therapist_ids = set(em_leaves_qs.exclude(therapist__isnull=True).values_list('therapist_id', flat=True))
-        emergency_leave_employee_codes = set(em_leaves_qs.exclude(employee_code__isnull=True).values_list('employee_code', flat=True))
+        full_day_leaves = []
+        half_day_leaves = []
+        for el in em_leaves_qs:
+            if el.is_half_day and (not el.half_day_date or el.half_day_date == target_date):
+                half_day_leaves.append(el)
+            else:
+                full_day_leaves.append(el)
+        full_leave_therapist_ids = set(el.therapist_id for el in full_day_leaves if el.therapist_id)
+        full_leave_emp_codes = set(el.employee_code for el in full_day_leaves if el.employee_code)
     except Exception:
-        emergency_leave_therapist_ids = set()
-        emergency_leave_employee_codes = set()
+        full_leave_therapist_ids = set()
+        full_leave_emp_codes = set()
+        half_day_leaves = []
     
     def therapist_on_leave(t):
         if TherapistLeaveMaster.objects.filter(therapist=t, leave_day=day_of_week).exists():
             return True
-        if getattr(t, 'id', None) in emergency_leave_therapist_ids:
-            return True
+        t_id = getattr(t, 'id', None)
         emp_code = getattr(t, 'employee_code', None)
-        if emp_code and emp_code in emergency_leave_employee_codes:
+        if t_id in full_leave_therapist_ids or (emp_code and emp_code in full_leave_emp_codes):
             return True
+        for el in half_day_leaves:
+            if (t_id and el.therapist_id == t_id) or (emp_code and el.employee_code == emp_code):
+                if el.is_slot_on_leave(target_date, slot_master):
+                    return True
         return False
     
     def get_therapist_gender(t):
@@ -2289,9 +2310,8 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                             on_leave = False
                             if TherapistLeaveMaster.objects.filter(therapist=th, leave_day=day_w).exists():
                                 on_leave = True
-                            if not on_leave and EmergencyLeave.objects.filter(
-                                from_date__lte=target_date, to_date__gte=target_date
-                            ).filter(Q(therapist=th) | Q(employee_code=th.employee_code)).exists():
+                            from masters.models import is_therapist_on_emergency_leave
+                            if not on_leave and is_therapist_on_emergency_leave(th, target_date, allocate_slot):
                                 on_leave = True
                             if not on_leave and TherapistBooking.objects.filter(
                                 therapist=th, date=target_date, time_slot=allocate_slot, status='BOOKED'
@@ -3005,13 +3025,8 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                                 continue
                             if TherapistLeaveMaster.objects.filter(therapist=alt_senior, leave_day=day_of_week).exists():
                                 continue
-                            from masters.models import EmergencyLeave
-                            from django.db.models import Q
-                            if EmergencyLeave.objects.filter(
-                                from_date__lte=target_date, to_date__gte=target_date
-                            ).filter(
-                                Q(therapist=alt_senior) | Q(employee_code=alt_senior.employee_code)
-                            ).exists():
+                            from masters.models import is_therapist_on_emergency_leave
+                            if is_therapist_on_emergency_leave(alt_senior, target_date, allocate_slot):
                                 continue
                             
                             # Found alternative senior - replace current senior and use this one for bathing

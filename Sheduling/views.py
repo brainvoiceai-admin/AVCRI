@@ -5891,7 +5891,8 @@ def reschedule_options_api(request):
             for ht in ht_qs:
                 if TherapistLeaveMaster.objects.filter(therapist=ht, leave_day=day_of_week).exists():
                     continue
-                if EmergencyLeave.objects.filter(from_date__lte=target_date, to_date__gte=target_date).filter(Q(therapist=ht) | Q(employee_code=ht.employee_code)).exists():
+                from masters.models import is_therapist_on_emergency_leave
+                if is_therapist_on_emergency_leave(ht, target_date, canonical_reg_slot):
                     continue
                 if TherapistBooking.objects.filter(therapist=ht, date=target_date, time_slot=canonical_reg_slot, status='BOOKED').exists():
                     continue
