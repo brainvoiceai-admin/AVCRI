@@ -54,7 +54,7 @@
             <div class="card-body">
                 <form method="get" action="{% url 'therapist_master_manage' %}" id="filterForm">
                     <div class="row">
-                        <div class="col-md-4">
+                        <div class="col-md-3">
                             <input type="text" class="form-control" name="search" id="searchInput"
                                 placeholder="Search therapists..." value="{{ search }}">
                         </div>
@@ -67,12 +67,19 @@
                                 <option value="helping" {% if status_filter == 'helping' %}selected{% endif %}>Helping Therapists</option>
                             </select>
                         </div>
-                        <div class="col-md-3">
+                        <div class="col-md-2">
                             <select class="form-select" name="grade" id="gradeFilter">
                                 <option value="">All Grades</option>
                                 {% for grade in grades %}
                                 <option value="{{ grade.id }}" {% if grade_filter == grade.id|stringformat:"s" %}selected{% endif %}>{{ grade.name }}</option>
                                 {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-md-2">
+                            <select class="form-select" name="gender" id="genderFilter">
+                                <option value="">All Genders</option>
+                                <option value="Male" {% if gender_filter|lower == 'male' %}selected{% endif %}>Male</option>
+                                <option value="Female" {% if gender_filter|lower == 'female' %}selected{% endif %}>Female</option>
                             </select>
                         </div>
                         <div class="col-md-2">
@@ -236,12 +243,12 @@
                 {% if page_obj.has_previous %}
                 <li class="page-item">
                     <a class="page-link"
-                        href="?page=1{% if search %}&search={{ search }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if grade_filter %}&grade={{ grade_filter }}{% endif %}">&laquo;
+                        href="?page=1{% if search %}&search={{ search }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if grade_filter %}&grade={{ grade_filter }}{% endif %}{% if gender_filter %}&gender={{ gender_filter }}{% endif %}">&laquo;
                         First</a>
                 </li>
                 <li class="page-item">
                     <a class="page-link"
-                        href="?page={{ page_obj.previous_page_number }}{% if search %}&search={{ search }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if grade_filter %}&grade={{ grade_filter }}{% endif %}">Previous</a>
+                        href="?page={{ page_obj.previous_page_number }}{% if search %}&search={{ search }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if grade_filter %}&grade={{ grade_filter }}{% endif %}{% if gender_filter %}&gender={{ gender_filter }}{% endif %}">Previous</a>
                 </li>
                 {% endif %}
 
@@ -254,11 +261,11 @@
                 {% if page_obj.has_next %}
                 <li class="page-item">
                     <a class="page-link"
-                        href="?page={{ page_obj.next_page_number }}{% if search %}&search={{ search }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if grade_filter %}&grade={{ grade_filter }}{% endif %}">Next</a>
+                        href="?page={{ page_obj.next_page_number }}{% if search %}&search={{ search }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if grade_filter %}&grade={{ grade_filter }}{% endif %}{% if gender_filter %}&gender={{ gender_filter }}{% endif %}">Next</a>
                 </li>
                 <li class="page-item">
                     <a class="page-link"
-                        href="?page={{ page_obj.paginator.num_pages }}{% if search %}&search={{ search }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if grade_filter %}&grade={{ grade_filter }}{% endif %}">Last
+                        href="?page={{ page_obj.paginator.num_pages }}{% if search %}&search={{ search }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if grade_filter %}&grade={{ grade_filter }}{% endif %}{% if gender_filter %}&gender={{ gender_filter }}{% endif %}">Last
                         &raquo;</a>
                 </li>
                 {% endif %}

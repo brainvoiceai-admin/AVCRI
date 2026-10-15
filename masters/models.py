@@ -536,6 +536,23 @@ class EmergencyLeave(models.Model):
     from_date = models.DateField()
     to_date = models.DateField()
 
+    # Half day leave details from HRMS
+    is_half_day = models.BooleanField(default=False, verbose_name="Is Half Day")
+    half_day_date = models.DateField(null=True, blank=True, verbose_name="Half Day Date")
+    half_day_session = models.CharField(
+        max_length=20,
+        null=True,
+        blank=True,
+        choices=[
+            ("Forenoon", "Forenoon"),
+            ("Afternoon", "Afternoon"),
+            ("Both", "Both"),
+        ],
+        verbose_name="Half Day Session",
+    )
+    custom_forenoon = models.BooleanField(default=False, verbose_name="Forenoon")
+    custom_afternoon = models.BooleanField(default=False, verbose_name="Afternoon")
+
     # meta / status
     leave_type = models.CharField(max_length=100, blank=True, null=True)
     status = models.CharField(max_length=50, default="new", help_text="eg: new, processed, resolved")
@@ -550,4 +567,156 @@ class EmergencyLeave(models.Model):
         ]
 
     def __str__(self):
-        return f"{self.employee_code} ({self.from_date} → {self.to_date})"
+        hd_str = f" [Half Day: {self.half_day_session or 'Yes'}]" if self.is_half_day else ""
+        return f"{self.employee_code} ({self.from_date} → {self.to_date}){hd_str}"
+
+    @staticmethod
+    def is_forenoon_slot(slot) -> bool:
+        """
+        Determine if the given slot is in the Forenoon (morning) session.
+        AVCRI slots:
+          Forenoon (slots 1-4): 06:30, 08:30, 10:00, 11:30 (< 13:00)
+          Afternoon (slots 5-7): 14:30, 16:00, 17:30 (>= 13:00)
+        """
+        import datetime
+        if slot is None:
+            return False
+
+        # If slot has slot_time attribute (SlotMaster instance)
+        if hasattr(slot, "slot_time") and slot.slot_time:
+            return slot.slot_time < datetime.time(13, 0)
+
+        # If slot has slot_number attribute
+        if hasattr(slot, "slot_number") and slot.slot_number:
+            return int(slot.slot_number) <= 4
+
+        # If slot is a datetime.time object
+        if isinstance(slot, datetime.time):
+            return slot < datetime.time(13, 0)
+
+        # If slot is an integer
+        if isinstance(slot, int):
+            if 1 <= slot <= 4:
+                return True
+            if 5 <= slot <= 7:
+                return False
+            # If it's a SlotMaster PK (e.g. 6..9 vs 10..12), check from SlotMaster
+            try:
+                sm = SlotMaster.objects.filter(pk=slot).first()
+                if sm and sm.slot_time:
+                    return sm.slot_time < datetime.time(13, 0)
+            except Exception:
+                pass
+            return slot <= 4
+
+        # If slot is a string
+        if isinstance(slot, str):
+            s = slot.strip().lower()
+            # Check slot number string like "1", "slot 1"
+            import re
+            m = re.search(r"slot\s*(\d+)", s)
+            if m:
+                return int(m.group(1)) <= 4
+            if s.isdigit():
+                return int(s) <= 4
+            # Try parsing time e.g. "06:30", "14:30"
+            for fmt in ("%H:%M:%S", "%H:%M", "%I:%M %p", "%I:%M%p"):
+                try:
+                    t = datetime.datetime.strptime(s, fmt).time()
+                    return t < datetime.time(13, 0)
+                except Exception:
+                    continue
+
+        return False
+
+    def is_slot_on_leave(self, target_date, slot=None) -> bool:
+        """
+        Check if this leave record makes the therapist unavailable for a given target_date and slot.
+        - target_date: date object or ISO string
+        - slot: SlotMaster, int, time, str, or None
+        Returns True if therapist is ON LEAVE (unavailable).
+        Returns False if therapist is AVAILABLE.
+        """
+        import datetime
+        if isinstance(target_date, str):
+            try:
+                target_date = datetime.datetime.strptime(target_date[:10], "%Y-%m-%d").date()
+            except Exception:
+                return True
+
+        if not (self.from_date <= target_date <= self.to_date):
+            return False
+
+        # If not a half-day leave, entire day is on leave
+        if not self.is_half_day:
+            return True
+
+        # If multi-day leave and half_day_date is specified, only that day is half-day
+        if self.half_day_date and target_date != self.half_day_date:
+            return True  # Other days are full leave
+
+        # If no slot specified, caller is checking if therapist has any leave on target_date
+        if slot is None:
+            return True
+
+        is_fn = EmergencyLeave.is_forenoon_slot(slot)
+
+        # Forenoon leave: unavailable during morning/forenoon slots, available in afternoon
+        if self.custom_forenoon or self.half_day_session == "Forenoon":
+            return is_fn
+
+        # Afternoon leave: available during morning/forenoon slots, unavailable in afternoon
+        if self.custom_afternoon or self.half_day_session == "Afternoon":
+            return not is_fn
+
+        # Both sessions marked
+        if self.half_day_session == "Both":
+            return True
+
+        # Fallback for unspecified half-day: default to afternoon leave (most common)
+        return not is_fn
+
+
+def is_therapist_on_emergency_leave(therapist, target_date, slot=None) -> bool:
+    """
+    Module helper to check if a therapist is on emergency leave on target_date for slot.
+    Returns True if on leave (unavailable).
+    Returns False if available.
+    """
+    if not therapist or not target_date:
+        return False
+
+    import datetime
+    from django.db.models import Q
+
+    if isinstance(target_date, str):
+        try:
+            target_date = datetime.datetime.strptime(target_date[:10], "%Y-%m-%d").date()
+        except Exception:
+            return False
+
+    emp_code = getattr(therapist, "employee_code", None)
+    th_pk = getattr(therapist, "pk", None) or getattr(therapist, "id", None)
+
+    q_filter = Q()
+    if th_pk:
+        q_filter |= Q(therapist_id=th_pk)
+    if emp_code:
+        q_filter |= Q(employee_code=str(emp_code).strip())
+
+    if not q_filter:
+        return False
+
+    leaves = EmergencyLeave.objects.filter(
+        from_date__lte=target_date,
+        to_date__gte=target_date,
+    ).filter(q_filter)
+
+    if not leaves.exists():
+        return False
+
+    for el in leaves:
+        if el.is_slot_on_leave(target_date, slot):
+            return True
+
+    return False

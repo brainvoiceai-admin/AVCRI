@@ -121,8 +121,20 @@ def fetch_leaves_for_date(target_date: str, test_token: str | None = None) -> li
         ["from_date", "<=", target_date],
         ["to_date", ">=", target_date],
     ]
+    leave_fields = [
+        "name",
+        "employee",
+        "from_date",
+        "to_date",
+        "leave_type",
+        "half_day",
+        "half_day_date",
+        "custom_forenoon",
+        "custom_afternoon",
+        "total_leave_days",
+    ]
     params = {
-        "fields": '["name","employee","from_date","to_date","leave_type"]',
+        "fields": json.dumps(leave_fields),
         "filters": json.dumps(filters),
     }
     url = HRMS_BASE_URL.rstrip("/") + HRMS_LEAVE_PATH
@@ -178,6 +190,31 @@ def upsert_emergency_leave_record(rec: dict):
     to_date = _parse_date_safe(rec.get("to_date") or rec.get("to"))
     leave_type = rec.get("leave_type")
 
+    # Extract half-day leave details
+    half_day_val = rec.get("half_day")
+    total_leave_days = rec.get("total_leave_days")
+    try:
+        total_leave_days = float(total_leave_days) if total_leave_days is not None else 0.0
+    except Exception:
+        total_leave_days = 0.0
+
+    is_half_day = bool(half_day_val in (1, "1", True) or total_leave_days == 0.5)
+    half_day_date = _parse_date_safe(rec.get("half_day_date")) or (from_date if is_half_day else None)
+    custom_forenoon = bool(rec.get("custom_forenoon") in (1, "1", True))
+    custom_afternoon = bool(rec.get("custom_afternoon") in (1, "1", True))
+
+    half_day_session = None
+    if is_half_day:
+        if custom_forenoon and not custom_afternoon:
+            half_day_session = "Forenoon"
+        elif custom_afternoon and not custom_forenoon:
+            half_day_session = "Afternoon"
+        elif custom_forenoon and custom_afternoon:
+            half_day_session = "Both"
+        else:
+            # Default when session is unspecified on half-day leave (most common in HRMS)
+            half_day_session = "Afternoon"
+
     if (not employee_code) or not from_date or not to_date:
         if not leave_id:
             return None, False
@@ -186,6 +223,11 @@ def upsert_emergency_leave_record(rec: dict):
             "from_date": from_date or date.today(),
             "to_date": to_date or (from_date or date.today()),
             "leave_type": leave_type,
+            "is_half_day": is_half_day,
+            "half_day_date": half_day_date,
+            "half_day_session": half_day_session,
+            "custom_forenoon": custom_forenoon,
+            "custom_afternoon": custom_afternoon,
             "raw_payload": rec,
             "status": "partial",
         }
@@ -199,6 +241,11 @@ def upsert_emergency_leave_record(rec: dict):
         "from_date": from_date,
         "to_date": to_date,
         "leave_type": leave_type,
+        "is_half_day": is_half_day,
+        "half_day_date": half_day_date,
+        "half_day_session": half_day_session,
+        "custom_forenoon": custom_forenoon,
+        "custom_afternoon": custom_afternoon,
         "raw_payload": rec,
         "therapist": therapist,
         "status": "processed" if therapist else "unlinked",

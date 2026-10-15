@@ -1,22 +1,31 @@
-[RESCHEDULE] 🧹 Cleared existing bookings/assignments for allocation 3068 on 2026-03-11 to prevent ghost therapists
-[RESCHEDULE PASS1] Booking 21724: Found 0 continuity therapists from TherapistContinuityPlan
-[RESCHEDULE PASS1] Built booking_continuity_map with 0 continuity assignments
-[RESCHEDULE PASS2] booking_continuity_map has 1 entries (from PASS 1)
-[RESCHEDULE PASS2] Booking 21724: Using 0 continuity therapists from PASS 1: []
-[RESCHEDULE PASS2] Using 0 continuity therapists from PASS 1: []
-[RESCHEDULE PASS2] ========== CHECKING PATIENT HISTORY FOR BOOKING 21724 ==========
-[RESCHEDULE PASS2] Patient: BARINDRA PATEL (Reg No: 114042025)
-[RESCHEDULE PASS2] Target Date: 2026-03-11, Slot: 7
-[RESCHEDULE PASS2] ✗ Patient is NOT a repeated visitor - Skipping PatientHistory check
-[RESCHEDULE PASS2] ========== END PATIENT HISTORY CHECK (Not a repeated visitor) ==========
-[RESCHEDULE PASS2] ========== END PATIENT HISTORY CHECK ==========
-[DEBUG Allocation] Male Trainee required (needed=1). Substituting search grade to Junior Therapist.
-[RESCHEDULE FALLBACK] Normal allocation failed: found 0/3 therapists
-[RESCHEDULE FALLBACK] Attempting allocation with grade substitution (Senior/Super Senior can fill Junior/Trainee slots)
-[FALLBACK Grade Substitution] Assigned Super Senior Therapist THP1117 to fill Trainee Therapist requirement (substitution)
-[FALLBACK Grade Substitution] Assigned Super Senior Therapist THP1004 to fill Junior Therapist requirement (substitution)
-[FALLBACK Grade Substitution] Assigned Super Senior Therapist THP1206 to fill Senior Therapist requirement (substitution)
-[RESCHEDULE FALLBACK] ✓ Grade substitution successful: found 3/3 therapists
-[RESCHEDULE] Using first assigned bathing therapist THP1117 for patient 742 (no continuity available)
-[DEBUG create_therapist_booking_safe] Cleared is_bathing for other therapists in visit 3068 on 2026-03-11 at Slot 2: 08:30 AM
-RESULT: [{'booking_id': 21724, 'allocation_id': 3068, 'date': '2026-03-11', 'therapy_name': 'Full body Sudhikalpana Dhara (3T)', 'slot': '08:30', 'status': 'BOOKED', 'reason': None, 'room_no': 'TRC-12', 'therapists': [{'therapist_code': 'THP1117', 'is_bathing': True}, {'therapist_code': 'THP1004', 'is_bathing': False}, {'therapist_code': 'THP1206', 'is_bathing': False}], 'grade_substitution_used': True, 'substitution_note': 'Senior/Super Senior therapists used to fill Junior/Trainee requirements'}]
+Traceback (most recent call last):
+  File "D:\pre=phase-2\AVCRI\test_reshedule.py", line 11, in <module>
+    res = expand_therapies_for_visit(3068, '2026-03-11', create_bookings=True)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\pre=phase-2\AVCRI\reshedule.py", line 3610, in expand_therapies_for_visit
+    allocation = TherapyAllocation.objects.filter(pk=therapy_allocation_id).first()
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\jaise\AppData\Local\Programs\Python\Python312\Lib\site-packages\django\db\models\query.py", line 1104, in first
+    for obj in queryset[:1]:
+  File "C:\Users\jaise\AppData\Local\Programs\Python\Python312\Lib\site-packages\django\db\models\query.py", line 384, in __iter__
+    self._fetch_all()
+  File "C:\Users\jaise\AppData\Local\Programs\Python\Python312\Lib\site-packages\django\db\models\query.py", line 1949, in _fetch_all
+    self._result_cache = list(self._iterable_class(self))
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\jaise\AppData\Local\Programs\Python\Python312\Lib\site-packages\django\db\models\query.py", line 91, in __iter__
+    results = compiler.execute_sql(
+              ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\jaise\AppData\Local\Programs\Python\Python312\Lib\site-packages\django\db\models\sql\compiler.py", line 1621, in execute_sql
+    cursor = self.connection.cursor()
+             ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\jaise\AppData\Local\Programs\Python\Python312\Lib\site-packages\django\utils\asyncio.py", line 26, in inner
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\jaise\AppData\Local\Programs\Python\Python312\Lib\site-packages\django\db\backends\base\base.py", line 320, in cursor
+    return self._cursor()
+           ^^^^^^^^^^^^^^
+  File "C:\Users\jaise\AppData\Local\Programs\Python\Python312\Lib\site-packages\django\db\backends\base\base.py", line 296, in _cursor
+    self.ensure_connection()
+  File "C:\Users\jaise\AppData\Local\Programs\Python\Python312\Lib\site-packages\pytest_django\plugin.py", line 908, in _blocking_wrapper
+    raise RuntimeError(
+RuntimeError: Database access not allowed, use the "django_db" mark, or the "db" or "transactional_db" fixtures to enable it.

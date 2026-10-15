@@ -82,28 +82,23 @@ def get_available_therapists_api(request):
             is_active=True
         ).values_list('therapist_id', flat=True)
         
-        # Get therapists who are on emergency leave for this date
-        # EmergencyLeave covers date ranges (from_date <= target_date <= to_date)
-        emergency_leave_qs = EmergencyLeave.objects.filter(
-            from_date__lte=target_date,
-            to_date__gte=target_date
-        )
-        # Get therapist IDs from FK relationship
-        emergency_leave_therapist_ids = set(
-            emergency_leave_qs.exclude(therapist__isnull=True)
-            .values_list('therapist_id', flat=True)
-        )
-        # Also get therapist IDs by matching employee_code
-        emergency_leave_employee_codes = set(
-            emergency_leave_qs.values_list('employee_code', flat=True)
-        )
-        emergency_leave_by_emp_code = set(
-            TherapistMaster.objects.filter(employee_code__in=emergency_leave_employee_codes)
-            .values_list('id', flat=True)
-        )
-        # Combine both sets
-        emergency_leave_therapist_ids = emergency_leave_therapist_ids | emergency_leave_by_emp_code
-        
+        # Parse slot if specified
+        slot_master = None
+        if time_slot:
+            try:
+                for fmt in ('%H:%M', '%H:%M:%S', '%I:%M %p', '%I:%M%p'):
+                    try:
+                        time_obj = datetime.strptime(time_slot.strip(), fmt).time()
+                        slot_master = SlotMaster.objects.filter(slot_time=time_obj, is_active=True).first()
+                        if slot_master:
+                            break
+                    except Exception:
+                        continue
+                if not slot_master and str(time_slot).strip().isdigit():
+                    slot_master = SlotMaster.objects.filter(slot_number=int(time_slot), is_active=True).first()
+            except Exception:
+                slot_master = None
+
         # Check if caller requested to ignore leave (e.g. for therapist preference/exclusion dropdowns)
         ignore_leave = request.GET.get('ignore_leave') in ['1', 'true', 'True'] or request.GET.get('all') in ['1', 'true', 'True']
 
@@ -113,26 +108,32 @@ def get_available_therapists_api(request):
                 pk__in=recurring_leave_therapist_ids
             )
             
-            # Exclude therapists on emergency leave
-            if emergency_leave_therapist_ids:
-                available_therapists = available_therapists.exclude(
-                    pk__in=emergency_leave_therapist_ids
+            # Emergency leave check: if slot is known, exclude only therapists on leave for that slot
+            emergency_leave_qs = EmergencyLeave.objects.filter(
+                from_date__lte=target_date,
+                to_date__gte=target_date
+            )
+            if slot_master:
+                active_leaves = [el for el in emergency_leave_qs if el.is_slot_on_leave(target_date, slot_master)]
+            else:
+                active_leaves = list(emergency_leave_qs)
+
+            em_therapist_ids = set(el.therapist_id for el in active_leaves if el.therapist_id)
+            em_emp_codes = set(el.employee_code for el in active_leaves if el.employee_code)
+            if em_emp_codes:
+                em_by_code = set(
+                    TherapistMaster.objects.filter(employee_code__in=em_emp_codes).values_list('id', flat=True)
                 )
+                em_therapist_ids |= em_by_code
+
+            if em_therapist_ids:
+                available_therapists = available_therapists.exclude(pk__in=em_therapist_ids)
         else:
             available_therapists = therapists_query
         
         # If time slot is specified, check availability using SlotMaster and TherapistBooking
         if time_slot:
-            # Parse time slot (e.g., "09:00" -> 9:00 AM)
             try:
-                time_obj = datetime.strptime(time_slot, '%H:%M').time()
-                
-                # Find the SlotMaster record matching this time
-                slot_master = SlotMaster.objects.filter(
-                    slot_time=time_obj,
-                    is_active=True
-                ).first()
-                
                 if slot_master:
                     # Shift eligibility filter (additive): applies only when shift masters are configured
                     try:

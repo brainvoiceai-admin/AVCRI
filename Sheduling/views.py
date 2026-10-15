@@ -5877,7 +5877,9 @@ def reschedule_options_api(request):
 
             day_of_week = target_date.weekday()
             pat_gender = getattr(getattr(allocation, 'patient', None), 'pat_sex', None)
-            desired_gender = 'female' if str(pat_gender).strip().lower().startswith('f') else ('male' if str(pat_gender).strip().lower().startswith('m') else None)
+            pat_age = getattr(getattr(allocation, 'patient', None), 'pat_age', None)
+            from final_allocation import resolve_desired_gender
+            desired_gender = resolve_desired_gender(pat_gender, pat_age)
 
             ht_qs = TherapistMaster.objects.filter(is_active=True, is_helping_therapist=True)
             if desired_gender:
@@ -5889,7 +5891,8 @@ def reschedule_options_api(request):
             for ht in ht_qs:
                 if TherapistLeaveMaster.objects.filter(therapist=ht, leave_day=day_of_week).exists():
                     continue
-                if EmergencyLeave.objects.filter(from_date__lte=target_date, to_date__gte=target_date).filter(Q(therapist=ht) | Q(employee_code=ht.employee_code)).exists():
+                from masters.models import is_therapist_on_emergency_leave
+                if is_therapist_on_emergency_leave(ht, target_date, canonical_reg_slot):
                     continue
                 if TherapistBooking.objects.filter(therapist=ht, date=target_date, time_slot=canonical_reg_slot, status='BOOKED').exists():
                     continue

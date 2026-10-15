@@ -250,14 +250,20 @@ def parse_target_date(date_str=None):
     return timezone.localtime(timezone.now()).date()
 
 
-def get_emergency_leave_sets_for_date(target_date):
+def get_emergency_leave_sets_for_date(target_date, slot=None):
     """
     Returns (set_of_therapist_pks, set_of_employee_codes) for EmergencyLeave overlapping target_date.
+    If slot is provided, respects half-day leave sessions: therapists available for this slot are NOT excluded.
     """
     try:
         leaves = EmergencyLeave.objects.filter(from_date__lte=target_date, to_date__gte=target_date)
-        em_ids = set(leaves.exclude(therapist__isnull=True).values_list("therapist__pk", flat=True))
-        em_codes = set(leaves.exclude(employee_code__isnull=True).values_list("employee_code", flat=True))
+        if slot is not None:
+            matching_leaves = [el for el in leaves if el.is_slot_on_leave(target_date, slot)]
+        else:
+            matching_leaves = list(leaves)
+
+        em_ids = set(el.therapist_id for el in matching_leaves if el.therapist_id)
+        em_codes = set(el.employee_code for el in matching_leaves if el.employee_code)
         return em_ids, em_codes
     except Exception as e:
         logger.exception("Error fetching EmergencyLeave: %s", e)
@@ -366,16 +372,50 @@ def get_patient_gender_from_booking(booking):
         pass
     return None
 
-def normalize_patient_gender(pat_sex):
-    """Normalize patient gender to 'male' or 'female'"""
-    if not pat_sex:
-        return None
-    g = str(pat_sex).strip().lower()
-    if g.startswith('f'):
-        return 'female'
-    elif g.startswith('m'):
-        return 'male'
+def get_patient_age_from_booking(booking):
+    """
+    Get patient age from booking. Tries multiple sources.
+    """
+    try:
+        # Try to get from booking's patient relationship
+        if hasattr(booking, 'patient') and booking.patient:
+            if hasattr(booking.patient, 'pat_age') and booking.patient.pat_age:
+                return booking.patient.pat_age
+        # Try to get from visit (TherapyAllocation)
+        if hasattr(booking, 'visit') and booking.visit:
+            if hasattr(booking.visit, 'patient') and booking.visit.patient:
+                if hasattr(booking.visit.patient, 'pat_age') and booking.visit.patient.pat_age:
+                    return booking.visit.patient.pat_age
+        # Try from PatientSnapshot via patient_id
+        try:
+            from Sheduling.models import PatientSnapshot
+            if hasattr(booking, 'patient_id') and booking.patient_id:
+                patient = PatientSnapshot.objects.filter(pat_reg_no=str(booking.patient_id)).first()
+                if patient and hasattr(patient, 'pat_age') and patient.pat_age:
+                    return patient.pat_age
+        except Exception:
+            pass
+    except Exception:
+        pass
     return None
+
+def normalize_patient_gender(pat_sex, pat_age=None):
+    """
+    Normalize patient gender to 'male' or 'female'.
+    Rule: Male children below 5 should be assigned to a female therapist.
+    """
+    try:
+        from final_allocation import resolve_desired_gender
+        return resolve_desired_gender(pat_sex, pat_age)
+    except Exception:
+        if not pat_sex:
+            return None
+        g = str(pat_sex).strip().lower()
+        if g.startswith('f'):
+            return 'female'
+        elif g.startswith('m'):
+            return 'male'
+        return None
 
 def get_therapist_gender(therapist):
     """Get therapist gender from TherapistMaster"""
@@ -555,7 +595,7 @@ def available_candidates_by_level_and_bathing(target_date, time_slot, level, req
         return []
 
     if em_therapist_ids is None or em_emp_codes is None:
-        em_therapist_ids, em_emp_codes = get_emergency_leave_sets_for_date(target_date)
+        em_therapist_ids, em_emp_codes = get_emergency_leave_sets_for_date(target_date, slot=time_slot)
 
     if em_therapist_ids:
         qs = qs.exclude(pk__in=em_therapist_ids)
@@ -736,7 +776,8 @@ def find_bathing_therapist_from_start_of_therapy(booking, allocation, target_dat
             if tid in seen:
                 continue
             seen.add(tid)
-            if tid in em_therapist_ids or getattr(t, 'employee_code', None) in em_emp_codes:
+            from masters.models import is_therapist_on_emergency_leave
+            if is_therapist_on_emergency_leave(t, target_date, slot):
                 continue
             if therapist_has_weekly_leave_on(t, target_date):
                 continue
@@ -1045,11 +1086,12 @@ def process_reassignments(target_date=None, dry_run=True, max_daily_normal=5, ma
         return summary
 
     affected = []
+    from masters.models import is_therapist_on_emergency_leave
     for b in qs:
         thr = getattr(b, 'therapist', None)
         if not thr:
             continue
-        if (getattr(thr, 'pk', None) in em_therapist_ids) or (getattr(thr, 'employee_code', None) in em_emp_codes):
+        if is_therapist_on_emergency_leave(thr, target_date, b.time_slot):
             affected.append(b)
 
     logger.info("Found %d affected bookings for date %s", len(affected), target_date.isoformat())
@@ -1088,6 +1130,8 @@ def process_reassignments(target_date=None, dry_run=True, max_daily_normal=5, ma
             level = getattr(old, 'therapist_grade', None)
         
         slot = booking.time_slot
+        # Slot-aware emergency leave sets: therapists on half-day leave for a different session are available for this slot
+        em_therapist_ids, em_emp_codes = get_emergency_leave_sets_for_date(target_date, slot=slot)
         therapy_name = getattr(booking, 'therapy_name', None)
 
         # Determine therapy requirements (to get difficulty category for fair distribution)
@@ -1106,9 +1150,10 @@ def process_reassignments(target_date=None, dry_run=True, max_daily_normal=5, ma
         if is_treatment_requiring_senior_tag and therapy_name:
             requires_senior_tag = is_treatment_requiring_senior_tag(therapy_name)
         
-        # Get patient gender
+        # Get patient gender and age (Rule: Male children below 5 assigned to female therapist)
         patient_gender = get_patient_gender_from_booking(booking)
-        desired_gender = normalize_patient_gender(patient_gender)
+        patient_age = get_patient_age_from_booking(booking)
+        desired_gender = normalize_patient_gender(patient_gender, patient_age)
         
         # Check if patient already has booking at this slot (excluding this booking and same allocation)
         exclude_allocation = None
