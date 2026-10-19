@@ -140,31 +140,46 @@ def get_active_patient_therapist_preferences(patient_id):
 
     patient_id_str = str(patient_id).strip()
 
-    # Check discharge status
-    if not is_patient_active(patient_id_str):
-        # Auto-deactivate active preferences on discharge
-        active_prefs = TherapistPreferenceRequest.objects.filter(
-            patient_id=patient_id_str,
-            is_active=True
-        )
-        for pref in active_prefs:
-            pref.is_active = False
-            pref.status = 'DEACTIVATED'
-            pref.deactivated_at = timezone.now()
-            pref.deactivated_reason = 'Patient Discharged'
-            pref.save()
+    candidate_ids = [patient_id_str]
+    try:
+        from Sheduling.models import PatientSnapshot
+        if patient_id_str.isdigit():
+            ps = PatientSnapshot.objects.filter(id=int(patient_id_str)).first()
+            if ps and ps.pat_reg_no and str(ps.pat_reg_no).strip() not in candidate_ids:
+                candidate_ids.append(str(ps.pat_reg_no).strip())
+        ps_by_reg = PatientSnapshot.objects.filter(pat_reg_no=patient_id_str).first()
+        if ps_by_reg and str(ps_by_reg.id) not in candidate_ids:
+            candidate_ids.append(str(ps_by_reg.id))
+    except Exception:
+        pass
 
-            TherapistPreferenceAuditLog.objects.create(
-                preference_request=pref,
-                patient_id=patient_id_str,
-                action='DEACTIVATED_DISCHARGE',
-                action_date=timezone.now(),
-                notes='Automatically deactivated preference due to patient discharge'
+    # Check discharge status
+    active_check_id = candidate_ids[1] if (len(candidate_ids) > 1 and patient_id_str.isdigit() and not candidate_ids[1].isdigit()) else patient_id_str
+    if not is_patient_active(active_check_id):
+        # Auto-deactivate active preferences on discharge
+        for pid in candidate_ids:
+            active_prefs = TherapistPreferenceRequest.objects.filter(
+                patient_id=pid,
+                is_active=True
             )
+            for pref in active_prefs:
+                pref.is_active = False
+                pref.status = 'DEACTIVATED'
+                pref.deactivated_at = timezone.now()
+                pref.deactivated_reason = 'Patient Discharged'
+                pref.save()
+
+                TherapistPreferenceAuditLog.objects.create(
+                    preference_request=pref,
+                    patient_id=pid,
+                    action='DEACTIVATED_DISCHARGE',
+                    action_date=timezone.now(),
+                    notes='Automatically deactivated preference due to patient discharge'
+                )
         return set(), set()
 
     active_pref = TherapistPreferenceRequest.objects.filter(
-        patient_id=patient_id_str,
+        patient_id__in=candidate_ids,
         status='APPROVED',
         is_active=True
     ).order_by('-action_date', '-id').first()
