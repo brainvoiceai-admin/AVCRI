@@ -980,7 +980,8 @@ def allocate_therapists(date, time_slot, therapy_requirements, last_therapists=N
             if desired_gender:
                 candidates_qs = candidates_qs.filter(therapist_gender__istartswith=desired_gender[0])
 
-            if needs_bathing:
+            has_bath_allocated = any(getattr(a, 'is_bathing_therapist', False) for a in allocated)
+            if needs_bathing and not has_bath_allocated and (total_required - len(allocated) <= 1):
                 candidates_qs = candidates_qs.filter(is_bathing_therapist=True)
 
             candidates_iter = list(candidates_qs)
@@ -1006,6 +1007,7 @@ def allocate_therapists(date, time_slot, therapy_requirements, last_therapists=N
 
             scored_candidates.sort(
                 key=lambda item: (
+                    0 if (needs_bathing and not has_bath_allocated and getattr(item[0], 'is_bathing_therapist', False)) else 1,
                     item[1],
                     item[2],
                     getattr(item[0], "id", 0) or 0,
@@ -1017,6 +1019,10 @@ def allocate_therapists(date, time_slot, therapy_requirements, last_therapists=N
                     break
                 if total_sessions >= 6:
                     continue
+
+                if needs_bathing and (total_required - len(allocated) <= 1) and not any(getattr(a, 'is_bathing_therapist', False) for a in allocated):
+                    if not getattr(t, 'is_bathing_therapist', False):
+                        continue
 
                 allocated.append(t)
                 needed -= 1
@@ -1149,7 +1155,8 @@ def allocate_therapists(date, time_slot, therapy_requirements, last_therapists=N
 
             if desired_gender and get_therapist_gender(t) != desired_gender:
                 continue
-            if needs_bathing and not getattr(t, 'is_bathing_therapist', False):
+            has_bath_allocated = any(getattr(a, 'is_bathing_therapist', False) for a in allocated)
+            if needs_bathing and not has_bath_allocated and (total_required - len(allocated) <= 1) and not getattr(t, 'is_bathing_therapist', False):
                 continue
             if therapist_on_leave(t):
                 continue
@@ -1441,7 +1448,8 @@ def allocate_therapists_with_grade_substitution(date, time_slot, therapy_require
                 t_gender = get_therapist_gender(t)
                 if t_gender != desired_gender:
                     continue
-            if needs_bathing and not getattr(t, 'is_bathing_therapist', False):
+            has_bath_allocated = any(getattr(a, 'is_bathing_therapist', False) for a in allocated)
+            if needs_bathing and not has_bath_allocated and (sum(grade_map.values()) <= 1) and not getattr(t, 'is_bathing_therapist', False):
                 continue
             if therapist_on_leave(t):
                 continue
@@ -1497,7 +1505,8 @@ def allocate_therapists_with_grade_substitution(date, time_slot, therapy_require
             if desired_gender:
                 candidates_qs = candidates_qs.filter(therapist_gender__istartswith=desired_gender[0])
             
-            if needs_bathing:
+            has_bath_allocated = any(getattr(a, 'is_bathing_therapist', False) for a in allocated)
+            if needs_bathing and not has_bath_allocated and (sum(grade_map.values()) <= 1):
                 candidates_qs = candidates_qs.filter(is_bathing_therapist=True)
             
             candidates_list = list(candidates_qs)
@@ -1524,6 +1533,7 @@ def allocate_therapists_with_grade_substitution(date, time_slot, therapy_require
             # Sort by session count, then id
             scored_candidates.sort(
                 key=lambda x: (
+                    0 if (needs_bathing and not has_bath_allocated and getattr(x[0], 'is_bathing_therapist', False)) else 1,
                     x[1],
                     getattr(x[0], "id", 0) or 0
                 )
@@ -1539,6 +1549,10 @@ def allocate_therapists_with_grade_substitution(date, time_slot, therapy_require
                     print(f"[FALLBACK Grade Substitution] Therapist {t.therapist_code} at max sessions ({session_count}/6) - skipping")
                     continue
                 
+                if needs_bathing and (sum(grade_map.values()) <= 1) and not any(getattr(a, 'is_bathing_therapist', False) for a in allocated):
+                    if not getattr(t, 'is_bathing_therapist', False):
+                        continue
+
                 allocated.append(t)
                 needed -= 1
                 grade_map[target_grade] -= 1
@@ -2430,6 +2444,8 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
                 bath_assigned = previous_bathing_therapist
                 print(f"[RESCHEDULE] [OK] Special treatment: Using previous bathing therapist {previous_bathing_therapist.therapist_code} (maintaining continuity, senior {senior_therapist.therapist_code} excluded)")
             elif bathing_candidates:
+                # Prefer non-senior therapist for bathing in special treatments
+                bathing_candidates.sort(key=lambda t: 0 if not ('Senior' in getattr(getattr(t, 'therapist_grade', None), 'name', '')) else 1)
                 # Pick first available bathing therapist (excluding senior)
                 bath_assigned = bathing_candidates[0]
                 print(f"[RESCHEDULE] Special treatment: Assigned bathing therapist {bath_assigned.therapist_code} (senior {senior_therapist.therapist_code} excluded)")

@@ -5280,11 +5280,11 @@ def get_therapy_data_api(request):
                 else:
                     bookings = list(base_bookings_qs)
                 
-                # Hide inactive patient treatments in *draft* view.
+                # Hide inactive patient treatments in active views (draft, scheduled, allocated).
                 # Use shared logic `final_allocation.is_patient_active()` which covers both:
                 # - IP patients (Registration.pat_status == 'Y')
                 # - OP patients (Treatment.Status == 'ON')
-                if status_filter == 'draft' and bookings:
+                if status_filter in ('draft', 'scheduled', 'allocated') and bookings:
                     try:
                         from final_allocation import is_patient_active
                         active_cache = {}
@@ -5583,6 +5583,22 @@ def get_therapy_data_api(request):
             if patient_name_filter:
                 allocations = allocations.filter(patient__pat_name__icontains=patient_name_filter)
             
+            if status_filter in ('draft', 'scheduled', 'allocated') and allocations:
+                try:
+                    from final_allocation import is_patient_active
+                    active_cache = {}
+                    filtered_allocs = []
+                    for a in allocations:
+                        pat_reg_no = getattr(getattr(a, 'patient', None), 'pat_reg_no', None)
+                        key = str(pat_reg_no).strip() if pat_reg_no is not None else ''
+                        if key not in active_cache:
+                            active_cache[key] = bool(is_patient_active(pat_reg_no))
+                        if active_cache.get(key, True):
+                            filtered_allocs.append(a)
+                    allocations = filtered_allocs
+                except Exception as e:
+                    print(f"Error filtering inactive patients in therapy API non-date ({status_filter}): {e}")
+
             # Convert to JSON format
             from .nurse_allocation import is_nurse_treatment
             from reshedule import therapist_requirements

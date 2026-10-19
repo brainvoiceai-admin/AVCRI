@@ -1134,7 +1134,8 @@ def allocate_therapists(
             if desired_gender:
                 candidates_qs = candidates_qs.filter(therapist_gender__istartswith=desired_gender[0])
 
-            if needs_bathing:
+            has_bath_allocated = any(getattr(a, 'is_bathing_therapist', False) for a in allocated)
+            if needs_bathing and not has_bath_allocated and (total_required - len(allocated) <= 1):
                 candidates_qs = candidates_qs.filter(is_bathing_therapist=True)
 
             candidates_list = list(candidates_qs)
@@ -1163,6 +1164,7 @@ def allocate_therapists(
 
             available_candidates.sort(
                 key=lambda x: (
+                    0 if (needs_bathing and not has_bath_allocated and getattr(x[0], 'is_bathing_therapist', False)) else 1,
                     x[1],
                     x[2],
                     getattr(x[0], "id", 0) or 0,
@@ -1197,6 +1199,10 @@ def allocate_therapists(
                     continue
                 if allow_extra and session_count >= 6:
                     continue
+
+                if needs_bathing and (total_required - len(allocated) <= 1) and not any(getattr(a, 'is_bathing_therapist', False) for a in allocated):
+                    if not getattr(t, 'is_bathing_therapist', False):
+                        continue
 
                 allocated.append(t)
                 needed -= 1
@@ -1533,13 +1539,14 @@ def assign_continuity_therapists_pass1(booking, allocation, target_date, locked_
 
     # Check active doctor-approved unpreferred therapist preferences for patient
     unpreferred_codes = set()
-    if patient_id:
+    pat_reg_no = getattr(getattr(allocation, 'patient', None), 'pat_reg_no', None)
+    for pid in filter(None, [patient_id, pat_reg_no]):
         try:
             from Sheduling.preference_views import get_active_patient_therapist_preferences
-            _, pref_u = get_active_patient_therapist_preferences(patient_id)
+            _, pref_u = get_active_patient_therapist_preferences(pid)
             unpreferred_codes.update(pref_u)
         except Exception as e:
-            print(f"[CONTINUITY PASS1] Error fetching active preferences for patient {patient_id}: {e}")
+            print(f"[CONTINUITY PASS1] Error fetching active preferences for patient {pid}: {e}")
 
     if unpreferred_codes:
         continuity_therapists = [t for t in continuity_therapists if getattr(t, 'therapist_code', None) not in unpreferred_codes]
@@ -2373,6 +2380,7 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                 try:
                     pat_sex = getattr(getattr(allocation, 'patient', None), 'pat_sex', None)
                     pat_age = getattr(getattr(allocation, 'patient', None), 'pat_age', None)
+                    pat_reg_id = getattr(getattr(allocation, 'patient', None), 'pat_reg_no', None) or getattr(allocation, 'patient_id', None)
                     
                     # Prefer "from start of therapy" therapists when filling remaining slots (e.g. they were on leave yesterday, back today)
                     last_therapists_for_remaining = None
@@ -2994,6 +3002,7 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                     
                     bathing_candidates = [t for t in assigned_therapists if t != senior_therapist and getattr(t, 'is_bathing_therapist', False)]
                     if bathing_candidates:
+                        bathing_candidates.sort(key=lambda t: 0 if not ('Senior' in getattr(getattr(t, 'therapist_grade', None), 'name', '')) else 1)
                         bath_assigned = bathing_candidates[0]
                         print(f"[DEBUG] Dhara & Pizichil: Assigned bathing therapist {bath_assigned.therapist_code} (senior {senior_therapist.therapist_code} excluded, preferred {bath_assigned_from_pass1.therapist_code if bath_assigned_from_pass1 else previous_bathing_therapist.therapist_code if previous_bathing_therapist else 'None'} not available)")
                     else:
@@ -4120,8 +4129,22 @@ def bulk_allocate_for_date(target_date_str):
     if inactive_failed_count > 0:
         print(f"[PATIENT STATUS] Total inactive patient bookings marked as failed: {inactive_failed_count}")
 
+    def _is_patient_op(pat):
+        if not pat:
+            return False
+        if hasattr(pat, 'is_op'):
+            return bool(pat.is_op())
+        if hasattr(pat, 'pat_reg_no'):
+            digits = ''.join(ch for ch in str(pat.pat_reg_no or '') if ch.isdigit())
+            return len(digits) == 5
+        return False
+
     ordered_bookings = []
-    for pid, bookings in by_patient.items():
+    sorted_by_patient = sorted(
+        by_patient.items(),
+        key=lambda item: 1 if _is_patient_op(getattr(item[1][0].allocation, 'patient', None) if item[1] else None) else 0
+    )
+    for pid, bookings in sorted_by_patient:
         bookings.sort(key=lambda bk: getattr(bk.allocation, 'from_date', target_date))
         ordered_bookings.extend(bookings)
     
@@ -4484,23 +4507,24 @@ def bulk_allocate_for_date(target_date_str):
             print(f"[CONTINUITY PRIORITY] Error computing priority for patient {patient_id}, therapy='{current_therapy_name}': {e}")
             return (3, None)  # Error case: treat as no continuity
     
-    # Compute priority for each allocation once
+    # Compute priority for each allocation once (Checklist #5: IP prioritized over OP)
     allocation_priorities = []
     for allocation in draft_allocations:
         priority_score, most_recent_date = get_continuity_priority(allocation)
         # Use date ordinal for sorting (more recent = larger ordinal = higher priority)
         # We negate it so that larger dates come first in ascending sort
         date_ordinal = -most_recent_date.toordinal() if most_recent_date else 0
-        allocation_priorities.append((allocation, priority_score, date_ordinal))
+        op_rank = 1 if _is_patient_op(getattr(allocation, 'patient', None)) else 0  # 0=IP (strict priority), 1=OP
+        allocation_priorities.append((allocation, op_rank, priority_score, date_ordinal))
     
-    # Sort by priority score (0 = highest), then by most recent date (larger ordinal = more recent)
-    sorted_allocations = [a for a, _, _ in sorted(allocation_priorities, key=lambda x: (x[1], x[2]))]
+    # Sort: IP first (op_rank=0), then priority score (0 = highest), then by most recent date
+    sorted_allocations = [a for a, _, _, _ in sorted(allocation_priorities, key=lambda x: (x[1], x[2], x[3]))]
     
     # Count statistics
     continuity_stats = {
-        'same_therapy': sum(1 for _, p, _ in allocation_priorities if p == 0),
-        'any_therapy': sum(1 for _, p, _ in allocation_priorities if p == 2),
-        'no_continuity': sum(1 for _, p, _ in allocation_priorities if p == 3)
+        'same_therapy': sum(1 for _, _, p, _ in allocation_priorities if p == 0),
+        'any_therapy': sum(1 for _, _, p, _ in allocation_priorities if p == 2),
+        'no_continuity': sum(1 for _, _, p, _ in allocation_priorities if p == 3)
     }
     print(f"[DEBUG Continuity Priority] Processing {len(sorted_allocations)} allocations:")
     print(f"  - Same therapy yesterday: {continuity_stats['same_therapy']}")
@@ -4536,7 +4560,7 @@ def bulk_allocate_for_date(target_date_str):
             patient_bookings_map[None].append(booking)
     
     # Sort patients by priority (same as allocations)
-    allocation_id_to_priority = {alloc.id: (p, d) for alloc, p, d in allocation_priorities}
+    allocation_id_to_priority = {alloc.id: (op_r, p, d) for alloc, op_r, p, d in allocation_priorities}
     
     # Tie-breaker: earliest "from start" date in continuity plan (priority < 0).
     # Patients whose therapy started earliest get processed first so their first-day therapists (e.g. Latha) are locked for them, not for a patient who had that therapist only on a later date.
@@ -4552,19 +4576,23 @@ def bulk_allocate_for_date(target_date_str):
         plan_earliest = {}
     
     def get_patient_priority(patient_id):
-        """Get (priority_score, date_ordinal, earliest_from_start_ordinal) for sorting.
+        """Get (op_rank, priority_score, date_ordinal, earliest_from_start_ordinal) for sorting.
+        IP patients (op_rank=0) strictly prioritized over OP (op_rank=1).
         Patients with earlier 'from start' date get processed first so first-day therapists are assigned to them."""
         if patient_id is None:
-            return (3, 0, 999999)
+            return (1, 3, 0, 999999)
+        first_pat = patient_bookings_map[patient_id][0].allocation.patient if patient_bookings_map[patient_id] else None
+        op_rank = 1 if _is_patient_op(first_pat) else 0
         min_priority = (3, 0)
         for booking in patient_bookings_map[patient_id]:
             alloc_id = booking.allocation_id
-            priority = allocation_id_to_priority.get(alloc_id, (3, 0))
+            p_tuple = allocation_id_to_priority.get(alloc_id, (op_rank, 3, 0))
+            priority = (p_tuple[1], p_tuple[2])
             if priority[0] < min_priority[0] or (priority[0] == min_priority[0] and priority[1] > min_priority[1]):
                 min_priority = priority
         earliest_sd = plan_earliest.get(patient_id)
         earliest_ord = earliest_sd.toordinal() if earliest_sd else 999999
-        return (min_priority[0], min_priority[1], earliest_ord)
+        return (op_rank, min_priority[0], min_priority[1], earliest_ord)
     
     # Sort patients by priority, then by earliest from-start date (therapy started first = process first)
     sorted_patient_ids = sorted(
