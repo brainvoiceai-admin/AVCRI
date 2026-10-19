@@ -1615,7 +1615,7 @@ def process_reassignments(target_date=None, dry_run=True, max_daily_normal=5, ma
                 logger.debug("Error checking room availability: %s", e)
         
         # Perform reassignment
-        dry_run_flag = getattr(args, 'dry_run', False) if hasattr(args, 'dry_run') else dry_run
+        dry_run_flag = dry_run
         if dry_run_flag:
             summary['reassigned'].append((booking.pk, getattr(old, 'therapist_code', old.pk), getattr(pick, 'therapist_code', pick.pk)))
             logger.info("[DRY RUN] Would reassign booking %s -> therapist %s", booking.pk, getattr(pick, 'therapist_code', pick.pk))
