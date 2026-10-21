@@ -622,6 +622,20 @@ def allocate_treatment_room(date, time_slot, last_room=None, therapy_name=None, 
             pass
         return None
     
+    # STEAM THERAPY RESTRICTION: Always allocate strictly to room TR-12
+    try:
+        from reshedule import is_steam_therapy_530_tr12_only
+        if is_steam_therapy_530_tr12_only(therapy_name):
+            steam_room = check_room_availability('TR-12')
+            if steam_room:
+                print(f"[ROOM RESTRICTION] Steam therapy detected - assigned TR-12 room.")
+                return steam_room
+            else:
+                print(f"[ROOM RESTRICTION] Steam therapy detected - TR-12 is unavailable on {date} at {time_slot}.")
+                return None
+    except Exception as _st_err:
+        print(f"[ROOM RESTRICTION] Error checking steam therapy room: {_st_err}")
+
     # NEW: Primary logic - allocate based on patient staying room
     # Special handling: If patient_staying_room starts with "OP-", treat it as if there's no staying room
     # (OP patients are handled in the OP patient fallback logic below)
@@ -2084,8 +2098,20 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
         pref_slot = getattr(booking, 'timeslot', None) or getattr(allocation, 'timeslot', None)
         # Vasthi therapy group (masters), except Mathra THEB037: final schedule must use 08:30 only
         try:
-            from reshedule import is_group_vasthi_0830_only
-            if is_group_vasthi_0830_only(therapy_name, getattr(allocation, 'therapy_code', None)):
+            from reshedule import is_group_vasthi_0830_only, is_steam_therapy_530_tr12_only
+            if is_steam_therapy_530_tr12_only(therapy_name, getattr(allocation, 'therapy_code', None)):
+                sm1730 = SlotMaster.objects.filter(
+                    slot_time=datetime.strptime('17:30', '%H:%M').time(),
+                    is_active=True,
+                ).first()
+                if sm1730:
+                    pref_slot = sm1730
+                    if create_bookings and getattr(booking, 'timeslot_id', None) != sm1730.id:
+                        booking.timeslot = sm1730
+                        booking.save(update_fields=['timeslot', 'updated_at'])
+                else:
+                    print('[STEAM THERAPY] Final schedule: no active SlotMaster for 17:30')
+            elif is_group_vasthi_0830_only(therapy_name, getattr(allocation, 'therapy_code', None)):
                 sm0830 = SlotMaster.objects.filter(
                     slot_time=datetime.strptime('08:30', '%H:%M').time(),
                     is_active=True,
@@ -2098,7 +2124,7 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                 else:
                     print('[VASTHI GROUP] Final schedule: no active SlotMaster for 08:30')
         except Exception as _gv_e:
-            print(f'[VASTHI GROUP] Final schedule slot rule skipped: {_gv_e}')
+            print(f'[SLOT RULE] Final schedule slot rule skipped: {_gv_e}')
         requested_slot_value = None
         if pref_slot:
             st = getattr(pref_slot, 'start_time', None)
@@ -3328,6 +3354,9 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                         ).exclude(pk=booking.pk).first()
                         
                         if existing_booking:
+                            from reshedule import is_steam_therapy_530_tr12_only
+                            if is_steam_therapy_530_tr12_only(therapy_name):
+                                raise RuntimeError(f"no_room_available: TR-12 is required for Steam Therapy and is already booked for {target_date} at {slot_master}")
                             print(f"[DEBUG] Room {room_candidate.room_no} already booked for {target_date} at {slot_master}, trying alternative room...")
                             alternative_room = allocate_treatment_room(
                                 target_date, 

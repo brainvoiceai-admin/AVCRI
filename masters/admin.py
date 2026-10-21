@@ -73,14 +73,14 @@ class TherapyGroupAdmin(admin.ModelAdmin):
 
 @admin.register(TherapyMaster)
 class TherapyMasterAdmin(admin.ModelAdmin):
-    list_display = ['therapy_code', 'therapy_name', 'therapy_group', 'total_no_of_therapist', 'is_active', 'created_at']
-    list_filter = ['is_active', 'therapy_group', 'therapy_category', 'created_at']
+    list_display = ['therapy_code', 'therapy_name', 'therapy_group', 'is_steam_therapy', 'total_no_of_therapist', 'is_active', 'created_at']
+    list_filter = ['is_active', 'is_steam_therapy', 'therapy_group', 'therapy_category', 'created_at']
     search_fields = ['therapy_code', 'therapy_name', 'therapy_group__name']
-    list_editable = ['is_active']
+    list_editable = ['is_active', 'is_steam_therapy']
     ordering = ['therapy_name']
     fieldsets = (
         ('Basic Information', {
-            'fields': ('therapy_code', 'therapy_name', 'therapy_group', 'therapy_category')
+            'fields': ('therapy_code', 'therapy_name', 'therapy_group', 'therapy_category', 'is_steam_therapy')
         }),
         ('Therapy Details', {
             'fields': ('therapy_duration', 'bathing_required', 'treatment_room_required', 'cost_of_therapy')

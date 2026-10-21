@@ -1537,10 +1537,10 @@ class TherapyMasterManagementView(ListView):
 
 class TherapyMasterCreateView(CreateView):
     model = TherapyMaster
-    fields = ['therapy_name', 'therapy_group', 'therapy_category', 'therapy_duration', 'bathing_required', 'treatment_room_required', 'cost_of_therapy', 'patient_type', 'no_of_super_senior_therapist', 'no_of_senior_therapist', 'no_of_junior_therapist', 'no_of_trainee_therapist', 'is_active']
+    fields = ['therapy_name', 'therapy_group', 'therapy_category', 'therapy_duration', 'bathing_required', 'treatment_room_required', 'cost_of_therapy', 'patient_type', 'is_steam_therapy', 'no_of_super_senior_therapist', 'no_of_senior_therapist', 'no_of_junior_therapist', 'no_of_trainee_therapist', 'is_active']
     template_name = 'masters/therapy_master_form.html'
     success_url = reverse_lazy('therapy_master_manage')
-    
+
     def get_form(self, form_class=None):
         form = super().get_form(form_class)
         # Make therapy_code read-only/hidden since it's auto-generated
@@ -1552,7 +1552,7 @@ class TherapyMasterCreateView(CreateView):
             form.fields['therapy_group'].empty_label = '-- Select Group --'
             form.fields['therapy_group'].widget.attrs['class'] = 'form-control'
             form.fields['therapy_group'].required = False
-        # Make all other fields required (except therapy_group)
+        # Make all other fields required (except therapy_group and is_steam_therapy)
         for field_name in ['therapy_name', 'therapy_category', 'therapy_duration', 'bathing_required',
                            'treatment_room_required', 'cost_of_therapy', 'patient_type',
                            'no_of_super_senior_therapist', 'no_of_senior_therapist',
@@ -1568,7 +1568,7 @@ class TherapyMasterCreateView(CreateView):
                 ('Easy', 'Easy'),
             ], attrs={'class': 'form-select'})
         return form
-    
+
     def form_valid(self, form):
         # Auto-generate unique therapy code by incrementing from highest existing code
         # Get all existing therapy codes that start with THEB
@@ -1613,7 +1613,7 @@ class TherapyMasterCreateView(CreateView):
 
 class TherapyMasterUpdateView(UpdateView):
     model = TherapyMaster
-    fields = ['therapy_name', 'therapy_group', 'therapy_category', 'therapy_duration', 'bathing_required', 'treatment_room_required', 'cost_of_therapy', 'patient_type', 'no_of_super_senior_therapist', 'no_of_senior_therapist', 'no_of_junior_therapist', 'no_of_trainee_therapist', 'is_active']
+    fields = ['therapy_name', 'therapy_group', 'therapy_category', 'therapy_duration', 'bathing_required', 'treatment_room_required', 'cost_of_therapy', 'patient_type', 'is_steam_therapy', 'no_of_super_senior_therapist', 'no_of_senior_therapist', 'no_of_junior_therapist', 'no_of_trainee_therapist', 'is_active']
     template_name = 'masters/therapy_master_form.html'
     success_url = reverse_lazy('therapy_master_manage')
     
