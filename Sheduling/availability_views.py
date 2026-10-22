@@ -128,6 +128,12 @@ def get_available_therapists_api(request):
 
             if em_therapist_ids:
                 available_therapists = available_therapists.exclude(pk__in=em_therapist_ids)
+
+            # Deputation check: exclude therapists on approved deputation covering target_date
+            from masters.models import get_deputed_therapist_ids_for_date
+            deputed_ids = get_deputed_therapist_ids_for_date(target_date)
+            if deputed_ids:
+                available_therapists = available_therapists.exclude(pk__in=deputed_ids)
         else:
             available_therapists = therapists_query
         
@@ -417,6 +423,42 @@ def get_therapists_on_leave_api(request):
                         'is_active': True
                     }
                     leave_data.append(leave_info)
+
+        # Get therapists on approved deputation for this date
+        from masters.models import TherapistDeputation
+        deputed_query = TherapistDeputation.objects.filter(
+            status='approved',
+            start_date__lte=target_date,
+            end_date__gte=target_date
+        ).select_related('therapist', 'therapist__therapist_grade', 'assigned_doctor')
+        
+        for dep in deputed_query:
+            therapist = dep.therapist
+            if therapist:
+                if gender and gender != 'all':
+                    t_gen = (therapist.therapist_gender or '').lower()
+                    if gender.lower().startswith('m') and not t_gen.startswith('m'):
+                        continue
+                    if gender.lower().startswith('f') and not t_gen.startswith('f'):
+                        continue
+                leave_info = {
+                    'id': therapist.pk,
+                    'name': therapist.therapist_name,
+                    'code': therapist.therapist_code,
+                    'employee_code': therapist.employee_code,
+                    'gender': therapist.therapist_gender or 'Unknown',
+                    'grade': therapist.therapist_grade.name if therapist.therapist_grade else 'N/A',
+                    'leave_date': target_date.strftime('%Y-%m-%d'),
+                    'leave_day': target_date.weekday(),
+                    'leave_day_name': target_date.strftime('%A'),
+                    'leave_type': 'Deputed',
+                    'from_date': dep.start_date.strftime('%Y-%m-%d'),
+                    'to_date': dep.end_date.strftime('%Y-%m-%d') if dep.end_date else '',
+                    'reason': f"Deputed to {dep.destination} ({dep.duration_days} days). Assigned Doctor: {dep.assigned_doctor_name or 'N/A'}",
+                    'is_bathing': therapist.is_bathing_therapist,
+                    'is_active': True
+                }
+                leave_data.append(leave_info)
         
         return JsonResponse({
             'success': True,

@@ -180,7 +180,140 @@
                                     <small class="form-text text-muted d-block">Therapist is currently active</small>
                                 </div>
                             </div>
+
+                            {% if can_request_deputation %}
+                            <div class="col-md-12 mb-2">
+                                <hr class="my-2">
+                                <div class="form-check form-switch fs-6">
+                                    <input class="form-check-input" type="checkbox" id="id_is_deputed" 
+                                           name="is_deputed" {% if pending_deputation or current_deputation %}checked{% endif %}
+                                           onchange="toggleDeputationFields(this.checked)">
+                                    <label class="form-check-label fw-bold text-dark" for="id_is_deputed">
+                                        <i class="fas fa-plane-departure text-warning me-1"></i>Mark as Deputed Therapist
+                                    </label>
+                                    <small class="form-text text-muted d-block">
+                                        Check to depute this therapist to another destination. Sent to Admin (GM) & HR for approval before scheduling exclusion.
+                                    </small>
+                                </div>
+                            </div>
+                            {% elif current_deputation or pending_deputation %}
+                            <div class="col-md-12 mb-2">
+                                <hr class="my-2">
+                                <div class="border rounded p-3" style="background-color: #fffdf2; border-left: 4px solid #ffc107 !important;">
+                                    <div class="d-flex justify-content-between align-items-center mb-2">
+                                        <h6 class="text-warning mb-0 fw-bold">
+                                            <i class="fas fa-plane-departure me-2"></i>Therapist Deputation Status
+                                        </h6>
+                                        {% if pending_deputation %}
+                                            <span class="badge bg-warning text-dark"><i class="fas fa-clock me-1"></i>Pending Admin (GM)/HR Approval</span>
+                                        {% elif current_deputation %}
+                                            <span class="badge bg-success"><i class="fas fa-check me-1"></i>Approved (Active)</span>
+                                        {% endif %}
+                                    </div>
+                                    {% if pending_deputation %}
+                                    <div class="small">
+                                        <strong>Destination:</strong> {{ pending_deputation.destination }} | 
+                                        <strong>Duration:</strong> {{ pending_deputation.duration_days }} days ({{ pending_deputation.start_date|date:"d/m/Y" }} to {{ pending_deputation.end_date|date:"d/m/Y" }})<br>
+                                        <strong>Assigned Doctor:</strong> {{ pending_deputation.assigned_doctor_name|default:"N/A" }}<br>
+                                        {% if pending_deputation.remarks %}<strong>Remarks:</strong> {{ pending_deputation.remarks }}<br>{% endif %}
+                                        <span class="text-muted">Awaiting approval by Admin (GM) or HR.</span>
+                                    </div>
+                                    {% elif current_deputation %}
+                                    <div class="small">
+                                        <strong>Destination:</strong> {{ current_deputation.destination }} | 
+                                        <strong>Duration:</strong> {{ current_deputation.duration_days }} days ({{ current_deputation.start_date|date:"d/m/Y" }} to {{ current_deputation.end_date|date:"d/m/Y" }})<br>
+                                        <strong>Assigned Doctor:</strong> {{ current_deputation.assigned_doctor_name|default:"N/A" }}<br>
+                                        {% if current_deputation.remarks %}<strong>Remarks:</strong> {{ current_deputation.remarks }}<br>{% endif %}
+                                        <span class="text-success fw-bold">Currently deputed. Excluded from scheduling until {{ current_deputation.end_date|date:"d/m/Y" }}.</span>
+                                    </div>
+                                    {% endif %}
+                                </div>
+                            </div>
+                            {% endif %}
                         </div>
+
+                        {% if can_request_deputation %}
+                        <!-- Deputation Details Section -->
+                        <div id="deputation_section" class="border rounded p-3 mt-3" style="{% if not pending_deputation and not current_deputation %}display: none;{% endif %} background-color: #fffdf2; border-left: 4px solid #ffc107 !important;">
+                            <div class="d-flex justify-content-between align-items-center mb-3">
+                                <h6 class="text-warning mb-0 fw-bold">
+                                    <i class="fas fa-plane-departure me-2"></i>Deputation Details
+                                </h6>
+                                {% if pending_deputation %}
+                                    <span class="badge bg-warning text-dark"><i class="fas fa-clock me-1"></i>Pending HR/Super Admin Approval</span>
+                                {% elif current_deputation %}
+                                    <span class="badge bg-success"><i class="fas fa-check me-1"></i>Approved (Active)</span>
+                                {% endif %}
+                            </div>
+
+                            {% if pending_deputation %}
+                            <div class="alert alert-warning py-2 mb-3 small">
+                                <i class="fas fa-info-circle me-1"></i>
+                                <strong>Request in review:</strong> Destination <strong>{{ pending_deputation.destination }}</strong> for <strong>{{ pending_deputation.duration_days }} days</strong> ({{ pending_deputation.start_date|date:"d/m/Y" }} to {{ pending_deputation.end_date|date:"d/m/Y" }}).
+                            </div>
+                            {% elif current_deputation %}
+                            <div class="alert alert-success py-2 mb-3 small">
+                                <i class="fas fa-check-circle me-1"></i>
+                                <strong>Currently deputed:</strong> Excluded from scheduling until <strong>{{ current_deputation.end_date|date:"d/m/Y" }}</strong>.
+                            </div>
+                            {% endif %}
+
+                            <div class="row">
+                                <div class="col-md-6 mb-3">
+                                    <label for="deputation_destination" class="form-label required-field fw-bold">Destination</label>
+                                    <input type="text" class="form-control" id="deputation_destination" name="deputation_destination" 
+                                           placeholder="e.g. Coimbatore Branch, Outstation Camp, Satellite Clinic"
+                                           value="{{ pending_deputation.destination|default:current_deputation.destination|default:'' }}">
+                                    <div class="invalid-feedback">Please enter the deputation destination.</div>
+                                </div>
+
+                                <div class="col-md-3 mb-3">
+                                    <label for="deputation_start_date" class="form-label required-field fw-bold">Start Date</label>
+                                    <input type="date" class="form-control" id="deputation_start_date" name="deputation_start_date" 
+                                           value="{{ pending_deputation.start_date|date:'Y-m-d'|default:current_deputation.start_date|date:'Y-m-d'|default:today_date }}"
+                                           onchange="updateEndDatePreview()">
+                                </div>
+
+                                <div class="col-md-3 mb-3">
+                                    <label for="deputation_duration_days" class="form-label required-field fw-bold">Duration (No. of Days)</label>
+                                    <input type="number" class="form-control" id="deputation_duration_days" name="deputation_duration_days" 
+                                           min="1" max="365"
+                                           value="{{ pending_deputation.duration_days|default:current_deputation.duration_days|default:1 }}"
+                                           oninput="updateEndDatePreview()">
+                                    <small class="form-text text-muted">End date: <span id="preview_end_date" class="fw-bold text-primary">-</span></small>
+                                </div>
+                            </div>
+
+                            <div class="row">
+                                <div class="col-md-6 mb-3">
+                                    <label for="deputation_doctor" class="form-label fw-bold">Assigned Doctor</label>
+                                    <select class="form-select" id="deputation_doctor" name="deputation_doctor" onchange="syncDoctorName(this)">
+                                        <option value="">-- Select Assigned Doctor --</option>
+                                        {% for doc in doctors %}
+                                        <option value="{{ doc.id }}" data-name="Dr. {{ doc.get_full_name|default:doc.username }}"
+                                                {% if pending_deputation.assigned_doctor_id == doc.id or current_deputation.assigned_doctor_id == doc.id %}selected{% endif %}>
+                                            Dr. {{ doc.get_full_name|default:doc.username }} ({{ doc.username }})
+                                        </option>
+                                        {% endfor %}
+                                    </select>
+                                    <input type="text" class="form-control mt-2" id="deputation_doctor_name" name="deputation_doctor_name"
+                                           placeholder="Or enter doctor name if not listed above"
+                                           value="{{ pending_deputation.assigned_doctor_name|default:current_deputation.assigned_doctor_name|default:'' }}">
+                                </div>
+
+                                <div class="col-md-6 mb-3">
+                                    <label for="deputation_remarks" class="form-label fw-bold">Relevant Deputation Details (Remarks)</label>
+                                    <textarea class="form-control" id="deputation_remarks" name="deputation_remarks" rows="3"
+                                              placeholder="Enter reason for deputation, reference letter, special responsibilities...">{{ pending_deputation.remarks|default:current_deputation.remarks|default:'' }}</textarea>
+                                </div>
+                            </div>
+
+                            <div class="alert alert-secondary py-2 mb-0 d-flex align-items-center small">
+                                <i class="fas fa-shield-alt text-primary fa-lg me-2"></i>
+                                <span><strong>Approval Required:</strong> Strictly <strong>Admin (GM) and HR</strong> profiles can approve deputations. The therapist will not come under scheduling until the duration expires.</span>
+                            </div>
+                        </div>
+                        {% endif %}
                     </div>
                 </div>
                 
@@ -266,6 +399,55 @@
             </div>
             {% endif %}
             
+            <!-- Deputation History Section (only for existing therapists) -->
+            {% if deputations_history %}
+            <div class="form-section mt-4">
+                <h5 class="text-primary mb-3">
+                    <i class="fas fa-history me-2"></i>Deputation History
+                </h5>
+                <div class="card">
+                    <div class="card-body p-0">
+                        <div class="table-responsive">
+                            <table class="table table-hover table-striped mb-0">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th>Destination</th>
+                                        <th>Duration</th>
+                                        <th>Dates</th>
+                                        <th>Assigned Doctor</th>
+                                        <th>Status</th>
+                                        <th>Requested By</th>
+                                        <th>Remarks</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for dep in deputations_history %}
+                                    <tr>
+                                        <td><strong>{{ dep.destination }}</strong></td>
+                                        <td>{{ dep.duration_days }} days</td>
+                                        <td>{{ dep.start_date|date:"d/m/Y" }} to {{ dep.end_date|date:"d/m/Y" }}</td>
+                                        <td>{{ dep.assigned_doctor_name|default:"N/A" }}</td>
+                                        <td>
+                                            {% if dep.status == 'approved' %}
+                                                <span class="badge bg-success"><i class="fas fa-check me-1"></i>Approved</span>
+                                            {% elif dep.status == 'pending' %}
+                                                <span class="badge bg-warning text-dark"><i class="fas fa-clock me-1"></i>Pending HR/Admin</span>
+                                            {% else %}
+                                                <span class="badge bg-danger"><i class="fas fa-times me-1"></i>Rejected</span>
+                                            {% endif %}
+                                        </td>
+                                        <td><small>{{ dep.requested_by.get_full_name|default:"System" }}</small></td>
+                                        <td><small class="text-muted">{{ dep.remarks|default:"-" }}</small></td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+            
             <!-- Form Actions -->
             <div class="row mt-4">
                 <div class="col-12">
@@ -296,5 +478,52 @@
     
     <script src="{% static 'js/masters_therapist_master_form.js' %}"></script>
     <script src="{% static 'js/dashboards_nav.js' %}"></script>
+
+    <script>
+    function toggleDeputationFields(checked) {
+        const sec = document.getElementById('deputation_section');
+        if (sec) {
+            sec.style.display = checked ? 'block' : 'none';
+            const destInput = document.getElementById('deputation_destination');
+            if (checked && destInput) {
+                destInput.focus();
+            }
+        }
+    }
+
+    function syncDoctorName(selectElem) {
+        const selectedOption = selectElem.options[selectElem.selectedIndex];
+        const docNameInput = document.getElementById('deputation_doctor_name');
+        if (selectedOption && selectedOption.dataset.name && docNameInput) {
+            docNameInput.value = selectedOption.dataset.name;
+        }
+    }
+
+    function updateEndDatePreview() {
+        const startDateInput = document.getElementById('deputation_start_date');
+        const durationInput = document.getElementById('deputation_duration_days');
+        const previewSpan = document.getElementById('preview_end_date');
+        if (!startDateInput || !durationInput || !previewSpan) return;
+
+        const startVal = startDateInput.value;
+        const durVal = parseInt(durationInput.value, 10) || 1;
+        if (startVal) {
+            const d = new Date(startVal);
+            if (!isNaN(d.getTime())) {
+                d.setDate(d.getDate() + Math.max(1, durVal) - 1);
+                const dd = String(d.getDate()).padStart(2, '0');
+                const mm = String(d.getMonth() + 1).padStart(2, '0');
+                const yyyy = d.getFullYear();
+                previewSpan.textContent = `${dd}/${mm}/${yyyy}`;
+                return;
+            }
+        }
+        previewSpan.textContent = '-';
+    }
+
+    document.addEventListener('DOMContentLoaded', function() {
+        updateEndDatePreview();
+    });
+    </script>
 </body>
 </html>

@@ -83,6 +83,7 @@ class CustomUser(AbstractUser):
     ("doctor", "Doctor"),
     ("scheduling_staff", "Scheduling Staff"),
     ("therapist", "Therapist"),
+    ("therapist_hod", "Therapist HOD"),
     ("nurse", "Nurse"),
     ("patient", "Patient"),
     ("ip_pharmacy_staff", "IP Pharmacy Staff"),
@@ -169,6 +170,7 @@ class CustomUser(AbstractUser):
             module_mapping = {
                 "doctor": ["add_therapy", "add_prescription"],
                 "therapist": ["therapy_schedule"],
+                "therapist_hod": ["therapy_schedule", "master_tables"],
                 "patient": ["patient_profiles", "patient_dashboard", "patient_feedback"],
                 "nurse": ["nurse_dashboard"],
                 "ip_pharmacy_staff": ["ip_pharmacy", "procurement_dashboard"],

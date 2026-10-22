@@ -141,6 +141,24 @@ def continuity_matrix_api(request):
                 if dow in dow_map:
                     leave_cache[curr].update(dow_map[dow])
                 curr += timedelta(days=1)
+
+            # Approved Deputations
+            try:
+                from masters.models import TherapistDeputation
+                deputations = TherapistDeputation.objects.filter(
+                    status='approved',
+                    start_date__lte=t_date,
+                    end_date__gte=f_date
+                )
+                for dep in deputations:
+                    curr = max(dep.start_date, f_date)
+                    e = min(dep.end_date, t_date)
+                    while curr <= e:
+                        if dep.therapist_id:
+                            leave_cache[curr].add(dep.therapist_id)
+                        curr += timedelta(days=1)
+            except Exception:
+                pass
                 
         populate_leave_cache(from_date, to_date)
         

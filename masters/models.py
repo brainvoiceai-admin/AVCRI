@@ -428,9 +428,31 @@ class TherapistMaster(models.Model):
     employee_code = models.CharField(max_length=50, unique=True, verbose_name="Employee Code", help_text="Used for emergency leave API mapping")
     is_bathing_therapist = models.BooleanField(default=True, verbose_name="Bathing Therapist")
     is_helping_therapist = models.BooleanField(default=False, verbose_name="Mark as Helping Therapist", help_text="Designates whether this therapist is a backup/supporting Helping Therapist")
+    is_deputed = models.BooleanField(default=False, verbose_name="Deputed Therapist", help_text="Designates whether this therapist is marked as deputed")
     is_active = models.BooleanField(default=True, verbose_name="Active")
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="Created At")
     updated_at = models.DateTimeField(auto_now=True, verbose_name="Updated At")
+
+    @property
+    def current_deputation(self):
+        """Returns the currently active approved deputation, if any."""
+        import datetime
+        today = datetime.date.today()
+        return self.deputations.filter(
+            status='approved',
+            start_date__lte=today,
+            end_date__gte=today
+        ).first()
+
+    @property
+    def pending_deputation(self):
+        """Returns pending deputation request, if any."""
+        return self.deputations.filter(status='pending').order_by('-created_at').first()
+
+    @property
+    def latest_deputation(self):
+        """Returns latest deputation record (any status)."""
+        return self.deputations.order_by('-created_at').first()
 
     def __str__(self):
         return f"{self.therapist_name} ({self.therapist_code})"
@@ -720,3 +742,224 @@ def is_therapist_on_emergency_leave(therapist, target_date, slot=None) -> bool:
             return True
 
     return False
+
+
+class TherapistDeputation(models.Model):
+    """
+    Model to track therapist deputations.
+    When marked as deputed, requires destination, duration (no. of days), assigned doctor,
+    and remarks. Deputations require approval from HR or Admin.
+    Once approved, the therapist will not come under scheduling for the duration.
+    """
+    STATUS_CHOICES = [
+        ('pending', 'Pending Approval'),
+        ('approved', 'Approved'),
+        ('rejected', 'Rejected'),
+    ]
+
+    therapist = models.ForeignKey(
+        TherapistMaster,
+        on_delete=models.CASCADE,
+        related_name='deputations',
+        verbose_name="Therapist"
+    )
+    destination = models.CharField(max_length=255, verbose_name="Destination")
+    start_date = models.DateField(verbose_name="Start Date")
+    duration_days = models.PositiveIntegerField(default=1, verbose_name="Duration (Number of Days)")
+    end_date = models.DateField(verbose_name="End Date", blank=True, null=True)
+    assigned_doctor = models.ForeignKey(
+        'authentication.CustomUser',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='deputed_therapist_assignments',
+        verbose_name="Assigned Doctor"
+    )
+    assigned_doctor_name = models.CharField(max_length=255, blank=True, null=True, verbose_name="Assigned Doctor Name")
+    remarks = models.TextField(blank=True, null=True, verbose_name="Relevant Deputation Details (Remarks)")
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending', db_index=True, verbose_name="Approval Status")
+    requested_by = models.ForeignKey(
+        'authentication.CustomUser',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='requested_deputations',
+        verbose_name="Requested By"
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Created At")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="Updated At")
+    approved_by = models.ForeignKey(
+        'authentication.CustomUser',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='approved_deputations',
+        verbose_name="Approved/Rejected By"
+    )
+    approved_at = models.DateTimeField(null=True, blank=True, verbose_name="Approved/Rejected At")
+    approval_remarks = models.TextField(blank=True, null=True, verbose_name="Approval/Rejection Remarks")
+
+    class Meta:
+        verbose_name = "Therapist Deputation"
+        verbose_name_plural = "Therapist Deputations"
+        ordering = ['-created_at']
+
+    def calculate_end_date(self):
+        import datetime
+        st = self.start_date
+        if not st:
+            st = datetime.date.today()
+        elif isinstance(st, str):
+            try:
+                st = datetime.datetime.strptime(st[:10], "%Y-%m-%d").date()
+            except Exception:
+                st = datetime.date.today()
+        days = max(1, int(self.duration_days or 1))
+        return st + datetime.timedelta(days=days - 1)
+
+    def save(self, *args, **kwargs):
+        import datetime
+        if not self.start_date:
+            self.start_date = datetime.date.today()
+        self.end_date = self.calculate_end_date()
+        if self.assigned_doctor and not self.assigned_doctor_name:
+            self.assigned_doctor_name = self.assigned_doctor.get_full_name() or self.assigned_doctor.username
+        super().save(*args, **kwargs)
+
+    def is_active_for_date(self, target_date):
+        if self.status != 'approved':
+            return False
+        import datetime
+        if isinstance(target_date, str):
+            try:
+                target_date = datetime.datetime.strptime(target_date[:10], "%Y-%m-%d").date()
+            except Exception:
+                return False
+        return self.start_date <= target_date <= self.end_date
+
+    def __str__(self):
+        return f"{self.therapist.therapist_name} -> {self.destination} ({self.duration_days} days) [{self.status}]"
+
+
+def is_therapist_deputed(therapist, target_date=None) -> bool:
+    """
+    Check if a therapist is on approved deputation covering target_date.
+    Returns True if therapist is currently on approved deputation (unavailable for scheduling).
+    Returns False if available.
+    """
+    if not therapist:
+        return False
+    import datetime
+    if target_date is None:
+        target_date = datetime.date.today()
+    elif isinstance(target_date, str):
+        try:
+            target_date = datetime.datetime.strptime(target_date[:10], "%Y-%m-%d").date()
+        except Exception:
+            return False
+    elif hasattr(target_date, 'date') and callable(target_date.date):
+        target_date = target_date.date()
+
+    th_pk = getattr(therapist, "pk", None) or getattr(therapist, "id", None)
+    if not th_pk and isinstance(therapist, (int, str)):
+        try:
+            th_pk = int(therapist)
+        except (ValueError, TypeError):
+            th_pk = None
+    if not th_pk:
+        return False
+
+    return TherapistDeputation.objects.filter(
+        therapist_id=th_pk,
+        status='approved',
+        start_date__lte=target_date,
+        end_date__gte=target_date
+    ).exists()
+
+
+def get_deputed_therapist_ids_for_date(target_date=None):
+    """
+    Return set of therapist IDs that are on approved deputation on target_date.
+    """
+    import datetime
+    if target_date is None:
+        target_date = datetime.date.today()
+    elif isinstance(target_date, str):
+        try:
+            target_date = datetime.datetime.strptime(target_date[:10], "%Y-%m-%d").date()
+        except Exception:
+            return set()
+    elif hasattr(target_date, 'date') and callable(target_date.date):
+        target_date = target_date.date()
+
+    return set(TherapistDeputation.objects.filter(
+        status='approved',
+        start_date__lte=target_date,
+        end_date__gte=target_date
+    ).values_list('therapist_id', flat=True))
+
+
+def can_request_deputation(user) -> bool:
+    """
+    Check if a user is authorized to request a therapist deputation.
+    Rule: Only the scheduling team and therapist HOD (plus super_admin) can request.
+    """
+    if not user or not user.is_authenticated:
+        return False
+
+    role = (getattr(user, 'role', '') or '').lower()
+    if role in ['scheduling_staff', 'therapist_hod', 'super_admin']:
+        return True
+
+    # Custom role checks
+    custom_role = getattr(user, 'custom_role', None)
+    if custom_role:
+        c_name = (getattr(custom_role, 'name', '') or '').lower()
+        c_disp = (getattr(custom_role, 'display_name', '') or '').lower()
+        if any(term in c_name or term in c_disp for term in ['scheduling', 'sheduling', 'hod']):
+            return True
+
+    # Profile designation/department checks
+    staff_profile = getattr(user, 'staff_profile', None)
+    if staff_profile:
+        s_dept = (getattr(staff_profile, 'department', '') or '').lower()
+        s_desig = (getattr(staff_profile, 'designation', '') or '').lower()
+        if any(term in s_dept or term in s_desig for term in ['scheduling', 'sheduling', 'hod', 'head']):
+            return True
+
+    therapist_profile = getattr(user, 'therapist_profile', None)
+    if therapist_profile:
+        t_dept = (getattr(therapist_profile, 'department', '') or '').lower()
+        t_grade = (getattr(therapist_profile, 'therapist_grade', '') or '').lower()
+        if any(term in t_dept or term in t_grade for term in ['hod', 'head']):
+            return True
+
+    return False
+
+
+def can_approve_deputation(user) -> bool:
+    """
+    Check if a user is authorized to approve or reject a therapist deputation.
+    Rule: Approval only given by Admin (Administrative GM / Management) and HR (not Super Admin).
+    """
+    if not user or not user.is_authenticated:
+        return False
+
+    role = (getattr(user, 'role', '') or '').lower()
+    if role in ['admin', 'hr']:
+        return True
+
+    # Custom role checks for Admin / GM / HR
+    custom_role = getattr(user, 'custom_role', None)
+    if custom_role:
+        c_name = (getattr(custom_role, 'name', '') or '').lower()
+        c_disp = (getattr(custom_role, 'display_name', '') or '').lower()
+        if any(term in c_name or term in c_disp for term in ['hr', 'human resource', 'admin', 'gm', 'general manager']):
+            if 'super' not in c_name and 'super' not in c_disp:
+                return True
+
+    admin_profile = getattr(user, 'admin_profile', None)
+    if admin_profile and role != 'super_admin':
+        return True
+
+    return False

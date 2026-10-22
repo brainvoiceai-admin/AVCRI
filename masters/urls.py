@@ -120,6 +120,12 @@ urlpatterns = [
     path('therapists/<int:pk>/disable/', views.therapist_master_disable, name='therapist_master_disable'),
     path('therapists/<int:pk>/toggle-helping/', views.toggle_helping_therapist_status, name='therapist_master_toggle_helping'),
     path('therapists/export-excel/', views.therapist_master_export_excel, name='therapist_master_export_excel'),
+    # Therapist Deputation URLs
+    path('therapists/deputation/create/', views.mark_therapist_deputed_api, name='therapist_deputation_create'),
+    path('therapists/deputation/<int:pk>/approve/', views.approve_therapist_deputation_api, name='therapist_deputation_approve'),
+    path('therapists/deputation/<int:pk>/reject/', views.reject_therapist_deputation_api, name='therapist_deputation_reject'),
+    path('therapists/deputations/', views.therapist_deputation_approvals_view, name='therapist_deputation_approvals'),
+    path('therapists/<int:pk>/deputation-history/', views.therapist_deputation_history_api, name='therapist_deputation_history'),
     # Therapist Grade CRUD
     path('therapist-grades/', views.TherapistGradeManagementView.as_view(), name='therapistgrade_manage'),
     path('therapist-grades/add/', views.TherapistGradeCreateView.as_view(), name='therapistgrade_add'),

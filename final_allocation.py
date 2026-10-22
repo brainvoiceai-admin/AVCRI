@@ -976,6 +976,13 @@ def allocate_therapists(
         full_leave_emp_codes = set()
         half_day_leaves = []
 
+    # Preload deputed therapist IDs for date
+    try:
+        from masters.models import get_deputed_therapist_ids_for_date
+        deputed_therapist_ids = get_deputed_therapist_ids_for_date(date)
+    except Exception:
+        deputed_therapist_ids = set()
+
     def therapist_on_leave(t: TherapistMaster, slot=None):
         target_slot = slot if slot is not None else time_slot
         if TherapistLeaveMaster.objects.filter(therapist=t, leave_day=day_of_week).exists():
@@ -990,6 +997,12 @@ def allocate_therapists(
             if (t_id and el.therapist_id == t_id) or (emp_code and el.employee_code == emp_code):
                 if el.is_slot_on_leave(date, target_slot):
                     return True
+        # Deputation check
+        if (t_id and t_id in deputed_therapist_ids):
+            return True
+        from masters.models import is_therapist_deputed
+        if is_therapist_deputed(t, date):
+            return True
         return False
 
     def get_therapist_gender(t):
@@ -1485,8 +1498,10 @@ def assign_continuity_therapists_pass1(booking, allocation, target_date, locked_
                         is_on_leave = False
                         if TherapistLeaveMaster.objects.filter(therapist=therapist, leave_day=day_of_week).exists():
                             is_on_leave = True
-                        from masters.models import is_therapist_on_emergency_leave
+                        from masters.models import is_therapist_on_emergency_leave, is_therapist_deputed
                         if not is_on_leave and is_therapist_on_emergency_leave(therapist, target_date, slot_master):
+                            is_on_leave = True
+                        if not is_on_leave and is_therapist_deputed(therapist, target_date):
                             is_on_leave = True
                         if not is_on_leave and TherapistBooking.objects.filter(
                             therapist=therapist,
@@ -1602,6 +1617,9 @@ def assign_continuity_therapists_pass1(booking, allocation, target_date, locked_
             if (t_id and el.therapist_id == t_id) or (emp_code and el.employee_code == emp_code):
                 if el.is_slot_on_leave(target_date, slot_master):
                     return True
+        from masters.models import is_therapist_deputed
+        if is_therapist_deputed(t, target_date):
+            return True
         return False
     
     def get_therapist_gender(t):
@@ -2317,8 +2335,10 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                             on_leave = False
                             if TherapistLeaveMaster.objects.filter(therapist=th, leave_day=day_w).exists():
                                 on_leave = True
-                            from masters.models import is_therapist_on_emergency_leave
+                            from masters.models import is_therapist_on_emergency_leave, is_therapist_deputed
                             if not on_leave and is_therapist_on_emergency_leave(th, target_date, allocate_slot):
+                                on_leave = True
+                            if not on_leave and is_therapist_deputed(th, target_date):
                                 on_leave = True
                             if not on_leave and TherapistBooking.objects.filter(
                                 therapist=th, date=target_date, time_slot=allocate_slot, status='BOOKED'
@@ -2577,6 +2597,13 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                                                         print(f"[CONTINUITY FROM PATIENT HISTORY MODEL]   ✗ {therapist_name} ({therapist_code}) is on weekly leave - NOT AVAILABLE")
                                                         unavailable_therapists.append((therapist_code, "On weekly leave"))
                                                         continue
+
+                                                    # 1b. Check deputation
+                                                    from masters.models import is_therapist_deputed
+                                                    if is_therapist_deputed(therapist, target_date):
+                                                        print(f"[CONTINUITY FROM PATIENT HISTORY MODEL]   ✗ {therapist_name} ({therapist_code}) is deputed - NOT AVAILABLE")
+                                                        unavailable_therapists.append((therapist_code, "On deputation"))
+                                                        continue
                                                     
                                                     # 2. Check if already booked at this date+time_slot
                                                     if allocate_slot and TherapistBooking.objects.filter(
@@ -2768,6 +2795,9 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                             if desired_gender and _tg(t) != desired_gender:
                                 continue
                             if TherapistLeaveMaster.objects.filter(therapist=t, leave_day=day_of_week).exists():
+                                continue
+                            from masters.models import is_therapist_deputed
+                            if is_therapist_deputed(t, target_date):
                                 continue
                             if TherapistBooking.objects.filter(therapist=t, date=target_date, time_slot=query_slot, status='BOOKED').exists():
                                 continue
@@ -3034,8 +3064,10 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                                 continue
                             if TherapistLeaveMaster.objects.filter(therapist=alt_senior, leave_day=day_of_week).exists():
                                 continue
-                            from masters.models import is_therapist_on_emergency_leave
+                            from masters.models import is_therapist_on_emergency_leave, is_therapist_deputed
                             if is_therapist_on_emergency_leave(alt_senior, target_date, allocate_slot):
+                                continue
+                            if is_therapist_deputed(alt_senior, target_date):
                                 continue
                             
                             # Found alternative senior - replace current senior and use this one for bathing
