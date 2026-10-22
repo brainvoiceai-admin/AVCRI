@@ -508,16 +508,16 @@ def allocate_treatment_room(date, time_slot, last_room=None, therapy_name=None, 
             pass
         return None
     
-    # STEAM THERAPY RESTRICTION: Always allocate strictly to room TR-12
+    # STEAM THERAPY RESTRICTION: Always allocate strictly to room TR-12 or TR-9
     try:
-        if is_steam_therapy_530_tr12_only(therapy_name):
-            steam_room = check_room_availability('TR-12')
-            if steam_room:
-                print(f"[ROOM RESTRICTION] Steam therapy detected - assigned TR-12 room.")
-                return steam_room
-            else:
-                print(f"[ROOM RESTRICTION] Steam therapy detected - TR-12 is unavailable on {date} at {time_slot}.")
-                return None
+        if is_steam_therapy_treatment(therapy_name):
+            for candidate_room_no in ['TR-12', 'TR-9']:
+                steam_room = check_room_availability(candidate_room_no)
+                if steam_room:
+                    print(f"[ROOM RESTRICTION] Steam therapy detected - assigned {candidate_room_no} room.")
+                    return steam_room
+            print(f"[ROOM RESTRICTION] Steam therapy detected - both TR-12 and TR-9 are unavailable on {date} at {time_slot}.")
+            return None
     except Exception as _st_err:
         print(f"[ROOM RESTRICTION] Error checking steam therapy room: {_st_err}")
 
@@ -727,10 +727,10 @@ def is_group_vasthi_0830_only(therapy_name, therapy_code=None):
         return False
 
 
-def is_steam_therapy_530_tr12_only(therapy_name=None, therapy_code=None):
+def is_steam_therapy_treatment(therapy_name=None, therapy_code=None):
     """
     True when therapy is marked as Steam Therapy in TherapyMaster (is_steam_therapy=True).
-    Such therapy must strictly be scheduled at 17:30 (5:30 PM) and in room TR-12.
+    Such therapy is strictly allocated to treatment rooms TR-12 or TR-9.
     """
     try:
         from masters.models import TherapyMaster
@@ -746,6 +746,9 @@ def is_steam_therapy_530_tr12_only(therapy_name=None, therapy_code=None):
     except Exception:
         return False
 
+# Backward compatibility alias
+is_steam_therapy_530_tr12_only = is_steam_therapy_treatment
+
 
 def get_allowed_slot_values(patient_type, therapy_category, used_slots=None, therapy_name=None, therapy_code=None):
     """
@@ -759,22 +762,6 @@ def get_allowed_slot_values(patient_type, therapy_category, used_slots=None, the
         therapy_name: Name of the therapy (for treatment-specific restrictions)
         therapy_code: Therapy code (master lookup + THEB037 exemption)
     """
-    # STEAM THERAPY RESTRICTION: Always allocate strictly to 17:30 (5:30 PM)
-    if is_steam_therapy_530_tr12_only(therapy_name, therapy_code):
-        allowed_slots = ["17:30"]
-        if used_slots:
-            used_slot_strs = []
-            for s in used_slots:
-                t = _slot_time_value(s)
-                if t:
-                    try:
-                        used_slot_strs.append(t.strftime("%H:%M"))
-                    except Exception:
-                        pass
-            allowed_slots = [s for s in allowed_slots if s not in used_slot_strs]
-        print(f"[SLOT RESTRICTION] Steam therapy detected - strictly restricted to 17:30. Allowed: {allowed_slots}")
-        return allowed_slots
-
     general_slots = ["06:30","08:30","10:00","11:30","14:30","16:00","17:30"]
 
     # default allowed by patient type
@@ -3972,28 +3959,8 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                 except Exception as e:
                     print(f"[SLOT RESTRICTION] Error checking preferred slot for Lepam: {e}")
 
-        # Steam Therapy: force allocation attempts to 17:30 only
-        if is_steam_therapy_530_tr12_only(therapy_name, getattr(allocation, "therapy_code", None)):
-            try:
-                t1730 = datetime.strptime("17:30", "%H:%M").time()
-                sm = SlotMaster.objects.filter(slot_time=t1730, is_active=True).first()
-                if sm:
-                    cur_t = None
-                    if canonical_pref:
-                        cur_t = getattr(canonical_pref, "slot_time", None) or getattr(canonical_pref, "start_time", None)
-                    if cur_t != t1730:
-                        canonical_pref = sm
-                        preferred_rejected_reason = None
-                        print("[SLOT RESTRICTION] Steam Therapy: normalized preferred slot to 17:30")
-                else:
-                    canonical_pref = None
-                    preferred_rejected_reason = "steam_therapy_no_1730_slotmaster"
-                    print("[SLOT RESTRICTION] Steam Therapy: no active SlotMaster for 17:30")
-            except Exception as e:
-                print(f"[SLOT RESTRICTION] Steam Therapy preferred-slot normalization error: {e}")
-
         # Vasthi therapy group (except Mathra THEB037): force allocation attempts to 08:30 only
-        elif is_group_vasthi_0830_only(therapy_name, getattr(allocation, "therapy_code", None)):
+        if is_group_vasthi_0830_only(therapy_name, getattr(allocation, "therapy_code", None)):
             try:
                 t0830 = datetime.strptime("08:30", "%H:%M").time()
                 sm = SlotMaster.objects.filter(slot_time=t0830, is_active=True).first()
