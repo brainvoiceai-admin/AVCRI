@@ -36,6 +36,7 @@ urlpatterns = [
       path("predictor/", include("predictor.urls")),
       path("sheduling/", include("Sheduling.urls")),
       path("Masters/", include("masters.urls")),
+      path("masters/", include("masters.urls")),
       # Temporary route to handle WebSocket notification requests (disabled)
       path('ws/notifications/', ws_notifications_disabled, name='ws_notifications_disabled'),
 ]

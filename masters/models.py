@@ -454,6 +454,16 @@ class TherapistMaster(models.Model):
         """Returns latest deputation record (any status)."""
         return self.deputations.order_by('-created_at').first()
 
+    @property
+    def approved_omitted_treatments(self):
+        """Returns approved omitted treatment records."""
+        return self.treatment_omissions.filter(status='approved', is_active=True).select_related('treatment', 'approved_by')
+
+    @property
+    def pending_omitted_treatments(self):
+        """Returns pending omitted treatment records."""
+        return self.treatment_omissions.filter(status='pending', is_active=True).select_related('treatment', 'requested_by')
+
     def __str__(self):
         return f"{self.therapist_name} ({self.therapist_code})"
 
@@ -962,4 +972,313 @@ def can_approve_deputation(user) -> bool:
     if admin_profile and role != 'super_admin':
         return True
 
-    return False
+    return False
+
+
+class TherapistTreatmentOmission(models.Model):
+    """
+    Model to track therapists omitting particular treatments on special request.
+    Therapists/staff select treatments to omit in Therapist Master edit.
+    Requests are sent for approval to HR and Admin.
+    Once approved, their name will not be scheduled with those treatments
+    in the scheduling list (only for those treatments their name will not be there).
+    """
+    STATUS_CHOICES = [
+        ('pending', 'Pending Approval'),
+        ('approved', 'Approved'),
+        ('rejected', 'Rejected'),
+    ]
+
+    therapist = models.ForeignKey(
+        TherapistMaster,
+        on_delete=models.CASCADE,
+        related_name='treatment_omissions',
+        verbose_name="Therapist"
+    )
+    treatment = models.ForeignKey(
+        TherapyMaster,
+        on_delete=models.CASCADE,
+        related_name='therapist_omissions',
+        verbose_name="Treatment / Therapy"
+    )
+    reason = models.TextField(blank=True, null=True, verbose_name="Reason for Special Request / Omission")
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default='pending',
+        db_index=True,
+        verbose_name="Approval Status"
+    )
+    requested_by = models.ForeignKey(
+        'authentication.CustomUser',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='requested_treatment_omissions',
+        verbose_name="Requested By"
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Created At")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="Updated At")
+    approved_by = models.ForeignKey(
+        'authentication.CustomUser',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='approved_treatment_omissions',
+        verbose_name="Approved/Rejected By"
+    )
+    approved_at = models.DateTimeField(null=True, blank=True, verbose_name="Approved/Rejected At")
+    approval_remarks = models.TextField(blank=True, null=True, verbose_name="Approval/Rejection Remarks")
+    batch_id = models.CharField(
+        max_length=64,
+        blank=True,
+        null=True,
+        db_index=True,
+        verbose_name="Request Batch ID",
+        help_text="Groups all treatments submitted together in a single request"
+    )
+    is_active = models.BooleanField(default=True, verbose_name="Active")
+
+    class Meta:
+        verbose_name = "Therapist Treatment Omission"
+        verbose_name_plural = "Therapist Treatment Omissions"
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['treatment', 'status', 'is_active'], name='idx_tto_tr_st_act'),
+            models.Index(fields=['therapist', 'status', 'is_active'], name='idx_tto_th_st_act'),
+            models.Index(fields=['batch_id', 'status', 'is_active'], name='idx_tto_batch_st_act'),
+        ]
+
+    def __str__(self):
+        return f"{self.therapist.therapist_name} - Omit {self.treatment.therapy_name} [{self.status}]"
+
+
+def is_therapist_omitted_for_treatment(therapist, treatment) -> bool:
+    """
+    Check if a therapist has an approved omission for a specific treatment.
+    Returns True if therapist is omitted (must NOT be scheduled for this treatment).
+    Returns False otherwise.
+    """
+    if not therapist or not treatment:
+        return False
+
+    th_id = None
+    th_code = None
+    if isinstance(therapist, TherapistMaster):
+        th_id = therapist.pk
+        th_code = therapist.therapist_code
+    elif hasattr(therapist, 'pk') and getattr(therapist, 'pk', None):
+        th_id = therapist.pk
+        th_code = getattr(therapist, 'therapist_code', None)
+    elif isinstance(therapist, int):
+        th_id = therapist
+    elif isinstance(therapist, str):
+        th_str = therapist.strip()
+        if th_str.isdigit():
+            th_id = int(th_str)
+        else:
+            th_code = th_str
+
+    tr_id = None
+    tr_code = None
+    tr_name = None
+    if isinstance(treatment, TherapyMaster):
+        tr_id = treatment.pk
+        tr_code = treatment.therapy_code
+        tr_name = treatment.therapy_name
+    elif hasattr(treatment, 'pk') and getattr(treatment, 'pk', None) and hasattr(treatment, 'therapy_name'):
+        tr_id = treatment.pk
+        tr_code = getattr(treatment, 'therapy_code', None)
+        tr_name = getattr(treatment, 'therapy_name', None)
+    elif isinstance(treatment, int):
+        tr_id = treatment
+    elif isinstance(treatment, str):
+        tr_str = treatment.strip()
+        if tr_str.isdigit():
+            tr_id = int(tr_str)
+        else:
+            tr_code = tr_str
+            tr_name = tr_str
+
+    from django.db.models import Q
+    th_q = Q()
+    if th_id:
+        th_q |= Q(therapist_id=th_id)
+    if th_code:
+        th_q |= Q(therapist__therapist_code__iexact=th_code)
+    if not th_q:
+        return False
+
+    tr_q = Q()
+    if tr_id:
+        tr_q |= Q(treatment_id=tr_id)
+    if tr_code:
+        tr_q |= Q(treatment__therapy_code__iexact=tr_code)
+    if tr_name:
+        tr_q |= Q(treatment__therapy_name__iexact=tr_name)
+    if not tr_q:
+        return False
+
+    return TherapistTreatmentOmission.objects.filter(
+        th_q,
+        tr_q,
+        status='approved',
+        is_active=True
+    ).exists()
+
+
+def get_omitted_therapist_ids_for_treatment(treatment) -> set:
+    """
+    Return a set of TherapistMaster IDs who have approved omissions for `treatment`.
+    """
+    if not treatment:
+        return set()
+    from django.db.models import Q
+    tr_q = Q()
+    if isinstance(treatment, TherapyMaster):
+        tr_q = Q(treatment_id=treatment.pk)
+    elif hasattr(treatment, 'pk') and getattr(treatment, 'pk', None) and hasattr(treatment, 'therapy_name'):
+        tr_q = Q(treatment_id=treatment.pk)
+    elif isinstance(treatment, int):
+        tr_q = Q(treatment_id=treatment)
+    elif isinstance(treatment, str):
+        treatment_clean = treatment.strip()
+        if treatment_clean.isdigit():
+            tr_q = Q(treatment_id=int(treatment_clean))
+        else:
+            tr_q = Q(treatment__therapy_code__iexact=treatment_clean) | Q(treatment__therapy_name__iexact=treatment_clean)
+    if not tr_q:
+        return set()
+
+    return set(TherapistTreatmentOmission.objects.filter(
+        tr_q,
+        status='approved',
+        is_active=True
+    ).values_list('therapist_id', flat=True))
+
+
+def get_omitted_therapist_codes_for_treatment(treatment) -> set:
+    """
+    Return a set of therapist_code strings who have approved omissions for `treatment`.
+    """
+    if not treatment:
+        return set()
+    from django.db.models import Q
+    tr_q = Q()
+    if isinstance(treatment, TherapyMaster):
+        tr_q = Q(treatment_id=treatment.pk)
+    elif hasattr(treatment, 'pk') and getattr(treatment, 'pk', None) and hasattr(treatment, 'therapy_name'):
+        tr_q = Q(treatment_id=treatment.pk)
+    elif isinstance(treatment, int):
+        tr_q = Q(treatment_id=treatment)
+    elif isinstance(treatment, str):
+        treatment_clean = treatment.strip()
+        if treatment_clean.isdigit():
+            tr_q = Q(treatment_id=int(treatment_clean))
+        else:
+            tr_q = Q(treatment__therapy_code__iexact=treatment_clean) | Q(treatment__therapy_name__iexact=treatment_clean)
+    if not tr_q:
+        return set()
+
+    return set(TherapistTreatmentOmission.objects.filter(
+        tr_q,
+        status='approved',
+        is_active=True
+    ).values_list('therapist__therapist_code', flat=True))
+
+
+def can_approve_treatment_omission(user) -> bool:
+    """
+    Check if a user is authorized to approve or reject a therapist treatment omission.
+    Rule: Approval only given by Admin (Administrative GM / Management) and HR.
+    """
+    return can_approve_deputation(user)
+
+
+class TherapistOmissionRequestGroup:
+    """
+    Encapsulates all treatments submitted together in a single request for a therapist.
+    """
+    def __init__(self, key, first_omission):
+        self.key = key
+        self.batch_id = first_omission.batch_id or f"TOR-{first_omission.id}"
+        self.raw_batch_id = first_omission.batch_id
+        self.therapist = first_omission.therapist
+        self.reason = first_omission.reason
+        self.status = first_omission.status
+        self.requested_by = first_omission.requested_by
+        self.created_at = first_omission.created_at
+        self.approved_by = first_omission.approved_by
+        self.approved_at = first_omission.approved_at
+        self.approval_remarks = first_omission.approval_remarks
+        self.omissions = []
+        self.treatments = []
+        self.first_id = first_omission.id
+
+    def add_omission(self, omission):
+        self.omissions.append(omission)
+        self.treatments.append(omission.treatment)
+        if omission.created_at and (not self.created_at or omission.created_at > self.created_at):
+            self.created_at = omission.created_at
+        if omission.approved_at and (not self.approved_at or omission.approved_at > self.approved_at):
+            self.approved_at = omission.approved_at
+        if omission.approved_by and not self.approved_by:
+            self.approved_by = omission.approved_by
+        if omission.approval_remarks and not self.approval_remarks:
+            self.approval_remarks = omission.approval_remarks
+
+    @property
+    def total_count(self):
+        return len(self.omissions)
+
+    @property
+    def hard_count(self):
+        return sum(1 for t in self.treatments if (getattr(t, 'therapy_category', None) or '').strip().lower() == 'hard')
+
+    @property
+    def medium_count(self):
+        return sum(1 for t in self.treatments if (getattr(t, 'therapy_category', None) or '').strip().lower() == 'medium')
+
+    @property
+    def easy_count(self):
+        return sum(1 for t in self.treatments if (getattr(t, 'therapy_category', None) or '').strip().lower() == 'easy')
+
+    @property
+    def other_count(self):
+        return self.total_count - (self.hard_count + self.medium_count + self.easy_count)
+
+    @property
+    def treatments_summary(self):
+        names = [t.therapy_name for t in self.treatments]
+        if len(names) <= 3:
+            return ", ".join(names)
+        return f"{', '.join(names[:3])} + {len(names) - 3} more"
+
+    @property
+    def action_identifier(self):
+        return self.raw_batch_id or str(self.first_id)
+
+
+def group_omissions_by_request(omissions_queryset):
+    """
+    Groups a queryset or iterable of TherapistTreatmentOmission instances
+    into logical requests (by batch_id, or by therapist+date fallback).
+    Preserves ordering (newest first).
+    """
+    if not omissions_queryset:
+        return []
+
+    groups = {}
+    for om in omissions_queryset:
+        if om.batch_id:
+            key = f"BATCH_{om.batch_id}"
+        else:
+            time_key = om.created_at.strftime('%Y%m%d%H%M') if om.created_at else 'unknown'
+            key = f"LEGACY_{om.therapist_id}_{time_key}_{(om.reason or '').strip()[:20]}"
+
+        if key not in groups:
+            groups[key] = TherapistOmissionRequestGroup(key, om)
+        groups[key].add_omission(om)
+
+    return list(groups.values())
+

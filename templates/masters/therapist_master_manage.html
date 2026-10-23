@@ -37,6 +37,12 @@
                     {% if pending_deputations_count %}<span class="badge bg-danger ms-1">{{ pending_deputations_count }}</span>{% endif %}
                 </a>
                 {% endif %}
+                {% if can_approve_omissions %}
+                <a href="{% url 'therapist_treatment_omission_approvals' %}" class="btn btn-outline-danger me-2">
+                    <i class="fas fa-ban me-2"></i>Treatment Omission Approvals
+                    {% if pending_omissions_count %}<span class="badge bg-danger ms-1">{{ pending_omissions_count }}</span>{% endif %}
+                </a>
+                {% endif %}
                 <a href="{% url 'therapist_master_add' %}" class="btn btn-success me-2">
                     <i class="fas fa-plus me-2"></i>Add New Therapist
                 </a>
@@ -133,6 +139,7 @@
                                 <th>Helping</th>
                                 <th>Leave Days</th>
                                 <th>Deputation</th>
+                                <th>Omitted Treatments</th>
                                 <th>Status</th>
                                 <th>Created</th>
                                 <th>Actions</th>
@@ -212,6 +219,28 @@
                                     {% endif %}
                                 </td>
                                 <td>
+                                    {% with therapist.approved_omitted_treatments as approved_om %}
+                                    {% with therapist.pending_omitted_treatments as pending_om %}
+                                        {% if approved_om %}
+                                        <span class="badge bg-danger" title="{% for o in approved_om %}{{ o.treatment.therapy_name }}{% if not forloop.last %}, {% endif %}{% endfor %}">
+                                            <i class="fas fa-ban me-1"></i>{{ approved_om|length }} Omitted
+                                        </span>
+                                        <div class="text-muted text-truncate" style="font-size: 0.72rem; max-width: 130px;" title="{% for o in approved_om %}{{ o.treatment.therapy_name }}{% if not forloop.last %}, {% endif %}{% endfor %}">
+                                            {% for o in approved_om %}{{ o.treatment.therapy_name|truncatechars:12 }}{% if not forloop.last %}, {% endif %}{% endfor %}
+                                        </div>
+                                        {% endif %}
+                                        {% if pending_om %}
+                                        <span class="badge bg-warning text-dark mt-1" title="Pending HR/Admin approval for {{ pending_om|length }} treatments">
+                                            <i class="fas fa-clock me-1"></i>{{ pending_om|length }} Pending
+                                        </span>
+                                        {% endif %}
+                                        {% if not approved_om and not pending_om %}
+                                        <span class="text-muted small">-</span>
+                                        {% endif %}
+                                    {% endwith %}
+                                    {% endwith %}
+                                </td>
+                                <td>
                                     {% if therapist.is_active %}
                                     <span class="badge bg-success">Active</span>
                                     {% else %}
@@ -256,7 +285,7 @@
                             </tr>
                             {% empty %}
                             <tr>
-                                <td colspan="12" class="text-center py-4">
+                                <td colspan="13" class="text-center py-4">
                                     <div class="text-muted">
                                         <i class="fas fa-user-md fa-3x mb-3"></i>
                                         <p>No therapists found. <a href="{% url 'therapist_master_add' %}">Add the first

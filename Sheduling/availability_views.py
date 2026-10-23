@@ -134,6 +134,19 @@ def get_available_therapists_api(request):
             deputed_ids = get_deputed_therapist_ids_for_date(target_date)
             if deputed_ids:
                 available_therapists = available_therapists.exclude(pk__in=deputed_ids)
+
+            # Treatment Omission check: exclude therapists with approved omission for specified treatment
+            treatment_param = (
+                request.GET.get('treatment') or 
+                request.GET.get('therapy') or 
+                request.GET.get('therapy_name') or 
+                request.GET.get('treatment_name')
+            )
+            if treatment_param:
+                from masters.models import get_omitted_therapist_ids_for_treatment
+                omitted_ids = get_omitted_therapist_ids_for_treatment(treatment_param)
+                if omitted_ids:
+                    available_therapists = available_therapists.exclude(pk__in=omitted_ids)
         else:
             available_therapists = therapists_query
         

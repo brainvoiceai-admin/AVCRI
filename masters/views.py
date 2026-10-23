@@ -17,7 +17,11 @@ from .models import (
     NurseMaster, IngredientMaster,
     ShiftMaster, ShiftSlotMapping, TherapistShiftMapping,
     TherapistDeputation, is_therapist_deputed, get_deputed_therapist_ids_for_date,
-    can_request_deputation, can_approve_deputation
+    can_request_deputation, can_approve_deputation,
+    TherapistTreatmentOmission, is_therapist_omitted_for_treatment,
+    get_omitted_therapist_ids_for_treatment, get_omitted_therapist_codes_for_treatment,
+    can_approve_treatment_omission,
+    TherapistOmissionRequestGroup, group_omissions_by_request
 )
 from Patient.models import TreatmentRoom, RoomName, Floor
 import json
@@ -2728,6 +2732,10 @@ class TherapistMasterManagementView(ListView):
         context['pending_deputations_count'] = TherapistDeputation.objects.filter(status='pending').count()
         context['can_request_deputation'] = can_request_deputation(self.request.user)
         context['can_approve_deputation'] = can_approve_deputation(self.request.user)
+        context['pending_omissions_count'] = len(group_omissions_by_request(
+            TherapistTreatmentOmission.objects.filter(status='pending', is_active=True)
+        ))
+        context['can_approve_omissions'] = can_approve_treatment_omission(self.request.user)
         context['today_date'] = datetime.date.today().strftime('%Y-%m-%d')
         # Bulk upload context
         # Note: Therapist master has complex relationships, basic bulk upload support
@@ -2768,6 +2776,16 @@ class TherapistMasterCreateView(CreateView):
         context['today_date'] = datetime.date.today().strftime('%Y-%m-%d')
         context['can_request_deputation'] = can_request_deputation(self.request.user)
         context['can_approve_deputation'] = can_approve_deputation(self.request.user)
+        context['current_deputation'] = None
+        context['pending_deputation'] = None
+        context['latest_deputation'] = None
+        context['active_deputation'] = None
+        context['deputation_destination'] = ''
+        context['deputation_start_date'] = context['today_date']
+        context['deputation_duration_days'] = 1
+        context['deputation_doctor_id'] = None
+        context['deputation_doctor_name'] = ''
+        context['deputation_remarks'] = ''
         context['selected_shift_ids'] = []
         return context
     
@@ -2969,6 +2987,28 @@ class TherapistMasterUpdateView(UpdateView):
         context['pending_deputation'] = self.object.pending_deputation
         context['latest_deputation'] = self.object.latest_deputation
         context['deputations_history'] = self.object.deputations.select_related('assigned_doctor', 'approved_by', 'requested_by').order_by('-created_at')[:10]
+
+        active_dep = self.object.pending_deputation or self.object.current_deputation
+        context['active_deputation'] = active_dep
+        context['deputation_destination'] = active_dep.destination if active_dep else ''
+        context['deputation_start_date'] = active_dep.start_date.strftime('%Y-%m-%d') if (active_dep and active_dep.start_date) else context['today_date']
+        context['deputation_duration_days'] = active_dep.duration_days if active_dep else 1
+        context['deputation_doctor_id'] = active_dep.assigned_doctor_id if active_dep else None
+        context['deputation_doctor_name'] = active_dep.assigned_doctor_name if active_dep else ''
+        context['deputation_remarks'] = active_dep.remarks if active_dep else ''
+
+        # Treatment Omission context
+        treatments_qs = TherapyMaster.objects.filter(is_active=True).order_by('therapy_name')
+        context['all_treatments'] = treatments_qs
+        context['hard_treatments_count'] = treatments_qs.filter(therapy_category__iexact='hard').count()
+        context['medium_treatments_count'] = treatments_qs.filter(therapy_category__iexact='medium').count()
+        context['easy_treatments_count'] = treatments_qs.filter(therapy_category__iexact='easy').count()
+        context['approved_omissions'] = self.object.approved_omitted_treatments
+        context['pending_omissions'] = self.object.pending_omitted_treatments
+        context['pending_omission_requests'] = group_omissions_by_request(self.object.pending_omitted_treatments)
+        context['approved_omitted_treatment_ids'] = set(self.object.treatment_omissions.filter(status='approved', is_active=True).values_list('treatment_id', flat=True))
+        context['pending_omitted_treatment_ids'] = set(self.object.treatment_omissions.filter(status='pending', is_active=True).values_list('treatment_id', flat=True))
+        context['can_approve_omissions'] = can_approve_treatment_omission(self.request.user)
         
         return context
     
@@ -3019,6 +3059,50 @@ class TherapistMasterUpdateView(UpdateView):
         else:
             # If no days selected, remove all leave records
             TherapistLeaveMaster.objects.filter(therapist=self.object).delete()
+
+        # Handle treatment omissions on special request
+        omit_treatment_ids = self.request.POST.getlist('omit_treatment_ids')
+        omit_reason = (self.request.POST.get('omit_reason') or '').strip()
+        if omit_treatment_ids:
+            import uuid
+            from django.utils import timezone
+            batch_id = f"TOR-{timezone.now().strftime('%Y%m%d%H%M%S')}-{self.object.id}-{uuid.uuid4().hex[:6].upper()}"
+            new_omissions_count = 0
+            for t_id in omit_treatment_ids:
+                try:
+                    t_id_int = int(t_id)
+                    treatment = TherapyMaster.objects.filter(id=t_id_int, is_active=True).first()
+                    if treatment:
+                        existing = TherapistTreatmentOmission.objects.filter(
+                            therapist=self.object,
+                            treatment=treatment,
+                            status__in=['pending', 'approved'],
+                            is_active=True
+                        ).first()
+                        if not existing:
+                            om = TherapistTreatmentOmission.objects.create(
+                                therapist=self.object,
+                                treatment=treatment,
+                                reason=omit_reason,
+                                status='pending',
+                                requested_by=self.request.user,
+                                batch_id=batch_id
+                            )
+                            _log_master_audit(
+                                self.request,
+                                'create',
+                                'TherapistTreatmentOmission',
+                                str(om.pk),
+                                f'Submitted omission request for {self.object.therapist_name} - {treatment.therapy_name} (Batch: {batch_id})'
+                            )
+                            new_omissions_count += 1
+                except (ValueError, TypeError):
+                    continue
+            if new_omissions_count > 0:
+                messages.info(
+                    self.request,
+                    f'Treatment omission request for {new_omissions_count} treatment(s) submitted for Admin and HR approval (Ref: {batch_id}).'
+                )
 
         # Handle deputation request if marked and authorized
         if can_request_deputation(self.request.user):
@@ -3344,6 +3428,533 @@ def therapist_deputation_history_api(request, pk):
             'approval_remarks': d.approval_remarks or '',
         })
     return JsonResponse({'therapist_name': therapist.therapist_name, 'deputations': data})
+
+
+# -------------------------------------------------------------
+# Therapist Treatment Omission CRUD & Approval Views
+# -------------------------------------------------------------
+
+@login_required
+@require_http_methods(["POST"])
+def therapist_treatment_omission_create(request, pk):
+    """
+    Submit a treatment omission request for a therapist.
+    Accessible from Therapist Master Edit form or AJAX.
+    """
+    therapist = get_object_or_404(TherapistMaster, pk=pk)
+    
+    # Can accept form POST or JSON body
+    treatment_ids = []
+    reason = ''
+    if request.content_type == 'application/json':
+        try:
+            data = json.loads(request.body)
+            treatment_ids = data.get('treatment_ids', [])
+            if 'treatment_id' in data and not treatment_ids:
+                treatment_ids = [data.get('treatment_id')]
+            reason = (data.get('reason') or '').strip()
+        except Exception as e:
+            return JsonResponse({'success': False, 'message': f'Invalid JSON: {e}'}, status=400)
+    else:
+        treatment_ids = request.POST.getlist('omit_treatment_ids')
+        if not treatment_ids and request.POST.get('treatment_id'):
+            treatment_ids = [request.POST.get('treatment_id')]
+        reason = (request.POST.get('omit_reason') or request.POST.get('reason') or '').strip()
+
+    if not treatment_ids:
+        msg = "Please select at least one treatment to omit."
+        if request.headers.get('x-requested-with') == 'XMLHttpRequest' or request.content_type == 'application/json':
+            return JsonResponse({'success': False, 'message': msg}, status=400)
+        messages.error(request, msg)
+        return redirect('therapist_master_update', pk=therapist.pk)
+
+    import uuid
+    from django.utils import timezone
+    batch_id = f"TOR-{timezone.now().strftime('%Y%m%d%H%M%S')}-{therapist.id}-{uuid.uuid4().hex[:6].upper()}"
+    created_records = []
+    already_omitted = []
+    for tid in treatment_ids:
+        try:
+            treatment = TherapyMaster.objects.filter(id=int(tid), is_active=True).first()
+            if not treatment:
+                continue
+            existing = TherapistTreatmentOmission.objects.filter(
+                therapist=therapist,
+                treatment=treatment,
+                status__in=['pending', 'approved'],
+                is_active=True
+            ).first()
+            if existing:
+                already_omitted.append(treatment.therapy_name)
+                continue
+
+            om = TherapistTreatmentOmission.objects.create(
+                therapist=therapist,
+                treatment=treatment,
+                reason=reason,
+                status='pending',
+                requested_by=request.user,
+                batch_id=batch_id
+            )
+            created_records.append(om)
+            _log_master_audit(
+                request,
+                'create',
+                'TherapistTreatmentOmission',
+                str(om.pk),
+                f'Submitted omission request for {therapist.therapist_name} - {treatment.therapy_name} (Batch: {batch_id})'
+            )
+        except (ValueError, TypeError):
+            continue
+
+    if created_records:
+        t_names = ", ".join(o.treatment.therapy_name for o in created_records[:4])
+        if len(created_records) > 4:
+            t_names += f" + {len(created_records) - 4} more"
+        msg = f'Omission request for {len(created_records)} treatment(s) ({t_names}) submitted successfully for Admin & HR approval (Ref: {batch_id}).'
+        messages.success(request, msg)
+        if request.headers.get('x-requested-with') == 'XMLHttpRequest' or request.content_type == 'application/json':
+            return JsonResponse({
+                'success': True,
+                'message': msg,
+                'batch_id': batch_id,
+                'count': len(created_records),
+                'already_omitted': already_omitted
+            })
+    elif already_omitted:
+        msg = f"Selected treatment(s) ({', '.join(already_omitted[:5])}) are already pending or approved for omission."
+        messages.warning(request, msg)
+        if request.headers.get('x-requested-with') == 'XMLHttpRequest' or request.content_type == 'application/json':
+            return JsonResponse({'success': False, 'message': msg}, status=400)
+    else:
+        msg = "No valid treatments were selected."
+        messages.error(request, msg)
+        if request.headers.get('x-requested-with') == 'XMLHttpRequest' or request.content_type == 'application/json':
+            return JsonResponse({'success': False, 'message': msg}, status=400)
+
+    return redirect('therapist_master_update', pk=therapist.pk)
+
+
+@login_required
+def approve_therapist_treatment_omission_api(request, pk):
+    """
+    Approve a single therapist treatment omission request.
+    Strictly Admin (GM) and HR.
+    Once approved, the therapist will NOT be scheduled for this treatment.
+    """
+    if not can_approve_treatment_omission(request.user):
+        msg = "Permission denied: Treatment omission approval can only be given by Admin (GM) and HR."
+        if request.headers.get('x-requested-with') == 'XMLHttpRequest' or request.content_type == 'application/json':
+            return JsonResponse({'success': False, 'message': msg}, status=403)
+        try:
+            messages.error(request, msg)
+        except Exception:
+            pass
+        return redirect('therapist_treatment_omission_approvals')
+
+    omission = get_object_or_404(TherapistTreatmentOmission, pk=pk)
+    remarks = (request.POST.get('approval_remarks') or request.POST.get('remarks') or request.GET.get('approval_remarks') or request.GET.get('remarks') or '').strip()
+    if not remarks and request.content_type == 'application/json':
+        try:
+            data = json.loads(request.body)
+            remarks = (data.get('approval_remarks') or data.get('remarks') or '').strip()
+        except Exception:
+            pass
+
+    from django.utils import timezone
+    omission.status = 'approved'
+    omission.approved_by = request.user
+    omission.approved_at = timezone.now()
+    if remarks:
+        omission.approval_remarks = remarks
+    omission.save()
+
+    therapist = omission.therapist
+    treatment = omission.treatment
+
+    _log_master_audit(
+        request,
+        'update',
+        'TherapistTreatmentOmission',
+        str(omission.pk),
+        f'Approved treatment omission for {therapist.therapist_name} - {treatment.therapy_name}'
+    )
+
+    success_msg = f'Omission of "{treatment.therapy_name}" for therapist "{therapist.therapist_name}" has been APPROVED. The therapist will not be scheduled for this treatment.'
+    try:
+        messages.success(request, success_msg)
+    except Exception:
+        pass
+
+    if request.headers.get('x-requested-with') == 'XMLHttpRequest' or request.content_type == 'application/json':
+        return JsonResponse({
+            'success': True,
+            'message': success_msg,
+            'omission_id': omission.id,
+            'status': omission.status
+        })
+
+    next_url = request.POST.get('next') or request.GET.get('next')
+    if next_url:
+        return redirect(next_url)
+    return redirect('therapist_treatment_omission_approvals')
+
+
+@login_required
+def reject_therapist_treatment_omission_api(request, pk):
+    """
+    Reject a single therapist treatment omission request.
+    Strictly Admin (GM) and HR.
+    """
+    if not can_approve_treatment_omission(request.user):
+        msg = "Permission denied: Treatment omission rejection can only be given by Admin (GM) and HR."
+        if request.headers.get('x-requested-with') == 'XMLHttpRequest' or request.content_type == 'application/json':
+            return JsonResponse({'success': False, 'message': msg}, status=403)
+        try:
+            messages.error(request, msg)
+        except Exception:
+            pass
+        return redirect('therapist_treatment_omission_approvals')
+
+    omission = get_object_or_404(TherapistTreatmentOmission, pk=pk)
+    remarks = (request.POST.get('approval_remarks') or request.POST.get('remarks') or request.GET.get('approval_remarks') or request.GET.get('remarks') or '').strip()
+    if not remarks and request.content_type == 'application/json':
+        try:
+            data = json.loads(request.body)
+            remarks = (data.get('approval_remarks') or data.get('remarks') or '').strip()
+        except Exception:
+            pass
+
+    from django.utils import timezone
+    omission.status = 'rejected'
+    omission.approved_by = request.user
+    omission.approved_at = timezone.now()
+    if remarks:
+        omission.approval_remarks = remarks
+    omission.save()
+
+    therapist = omission.therapist
+    treatment = omission.treatment
+
+    _log_master_audit(
+        request,
+        'update',
+        'TherapistTreatmentOmission',
+        str(omission.pk),
+        f'Rejected treatment omission for {therapist.therapist_name} - {treatment.therapy_name}'
+    )
+
+    msg = f'Omission request of "{treatment.therapy_name}" for therapist "{therapist.therapist_name}" has been REJECTED.'
+    try:
+        messages.info(request, msg)
+    except Exception:
+        pass
+
+    if request.headers.get('x-requested-with') == 'XMLHttpRequest' or request.content_type == 'application/json':
+        return JsonResponse({
+            'success': True,
+            'message': msg,
+            'omission_id': omission.id,
+            'status': omission.status
+        })
+
+    next_url = request.POST.get('next') or request.GET.get('next')
+    if next_url:
+        return redirect(next_url)
+    return redirect('therapist_treatment_omission_approvals')
+
+
+@login_required
+def delete_therapist_treatment_omission_api(request, pk):
+    """
+    Cancel or revoke a single treatment omission.
+    """
+    omission = get_object_or_404(TherapistTreatmentOmission, pk=pk)
+    therapist_pk = omission.therapist_id
+    treatment_name = omission.treatment.therapy_name
+    therapist_name = omission.therapist.therapist_name
+
+    omission.delete()
+
+    _log_master_audit(
+        request,
+        'delete',
+        'TherapistTreatmentOmission',
+        str(pk),
+        f'Deleted/revoked treatment omission for {therapist_name} - {treatment_name}'
+    )
+
+    msg = f'Omission for "{treatment_name}" removed. Therapist "{therapist_name}" is now eligible for scheduling this treatment.'
+    try:
+        messages.success(request, msg)
+    except Exception:
+        pass
+
+    if request.headers.get('x-requested-with') == 'XMLHttpRequest' or request.content_type == 'application/json':
+        return JsonResponse({'success': True, 'message': msg})
+
+    next_url = request.POST.get('next') or request.GET.get('next')
+    if next_url:
+        return redirect(next_url)
+    return redirect('therapist_master_update', pk=therapist_pk)
+
+
+# =============================================================
+# Batch / Single-Request Treatment Omission Actions (HR & Admin)
+# =============================================================
+
+@login_required
+def approve_therapist_treatment_omission_batch_api(request, batch_id):
+    """
+    Approve all treatment omissions in a single request batch.
+    Strictly Admin (GM) and HR.
+    """
+    if not can_approve_treatment_omission(request.user):
+        msg = "Permission denied: Treatment omission approval can only be given by Admin (GM) and HR."
+        if request.headers.get('x-requested-with') == 'XMLHttpRequest' or request.content_type == 'application/json':
+            return JsonResponse({'success': False, 'message': msg}, status=403)
+        messages.error(request, msg)
+        return redirect('therapist_treatment_omission_approvals')
+
+    remarks = (request.POST.get('approval_remarks') or request.POST.get('remarks') or request.GET.get('approval_remarks') or request.GET.get('remarks') or '').strip()
+    if not remarks and request.content_type == 'application/json':
+        try:
+            data = json.loads(request.body)
+            remarks = (data.get('approval_remarks') or data.get('remarks') or '').strip()
+        except Exception:
+            pass
+
+    omissions = TherapistTreatmentOmission.objects.filter(batch_id=batch_id, status='pending')
+    if not omissions.exists() and batch_id.isdigit():
+        omissions = TherapistTreatmentOmission.objects.filter(pk=int(batch_id), status='pending')
+
+    if not omissions.exists():
+        msg = "No pending omission records found for this request."
+        if request.headers.get('x-requested-with') == 'XMLHttpRequest' or request.content_type == 'application/json':
+            return JsonResponse({'success': False, 'message': msg}, status=404)
+        messages.warning(request, msg)
+        return redirect('therapist_treatment_omission_approvals')
+
+    from django.utils import timezone
+    now = timezone.now()
+    count = omissions.count()
+    therapist = omissions.first().therapist
+
+    for om in omissions:
+        om.status = 'approved'
+        om.approved_by = request.user
+        om.approved_at = now
+        if remarks:
+            om.approval_remarks = remarks
+        om.save()
+        _log_master_audit(
+            request,
+            'update',
+            'TherapistTreatmentOmission',
+            str(om.pk),
+            f'Approved omission in batch {batch_id}: {om.therapist.therapist_name} - {om.treatment.therapy_name}'
+        )
+
+    msg = f'Omission request ({count} treatment(s)) for therapist "{therapist.therapist_name}" has been APPROVED. The therapist will not be scheduled for these treatments.'
+    try:
+        messages.success(request, msg)
+    except Exception:
+        pass
+
+    if request.headers.get('x-requested-with') == 'XMLHttpRequest' or request.content_type == 'application/json':
+        return JsonResponse({
+            'success': True,
+            'message': msg,
+            'batch_id': batch_id,
+            'count': count,
+            'status': 'approved'
+        })
+
+    next_url = request.POST.get('next') or request.GET.get('next')
+    if next_url:
+        return redirect(next_url)
+    return redirect('therapist_treatment_omission_approvals')
+
+
+@login_required
+def reject_therapist_treatment_omission_batch_api(request, batch_id):
+    """
+    Reject all treatment omissions in a single request batch.
+    Strictly Admin (GM) and HR.
+    """
+    if not can_approve_treatment_omission(request.user):
+        msg = "Permission denied: Treatment omission rejection can only be given by Admin (GM) and HR."
+        if request.headers.get('x-requested-with') == 'XMLHttpRequest' or request.content_type == 'application/json':
+            return JsonResponse({'success': False, 'message': msg}, status=403)
+        try:
+            messages.error(request, msg)
+        except Exception:
+            pass
+        return redirect('therapist_treatment_omission_approvals')
+
+    remarks = (request.POST.get('approval_remarks') or request.POST.get('remarks') or request.GET.get('approval_remarks') or request.GET.get('remarks') or '').strip()
+    if not remarks and request.content_type == 'application/json':
+        try:
+            data = json.loads(request.body)
+            remarks = (data.get('approval_remarks') or data.get('remarks') or '').strip()
+        except Exception:
+            pass
+
+    omissions = TherapistTreatmentOmission.objects.filter(batch_id=batch_id, status='pending')
+    if not omissions.exists() and batch_id.isdigit():
+        omissions = TherapistTreatmentOmission.objects.filter(pk=int(batch_id), status='pending')
+
+    if not omissions.exists():
+        msg = "No pending omission records found for this request."
+        if request.headers.get('x-requested-with') == 'XMLHttpRequest' or request.content_type == 'application/json':
+            return JsonResponse({'success': False, 'message': msg}, status=404)
+        try:
+            messages.warning(request, msg)
+        except Exception:
+            pass
+        return redirect('therapist_treatment_omission_approvals')
+
+    from django.utils import timezone
+    now = timezone.now()
+    count = omissions.count()
+    therapist = omissions.first().therapist
+
+    for om in omissions:
+        om.status = 'rejected'
+        om.approved_by = request.user
+        om.approved_at = now
+        if remarks:
+            om.approval_remarks = remarks
+        om.save()
+        _log_master_audit(
+            request,
+            'update',
+            'TherapistTreatmentOmission',
+            str(om.pk),
+            f'Rejected omission in batch {batch_id}: {om.therapist.therapist_name} - {om.treatment.therapy_name}'
+        )
+
+    msg = f'Omission request ({count} treatment(s)) for therapist "{therapist.therapist_name}" has been REJECTED.'
+    try:
+        messages.info(request, msg)
+    except Exception:
+        pass
+
+    if request.headers.get('x-requested-with') == 'XMLHttpRequest' or request.content_type == 'application/json':
+        return JsonResponse({
+            'success': True,
+            'message': msg,
+            'batch_id': batch_id,
+            'count': count,
+            'status': 'rejected'
+        })
+
+    next_url = request.POST.get('next') or request.GET.get('next')
+    if next_url:
+        return redirect(next_url)
+    return redirect('therapist_treatment_omission_approvals')
+
+
+@login_required
+def delete_therapist_treatment_omission_batch_api(request, batch_id):
+    """
+    Cancel or revoke all omissions in a single request batch.
+    """
+    omissions = TherapistTreatmentOmission.objects.filter(batch_id=batch_id)
+    if not omissions.exists() and batch_id.isdigit():
+        omissions = TherapistTreatmentOmission.objects.filter(pk=int(batch_id))
+
+    if not omissions.exists():
+        msg = "No omission records found for this request."
+        if request.headers.get('x-requested-with') == 'XMLHttpRequest' or request.content_type == 'application/json':
+            return JsonResponse({'success': False, 'message': msg}, status=404)
+        try:
+            messages.warning(request, msg)
+        except Exception:
+            pass
+        return redirect('therapist_treatment_omission_approvals')
+
+    therapist = omissions.first().therapist
+    therapist_pk = therapist.pk
+    count = omissions.count()
+
+    for om in omissions:
+        _log_master_audit(
+            request,
+            'delete',
+            'TherapistTreatmentOmission',
+            str(om.pk),
+            f'Deleted/cancelled treatment omission in batch {batch_id}: {therapist.therapist_name} - {om.treatment.therapy_name}'
+        )
+    omissions.delete()
+
+    msg = f'Omission request ({count} treatment(s)) for therapist "{therapist.therapist_name}" has been cancelled/removed.'
+    try:
+        messages.success(request, msg)
+    except Exception:
+        pass
+
+    if request.headers.get('x-requested-with') == 'XMLHttpRequest' or request.content_type == 'application/json':
+        return JsonResponse({'success': True, 'message': msg, 'count': count})
+
+    next_url = request.POST.get('next') or request.GET.get('next')
+    if next_url:
+        return redirect(next_url)
+    referer = request.META.get('HTTP_REFERER', '')
+    if 'treatment-omission' in referer:
+        return redirect('therapist_treatment_omission_approvals')
+    return redirect('therapist_master_update', pk=therapist_pk)
+
+
+@login_required
+def therapist_treatment_omission_approvals_view(request):
+    """
+    Dedicated dashboard view for Admin (GM) and HR to review, approve, and manage treatment omissions.
+    Considers all treatments requested together for a therapist as a single request.
+    """
+    if not can_approve_treatment_omission(request.user):
+        messages.error(request, "Permission denied: Treatment omission approvals can only be accessed by Admin (GM) and HR.")
+        return redirect('therapist_master_manage')
+
+    pending_list = TherapistTreatmentOmission.objects.filter(status='pending', is_active=True).select_related(
+        'therapist', 'therapist__therapist_grade', 'treatment', 'requested_by'
+    ).order_by('-created_at')
+
+    pending_requests = group_omissions_by_request(pending_list)
+
+    approved_list = TherapistTreatmentOmission.objects.filter(status='approved', is_active=True).select_related(
+        'therapist', 'therapist__therapist_grade', 'treatment', 'approved_by', 'requested_by'
+    ).order_by('-approved_at', 'therapist__therapist_name')
+
+    approved_requests = group_omissions_by_request(approved_list)
+
+    history_list = TherapistTreatmentOmission.objects.exclude(status='pending').select_related(
+        'therapist', 'therapist__therapist_grade', 'treatment', 'approved_by', 'requested_by'
+    ).order_by('-updated_at')[:200]
+
+    history_requests = group_omissions_by_request(history_list)
+
+    therapists_with_omissions_count = TherapistMaster.objects.filter(
+        treatment_omissions__status='approved',
+        treatment_omissions__is_active=True
+    ).distinct().count()
+
+    context = {
+        'pending_requests': pending_requests,
+        'pending_requests_count': len(pending_requests),
+        'pending_treatments_count': pending_list.count(),
+        'pending_count': len(pending_requests),
+        'pending_list': pending_list,
+        'approved_requests': approved_requests,
+        'approved_requests_count': len(approved_requests),
+        'approved_treatments_count': approved_list.count(),
+        'approved_count': len(approved_requests),
+        'approved_list': approved_list,
+        'history_requests': history_requests,
+        'history_list': history_list,
+        'therapists_with_omissions_count': therapists_with_omissions_count,
+    }
+    return render(request, 'masters/therapist_treatment_omission_approvals.html', context)
 
 @login_required
 @super_admin_required

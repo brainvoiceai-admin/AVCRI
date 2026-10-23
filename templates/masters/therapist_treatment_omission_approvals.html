@@ -1,0 +1,1156 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Therapist Treatment Omission Approvals - AVCRI</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="{% static 'css/dashboards_nav.css' %}">
+    <style>
+        :root {
+            --bs-body-bg: #f8fafc;
+            --bs-body-color: #334155;
+        }
+        body {
+            background-color: var(--bs-body-bg);
+            color: var(--bs-body-color);
+            font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        }
+        .main-content {
+            margin-left: 280px;
+            padding: 24px 32px;
+            min-height: 100vh;
+            background-color: #f8fafc;
+            transition: margin-left 0.3s ease;
+        }
+        @media (max-width: 768px) {
+            .main-content {
+                margin-left: 0;
+                padding: 16px;
+            }
+        }
+        .breadcrumb-item a {
+            color: #64748b;
+            text-decoration: none;
+            font-weight: 500;
+        }
+        .breadcrumb-item a:hover {
+            color: #0d6efd;
+        }
+        .breadcrumb-item.active {
+            color: #0f172a;
+            font-weight: 600;
+        }
+        /* Modern Stat Cards */
+        .card-stat {
+            border: 1px solid rgba(226, 232, 240, 0.9);
+            border-radius: 14px;
+            background: #ffffff;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04), 0 4px 12px rgba(0, 0, 0, 0.03);
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+        .card-stat:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 18px rgba(0, 0, 0, 0.07);
+        }
+        .stat-icon {
+            width: 52px;
+            height: 52px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.4rem;
+        }
+        /* Tab navigation */
+        .card-tabs-header {
+            background: #ffffff;
+            border-bottom: 1px solid #e2e8f0;
+            padding: 0 16px;
+            border-radius: 14px 14px 0 0;
+        }
+        .nav-tabs {
+            border-bottom: none;
+        }
+        .nav-tabs .nav-link {
+            font-weight: 600;
+            font-size: 0.92rem;
+            color: #64748b;
+            border: none;
+            border-bottom: 3px solid transparent;
+            padding: 14px 20px;
+            background: transparent;
+            transition: all 0.2s;
+        }
+        .nav-tabs .nav-link:hover {
+            color: #1e293b;
+            border-color: transparent;
+        }
+        .nav-tabs .nav-link.active {
+            color: #0d6efd;
+            border-bottom: 3px solid #0d6efd;
+            background: transparent;
+        }
+        /* Tables */
+        .table-custom {
+            margin-bottom: 0;
+        }
+        .table-custom thead th {
+            background-color: #f8fafc;
+            color: #475569;
+            font-size: 0.76rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.6px;
+            border-top: none;
+            border-bottom: 1px solid #e2e8f0;
+            padding: 12px 18px;
+            white-space: nowrap;
+        }
+        .table-custom tbody td {
+            padding: 14px 18px;
+            vertical-align: middle;
+            border-bottom: 1px solid #f1f5f9;
+        }
+        .table-custom tbody tr:hover td {
+            background-color: #f8faff;
+        }
+        /* Therapist Avatar */
+        .avatar-circle {
+            width: 44px;
+            height: 44px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            font-size: 1rem;
+            background: linear-gradient(135deg, #e0e7ff 0%, #c7d2fe 100%);
+            color: #3730a3;
+            box-shadow: 0 2px 4px rgba(55, 48, 163, 0.1);
+            flex-shrink: 0;
+        }
+        /* Badges */
+        .badge-soft-danger {
+            background-color: #fee2e2;
+            color: #991b1b;
+            font-weight: 600;
+        }
+        .badge-soft-warning {
+            background-color: #fef3c7;
+            color: #92400e;
+            font-weight: 600;
+        }
+        .badge-soft-success {
+            background-color: #dcfce7;
+            color: #166534;
+            font-weight: 600;
+        }
+        .badge-soft-info {
+            background-color: #e0f2fe;
+            color: #075985;
+            font-weight: 600;
+        }
+        .badge-soft-secondary {
+            background-color: #f1f5f9;
+            color: #475569;
+            font-weight: 600;
+        }
+        /* Action buttons */
+        .btn-action-approve {
+            background: #10b981;
+            color: #ffffff;
+            border: none;
+            font-weight: 600;
+            font-size: 0.85rem;
+            padding: 6px 16px;
+            border-radius: 8px;
+            transition: all 0.2s;
+            box-shadow: 0 1px 3px rgba(16, 185, 129, 0.25);
+        }
+        .btn-action-approve:hover {
+            background: #059669;
+            color: #ffffff;
+            box-shadow: 0 4px 10px rgba(16, 185, 129, 0.35);
+            transform: translateY(-1px);
+        }
+        .btn-action-reject {
+            background: #ffffff;
+            color: #ef4444;
+            border: 1px solid #fca5a5;
+            font-weight: 600;
+            font-size: 0.85rem;
+            padding: 6px 14px;
+            border-radius: 8px;
+            transition: all 0.2s;
+        }
+        .btn-action-reject:hover {
+            background: #ef4444;
+            color: #ffffff;
+            border-color: #ef4444;
+            box-shadow: 0 4px 10px rgba(239, 68, 68, 0.25);
+            transform: translateY(-1px);
+        }
+        .btn-view-treatments {
+            font-size: 0.82rem;
+            font-weight: 600;
+            color: #0d6efd;
+            background: #eff6ff;
+            border: 1px solid #bfdbfe;
+            border-radius: 8px;
+            padding: 5px 12px;
+            transition: all 0.15s ease-in-out;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+        }
+        .btn-view-treatments:hover {
+            background: #0d6efd;
+            color: #ffffff;
+            border-color: #0d6efd;
+            box-shadow: 0 2px 6px rgba(13, 110, 253, 0.25);
+        }
+        /* Search box */
+        .search-control {
+            border-radius: 10px;
+            border: 1px solid #e2e8f0;
+            padding: 8px 14px 8px 36px;
+            font-size: 0.88rem;
+            background-color: #ffffff;
+            transition: all 0.2s;
+        }
+        .search-control:focus {
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.12);
+        }
+        .search-wrapper {
+            position: relative;
+        }
+        .search-wrapper i {
+            position: absolute;
+            left: 12px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: #94a3b8;
+            font-size: 0.9rem;
+        }
+    </style>
+</head>
+<body>
+    {% include 'dashboards/nav.html' %}
+
+    <div class="main-content">
+        <div class="container-fluid px-0">
+
+            <!-- Breadcrumb Navigation -->
+            <nav aria-label="breadcrumb" class="mb-2">
+                <ol class="breadcrumb mb-0 small">
+                    <li class="breadcrumb-item"><a href="{% url 'master_management_dashboard' %}"><i class="fas fa-th-large me-1"></i>Masters</a></li>
+                    <li class="breadcrumb-item"><a href="{% url 'therapist_master_manage' %}">Therapist Master</a></li>
+                    <li class="breadcrumb-item active" aria-current="page">Treatment Omission Approvals</li>
+                </ol>
+            </nav>
+
+            <!-- Page Title Bar -->
+            <div class="d-flex flex-wrap justify-content-between align-items-center mb-4 gap-3">
+                <div class="d-flex align-items-center">
+                    <div class="stat-icon me-3 bg-danger bg-opacity-10 text-danger rounded-3" style="width: 54px; height: 54px;">
+                        <i class="fas fa-user-shield fa-lg"></i>
+                    </div>
+                    <div>
+                        <h3 class="fw-bold mb-1 text-dark" style="letter-spacing: -0.3px;">Therapist Treatment Omission Approvals</h3>
+                        <p class="text-muted mb-0 small">
+                            Review and decide on special requests to omit specific treatments from therapist scheduling.
+                        </p>
+                    </div>
+                </div>
+                <div class="d-flex gap-2">
+                    <a href="{% url 'therapist_master_manage' %}" class="btn btn-sm btn-outline-secondary rounded-pill px-3 py-2 fw-semibold">
+                        <i class="fas fa-user-md me-1"></i>Therapist Master
+                    </a>
+                    <a href="{% url 'master_management_dashboard' %}" class="btn btn-sm btn-outline-primary rounded-pill px-3 py-2 fw-semibold">
+                        <i class="fas fa-th-large me-1"></i>Master Dashboard
+                    </a>
+                </div>
+            </div>
+
+            {% if messages %}
+                {% for message in messages %}
+                    <div class="alert alert-{{ message.tags }} alert-dismissible fade show border-0 shadow-sm" role="alert" style="border-radius: 10px;">
+                        <i class="fas fa-info-circle me-2"></i>{{ message }}
+                        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                    </div>
+                {% endfor %}
+            {% endif %}
+
+            <!-- Stat Cards Row -->
+            <div class="row g-3 mb-4">
+                <!-- Card 1: Pending Approvals -->
+                <div class="col-md-4">
+                    <div class="card card-stat p-3" style="border-left: 4px solid #f59e0b !important;">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div>
+                                <div class="text-muted small text-uppercase fw-bold mb-1" style="letter-spacing: 0.6px; font-size: 0.74rem;">Pending Approvals</div>
+                                <h2 class="mb-0 text-dark fw-bold" style="font-size: 2.1rem; line-height: 1.1;">{{ pending_count|default:"0" }}</h2>
+                                <small class="text-muted d-block mt-1">
+                                    <i class="fas fa-hourglass-half me-1 text-warning"></i>Awaiting Admin (GM) / HR decision
+                                </small>
+                            </div>
+                            <div class="stat-icon bg-warning bg-opacity-15 text-warning rounded-circle shadow-sm" style="width: 54px; height: 54px;">
+                                <i class="fas fa-clock fa-lg"></i>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Card 2: Active Approved Omissions -->
+                <div class="col-md-4">
+                    <div class="card card-stat p-3" style="border-left: 4px solid #ef4444 !important;">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div>
+                                <div class="text-muted small text-uppercase fw-bold mb-1" style="letter-spacing: 0.6px; font-size: 0.74rem;">Active Approved Omissions</div>
+                                <h2 class="mb-0 text-danger fw-bold" style="font-size: 2.1rem; line-height: 1.1;">{{ approved_count|default:"0" }}</h2>
+                                <small class="text-muted d-block mt-1">
+                                    <i class="fas fa-ban me-1 text-danger"></i>Excluded from scheduling
+                                </small>
+                            </div>
+                            <div class="stat-icon bg-danger bg-opacity-15 text-danger rounded-circle shadow-sm" style="width: 54px; height: 54px;">
+                                <i class="fas fa-shield-alt fa-lg"></i>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Card 3: Therapists With Restrictions -->
+                <div class="col-md-4">
+                    <div class="card card-stat p-3" style="border-left: 4px solid #3b82f6 !important;">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div>
+                                <div class="text-muted small text-uppercase fw-bold mb-1" style="letter-spacing: 0.6px; font-size: 0.74rem;">Therapists With Restrictions</div>
+                                <h2 class="mb-0 text-primary fw-bold" style="font-size: 2.1rem; line-height: 1.1;">{{ therapists_with_omissions_count|default:"0" }}</h2>
+                                <small class="text-muted d-block mt-1">
+                                    <i class="fas fa-user-check me-1 text-primary"></i>Therapists with active restrictions
+                                </small>
+                            </div>
+                            <div class="stat-icon bg-primary bg-opacity-15 text-primary rounded-circle shadow-sm" style="width: 54px; height: 54px;">
+                                <i class="fas fa-user-shield fa-lg"></i>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Main Management Card with Tabs -->
+            <div class="card border-0 shadow-sm" style="border-radius: 14px; overflow: hidden;">
+                <div class="card-tabs-header">
+                    <ul class="nav nav-tabs" id="omissionTabs" role="tablist">
+                        <li class="nav-item">
+                            <button class="nav-link active" id="pending-tab" data-bs-toggle="tab" data-bs-target="#pending" type="button" role="tab">
+                                <i class="fas fa-clock text-warning me-2"></i>Pending Approvals
+                                {% if pending_count %}
+                                <span class="badge bg-danger rounded-pill ms-2 px-2 py-1">{{ pending_count }}</span>
+                                {% endif %}
+                            </button>
+                        </li>
+                        <li class="nav-item">
+                            <button class="nav-link" id="approved-tab" data-bs-toggle="tab" data-bs-target="#approved" type="button" role="tab">
+                                <i class="fas fa-check-circle text-success me-2"></i>Active Approved Omissions
+                                {% if approved_count %}
+                                <span class="badge bg-success rounded-pill ms-2 px-2 py-1">{{ approved_count }}</span>
+                                {% endif %}
+                            </button>
+                        </li>
+                        <li class="nav-item">
+                            <button class="nav-link" id="history-tab" data-bs-toggle="tab" data-bs-target="#history" type="button" role="tab">
+                                <i class="fas fa-history text-secondary me-2"></i>Audit History
+                            </button>
+                        </li>
+                    </ul>
+                </div>
+
+                <div class="card-body p-0">
+                    <div class="tab-content" id="omissionTabsContent">
+                        
+                        <!-- TAB 1: PENDING APPROVALS -->
+                        <div class="tab-pane fade show active p-3" id="pending" role="tabpanel">
+                            {% if pending_requests %}
+                            <!-- Top action / filter bar -->
+                            <div class="d-flex justify-content-between align-items-center mb-3 px-2 flex-wrap gap-2">
+                                <div class="text-muted small">
+                                    Showing <strong>{{ pending_requests|length }}</strong> pending special request{{ pending_requests|length|pluralize }}
+                                </div>
+                                <div class="search-wrapper" style="max-width: 300px; width: 100%;">
+                                    <i class="fas fa-search"></i>
+                                    <input type="text" class="form-control search-control" placeholder="Filter requests..." onkeyup="filterSimpleTable(this, 'pendingRequestsTable')">
+                                </div>
+                            </div>
+
+                            <div class="table-responsive">
+                                <table class="table table-custom align-middle mb-0" id="pendingRequestsTable">
+                                    <thead>
+                                        <tr>
+                                            <th style="min-width: 240px;">Therapist</th>
+                                            <th style="min-width: 240px;">Requested Treatments to Omit</th>
+                                            <th style="min-width: 200px;">Reason / Special Request</th>
+                                            <th style="min-width: 180px;">Requested By & Date</th>
+                                            <th class="text-center" style="width: 230px;">Approval Action</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for r in pending_requests %}
+                                        <tr>
+                                            <!-- Column 1: Therapist Info -->
+                                            <td>
+                                                <div class="d-flex align-items-center">
+                                                    <div class="avatar-circle me-3">
+                                                        {{ r.therapist.therapist_name|slice:":2"|upper }}
+                                                    </div>
+                                                    <div>
+                                                        <div class="fw-bold text-dark fs-6">{{ r.therapist.therapist_name }}</div>
+                                                        <div class="d-flex align-items-center gap-1 flex-wrap mt-1">
+                                                            <span class="badge badge-soft-secondary font-monospace">{{ r.therapist.therapist_code }}</span>
+                                                            <span class="badge badge-soft-info">{{ r.therapist.therapist_grade.name|default:"Grade N/A" }}</span>
+                                                            {% if r.therapist.therapist_gender %}
+                                                            <span class="badge badge-soft-secondary">{{ r.therapist.therapist_gender }}</span>
+                                                            {% endif %}
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </td>
+
+                                            <!-- Column 2: Requested Omissions (Clean Pill + Modal Trigger) -->
+                                            <td>
+                                                <div class="d-flex align-items-center gap-1 flex-wrap mb-2">
+                                                    <span class="badge badge-soft-danger px-2 py-1 fs-6">
+                                                        <i class="fas fa-ban me-1"></i>{{ r.total_count }} Treatment{{ r.total_count|pluralize }}
+                                                    </span>
+                                                    {% if r.hard_count %}
+                                                    <span class="badge bg-danger text-white">{{ r.hard_count }} Hard</span>
+                                                    {% endif %}
+                                                    {% if r.medium_count %}
+                                                    <span class="badge bg-warning text-dark">{{ r.medium_count }} Medium</span>
+                                                    {% endif %}
+                                                    {% if r.easy_count %}
+                                                    <span class="badge bg-success text-white">{{ r.easy_count }} Easy</span>
+                                                    {% endif %}
+                                                </div>
+                                                <div>
+                                                    <button type="button" class="btn-view-treatments" data-bs-toggle="modal" data-bs-target="#viewTreatmentsModal_{{ forloop.counter }}">
+                                                        <i class="fas fa-eye me-1"></i>View All {{ r.total_count }} Treatments
+                                                    </button>
+                                                </div>
+                                            </td>
+
+                                            <!-- Column 3: Reason / Special Request -->
+                                            <td>
+                                                <div class="p-2 rounded bg-light border-start border-3 border-warning small">
+                                                    <i class="fas fa-quote-left text-warning me-1"></i>{{ r.reason|default:"Special Request" }}
+                                                </div>
+                                            </td>
+
+                                            <!-- Column 4: Requested By & Date -->
+                                            <td>
+                                                <div class="fw-semibold small text-dark">
+                                                    <i class="fas fa-user-edit text-muted me-1"></i>{{ r.requested_by.get_full_name|default:r.requested_by.username|default:"System" }}
+                                                </div>
+                                                <small class="text-muted d-block">
+                                                    <i class="far fa-clock me-1"></i>{{ r.created_at|date:"d M Y, h:i A" }}
+                                                </small>
+                                                <span class="badge badge-soft-secondary font-monospace mt-1" style="font-size: 0.72rem;">
+                                                    Ref: {{ r.batch_id }}
+                                                </span>
+                                            </td>
+
+                                            <!-- Column 5: Action Buttons -->
+                                            <td class="text-center">
+                                                <div class="d-flex flex-column gap-2 justify-content-center align-items-stretch" style="max-width: 170px; margin: 0 auto;">
+                                                    <button type="button" class="btn-action-approve"
+                                                            onclick="openBatchDecisionModal('{{ r.action_identifier }}', 'approve', '{{ r.therapist.therapist_name|escapejs }}', '{{ r.total_count }}')">
+                                                        <i class="fas fa-check me-1"></i>Approve Request
+                                                    </button>
+                                                    <button type="button" class="btn-action-reject"
+                                                            onclick="openBatchDecisionModal('{{ r.action_identifier }}', 'reject', '{{ r.therapist.therapist_name|escapejs }}', '{{ r.total_count }}')">
+                                                        <i class="fas fa-times me-1"></i>Reject Request
+                                                    </button>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                            {% else %}
+                            <div class="text-center py-5">
+                                <div class="rounded-circle bg-success bg-opacity-10 text-success d-inline-flex p-3 mb-3">
+                                    <i class="fas fa-check-circle fa-3x"></i>
+                                </div>
+                                <h5 class="fw-bold text-dark">No Pending Omission Requests</h5>
+                                <p class="text-muted small mb-0">All therapist treatment omission requests have been reviewed and decided.</p>
+                            </div>
+                            {% endif %}
+                        </div>
+
+                        <!-- TAB 2: ACTIVE APPROVED OMISSIONS -->
+                        <div class="tab-pane fade p-3" id="approved" role="tabpanel">
+                            {% if approved_requests %}
+                            <div class="d-flex justify-content-between align-items-center mb-3 px-2 flex-wrap gap-2">
+                                <div class="text-muted small">
+                                    Showing <strong>{{ approved_requests|length }}</strong> active approved omission request{{ approved_requests|length|pluralize }}
+                                    {% if approved_treatments_count %}
+                                    <span class="text-muted">({{ approved_treatments_count }} total treatment{{ approved_treatments_count|pluralize }} excluded)</span>
+                                    {% endif %}
+                                </div>
+                                <div class="search-wrapper" style="max-width: 300px; width: 100%;">
+                                    <i class="fas fa-search"></i>
+                                    <input type="text" class="form-control search-control" placeholder="Search by therapist or treatment..." onkeyup="filterSimpleTable(this, 'approvedRequestsTable')">
+                                </div>
+                            </div>
+
+                            <div class="table-responsive">
+                                <table class="table table-custom align-middle mb-0" id="approvedRequestsTable">
+                                    <thead>
+                                        <tr>
+                                            <th style="min-width: 240px;">Therapist</th>
+                                            <th style="min-width: 240px;">Omitted Treatments</th>
+                                            <th style="min-width: 200px;">Reason / Special Request</th>
+                                            <th style="min-width: 180px;">Approved By & Date</th>
+                                            <th style="min-width: 180px;">Scheduling Impact</th>
+                                            <th class="text-center" style="width: 170px;">Action</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for r in approved_requests %}
+                                        <tr>
+                                            <!-- Column 1: Therapist Info -->
+                                            <td>
+                                                <div class="d-flex align-items-center">
+                                                    <div class="avatar-circle me-3">
+                                                        {{ r.therapist.therapist_name|slice:":2"|upper }}
+                                                    </div>
+                                                    <div>
+                                                        <div class="fw-bold text-dark fs-6">{{ r.therapist.therapist_name }}</div>
+                                                        <div class="d-flex align-items-center gap-1 flex-wrap mt-1">
+                                                            <span class="badge badge-soft-secondary font-monospace">{{ r.therapist.therapist_code }}</span>
+                                                            <span class="badge badge-soft-info">{{ r.therapist.therapist_grade.name|default:"Grade N/A" }}</span>
+                                                            {% if r.therapist.therapist_gender %}
+                                                            <span class="badge badge-soft-secondary">{{ r.therapist.therapist_gender }}</span>
+                                                            {% endif %}
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </td>
+
+                                            <!-- Column 2: Omitted Treatments Scope -->
+                                            <td>
+                                                <div class="d-flex align-items-center gap-1 flex-wrap mb-2">
+                                                    <span class="badge badge-soft-danger px-2 py-1 fs-6">
+                                                        <i class="fas fa-ban me-1"></i>{{ r.total_count }} Treatment{{ r.total_count|pluralize }}
+                                                    </span>
+                                                    {% if r.hard_count %}
+                                                    <span class="badge bg-danger text-white">{{ r.hard_count }} Hard</span>
+                                                    {% endif %}
+                                                    {% if r.medium_count %}
+                                                    <span class="badge bg-warning text-dark">{{ r.medium_count }} Medium</span>
+                                                    {% endif %}
+                                                    {% if r.easy_count %}
+                                                    <span class="badge bg-success text-white">{{ r.easy_count }} Easy</span>
+                                                    {% endif %}
+                                                </div>
+                                                <div>
+                                                    <button type="button" class="btn-view-treatments" data-bs-toggle="modal" data-bs-target="#viewApprovedModal_{{ forloop.counter }}">
+                                                        <i class="fas fa-eye me-1"></i>View All {{ r.total_count }} Treatments
+                                                    </button>
+                                                </div>
+                                            </td>
+
+                                            <!-- Column 3: Reason -->
+                                            <td>
+                                                <div class="p-2 rounded bg-light border-start border-3 border-info small">
+                                                    <i class="fas fa-quote-left text-info me-1"></i>{{ r.reason|default:"Special Request" }}
+                                                </div>
+                                            </td>
+
+                                            <!-- Column 4: Approved By & Date -->
+                                            <td>
+                                                <div class="fw-semibold small text-dark">
+                                                    <i class="fas fa-user-check text-success me-1"></i>{{ r.approved_by.get_full_name|default:r.approved_by.username|default:"Admin/HR" }}
+                                                </div>
+                                                <small class="text-muted d-block">
+                                                    <i class="far fa-clock me-1"></i>{{ r.approved_at|date:"d M Y, h:i A"|default:"-" }}
+                                                </small>
+                                                <span class="badge badge-soft-secondary font-monospace mt-1" style="font-size: 0.72rem;">
+                                                    Ref: {{ r.batch_id }}
+                                                </span>
+                                            </td>
+
+                                            <!-- Column 5: Scheduling Impact -->
+                                            <td>
+                                                <span class="badge badge-soft-danger px-2 py-1">
+                                                    <i class="fas fa-ban me-1"></i>Excluded From Scheduling
+                                                </span>
+                                            </td>
+
+                                            <!-- Column 6: Revoke Action -->
+                                            <td class="text-center">
+                                                <button type="button" class="btn btn-action-reject"
+                                                        onclick="openRevokeBatchModal('{{ r.action_identifier }}', '{{ r.therapist.therapist_name|escapejs }}', '{{ r.total_count }}')">
+                                                    <i class="fas fa-undo-alt me-1"></i>Revoke Request
+                                                </button>
+                                            </td>
+                                        </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                            {% else %}
+                            <div class="text-center py-5">
+                                <div class="rounded-circle bg-secondary bg-opacity-10 text-secondary d-inline-flex p-3 mb-3">
+                                    <i class="fas fa-info-circle fa-3x"></i>
+                                </div>
+                                <h5 class="fw-bold text-dark">No Active Approved Omissions</h5>
+                                <p class="text-muted small mb-0">No therapists currently have approved treatment exclusions.</p>
+                            </div>
+                            {% endif %}
+                        </div>
+
+                        <!-- TAB 3: AUDIT HISTORY -->
+                        <div class="tab-pane fade p-3" id="history" role="tabpanel">
+                            {% if history_requests %}
+                            <div class="d-flex justify-content-between align-items-center mb-3 px-2 flex-wrap gap-2">
+                                <div class="text-muted small">
+                                    Showing latest <strong>{{ history_requests|length }}</strong> historical decision{{ history_requests|length|pluralize }}
+                                </div>
+                                <div class="search-wrapper" style="max-width: 300px; width: 100%;">
+                                    <i class="fas fa-search"></i>
+                                    <input type="text" class="form-control search-control" placeholder="Search audit history..." onkeyup="filterSimpleTable(this, 'historyRequestsTable')">
+                                </div>
+                            </div>
+
+                            <div class="table-responsive">
+                                <table class="table table-custom align-middle mb-0" id="historyRequestsTable">
+                                    <thead>
+                                        <tr>
+                                            <th>Therapist</th>
+                                            <th>Treatments Requested</th>
+                                            <th>Requested By & Date</th>
+                                            <th>Decision Status</th>
+                                            <th>Decision By & Date</th>
+                                            <th>Remarks</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for r in history_requests %}
+                                        <tr>
+                                            <td>
+                                                <div class="fw-bold text-dark">{{ r.therapist.therapist_name }}</div>
+                                                <small class="text-muted font-monospace">{{ r.therapist.therapist_code }}</small>
+                                            </td>
+                                            <td>
+                                                <span class="badge badge-soft-secondary px-2 py-1 fs-6">
+                                                    {{ r.total_count }} Treatment{{ r.total_count|pluralize }}
+                                                </span>
+                                                <button type="button" class="btn btn-sm btn-link p-0 text-decoration-none ms-1" data-bs-toggle="modal" data-bs-target="#viewHistoryModal_{{ forloop.counter }}">
+                                                    <i class="fas fa-eye me-1"></i>View
+                                                </button>
+                                            </td>
+                                            <td>
+                                                <small class="text-dark fw-semibold">{{ r.requested_by.get_full_name|default:r.requested_by.username|default:"System" }}</small><br>
+                                                <small class="text-muted">{{ r.created_at|date:"d M Y, h:i A" }}</small>
+                                            </td>
+                                            <td>
+                                                {% if r.status == 'approved' %}
+                                                    <span class="badge bg-success"><i class="fas fa-check me-1"></i>Approved</span>
+                                                {% elif r.status == 'rejected' %}
+                                                    <span class="badge bg-danger"><i class="fas fa-times me-1"></i>Rejected</span>
+                                                {% else %}
+                                                    <span class="badge bg-warning text-dark">{{ r.status|title }}</span>
+                                                {% endif %}
+                                            </td>
+                                            <td>
+                                                <small class="text-dark fw-semibold">{{ r.approved_by.get_full_name|default:r.approved_by.username|default:"-" }}</small><br>
+                                                <small class="text-muted">{{ r.approved_at|date:"d M Y, h:i A"|default:"-" }}</small>
+                                            </td>
+                                            <td>
+                                                <small class="text-muted">{{ r.approval_remarks|default:r.reason|default:"-" }}</small>
+                                            </td>
+                                        </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                            {% else %}
+                            <div class="text-center py-5">
+                                <div class="rounded-circle bg-secondary bg-opacity-10 text-secondary d-inline-flex p-3 mb-3">
+                                    <i class="fas fa-history fa-3x"></i>
+                                </div>
+                                <h5 class="fw-bold text-dark">No History Records</h5>
+                                <p class="text-muted small mb-0">No past treatment omission decisions found.</p>
+                            </div>
+                            {% endif %}
+                        </div>
+
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- ========================================================================= -->
+    <!-- MODALS: Rendered at root level outside the table to prevent DOM spillover -->
+    <!-- ========================================================================= -->
+
+    <!-- 1. MODALS FOR PENDING REQUESTS -->
+    {% for r in pending_requests %}
+    <!-- Detailed Treatment Inspection Modal for Pending Request {{ forloop.counter }} -->
+    <div class="modal fade" id="viewTreatmentsModal_{{ forloop.counter }}" tabindex="-1" aria-labelledby="viewTreatmentsLabel_{{ forloop.counter }}" aria-hidden="true">
+        <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+            <div class="modal-content border-0 shadow-lg" style="border-radius: 16px; overflow: hidden;">
+                <!-- Modal Header -->
+                <div class="modal-header bg-light border-bottom px-4 py-3">
+                    <div class="d-flex align-items-center">
+                        <div class="avatar-circle me-3" style="width: 40px; height: 40px; font-size: 0.95rem;">
+                            {{ r.therapist.therapist_name|slice:":2"|upper }}
+                        </div>
+                        <div>
+                            <h5 class="modal-title fw-bold text-dark mb-0" id="viewTreatmentsLabel_{{ forloop.counter }}">
+                                Requested Treatments to Omit
+                            </h5>
+                            <small class="text-muted">
+                                Therapist: <strong class="text-dark">{{ r.therapist.therapist_name }}</strong>
+                                <span class="badge badge-soft-secondary font-monospace ms-1">{{ r.therapist.therapist_code }}</span>
+                                {% if r.therapist.therapist_grade %}
+                                <span class="badge badge-soft-info ms-1">{{ r.therapist.therapist_grade.name }}</span>
+                                {% endif %}
+                            </small>
+                        </div>
+                    </div>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+
+                <!-- Modal Body -->
+                <div class="modal-body p-4">
+                    <!-- Request Summary Banner -->
+                    <div class="p-3 bg-light rounded-3 border mb-3">
+                        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+                            <div>
+                                <small class="text-muted d-block">
+                                    Requested by: <strong class="text-dark">{{ r.requested_by.get_full_name|default:r.requested_by.username|default:"System" }}</strong>
+                                    on {{ r.created_at|date:"d M Y, h:i A" }}
+                                </small>
+                                <small class="text-muted font-monospace" style="font-size: 0.74rem;">Request Ref: {{ r.batch_id }}</small>
+                            </div>
+                            <div class="d-flex align-items-center gap-1 flex-wrap">
+                                <span class="badge badge-soft-danger px-2 py-1 fs-6 fw-bold">
+                                    <i class="fas fa-ban me-1"></i>{{ r.total_count }} Total Treatments
+                                </span>
+                                {% if r.hard_count %}<span class="badge bg-danger">{{ r.hard_count }} Hard</span>{% endif %}
+                                {% if r.medium_count %}<span class="badge bg-warning text-dark">{{ r.medium_count }} Medium</span>{% endif %}
+                                {% if r.easy_count %}<span class="badge bg-success">{{ r.easy_count }} Easy</span>{% endif %}
+                            </div>
+                        </div>
+                        <div class="mt-2 pt-2 border-top">
+                            <span class="text-muted small fw-bold text-uppercase" style="font-size: 0.72rem; letter-spacing: 0.5px;">Reason for Special Request:</span>
+                            <div class="text-dark mt-1 small bg-white p-2 rounded border">
+                                <i class="fas fa-comment-dots text-warning me-1"></i>{{ r.reason|default:"Special Request" }}
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Instant Search Inside Modal -->
+                    <div class="search-wrapper mb-3">
+                        <i class="fas fa-search"></i>
+                        <input type="text" class="form-control search-control" placeholder="Search treatments by name, code, or category..." onkeyup="filterTreatmentsModalTable(this, 'treatmentsTable_{{ forloop.counter }}')">
+                    </div>
+
+                    <!-- Scrollable Treatments List -->
+                    <div class="table-responsive border rounded-3" style="max-height: 380px;">
+                        <table class="table table-sm table-hover table-striped align-middle mb-0" id="treatmentsTable_{{ forloop.counter }}">
+                            <thead class="table-light sticky-top shadow-sm">
+                                <tr>
+                                    <th style="width: 50px;" class="text-center">#</th>
+                                    <th style="width: 120px;">Code</th>
+                                    <th>Treatment Name</th>
+                                    <th style="width: 110px;" class="text-center">Category</th>
+                                    <th style="width: 120px;">Patient Type</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for o in r.omissions %}
+                                <tr>
+                                    <td class="text-center text-muted small">{{ forloop.counter }}</td>
+                                    <td><span class="badge badge-soft-secondary font-monospace">{{ o.treatment.therapy_code }}</span></td>
+                                    <td class="fw-bold text-dark">{{ o.treatment.therapy_name }}</td>
+                                    <td class="text-center">
+                                        {% if o.treatment.therapy_category|lower == 'hard' %}
+                                            <span class="badge bg-danger">Hard</span>
+                                        {% elif o.treatment.therapy_category|lower == 'medium' %}
+                                            <span class="badge bg-warning text-dark">Medium</span>
+                                        {% elif o.treatment.therapy_category|lower == 'easy' %}
+                                            <span class="badge bg-success">Easy</span>
+                                        {% else %}
+                                            <span class="badge bg-secondary">{{ o.treatment.therapy_category|default:"-" }}</span>
+                                        {% endif %}
+                                    </td>
+                                    <td><small class="text-muted">{{ o.treatment.patient_type|default:"-" }}</small></td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Modal Footer with Actions -->
+                <div class="modal-footer bg-light border-top px-4 py-3 d-flex justify-content-between">
+                    <button type="button" class="btn btn-outline-secondary rounded-pill px-4 fw-semibold" data-bs-dismiss="modal">
+                        Close
+                    </button>
+                    <div class="d-flex gap-2">
+                        <button type="button" class="btn btn-outline-danger rounded-pill px-4 fw-semibold" data-bs-dismiss="modal"
+                                onclick="openBatchDecisionModal('{{ r.action_identifier }}', 'reject', '{{ r.therapist.therapist_name|escapejs }}', '{{ r.total_count }}')">
+                            <i class="fas fa-times me-1"></i>Reject Request
+                        </button>
+                        <button type="button" class="btn btn-success rounded-pill px-4 fw-semibold shadow-sm" data-bs-dismiss="modal"
+                                onclick="openBatchDecisionModal('{{ r.action_identifier }}', 'approve', '{{ r.therapist.therapist_name|escapejs }}', '{{ r.total_count }}')">
+                            <i class="fas fa-check me-1"></i>Approve All {{ r.total_count }} Treatments
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+
+    <!-- 2. MODALS FOR APPROVED REQUESTS -->
+    {% for r in approved_requests %}
+    <!-- Detailed Treatment Inspection Modal for Approved Request {{ forloop.counter }} -->
+    <div class="modal fade" id="viewApprovedModal_{{ forloop.counter }}" tabindex="-1" aria-labelledby="viewApprovedLabel_{{ forloop.counter }}" aria-hidden="true">
+        <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+            <div class="modal-content border-0 shadow-lg" style="border-radius: 16px; overflow: hidden;">
+                <!-- Modal Header -->
+                <div class="modal-header bg-light border-bottom px-4 py-3">
+                    <div class="d-flex align-items-center">
+                        <div class="avatar-circle me-3" style="width: 40px; height: 40px; font-size: 0.95rem;">
+                            {{ r.therapist.therapist_name|slice:":2"|upper }}
+                        </div>
+                        <div>
+                            <h5 class="modal-title fw-bold text-dark mb-0" id="viewApprovedLabel_{{ forloop.counter }}">
+                                Approved Treatment Omissions
+                            </h5>
+                            <small class="text-muted">
+                                Therapist: <strong class="text-dark">{{ r.therapist.therapist_name }}</strong>
+                                <span class="badge badge-soft-secondary font-monospace ms-1">{{ r.therapist.therapist_code }}</span>
+                                {% if r.therapist.therapist_grade %}
+                                <span class="badge badge-soft-info ms-1">{{ r.therapist.therapist_grade.name }}</span>
+                                {% endif %}
+                            </small>
+                        </div>
+                    </div>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+
+                <!-- Modal Body -->
+                <div class="modal-body p-4">
+                    <!-- Summary Banner -->
+                    <div class="p-3 bg-light rounded-3 border mb-3">
+                        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+                            <div>
+                                <small class="text-muted d-block">
+                                    Approved by: <strong class="text-dark">{{ r.approved_by.get_full_name|default:r.approved_by.username|default:"Admin/HR" }}</strong>
+                                    on {{ r.approved_at|date:"d M Y, h:i A"|default:"-" }}
+                                </small>
+                                <small class="text-muted font-monospace" style="font-size: 0.74rem;">Request Ref: {{ r.batch_id }}</small>
+                            </div>
+                            <div class="d-flex align-items-center gap-1 flex-wrap">
+                                <span class="badge badge-soft-danger px-2 py-1 fs-6 fw-bold">
+                                    <i class="fas fa-ban me-1"></i>{{ r.total_count }} Total Treatments
+                                </span>
+                                {% if r.hard_count %}<span class="badge bg-danger">{{ r.hard_count }} Hard</span>{% endif %}
+                                {% if r.medium_count %}<span class="badge bg-warning text-dark">{{ r.medium_count }} Medium</span>{% endif %}
+                                {% if r.easy_count %}<span class="badge bg-success">{{ r.easy_count }} Easy</span>{% endif %}
+                            </div>
+                        </div>
+                        {% if r.reason %}
+                        <div class="mt-2 pt-2 border-top">
+                            <span class="text-muted small fw-bold text-uppercase" style="font-size: 0.72rem; letter-spacing: 0.5px;">Reason:</span>
+                            <div class="text-dark mt-1 small bg-white p-2 rounded border">
+                                <i class="fas fa-comment-dots text-info me-1"></i>{{ r.reason }}
+                            </div>
+                        </div>
+                        {% endif %}
+                    </div>
+
+                    <!-- Instant Search Inside Modal -->
+                    <div class="search-wrapper mb-3">
+                        <i class="fas fa-search"></i>
+                        <input type="text" class="form-control search-control" placeholder="Search treatments by name, code, or category..." onkeyup="filterTreatmentsModalTable(this, 'approvedTreatmentsTable_{{ forloop.counter }}')">
+                    </div>
+
+                    <!-- Scrollable Treatments List -->
+                    <div class="table-responsive border rounded-3" style="max-height: 380px;">
+                        <table class="table table-sm table-hover table-striped align-middle mb-0" id="approvedTreatmentsTable_{{ forloop.counter }}">
+                            <thead class="table-light sticky-top shadow-sm">
+                                <tr>
+                                    <th style="width: 50px;" class="text-center">#</th>
+                                    <th style="width: 120px;">Code</th>
+                                    <th>Treatment Name</th>
+                                    <th style="width: 110px;" class="text-center">Category</th>
+                                    <th style="width: 120px;">Patient Type</th>
+                                    <th style="width: 100px;" class="text-center">Action</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for o in r.omissions %}
+                                <tr>
+                                    <td class="text-center text-muted small">{{ forloop.counter }}</td>
+                                    <td><span class="badge badge-soft-secondary font-monospace">{{ o.treatment.therapy_code }}</span></td>
+                                    <td class="fw-bold text-dark">{{ o.treatment.therapy_name }}</td>
+                                    <td class="text-center">
+                                        {% if o.treatment.therapy_category|lower == 'hard' %}
+                                            <span class="badge bg-danger">Hard</span>
+                                        {% elif o.treatment.therapy_category|lower == 'medium' %}
+                                            <span class="badge bg-warning text-dark">Medium</span>
+                                        {% elif o.treatment.therapy_category|lower == 'easy' %}
+                                            <span class="badge bg-success">Easy</span>
+                                        {% else %}
+                                            <span class="badge bg-secondary">{{ o.treatment.therapy_category|default:"-" }}</span>
+                                        {% endif %}
+                                    </td>
+                                    <td><small class="text-muted">{{ o.treatment.patient_type|default:"-" }}</small></td>
+                                    <td class="text-center">
+                                        <a href="{% url 'therapist_treatment_omission_delete' o.pk %}?next={% url 'therapist_treatment_omission_approvals' %}"
+                                           class="btn btn-sm btn-outline-danger py-0 px-2"
+                                           onclick="return confirm('Revoke exclusion for &quot;{{ o.treatment.therapy_name|escapejs }}&quot; only?');"
+                                           title="Revoke this treatment">
+                                            <i class="fas fa-undo-alt me-1"></i>Revoke
+                                        </a>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Modal Footer with Actions -->
+                <div class="modal-footer bg-light border-top px-4 py-3 d-flex justify-content-between">
+                    <button type="button" class="btn btn-outline-secondary rounded-pill px-4 fw-semibold" data-bs-dismiss="modal">
+                        Close
+                    </button>
+                    <button type="button" class="btn btn-outline-danger rounded-pill px-4 fw-semibold" data-bs-dismiss="modal"
+                            onclick="openRevokeBatchModal('{{ r.action_identifier }}', '{{ r.therapist.therapist_name|escapejs }}', '{{ r.total_count }}')">
+                        <i class="fas fa-undo-alt me-1"></i>Revoke Entire Request ({{ r.total_count }} Treatments)
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+
+    <!-- 3. MODALS FOR HISTORY REQUESTS -->
+    {% for r in history_requests %}
+    <!-- Detailed Treatment Inspection Modal for History Request {{ forloop.counter }} -->
+    <div class="modal fade" id="viewHistoryModal_{{ forloop.counter }}" tabindex="-1" aria-labelledby="viewHistoryLabel_{{ forloop.counter }}" aria-hidden="true">
+        <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+            <div class="modal-content border-0 shadow-lg" style="border-radius: 16px; overflow: hidden;">
+                <div class="modal-header bg-light border-bottom px-4 py-3">
+                    <div class="d-flex align-items-center">
+                        <div class="avatar-circle me-3" style="width: 40px; height: 40px; font-size: 0.95rem;">
+                            {{ r.therapist.therapist_name|slice:":2"|upper }}
+                        </div>
+                        <div>
+                            <h5 class="modal-title fw-bold text-dark mb-0" id="viewHistoryLabel_{{ forloop.counter }}">
+                                Treatment Omission Audit Details
+                            </h5>
+                            <small class="text-muted">
+                                Therapist: <strong class="text-dark">{{ r.therapist.therapist_name }}</strong> ({{ r.therapist.therapist_code }})
+                            </small>
+                        </div>
+                    </div>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body p-4">
+                    <div class="p-3 bg-light rounded-3 border mb-3">
+                        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+                            <div>
+                                <span class="badge {% if r.status == 'approved' %}bg-success{% elif r.status == 'rejected' %}bg-danger{% else %}bg-secondary{% endif %} fs-6 mb-1">
+                                    {{ r.status|upper }}
+                                </span>
+                                <small class="text-muted d-block">Requested by: {{ r.requested_by.get_full_name|default:r.requested_by.username|default:"System" }}</small>
+                                <small class="text-muted d-block">Decided by: {{ r.approved_by.get_full_name|default:r.approved_by.username|default:"-" }} on {{ r.approved_at|date:"d M Y, h:i A"|default:"-" }}</small>
+                            </div>
+                            <span class="badge badge-soft-secondary fs-6">{{ r.total_count }} Total Treatments</span>
+                        </div>
+                    </div>
+                    <div class="table-responsive border rounded-3" style="max-height: 350px;">
+                        <table class="table table-sm table-hover table-striped align-middle mb-0">
+                            <thead class="table-light sticky-top">
+                                <tr>
+                                    <th style="width: 50px;" class="text-center">#</th>
+                                    <th>Code</th>
+                                    <th>Treatment Name</th>
+                                    <th class="text-center">Category</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for o in r.omissions %}
+                                <tr>
+                                    <td class="text-center text-muted small">{{ forloop.counter }}</td>
+                                    <td><span class="badge badge-soft-secondary font-monospace">{{ o.treatment.therapy_code }}</span></td>
+                                    <td class="fw-bold">{{ o.treatment.therapy_name }}</td>
+                                    <td class="text-center"><span class="badge bg-secondary">{{ o.treatment.therapy_category|default:"-" }}</span></td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="modal-footer bg-light border-top px-4 py-3">
+                    <button type="button" class="btn btn-outline-secondary rounded-pill px-4 fw-semibold" data-bs-dismiss="modal">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+
+    <!-- Confirmation Decision Modal (Approve / Reject / Revoke) -->
+    <div class="modal fade" id="decisionModal" tabindex="-1" aria-labelledby="decisionModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content border-0 shadow-lg" style="border-radius: 16px; overflow: hidden;">
+                <form id="decisionForm" method="post" action="">
+                    {% csrf_token %}
+                    <div class="modal-header border-bottom px-4 py-3">
+                        <h5 class="modal-title fw-bold" id="decisionModalLabel">Confirm Decision</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body p-4">
+                        <div id="modalDescription" class="mb-3"></div>
+                        <div class="mb-3">
+                            <label for="modalRemarks" class="form-label fw-semibold small text-uppercase" style="letter-spacing: 0.5px;">
+                                Remarks (Optional)
+                            </label>
+                            <textarea class="form-control" id="modalRemarks" name="approval_remarks" rows="3"
+                                      placeholder="Enter administrative notes, approval reason, or rejection explanation..."></textarea>
+                        </div>
+                    </div>
+                    <div class="modal-footer bg-light border-top px-4 py-3">
+                        <button type="button" class="btn btn-outline-secondary rounded-pill px-4 fw-semibold" data-bs-dismiss="modal">Cancel</button>
+                        <button type="submit" id="modalSubmitBtn" class="btn btn-primary rounded-pill px-4 fw-semibold shadow-sm">Confirm</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bootstrap Bundle JS & Navigation Script -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="{% static 'js/dashboards_nav.js' %}"></script>
+
+    <script>
+    // Live filter inside treatment inspection modal
+    function filterTreatmentsModalTable(input, tableId) {
+        const filter = input.value.toLowerCase().trim();
+        const table = document.getElementById(tableId);
+        if (!table) return;
+        const rows = table.querySelectorAll('tbody tr');
+        rows.forEach(row => {
+            const text = row.textContent.toLowerCase();
+            row.style.display = text.includes(filter) ? '' : 'none';
+        });
+    }
+
+    // Live filter for tables on main page
+    function filterSimpleTable(input, tableId) {
+        const filter = input.value.toLowerCase().trim();
+        const table = document.getElementById(tableId);
+        if (!table) return;
+        const rows = table.querySelectorAll('tbody tr');
+        rows.forEach(row => {
+            const text = row.textContent.toLowerCase();
+            row.style.display = text.includes(filter) ? '' : 'none';
+        });
+    }
+
+    // Open confirmation modal for batch requests
+    function openBatchDecisionModal(batchId, action, therapistName, count) {
+        const form = document.getElementById('decisionForm');
+        const title = document.getElementById('decisionModalLabel');
+        const desc = document.getElementById('modalDescription');
+        const submitBtn = document.getElementById('modalSubmitBtn');
+
+        const batchApproveTemplate = "{% url 'therapist_treatment_omission_batch_approve' 'BATCH_ID_PLACEHOLDER' %}";
+        const batchRejectTemplate = "{% url 'therapist_treatment_omission_batch_reject' 'BATCH_ID_PLACEHOLDER' %}";
+
+        if (action === 'approve') {
+            form.action = batchApproveTemplate.replace('BATCH_ID_PLACEHOLDER', encodeURIComponent(batchId));
+            title.textContent = 'Approve Treatment Omission Request';
+            title.className = 'modal-title text-success fw-bold';
+            desc.innerHTML = `
+                <div class="alert alert-success bg-opacity-10 border-success mb-3 p-3 rounded-3">
+                    <div class="fw-bold fs-6 mb-1 text-success"><i class="fas fa-check-circle me-1"></i>Confirm Approval</div>
+                    Are you sure you want to <strong>APPROVE</strong> the omission of all <strong>${count} treatment(s)</strong> for therapist <strong>"${therapistName}"</strong>?
+                </div>
+                <div class="alert alert-warning py-2 mb-0 small rounded-3">
+                    <i class="fas fa-exclamation-triangle me-1"></i>
+                    Once approved, this therapist will <strong>NOT</strong> be scheduled for any of these ${count} treatments in any scheduling list.
+                </div>
+            `;
+            submitBtn.className = 'btn btn-success rounded-pill px-4 fw-semibold shadow-sm';
+            submitBtn.innerHTML = `<i class="fas fa-check me-1"></i>Approve Request (${count} Treatments)`;
+        } else {
+            form.action = batchRejectTemplate.replace('BATCH_ID_PLACEHOLDER', encodeURIComponent(batchId));
+            title.textContent = 'Reject Treatment Omission Request';
+            title.className = 'modal-title text-danger fw-bold';
+            desc.innerHTML = `
+                <div class="alert alert-danger bg-opacity-10 border-danger mb-3 p-3 rounded-3">
+                    <div class="fw-bold fs-6 mb-1 text-danger"><i class="fas fa-times-circle me-1"></i>Confirm Rejection</div>
+                    Are you sure you want to <strong>REJECT</strong> the omission request of all <strong>${count} treatment(s)</strong> for therapist <strong>"${therapistName}"</strong>?
+                </div>
+                <div class="text-muted small">
+                    The therapist will remain eligible for scheduling these treatments.
+                </div>
+            `;
+            submitBtn.className = 'btn btn-danger rounded-pill px-4 fw-semibold shadow-sm';
+            submitBtn.innerHTML = `<i class="fas fa-times me-1"></i>Reject Request (${count} Treatments)`;
+        }
+
+        const modal = new bootstrap.Modal(document.getElementById('decisionModal'));
+        modal.show();
+    }
+
+    // Open confirmation modal for revoking an active approved batch
+    function openRevokeBatchModal(batchId, therapistName, count) {
+        const form = document.getElementById('decisionForm');
+        const title = document.getElementById('decisionModalLabel');
+        const desc = document.getElementById('modalDescription');
+        const submitBtn = document.getElementById('modalSubmitBtn');
+
+        const batchRevokeTemplate = "{% url 'therapist_treatment_omission_batch_delete' 'BATCH_ID_PLACEHOLDER' %}";
+        let actionUrl = batchRevokeTemplate.replace('BATCH_ID_PLACEHOLDER', encodeURIComponent(batchId));
+        if (actionUrl.indexOf('?') === -1) {
+            actionUrl += '?next=' + encodeURIComponent(window.location.pathname);
+        }
+        form.action = actionUrl;
+        title.textContent = 'Revoke Treatment Omission Request';
+        title.className = 'modal-title text-danger fw-bold';
+        desc.innerHTML = `
+            <div class="alert alert-danger bg-opacity-10 border-danger mb-3 p-3 rounded-3">
+                <div class="fw-bold fs-6 mb-1 text-danger"><i class="fas fa-undo-alt me-1"></i>Confirm Revocation</div>
+                Are you sure you want to <strong>REVOKE</strong> the omission of all <strong>${count} treatment(s)</strong> for therapist <strong>"${therapistName}"</strong>?
+            </div>
+            <div class="alert alert-info py-2 mb-0 small rounded-3">
+                <i class="fas fa-info-circle me-1"></i>
+                Once revoked, this therapist will once again be eligible for scheduling these treatments in the scheduling list.
+            </div>
+        `;
+        submitBtn.className = 'btn btn-danger rounded-pill px-4 fw-semibold shadow-sm';
+        submitBtn.innerHTML = `<i class="fas fa-undo-alt me-1"></i>Revoke Request (${count} Treatments)`;
+
+        const modal = new bootstrap.Modal(document.getElementById('decisionModal'));
+        modal.show();
+    }
+    </script>
+</body>
+</html>
