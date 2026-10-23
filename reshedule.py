@@ -508,6 +508,18 @@ def allocate_treatment_room(date, time_slot, last_room=None, therapy_name=None, 
             pass
         return None
     
+    # VAMANAM RESTRICTION: Always allocate strictly to room TR-12
+    try:
+        if is_vamanam_treatment(therapy_name):
+            vamanam_room = check_room_availability('TR-12')
+            if vamanam_room:
+                print(f"[ROOM RESTRICTION] Vamanam treatment detected - assigned TR-12 room.")
+                return vamanam_room
+            print(f"[ROOM RESTRICTION] Vamanam treatment detected - TR-12 is unavailable on {date} at {time_slot}.")
+            return None
+    except Exception as _vm_err:
+        print(f"[ROOM RESTRICTION] Error checking vamanam room: {_vm_err}")
+
     # STEAM THERAPY RESTRICTION: Always allocate strictly to room TR-12 or TR-9
     try:
         if is_steam_therapy_treatment(therapy_name):
@@ -727,6 +739,33 @@ def is_group_vasthi_0830_only(therapy_name, therapy_code=None):
         return False
 
 
+def is_vamanam_treatment(therapy_name=None, therapy_code=None):
+    """
+    True when therapy is Vamanam (e.g. THEB126 or 'vamanam' in therapy name).
+    Such therapy must strictly be scheduled at 05:30 AM (or 17:30 slot representation) and in room TR-12.
+    """
+    code = (therapy_code or '').strip().upper()
+    if code == 'THEB126':
+        return True
+    if therapy_name and 'vamanam' in str(therapy_name).strip().lower():
+        return True
+    try:
+        from masters.models import TherapyMaster
+        tm = None
+        if therapy_code:
+            tm = TherapyMaster.objects.filter(therapy_code=str(therapy_code).strip()).first()
+        if not tm and therapy_name:
+            tm = TherapyMaster.objects.filter(therapy_name__iexact=str(therapy_name).strip()).first()
+        if tm:
+            if 'vamanam' in (tm.therapy_name or '').lower():
+                return True
+            if getattr(tm, 'therapy_code', '').upper() == 'THEB126':
+                return True
+        return False
+    except Exception:
+        return False
+
+
 def is_steam_therapy_treatment(therapy_name=None, therapy_code=None):
     """
     True when therapy is marked as Steam Therapy in TherapyMaster (is_steam_therapy=True).
@@ -762,6 +801,32 @@ def get_allowed_slot_values(patient_type, therapy_category, used_slots=None, the
         therapy_name: Name of the therapy (for treatment-specific restrictions)
         therapy_code: Therapy code (master lookup + THEB037 exemption)
     """
+    # VAMANAM RESTRICTION: Strictly 05:30 (or 17:30 depending on representation)
+    if is_vamanam_treatment(therapy_name, therapy_code):
+        # Check active SlotMaster to match whether 05:30 or 17:30 or 05:30 AM exists
+        v_slots = []
+        try:
+            from masters.models import SlotMaster
+            matching_sms = SlotMaster.objects.filter(slot_time__in=[time(17, 30), time(5, 30)], is_active=True).order_by('slot_number')
+            v_slots = [sm.slot_time.strftime("%H:%M") for sm in matching_sms]
+            if not v_slots:
+                v_slots = ["17:30"]
+        except Exception:
+            v_slots = ["17:30"]
+        allowed_slots = v_slots
+        if used_slots:
+            used_slot_strs = []
+            for s in used_slots:
+                t = _slot_time_value(s)
+                if t:
+                    try:
+                        used_slot_strs.append(t.strftime("%H:%M"))
+                    except Exception:
+                        pass
+            allowed_slots = [s for s in allowed_slots if s not in used_slot_strs]
+        print(f"[SLOT RESTRICTION] Vamanam treatment detected - only {v_slots} allowed. Slots: {allowed_slots}")
+        return allowed_slots
+
     general_slots = ["06:30","08:30","10:00","11:30","14:30","16:00","17:30"]
 
     # default allowed by patient type
@@ -2651,6 +2716,9 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
 
     # room allocation if needed
     room_candidate = getattr(booking, 'room', None)
+    if is_vamanam_treatment(therapy_name, getattr(allocation, 'therapy_code', None)):
+        if getattr(room_candidate, 'room_no', None) != 'TR-12':
+            room_candidate = None
     if room_candidate:
         if getattr(booking, 'timeslot', None) != canonical_slot:
             room_candidate = None
@@ -3833,6 +3901,20 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
 
         # preferred slot
         pref_slot = getattr(booking, 'timeslot', None) or getattr(allocation, 'timeslot', None)
+        # Vamanam therapy: must strictly use 5:30 (17:30 / 05:30) slot only
+        try:
+            if is_vamanam_treatment(therapy_name, getattr(allocation, 'therapy_code', None)):
+                sm530 = (
+                    SlotMaster.objects.filter(slot_time=datetime.strptime('17:30', '%H:%M').time(), is_active=True).first()
+                    or SlotMaster.objects.filter(slot_time=datetime.strptime('05:30', '%H:%M').time(), is_active=True).first()
+                )
+                if sm530:
+                    pref_slot = sm530
+                    if create_bookings and getattr(booking, 'timeslot_id', None) != sm530.id:
+                        booking.timeslot = sm530
+                        booking.save(update_fields=['timeslot', 'updated_at'])
+        except Exception as _vm_e:
+            print(f'[SLOT RULE] Vamanam slot rule skipped: {_vm_e}')
         requested_slot_value = None
         if pref_slot:
             st = getattr(pref_slot, 'start_time', None)
@@ -3979,6 +4061,30 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
             except Exception as e:
                 print(f"[SLOT RESTRICTION] Vasthi therapy group preferred-slot normalization error: {e}")
 
+        # Vamanam therapy: force allocation attempts to 5:30 (17:30 / 05:30) only
+        if is_vamanam_treatment(therapy_name, getattr(allocation, "therapy_code", None)):
+            try:
+                t530_pm = datetime.strptime("17:30", "%H:%M").time()
+                t530_am = datetime.strptime("05:30", "%H:%M").time()
+                sm = (
+                    SlotMaster.objects.filter(slot_time=t530_pm, is_active=True).first()
+                    or SlotMaster.objects.filter(slot_time=t530_am, is_active=True).first()
+                )
+                if sm:
+                    cur_t = None
+                    if canonical_pref:
+                        cur_t = getattr(canonical_pref, "slot_time", None) or getattr(canonical_pref, "start_time", None)
+                    if cur_t != sm.slot_time:
+                        canonical_pref = sm
+                        preferred_rejected_reason = None
+                        print(f"[SLOT RESTRICTION] Vamanam therapy: normalized preferred slot to {sm.slot_time}")
+                else:
+                    canonical_pref = None
+                    preferred_rejected_reason = "vamanam_no_530_slotmaster"
+                    print("[SLOT RESTRICTION] Vamanam therapy: no active SlotMaster for 17:30 or 05:30")
+            except Exception as e:
+                print(f"[SLOT RESTRICTION] Vamanam preferred-slot normalization error: {e}")
+
         therapy_req = therapist_requirements(allocation)
         needs_room_flag = therapy_needs_room(allocation)
         needs_bath_flag = therapy_needs_bath(allocation)
@@ -4068,6 +4174,10 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                 should_try_fallback = True
                 print(f"[DEBUG Reschedule] Preferred slot failed with no reason. Will try alternate slots as fallback.")
             
+            if is_vamanam_treatment(therapy_name, getattr(allocation, "therapy_code", None)):
+                should_try_fallback = False
+                print(f"[SLOT RESTRICTION] Vamanam therapy detected - slot is strictly fixed to 5:30. Will NOT try alternate slots.")
+
             if should_try_fallback:
                 # attempt other allowed slots (OP/IP aware)
                 allowed_slot_values = get_allowed_slot_values(

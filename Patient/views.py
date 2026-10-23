@@ -1507,6 +1507,18 @@ def compute_available_slots_for_date(date_obj, therapy_name, patient_type, thera
         candidate_slots = [s for s in candidate_slots if s not in ["11:30", "17:30"]]
 
     try:
+        from datetime import time
+        from reshedule import is_vamanam_treatment
+        if is_vamanam_treatment(therapy_name, therapy_code):
+            from masters.models import SlotMaster
+            matching_sms = SlotMaster.objects.filter(slot_time__in=[time(17, 30), time(5, 30)], is_active=True).order_by('slot_number')
+            candidate_slots = [sm.slot_time.strftime("%H:%M") for sm in matching_sms]
+            if not candidate_slots:
+                candidate_slots = ["17:30"]
+    except Exception:
+        pass
+
+    try:
         from reshedule import is_group_vasthi_0830_only
         if is_group_vasthi_0830_only(therapy_name, therapy_code):
             candidate_slots = [s for s in candidate_slots if s == "08:30"]

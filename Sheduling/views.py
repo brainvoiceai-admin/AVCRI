@@ -1089,6 +1089,23 @@ def therapy_entry(request):
                 if new_timeslot is not None:
                     allocation.timeslot = new_timeslot
                 
+                try:
+                    from reshedule import is_vamanam_treatment
+                    if is_vamanam_treatment(allocation.therapy_name, getattr(allocation, 'therapy_code', None)):
+                        if SlotMaster is not None:
+                            slot530 = (
+                                SlotMaster.objects.filter(slot_time=datetime.strptime('17:30', '%H:%M').time(), is_active=True).first()
+                                or SlotMaster.objects.filter(slot_time=datetime.strptime('05:30', '%H:%M').time(), is_active=True).first()
+                            )
+                            if slot530:
+                                allocation.timeslot = slot530
+                        if TreatmentRoom is not None:
+                            tr12 = TreatmentRoom.objects.filter(room_no='TR-12', is_active=True).first()
+                            if tr12:
+                                allocation.room = tr12
+                except Exception:
+                    pass
+                
                 # Check if therapy code changed (might indicate nurse treatment change)
                 if 'therapy_code' in payload:
                     allocation.therapy_code = payload['therapy_code']
@@ -1733,6 +1750,24 @@ def therapy_entry(request):
                                     },
                                     status=400,
                                 )
+                except Exception:
+                    pass
+
+                # Vamanam therapy: must strictly use 5:30 (17:30 / 05:30) slot and TR-12 room only
+                try:
+                    from reshedule import is_vamanam_treatment
+                    if is_vamanam_treatment(payload.get('therapy_name'), payload.get('therapy_code')):
+                        if SlotMaster is not None:
+                            slot530 = (
+                                SlotMaster.objects.filter(slot_time=datetime.strptime('17:30', '%H:%M').time(), is_active=True).first()
+                                or SlotMaster.objects.filter(slot_time=datetime.strptime('05:30', '%H:%M').time(), is_active=True).first()
+                            )
+                            if slot530:
+                                timeslot_obj = slot530
+                        if TreatmentRoom is not None:
+                            tr12 = TreatmentRoom.objects.filter(room_no='TR-12', is_active=True).first()
+                            if tr12:
+                                room_obj = tr12
                 except Exception:
                     pass
 
@@ -3916,6 +3951,26 @@ def allocate_therapy(request):
                         },
                         status=400,
                     )
+        except Exception:
+            pass
+
+    # Vamanam therapy: must strictly use 5:30 (17:30 / 05:30) slot and TR-12 room only
+    if not nurse_treatment:
+        try:
+            from reshedule import is_vamanam_treatment
+            if is_vamanam_treatment(payload.get("therapy_name"), payload.get("therapy_code")):
+                t530_pm = parse_time_hhmm("17:30")
+                t530_am = parse_time_hhmm("05:30")
+                slot530 = (
+                    SlotMaster.objects.filter(slot_time=t530_pm, is_active=True).first() if t530_pm else None
+                ) or (
+                    SlotMaster.objects.filter(slot_time=t530_am, is_active=True).first() if t530_am else None
+                )
+                if slot530:
+                    timeslot = slot530
+                tr12 = TreatmentRoom.objects.filter(room_no='TR-12', is_active=True).first()
+                if tr12:
+                    room = tr12
         except Exception:
             pass
 

@@ -748,12 +748,35 @@ $(function () {
   // Function to update slots based on therapy difficulty
   function updateSlotsForTherapy() {
     const selectedTherapy = $therapySelect.select2('data');
-    if (!selectedTherapy || selectedTherapy.length === 0) {
+    let therapy = null;
+    if (selectedTherapy && selectedTherapy.length > 0) {
+      therapy = selectedTherapy[0];
+    } else {
+      const selectedVal = $therapySelect.val();
+      if (selectedVal) {
+        const $opt = $therapySelect.find(`option[value="${selectedVal}"]`);
+        therapy = {
+          id: selectedVal,
+          text: $opt.text() || '',
+          therapy_category: $opt.data('category') || ''
+        };
+      }
+    }
+
+    if (!therapy || (!therapy.id && !therapy.text)) {
       // No therapy selected, show all slots
       return populateSlots();
     }
 
-    const therapy = selectedTherapy[0];
+    const therapyText = (therapy.text || '').toLowerCase();
+    const therapyCode = (therapy.id || '').toUpperCase();
+    const isVamanam = therapyCode === 'THEB126' || therapyText.includes('vamanam');
+
+    if (isVamanam) {
+      // For Vamanam, strictly 5:30 slot only
+      return populateSlots([], ['17:30', '05:30'], true);
+    }
+
     const therapyCategory = therapy.therapy_category || '';
 
     // If therapy difficulty is "Hard", filter out 5:30 PM and 11:30 AM slots
@@ -775,8 +798,8 @@ $(function () {
     return `${hours.padStart(2, '0')}:${minutes}`;
   }
 
-  // Function to populate slots with optional exclusion list
-  function populateSlots(excludeSlots = []) {
+  // Function to populate slots with optional exclusion list and optional inclusion list
+  function populateSlots(excludeSlots = [], onlySlots = [], autoSelectIfSingle = false) {
     return ajax({ action: 'slots' }).then(resp => {
       const slots = (resp && resp.slots) || resp || FALLBACK_SLOTS;
       $slotSelect.find('option').not(':first').remove();
@@ -787,6 +810,12 @@ $(function () {
         // Normalize slot time to HH:MM format for comparison
         let normalizedSlotTime = normalizeSlotTime(slotTime);
 
+        // Check if only specific slots are allowed
+        if (onlySlots && onlySlots.length > 0) {
+          const isAllowed = onlySlots.some(allowed => normalizeSlotTime(allowed) === normalizedSlotTime);
+          if (!isAllowed) return;
+        }
+
         // Check if this slot should be excluded
         const shouldExclude = excludeSlots.some(exclude => {
           // Normalize exclude time to HH:MM format
@@ -799,6 +828,12 @@ $(function () {
           $slotSelect.append(`<option value="${slotTime}">${displayText}</option>`);
         }
       });
+      if (autoSelectIfSingle) {
+        const availableOptions = $slotSelect.find('option').not(':first');
+        if (availableOptions.length === 1) {
+          $slotSelect.val(availableOptions.val()).trigger('change');
+        }
+      }
       return Promise.resolve(); // Return promise for chaining
     }).catch(() => {
       $slotSelect.find('option').not(':first').remove();
@@ -809,6 +844,11 @@ $(function () {
         // Normalize slot time to HH:MM format for comparison
         let normalizedSlotTime = normalizeSlotTime(slotTime);
 
+        if (onlySlots && onlySlots.length > 0) {
+          const isAllowed = onlySlots.some(allowed => normalizeSlotTime(allowed) === normalizedSlotTime);
+          if (!isAllowed) return;
+        }
+
         // Check if this slot should be excluded
         const shouldExclude = excludeSlots.some(exclude => {
           // Normalize exclude time to HH:MM format
@@ -821,6 +861,12 @@ $(function () {
           $slotSelect.append(`<option value="${slotTime}">${displayText}</option>`);
         }
       });
+      if (autoSelectIfSingle) {
+        const availableOptions = $slotSelect.find('option').not(':first');
+        if (availableOptions.length === 1) {
+          $slotSelect.val(availableOptions.val()).trigger('change');
+        }
+      }
       return Promise.resolve(); // Return promise for chaining
     });
   }

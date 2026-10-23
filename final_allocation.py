@@ -622,6 +622,19 @@ def allocate_treatment_room(date, time_slot, last_room=None, therapy_name=None, 
             pass
         return None
     
+    # VAMANAM RESTRICTION: Always allocate strictly to room TR-12
+    try:
+        from reshedule import is_vamanam_treatment
+        if is_vamanam_treatment(therapy_name):
+            vamanam_room = check_room_availability('TR-12')
+            if vamanam_room:
+                print(f"[ROOM RESTRICTION] Vamanam treatment detected - assigned TR-12 room.")
+                return vamanam_room
+            print(f"[ROOM RESTRICTION] Vamanam treatment detected - TR-12 is unavailable on {date} at {time_slot}.")
+            return None
+    except Exception as _vm_err:
+        print(f"[ROOM RESTRICTION] Error checking vamanam room: {_vm_err}")
+
     # STEAM THERAPY RESTRICTION: Always allocate strictly to room TR-12 or TR-9
     try:
         from reshedule import is_steam_therapy_treatment
@@ -2113,6 +2126,24 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                     print('[VASTHI GROUP] Final schedule: no active SlotMaster for 08:30')
         except Exception as _gv_e:
             print(f'[SLOT RULE] Final schedule slot rule skipped: {_gv_e}')
+
+        # Vamanam therapy: final schedule must use 5:30 (17:30 / 05:30) slot only
+        try:
+            from reshedule import is_vamanam_treatment
+            if is_vamanam_treatment(therapy_name, getattr(allocation, 'therapy_code', None)):
+                sm530 = (
+                    SlotMaster.objects.filter(slot_time=datetime.strptime('17:30', '%H:%M').time(), is_active=True).first()
+                    or SlotMaster.objects.filter(slot_time=datetime.strptime('05:30', '%H:%M').time(), is_active=True).first()
+                )
+                if sm530:
+                    pref_slot = sm530
+                    if create_bookings and getattr(booking, 'timeslot_id', None) != sm530.id:
+                        booking.timeslot = sm530
+                        booking.save(update_fields=['timeslot', 'updated_at'])
+                else:
+                    print('[VAMANAM] Final schedule: no active SlotMaster for 17:30 / 05:30')
+        except Exception as _vm_e:
+            print(f'[SLOT RULE] Vamanam slot rule skipped: {_vm_e}')
         requested_slot_value = None
         if pref_slot:
             st = getattr(pref_slot, 'start_time', None)
@@ -3187,6 +3218,13 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
         allocate_slot_for_room = slot_master if slot_master else canonical_slot
         
         room_candidate = getattr(booking, 'room', None)
+        try:
+            from reshedule import is_vamanam_treatment
+            if is_vamanam_treatment(therapy_name, getattr(allocation, 'therapy_code', None)):
+                if getattr(room_candidate, 'room_no', None) != 'TR-12':
+                    room_candidate = None
+        except Exception:
+            pass
         if needs_room_flag and not room_candidate:
             try:
                 room_candidate = allocate_treatment_room(
@@ -3342,8 +3380,10 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                         ).exclude(pk=booking.pk).first()
                         
                         if existing_booking:
-                            from reshedule import is_steam_therapy_treatment
-                            if is_steam_therapy_treatment(therapy_name):
+                            from reshedule import is_vamanam_treatment, is_steam_therapy_treatment
+                            if is_vamanam_treatment(therapy_name):
+                                raise RuntimeError(f"no_room_available: TR-12 is strictly required for Vamanam but already booked on {target_date} at {slot_master}")
+                            elif is_steam_therapy_treatment(therapy_name):
                                 # If room_candidate was TR-12, try TR-9; if TR-9, try TR-12
                                 alt_steam_room_no = 'TR-9' if getattr(room_candidate, 'room_no', None) == 'TR-12' else 'TR-12'
                                 from Patient.models import TreatmentRoom
@@ -3438,6 +3478,9 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                             traceback.print_exc()
                             raise
                         if not rb_created:
+                            from reshedule import is_vamanam_treatment
+                            if is_vamanam_treatment(therapy_name):
+                                raise RuntimeError(f"no_room_available: TR-12 RoomBooking conflict for Vamanam on {target_date} at {slot_master}")
                             # RoomBooking already exists, try alternative room
                             alternative_room = allocate_treatment_room(
                                 target_date, 
