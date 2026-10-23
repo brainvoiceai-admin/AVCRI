@@ -508,6 +508,19 @@ def allocate_treatment_room(date, time_slot, last_room=None, therapy_name=None, 
             pass
         return None
     
+    # STEAM THERAPY RESTRICTION: Always allocate strictly to room TR-12 or TR-9
+    try:
+        if is_steam_therapy_treatment(therapy_name):
+            for candidate_room_no in ['TR-12', 'TR-9']:
+                steam_room = check_room_availability(candidate_room_no)
+                if steam_room:
+                    print(f"[ROOM RESTRICTION] Steam therapy detected - assigned {candidate_room_no} room.")
+                    return steam_room
+            print(f"[ROOM RESTRICTION] Steam therapy detected - both TR-12 and TR-9 are unavailable on {date} at {time_slot}.")
+            return None
+    except Exception as _st_err:
+        print(f"[ROOM RESTRICTION] Error checking steam therapy room: {_st_err}")
+
     # NEW: Primary logic - allocate based on patient staying room
     # Special handling: If patient_staying_room starts with "OP-", treat it as if there's no staying room
     # (OP patients are handled in the OP patient fallback logic below)
@@ -712,6 +725,29 @@ def is_group_vasthi_0830_only(therapy_name, therapy_code=None):
         return gname == VASTHI_THERAPY_GROUP_NAME_NORMALIZED
     except Exception:
         return False
+
+
+def is_steam_therapy_treatment(therapy_name=None, therapy_code=None):
+    """
+    True when therapy is marked as Steam Therapy in TherapyMaster (is_steam_therapy=True).
+    Such therapy is strictly allocated to treatment rooms TR-12 or TR-9.
+    """
+    try:
+        from masters.models import TherapyMaster
+
+        tm = None
+        if therapy_code:
+            tm = TherapyMaster.objects.filter(therapy_code=str(therapy_code).strip()).first()
+        if not tm and therapy_name:
+            tm = TherapyMaster.objects.filter(therapy_name__iexact=str(therapy_name).strip()).first()
+        if tm and getattr(tm, 'is_steam_therapy', False):
+            return True
+        return False
+    except Exception:
+        return False
+
+# Backward compatibility alias
+is_steam_therapy_530_tr12_only = is_steam_therapy_treatment
 
 
 def get_allowed_slot_values(patient_type, therapy_category, used_slots=None, therapy_name=None, therapy_code=None):
