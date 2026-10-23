@@ -201,6 +201,11 @@ class TherapyMaster(models.Model):
     no_of_trainee_therapist = models.IntegerField(default=0, verbose_name="Trainee Therapists")
     total_no_of_therapist = models.IntegerField(default=0, verbose_name="Total Therapists")
     
+    is_steam_therapy = models.BooleanField(
+        default=False,
+        verbose_name="Steam Therapy (TR-12 / TR-9 Rooms Only)",
+        help_text="If enabled, this therapy is strictly allocated to room TR-12 or TR-9 without slot restrictions (slot allocated per patient selection)."
+    )
     is_active = models.BooleanField(default=True, verbose_name="Active")
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="Created At")
     updated_at = models.DateTimeField(auto_now=True, verbose_name="Updated At")
@@ -1281,4 +1286,4 @@ def group_omissions_by_request(omissions_queryset):
         groups[key].add_omission(om)
 
     return list(groups.values())
-
+
