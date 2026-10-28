@@ -840,19 +840,17 @@ def allocate_treatment_room(date, time_slot, last_room=None, therapy_name=None, 
 # -----------------------
 # Slot allocation helper (kept for possible fallback)
 # -----------------------
-def allocate_treatment_slot(patient_type, therapy_category, used_slots=None):
-    general_slots = ["06:30","08:30","10:00","11:30","14:30","16:00","17:30"]
-    if patient_type and str(patient_type).upper() == "OP":
-        allowed_slots = ["11:30","17:30"]
-    elif patient_type and str(patient_type).upper() == "IP":
-        allowed_slots = ["06:30","08:30","10:00","14:30","16:00"]
-    else:
-        allowed_slots = general_slots
-    if therapy_category and str(therapy_category).lower() in ["hard","special"]:
-        allowed_slots = [s for s in general_slots if s not in ["11:30","17:30"]]
-    if used_slots:
-        used_slot_strs = [getattr(s, 'start_time').strftime("%H:%M") for s in used_slots if getattr(s, 'start_time', None)]
-        allowed_slots = [s for s in allowed_slots if s not in used_slot_strs]
+def allocate_treatment_slot(patient_type, therapy_category, used_slots=None, patient_id=None, target_date=None, therapy_name=None, therapy_code=None):
+    from reshedule import get_allowed_slot_values
+    allowed_slots = get_allowed_slot_values(
+        patient_type=patient_type,
+        therapy_category=therapy_category,
+        used_slots=used_slots,
+        therapy_name=therapy_name,
+        therapy_code=therapy_code,
+        patient_id=patient_id,
+        target_date=target_date,
+    )
     return allowed_slots[0] if allowed_slots else None
 
 # -----------------------
@@ -1477,7 +1475,9 @@ def assign_continuity_therapists_pass1(booking, allocation, target_date, locked_
     patient_gender = getattr(getattr(allocation, 'patient', None), 'pat_sex', None)
     patient_age = getattr(getattr(allocation, 'patient', None), 'pat_age', None)
     needs_bath_flag = therapy_needs_bath(allocation) if therapy_needs_bath else False
-    therapy_name = allocation.therapy_name
+    therapy_name = getattr(allocation, 'therapy_name', None)
+    therapy_code = getattr(allocation, 'therapy_code', None)
+    current_therapy_name = therapy_name
     
     # Get slot
     slot = getattr(booking, 'timeslot', None)
@@ -1495,6 +1495,20 @@ def assign_continuity_therapists_pass1(booking, allocation, target_date, locked_
     
     if not slot_master:
         return result
+
+    # HARD TREATMENT RESTRICTION: Do not lock continuity therapists if patient already has a hard treatment in this session
+    from reshedule import is_hard_treatment, get_slot_session, patient_has_hard_treatment_in_session
+    if is_hard_treatment(allocation, therapy_name=therapy_name, therapy_code=therapy_code):
+        slot_session = get_slot_session(slot_master)
+        if slot_session and patient_id and patient_has_hard_treatment_in_session(
+            patient_id=patient_id,
+            target_date=target_date,
+            session=slot_session,
+            exclude_booking_id=getattr(booking, 'pk', None),
+            exclude_allocation_id=getattr(allocation, 'pk', None)
+        ):
+            print(f"[FINAL ALLOC PASS1] Skipping booking {booking.pk} - patient {patient_id} already has a hard treatment in {slot_session} session on {target_date}")
+            return result
 
     # Shift eligibility filter (additive): enforce only when shift masters are configured.
     shift_filter_enabled = _shift_enforcement_enabled()
@@ -2282,6 +2296,45 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                 "room_no": getattr(booking.room, 'room_no', None) if getattr(booking, 'room', None) else None, "therapists": []
             })
             continue
+
+        # HARD TREATMENT RESTRICTION: Two hard treatments should not be scheduled in the same session
+        # Exception: Medium and Easy treatments (e.g. Lepam) can be assigned in the same session
+        from reshedule import is_hard_treatment, get_slot_session, patient_has_hard_treatment_in_session
+        is_hard = is_hard_treatment(allocation, therapy_name=therapy_name, therapy_code=getattr(allocation, 'therapy_code', None))
+        if is_hard:
+            slot_session = get_slot_session(query_slot or canonical_slot)
+            if slot_session and patient_id and patient_has_hard_treatment_in_session(
+                patient_id=patient_id,
+                target_date=target_date,
+                session=slot_session,
+                exclude_booking_id=booking_id,
+                exclude_allocation_id=therapy_allocation_id,
+                in_memory_tasks=tasks
+            ):
+                reason = "hard_treatment_same_session_conflict"
+                print(f"[CONTINUITY PASS2] Booking {booking_id}: SKIPPING due to hard_treatment_same_session_conflict for patient {patient_id} in {slot_session} session on {target_date}")
+                try:
+                    booking.status = 'failed'
+                    booking.failure_reason = (str(reason) or '')[:512]
+                    booking.save(update_fields=['status', 'failure_reason', 'updated_at'])
+                except Exception as e:
+                    print(f"Error updating booking {booking_id} to failed: {e}")
+                
+                if AllocationAttempt:
+                    try:
+                        AllocationAttempt.objects.create(
+                            visit=None, therapy=None, date=target_date,
+                            requested_time_slot=canonical_slot, requested_time_slot_value=requested_slot_value or '',
+                            status='FAILED', reason=reason, extra={"booking_id": booking_id, "session": slot_session}
+                        )
+                    except Exception:
+                        pass
+                tasks.append({
+                    "booking_id": booking_id, "allocation_id": therapy_allocation_id, "date": target_date.isoformat(),
+                    "therapy_name": therapy_name, "slot": requested_slot_value, "status": "FAILED", "reason": reason,
+                    "room_no": getattr(booking.room, 'room_no', None) if getattr(booking, 'room', None) else None, "therapists": []
+                })
+                continue
 
         # in-run used slot check
         if any(getattr(s, 'start_time', None) == getattr(query_slot, 'start_time', None) for s in used_slots):
