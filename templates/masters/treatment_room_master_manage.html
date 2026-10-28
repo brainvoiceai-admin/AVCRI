@@ -48,7 +48,7 @@
             <div class="card-body">
                 <form method="get" action="{% url 'treatment_room_master_manage' %}" id="filterForm">
                     <div class="row g-2">
-                        <div class="col-md-4">
+                        <div class="col-md-3">
                             <input type="text" class="form-control" name="search" id="searchInput"
                                 placeholder="Search rooms..." value="{{ search|default:'' }}">
                         </div>
@@ -61,20 +61,27 @@
                         </div>
                         <div class="col-md-2">
                             <select class="form-select" name="steam" id="steamFilter">
-                                <option value="">All Types</option>
+                                <option value="">All Steam Types</option>
                                 <option value="yes" {% if steam_filter == 'yes' %}selected{% endif %}>Steam Rooms</option>
-                                <option value="no" {% if steam_filter == 'no' %}selected{% endif %}>Regular Rooms</option>
+                                <option value="no" {% if steam_filter == 'no' %}selected{% endif %}>Non-Steam</option>
                             </select>
                         </div>
                         <div class="col-md-2">
+                            <select class="form-select" name="vamanam" id="vamanamFilter">
+                                <option value="">All Vamanam Types</option>
+                                <option value="yes" {% if vamanam_filter == 'yes' %}selected{% endif %}>Vamanam Rooms</option>
+                                <option value="no" {% if vamanam_filter == 'no' %}selected{% endif %}>Non-Vamanam</option>
+                            </select>
+                        </div>
+                        <div class="col-md-1">
                             <button type="submit" class="btn btn-primary w-100" id="filterButton">
-                                <i class="fas fa-search me-1"></i>Filter
+                                <i class="fas fa-search"></i>
                             </button>
                         </div>
                         <div class="col-md-2">
-                            <button type="button" class="btn btn-outline-secondary w-100" id="clearFilters">
+                            <a href="{% url 'treatment_room_master_manage' %}" class="btn btn-outline-secondary w-100" id="clearFilters">
                                 <i class="fas fa-times me-1"></i>Clear
-                            </button>
+                            </a>
                         </div>
                     </div>
                 </form>
@@ -99,6 +106,7 @@
                                 <th>Room Name</th>
                                 <th>Floor</th>
                                 <th>Steam Therapy</th>
+                                <th>Vamanam Therapy</th>
                                 <th>Description</th>
                                 <th>Status</th>
                                 <th>Created</th>
@@ -129,6 +137,23 @@
                                     </a>
                                     {% endif %}
                                 </td>
+                                <td>
+                                    {% if room.is_vamanam_room %}
+                                    <a href="{% url 'treatment_room_master_toggle_vamanam' room.room_no %}" 
+                                       class="badge bg-danger text-white text-decoration-none" 
+                                       title="Click to toggle Vamanam Room status"
+                                       onclick="return confirm('Remove Vamanam designation from {{ room.room_no }}?');">
+                                        <i class="fas fa-heartbeat me-1"></i>Vamanam Room
+                                    </a>
+                                    {% else %}
+                                    <a href="{% url 'treatment_room_master_toggle_vamanam' room.room_no %}" 
+                                       class="badge bg-secondary text-decoration-none" 
+                                       title="Click to toggle Vamanam Room status"
+                                       onclick="return confirm('Designate {{ room.room_no }} as a Vamanam Therapy Room?');">
+                                        Regular
+                                    </a>
+                                    {% endif %}
+                                </td>
                                 <td>{{ room.description|default:"-"|truncatewords:10 }}</td>
                                 <td>
                                     {% if room.is_active %}
@@ -152,6 +177,12 @@
                                             onclick="return confirm('Toggle steam room designation for {{ room.room_no }}?');">
                                             <i class="fas fa-wind"></i>
                                         </a>
+                                        <a href="{% url 'treatment_room_master_toggle_vamanam' room.room_no %}"
+                                            class="btn btn-sm {% if room.is_vamanam_room %}btn-danger text-white{% else %}btn-outline-secondary{% endif %}" 
+                                            title="Toggle Vamanam Therapy Room designation"
+                                            onclick="return confirm('Toggle Vamanam room designation for {{ room.room_no }}?');">
+                                            <i class="fas fa-heartbeat"></i>
+                                        </a>
                                         {% if room.is_active %}
                                         <a href="{% url 'treatment_room_master_disable' room.room_no %}"
                                             class="btn btn-sm btn-outline-warning" title="Disable"
@@ -174,7 +205,7 @@
                             </tr>
                             {% empty %}
                             <tr>
-                                <td colspan="9" class="text-center py-4">
+                                <td colspan="10" class="text-center py-4">
                                     <div class="text-muted">
                                         <i class="fas fa-door-open fa-3x mb-3"></i>
                                         <p>No treatment rooms found. <a href="{% url 'treatment_room_master_add' %}">Add the first room</a></p>

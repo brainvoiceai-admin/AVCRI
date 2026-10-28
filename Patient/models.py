@@ -154,6 +154,11 @@ class TreatmentRoom(models.Model):
         verbose_name="Steam Therapy Room",
         help_text="Designate this treatment room for steam therapies"
     )
+    is_vamanam_room = models.BooleanField(
+        default=False,
+        verbose_name="Vamanam Treatment Room",
+        help_text="Designate this treatment room for Vamanam therapies"
+    )
     is_active = models.BooleanField(default=True, verbose_name="Active")
     created_at = models.DateTimeField(auto_now_add=True, null=True, blank=True, verbose_name="Created At")
     updated_at = models.DateTimeField(auto_now=True, null=True, blank=True, verbose_name="Updated At")

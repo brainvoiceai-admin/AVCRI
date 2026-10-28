@@ -10,9 +10,9 @@ admin.site.register(TherapistLeave)
 admin.site.register(TimeSlot)
 @admin.register(TreatmentRoom)
 class TreatmentRoomAdmin(admin.ModelAdmin):
-    list_display = ['room_no', 'tr_code', 'room_name', 'floor_master', 'is_steam_room', 'is_active', 'created_at']
-    list_filter = ['is_active', 'is_steam_room', 'floor_master']
-    list_editable = ['is_steam_room', 'is_active']
+    list_display = ['room_no', 'tr_code', 'room_name', 'floor_master', 'is_steam_room', 'is_vamanam_room', 'is_active', 'created_at']
+    list_filter = ['is_active', 'is_steam_room', 'is_vamanam_room', 'floor_master']
+    list_editable = ['is_steam_room', 'is_vamanam_room', 'is_active']
     search_fields = ['room_no', 'tr_code', 'description']
 admin.site.register(RoomBooking)
 admin.site.register(TherapistBooking)

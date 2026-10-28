@@ -603,11 +603,11 @@ def therapy_entry(request):
 
     # --- POST actions (allocate, mark_completed, request_cancellation) ---
     if request.method == 'POST':
-        action_post = (request.GET.get('action') or '').strip().lower()
         try:
             payload = json.loads(request.body.decode('utf-8') or '{}')
         except Exception:
             return JsonResponse({'error': 'invalid_json'}, status=400)
+        action_post = (request.GET.get('action') or payload.get('action') or '').strip().lower()
 
         # ---------- cancel therapy ----------
         if action_post == 'cancel_therapy':
@@ -1884,12 +1884,106 @@ def therapy_entry(request):
                             alloc.cancelled_at = timezone.now()
                             alloc.save(update_fields=['cancelled_date_from', 'cancelled_date_to', 'cancellation_reason', 'cancelled_by', 'cancelled_at'])
 
-                    # Newly created therapies remain in draft status until scheduling is explicitly run from the scheduling dashboard
-                    alloc.status = 'draft'
-                    alloc.save(update_fields=['status'])
-                    status_counts['draft'] = (tdate - fdate).days + 1 - (1 if any_auto_cancelled else 0)
-                    if any_auto_cancelled:
-                        status_counts['cancelled'] = 1
+                    # Check which dates have Final Schedule run - run algorithm for those dates immediately
+                    # Other dates will remain in draft and can be scheduled via Final Schedule button in dashboard
+                    # IMPORTANT: Use bulk_allocate_for_date to ensure PASS 1 (continuity) and PASS 2 are both executed
+                    try:
+                        from .models import FinalScheduleRun
+                        from final_allocation import bulk_allocate_for_date
+
+                        any_succeeded = False
+                        any_failed = False
+                        
+                        # Group dates by Final Schedule status
+                        dates_with_final_schedule = []
+                        for i in range((tdate - fdate).days + 1):
+                            single_date = fdate + timedelta(days=i)
+                            # Skip locked dates (past and, after 5:30AM, today). They must remain unchanged / cancelled.
+                            if single_date <= lock_upto_date:
+                                continue
+                            if FinalScheduleRun.objects.filter(run_date=single_date).exists():
+                                dates_with_final_schedule.append(single_date)
+                        
+                        # Process each date that has Final Schedule run
+                        # Use bulk_allocate_for_date which includes PASS 1 (continuity) and PASS 2
+                        for d in dates_with_final_schedule:
+                            try:
+                                print(f"[THERAPY ENTRY] Running bulk_allocate_for_date for date {d.isoformat()} to ensure continuity (PASS 1 + PASS 2)")
+                                result = bulk_allocate_for_date(d.strftime('%Y-%m-%d'))
+                                
+                                try:
+                                    from .nurse_allocation import allocate_nurses_for_date
+                                    allocate_nurses_for_date(d.strftime('%Y-%m-%d'))
+                                except Exception as n_err:
+                                    print(f"[THERAPY ENTRY] Nurse allocation notice: {n_err}")
+                                
+                                if result.get('success', False):
+                                    # Check if our allocation was processed successfully
+                                    # bulk_allocate_for_date processes all draft bookings for the date
+                                    # Check the status of bookings for this specific allocation
+                                    allocation_bookings = Booking.objects.filter(allocation=alloc, date=d)
+                                    
+                                    scheduled_count = allocation_bookings.filter(status='scheduled').count()
+                                    failed_count = allocation_bookings.filter(status='failed').count()
+                                    draft_count = allocation_bookings.filter(status='draft').count()
+                                    
+                                    if scheduled_count > 0:
+                                        any_succeeded = True
+                                        # Update booking items status for this date
+                                        BookingItem.objects.filter(booking__allocation=alloc, booking__date=d).update(status='scheduled')
+                                        status_counts['draft'] -= draft_count
+                                        status_counts['allocated'] += scheduled_count
+                                        date_status_map[d.isoformat()] = 'allocated'
+                                        print(f"[THERAPY ENTRY] ✓ Date {d.isoformat()}: {scheduled_count} booking(s) scheduled with continuity")
+                                    elif failed_count > 0:
+                                        any_failed = True
+                                        BookingItem.objects.filter(booking__allocation=alloc, booking__date=d).update(status='failed')
+                                        status_counts['draft'] -= draft_count
+                                        status_counts['failed'] += failed_count
+                                        date_status_map[d.isoformat()] = 'failed'
+                                        print(f"[THERAPY ENTRY] ✗ Date {d.isoformat()}: {failed_count} booking(s) failed")
+                                    else:
+                                        # Still in draft - might not have been processed
+                                        print(f"[THERAPY ENTRY] ? Date {d.isoformat()}: {draft_count} booking(s) still in draft")
+                                else:
+                                    # bulk_allocate_for_date returned an error
+                                    error_msg = result.get('error', 'Unknown error')
+                                    print(f"[THERAPY ENTRY] ✗ Error in bulk_allocate_for_date for {d.isoformat()}: {error_msg}")
+                                    any_failed = True
+                                    allocation_bookings = Booking.objects.filter(allocation=alloc, date=d)
+                                    draft_count = allocation_bookings.filter(status='draft').count()
+                                    Booking.objects.filter(allocation=alloc, date=d).update(status='failed', failure_reason=(str(error_msg) or '')[:512])
+                                    BookingItem.objects.filter(booking__allocation=alloc, booking__date=d).update(status='failed')
+                                    status_counts['draft'] -= draft_count
+                                    status_counts['failed'] += draft_count
+                                    date_status_map[d.isoformat()] = 'failed'
+                            except Exception as _e:
+                                # Continue to next date on error
+                                print(f"[THERAPY ENTRY] ✗ Error processing date {d.isoformat()} for allocation {alloc.id}: {_e}")
+                                import traceback
+                                print(f"[THERAPY ENTRY] Traceback: {traceback.format_exc()}")
+                                any_failed = True
+                                Booking.objects.filter(allocation=alloc, date=d).update(status='failed', failure_reason=(str(_e) or '')[:512])
+                                BookingItem.objects.filter(booking__allocation=alloc, booking__date=d).update(status='failed')
+                                status_counts['draft'] -= Booking.objects.filter(allocation=alloc, date=d, status='draft').count()
+                                status_counts['failed'] += Booking.objects.filter(allocation=alloc, date=d, status='failed').count()
+                                date_status_map[d.isoformat()] = 'failed'
+
+                        # Update overall allocation status based on results
+                        if any_succeeded:
+                            alloc.status = 'allocated'
+                            alloc.save(update_fields=['status'])
+                        elif any_failed and not any_succeeded:
+                            alloc.status = 'failed'
+                            alloc.save(update_fields=['status'])
+                        else:
+                            alloc.status = 'draft'
+                            alloc.save(update_fields=['status'])
+                    except Exception as e:
+                        # Keep as draft if auto-scheduling fails
+                        alloc.status = 'draft'
+                        alloc.save(update_fields=['status'])
+                        print(f"Automatic scheduling check failed for allocation {alloc.id}: {e}")
 
                     # Log comprehensive audit event
                     log_therapy_audit(
@@ -2008,11 +2102,14 @@ def therapy_entry(request):
             if q:
                 qs = qs.filter(Q(therapy_name__icontains=q) | Q(therapy_code__icontains=q))
             qs = qs[:50]
+            from reshedule import is_vamanam_treatment
             for t in qs:
+                is_vam = bool(getattr(t, 'is_vamanam', False) or is_vamanam_treatment(getattr(t, 'therapy_name', ''), getattr(t, 'therapy_code', '')))
                 results.append({
                     'therapy_code': getattr(t, 'therapy_code', ''),
                     'therapy_name': getattr(t, 'therapy_name', ''),
-                    'therapy_category': getattr(t, 'therapy_category', '') or ''
+                    'therapy_category': getattr(t, 'therapy_category', '') or '',
+                    'is_vamanam': is_vam
                 })
 
         # Add nurse treatments from NurseTreatmentMaster
@@ -2028,7 +2125,8 @@ def therapy_entry(request):
                 results.append({
                     'therapy_code': getattr(nt, 'treatment_code', ''),
                     'therapy_name': getattr(nt, 'name', ''),
-                    'therapy_category': 'Nurse Treatment'  # Mark as nurse treatment
+                    'therapy_category': 'Nurse Treatment',  # Mark as nurse treatment
+                    'is_vamanam': False
                 })
 
         return JsonResponse(results, safe=False)
@@ -2107,15 +2205,39 @@ def therapy_entry(request):
         results = []
         if SlotMaster is not None:
             try:
-                qs = SlotMaster.objects.filter(is_active=True).all().order_by('slot_number')  # Use local master table
+                from reshedule import is_vamanam_treatment
+
+                req_therapy_name = request.GET.get('therapy_name', '').strip()
+                req_therapy_code = request.GET.get('therapy_code', '').strip()
+                req_is_vamanam = request.GET.get('is_vamanam')
+                filter_type = (request.GET.get('filter_type') or '').strip().lower()
+
+                is_vam = False
+                if req_is_vamanam is not None:
+                    is_vam = str(req_is_vamanam).lower() in ('1', 'true', 'yes')
+                elif req_therapy_name or req_therapy_code:
+                    is_vam = is_vamanam_treatment(req_therapy_name, req_therapy_code)
+
+                qs = SlotMaster.objects.filter(is_active=True).all().order_by('slot_number')
+
+                if is_vam or filter_type == 'vamanam_only':
+                    qs = qs.filter(is_vamanam_slot=True)
+                elif filter_type == 'regular_only' or request.GET.get('exclude_vamanam', '').lower() in ('1', 'true', 'yes'):
+                    qs = qs.filter(is_vamanam_slot=False)
+
                 for s in qs:
                     start = getattr(s, 'slot_time', '')
                     if hasattr(start, 'strftime'):
                         start_s = start.strftime('%H:%M')
                     else:
                         start_s = str(start)
-                    results.append({'slot_number': getattr(s, 'slot_number', ''), 'start_time': start_s})
-            except Exception:
+                    results.append({
+                        'slot_number': getattr(s, 'slot_number', ''), 
+                        'start_time': start_s,
+                        'is_vamanam_slot': getattr(s, 'is_vamanam_slot', False)
+                    })
+            except Exception as e:
+                print(f"Error loading slots: {e}")
                 results = []
         return JsonResponse({'slots': results})
 
@@ -3919,6 +4041,36 @@ def allocate_therapy(request):
         except Exception:
             pass
 
+    # Vamanam therapy slot exclusivity validation
+    if not nurse_treatment and timeslot:
+        try:
+            from reshedule import is_vamanam_treatment, get_vamanam_slots
+            is_vam = is_vamanam_treatment(payload.get("therapy_name"), payload.get("therapy_code"))
+            slot_time_str = timeslot.slot_time.strftime("%H:%M") if hasattr(timeslot.slot_time, "strftime") else str(timeslot.slot_time)[:5]
+            vam_slots = get_vamanam_slots()
+            is_vam_slot_obj = getattr(timeslot, "is_vamanam_slot", False) or (slot_time_str in vam_slots)
+
+            if is_vam:
+                if not is_vam_slot_obj:
+                    return JsonResponse(
+                        {
+                            "error": "vamanam_slot_required",
+                            "message": f"Vamanam treatments are strictly restricted to Vamanam slots ({', '.join(vam_slots)}). Selected slot {slot_time_str} is not allowed.",
+                        },
+                        status=400,
+                    )
+            else:
+                if is_vam_slot_obj:
+                    return JsonResponse(
+                        {
+                            "error": "vamanam_slot_exclusive",
+                            "message": f"Slot {slot_time_str} is exclusively reserved for Vamanam treatments and cannot be assigned to regular treatments.",
+                        },
+                        status=400,
+                    )
+        except Exception as e:
+            print(f"[VAMANAM ALLOCATE VALIDATION] Error: {e}")
+
     # room (optional for both regular and nurse treatments)
     room = None
     room_no = payload.get("room_no")  # optional string
@@ -3942,6 +4094,7 @@ def allocate_therapy(request):
     # items_groups expected as list of groups (can be empty):
     # [{ "items":[{"item_code":"KAS","item_name":"Kashayam"}, ...], "dosage":"10 ml", "uno":"1" }, ...]
     # items_groups is optional - can be empty array (already set above)
+    items_groups = payload.get("items_groups") or []
     if not isinstance(items_groups, list):
         return JsonResponse({"error": "items_groups must be a list"}, status=400)
 

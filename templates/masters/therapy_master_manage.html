@@ -125,6 +125,9 @@
                                     {% if therapy.is_steam_therapy %}
                                     <span class="badge bg-warning text-dark ms-1" title="Allocates strictly to configured steam rooms: {% if steam_rooms_display %}{{ steam_rooms_display }}{% else %}Room Master configured{% endif %}"><i class="fas fa-wind me-1"></i>Steam Room ({% if steam_rooms_display %}{{ steam_rooms_display }}{% else %}Dynamic{% endif %})</span>
                                     {% endif %}
+                                    {% if therapy.is_vamanam %}
+                                    <span class="badge bg-danger text-white ms-1" title="Allocates strictly to Vamanam slots ({% if vamanam_slots_display %}{{ vamanam_slots_display }}{% else %}05:00, 05:30{% endif %}) and Vamanam rooms ({% if vamanam_rooms_display %}{{ vamanam_rooms_display }}{% else %}Configured in Room Master{% endif %})"><i class="fas fa-heartbeat me-1"></i>Vamanam</span>
+                                    {% endif %}
                                 </td>
                                 <td>{{ therapy.therapy_group|default:"-" }}</td>
                                 <td>{{ therapy.therapy_category|default:"-" }}</td>

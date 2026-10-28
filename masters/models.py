@@ -206,6 +206,11 @@ class TherapyMaster(models.Model):
         verbose_name="Steam Therapy",
         help_text="If enabled, this therapy is dynamically allocated to designated Steam Therapy Rooms configured in Treatment Room Master without slot restrictions."
     )
+    is_vamanam = models.BooleanField(
+        default=False,
+        verbose_name="Vamanam Therapy",
+        help_text="If enabled, this therapy is strictly allocated to designated Vamanam slots (e.g. 05:00 AM, 05:30 AM) and Vamanam treatment rooms."
+    )
     is_active = models.BooleanField(default=True, verbose_name="Active")
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="Created At")
     updated_at = models.DateTimeField(auto_now=True, verbose_name="Updated At")
@@ -297,6 +302,11 @@ class SlotMaster(models.Model):
     slot_number = models.IntegerField(unique=True, verbose_name="Slot Number")
     slot_time = models.TimeField(verbose_name="Slot Time")
     slot_name = models.CharField(max_length=100, null=True, blank=True, verbose_name="Slot Name")
+    is_vamanam_slot = models.BooleanField(
+        default=False,
+        verbose_name="Vamanam Slot (Exclusive)",
+        help_text="Designate this slot exclusively for Vamanam treatments. Regular treatments will not use this slot."
+    )
     is_active = models.BooleanField(default=True, verbose_name="Active")
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="Created At")
     updated_at = models.DateTimeField(auto_now=True, verbose_name="Updated At")
