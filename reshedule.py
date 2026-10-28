@@ -508,15 +508,16 @@ def allocate_treatment_room(date, time_slot, last_room=None, therapy_name=None, 
             pass
         return None
     
-    # STEAM THERAPY RESTRICTION: Always allocate strictly to room TR-12 or TR-9
+    # STEAM THERAPY RESTRICTION: Always allocate strictly to designated steam therapy rooms (dynamic from Room Master)
     try:
         if is_steam_therapy_treatment(therapy_name):
-            for candidate_room_no in ['TR-12', 'TR-9']:
+            steam_rooms = get_steam_therapy_rooms()
+            for candidate_room_no in steam_rooms:
                 steam_room = check_room_availability(candidate_room_no)
                 if steam_room:
                     print(f"[ROOM RESTRICTION] Steam therapy detected - assigned {candidate_room_no} room.")
                     return steam_room
-            print(f"[ROOM RESTRICTION] Steam therapy detected - both TR-12 and TR-9 are unavailable on {date} at {time_slot}.")
+            print(f"[ROOM RESTRICTION] Steam therapy detected - all steam rooms ({', '.join(steam_rooms)}) are unavailable on {date} at {time_slot}.")
             return None
     except Exception as _st_err:
         print(f"[ROOM RESTRICTION] Error checking steam therapy room: {_st_err}")
@@ -748,6 +749,34 @@ def is_steam_therapy_treatment(therapy_name=None, therapy_code=None):
 
 # Backward compatibility alias
 is_steam_therapy_530_tr12_only = is_steam_therapy_treatment
+
+
+def get_steam_therapy_rooms():
+    """
+    Returns an ordered list of room numbers (str) designated as steam therapy rooms.
+    Dynamically fetched from TreatmentRoom where is_steam_room=True and is_active=True.
+    Falls back to ['TR-12', 'TR-9'] if none are configured.
+    Ensures TR-12 and TR-9 are prioritized first if present.
+    """
+    try:
+        from Patient.models import TreatmentRoom
+        rooms = list(
+            TreatmentRoom.objects.filter(is_steam_room=True, is_active=True)
+            .values_list('room_no', flat=True)
+        )
+        if rooms:
+            def steam_priority(r):
+                if r == 'TR-12':
+                    return (0, r)
+                if r == 'TR-9':
+                    return (1, r)
+                return (2, r)
+            rooms.sort(key=steam_priority)
+            return rooms
+    except Exception as e:
+        print(f"[STEAM ROOM] Error querying dynamic steam rooms: {e}")
+    return ['TR-12', 'TR-9']
+
 
 
 def get_allowed_slot_values(patient_type, therapy_category, used_slots=None, therapy_name=None, therapy_code=None):
@@ -2702,6 +2731,9 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
     if needs_room_flag and not room_candidate:
         # Build detailed error message based on patient staying room or OP status
         reason = "no_room_available"
+        if is_steam_therapy_treatment(therapy_name):
+            steam_rooms = get_steam_therapy_rooms()
+            reason = f"no_room_available: All steam therapy rooms ({', '.join(steam_rooms)}) are not available"
         # Check if this is Dhara & Pizichil and we had a previous room that's unavailable
         therapy_lower = str(therapy_name or '').lower()
         is_dhara_pizichil = 'dhara' in therapy_lower and 'pizichil' in therapy_lower

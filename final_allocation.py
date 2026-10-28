@@ -622,16 +622,17 @@ def allocate_treatment_room(date, time_slot, last_room=None, therapy_name=None, 
             pass
         return None
     
-    # STEAM THERAPY RESTRICTION: Always allocate strictly to room TR-12 or TR-9
+    # STEAM THERAPY RESTRICTION: Always allocate strictly to designated steam therapy rooms (dynamic from Room Master)
     try:
-        from reshedule import is_steam_therapy_treatment
+        from reshedule import is_steam_therapy_treatment, get_steam_therapy_rooms
         if is_steam_therapy_treatment(therapy_name):
-            for candidate_room_no in ['TR-12', 'TR-9']:
+            steam_rooms = get_steam_therapy_rooms()
+            for candidate_room_no in steam_rooms:
                 steam_room = check_room_availability(candidate_room_no)
                 if steam_room:
                     print(f"[ROOM RESTRICTION] Steam therapy detected - assigned {candidate_room_no} room.")
                     return steam_room
-            print(f"[ROOM RESTRICTION] Steam therapy detected - both TR-12 and TR-9 are unavailable on {date} at {time_slot}.")
+            print(f"[ROOM RESTRICTION] Steam therapy detected - all steam rooms ({', '.join(steam_rooms)}) are unavailable on {date} at {time_slot}.")
             return None
     except Exception as _st_err:
         print(f"[ROOM RESTRICTION] Error checking steam therapy room: {_st_err}")
@@ -3203,7 +3204,11 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
         if needs_room_flag and not room_candidate:
             # Build detailed error message based on patient staying room or OP status
             reason = "no_room_available"
-            if patient_staying_room:
+            from reshedule import is_steam_therapy_treatment, get_steam_therapy_rooms
+            if is_steam_therapy_treatment(therapy_name):
+                steam_rooms = get_steam_therapy_rooms()
+                reason = f"no_room_available: All steam therapy rooms ({', '.join(steam_rooms)}) are not available"
+            elif patient_staying_room:
                 staying_room_upper = str(patient_staying_room).strip().upper()
                 # Check if it's an OP- prefix (not a real staying room)
                 if staying_room_upper.startswith('OP-'):
@@ -3342,25 +3347,28 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                         ).exclude(pk=booking.pk).first()
                         
                         if existing_booking:
-                            from reshedule import is_steam_therapy_treatment
+                            from reshedule import is_steam_therapy_treatment, get_steam_therapy_rooms
                             if is_steam_therapy_treatment(therapy_name):
-                                # If room_candidate was TR-12, try TR-9; if TR-9, try TR-12
-                                alt_steam_room_no = 'TR-9' if getattr(room_candidate, 'room_no', None) == 'TR-12' else 'TR-12'
+                                current_room_no = getattr(room_candidate, 'room_no', None)
+                                steam_rooms = get_steam_therapy_rooms()
+                                alt_steam_rooms = [r for r in steam_rooms if r != current_room_no]
                                 from Patient.models import TreatmentRoom
-                                alt_room_obj = TreatmentRoom.objects.filter(room_no=alt_steam_room_no, is_active=True).first()
-                                if alt_room_obj:
-                                    alt_conflict = BookingModel.objects.filter(
-                                        room=alt_room_obj,
-                                        date=target_date,
-                                        timeslot=slot_master
-                                    ).exclude(pk=booking.pk).first()
-                                    if not alt_conflict:
-                                        room_candidate = alt_room_obj
-                                        print(f"[DEBUG] Using alternative steam room: {alt_room_obj.room_no}")
-                                    else:
-                                        raise RuntimeError(f"no_room_available: Both TR-12 and TR-9 are booked for Steam Therapy on {target_date} at {slot_master}")
-                                else:
-                                    raise RuntimeError(f"no_room_available: Alternative steam room {alt_steam_room_no} not found or inactive")
+                                alt_found = False
+                                for alt_steam_room_no in alt_steam_rooms:
+                                    alt_room_obj = TreatmentRoom.objects.filter(room_no=alt_steam_room_no, is_active=True).first()
+                                    if alt_room_obj:
+                                        alt_conflict = BookingModel.objects.filter(
+                                            room=alt_room_obj,
+                                            date=target_date,
+                                            timeslot=slot_master
+                                        ).exclude(pk=booking.pk).first()
+                                        if not alt_conflict:
+                                            room_candidate = alt_room_obj
+                                            print(f"[DEBUG] Using alternative steam room: {alt_room_obj.room_no}")
+                                            alt_found = True
+                                            break
+                                if not alt_found:
+                                    raise RuntimeError(f"no_room_available: All steam therapy rooms ({', '.join(steam_rooms)}) are booked on {target_date} at {slot_master}")
                             else:
                                 print(f"[DEBUG] Room {room_candidate.room_no} already booked for {target_date} at {slot_master}, trying alternative room...")
                             alternative_room = allocate_treatment_room(

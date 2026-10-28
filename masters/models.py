@@ -203,8 +203,8 @@ class TherapyMaster(models.Model):
     
     is_steam_therapy = models.BooleanField(
         default=False,
-        verbose_name="Steam Therapy (TR-12 / TR-9 Rooms Only)",
-        help_text="If enabled, this therapy is strictly allocated to room TR-12 or TR-9 without slot restrictions (slot allocated per patient selection)."
+        verbose_name="Steam Therapy",
+        help_text="If enabled, this therapy is dynamically allocated to designated Steam Therapy Rooms configured in Treatment Room Master without slot restrictions."
     )
     is_active = models.BooleanField(default=True, verbose_name="Active")
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="Created At")

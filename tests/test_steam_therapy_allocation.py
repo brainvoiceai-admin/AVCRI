@@ -20,7 +20,7 @@ from django.test import TestCase
 from masters.models import TherapyMaster, SlotMaster, TherapistMaster, TherapistGrade
 from Patient.models import TreatmentRoom, RoomName, RoomBooking
 from Sheduling.models import PatientSnapshot, TherapyAllocation, Booking
-from reshedule import get_allowed_slot_values, is_steam_therapy_treatment
+from reshedule import get_allowed_slot_values, is_steam_therapy_treatment, get_steam_therapy_rooms
 from final_allocation import allocate_treatment_room, expand_therapies_for_visit
 
 
@@ -45,20 +45,26 @@ class TestSteamTherapyAllocation(TestCase):
         rn1, _ = RoomName.objects.get_or_create(name="Room TR-1", defaults={"is_active": True})
         self.tr1, _ = TreatmentRoom.objects.get_or_create(
             room_no="TR-1",
-            defaults={"room_name": rn1, "floor": "G", "is_active": True}
+            defaults={"room_name": rn1, "floor": "G", "is_active": True, "is_steam_room": False}
         )
+        self.tr1.is_steam_room = False
+        self.tr1.save()
 
         rn9, _ = RoomName.objects.get_or_create(name="Room TR-9", defaults={"is_active": True})
         self.tr9, _ = TreatmentRoom.objects.get_or_create(
             room_no="TR-9",
-            defaults={"room_name": rn9, "floor": "G", "is_active": True}
+            defaults={"room_name": rn9, "floor": "G", "is_active": True, "is_steam_room": True}
         )
+        self.tr9.is_steam_room = True
+        self.tr9.save()
 
         rn12, _ = RoomName.objects.get_or_create(name="Room TR-12", defaults={"is_active": True})
         self.tr12, _ = TreatmentRoom.objects.get_or_create(
             room_no="TR-12",
-            defaults={"room_name": rn12, "floor": "G", "is_active": True}
+            defaults={"room_name": rn12, "floor": "G", "is_active": True, "is_steam_room": True}
         )
+        self.tr12.is_steam_room = True
+        self.tr12.save()
 
         # 3. Create Therapist
         self.grade_sr, _ = TherapistGrade.objects.get_or_create(
@@ -240,3 +246,93 @@ class TestSteamTherapyAllocation(TestCase):
         assert draft_booking.timeslot == self.slot_1000
         assert draft_booking.room in [self.tr12, self.tr9]
         assert draft_booking.room.room_no == "TR-12"
+
+    def test_dynamic_steam_room_toggle_allocation(self):
+        """Validates that turning on steam therapy room toggle in room master dynamically considers the new room."""
+        # Initially, steam rooms are TR-12 and TR-9
+        steam_rooms = get_steam_therapy_rooms()
+        assert "TR-12" in steam_rooms
+        assert "TR-9" in steam_rooms
+        assert "TR-1" not in steam_rooms
+
+        # Turn ON steam therapy room toggle for TR-1 in room master
+        self.tr1.is_steam_room = True
+        self.tr1.save()
+
+        # Dynamic query reflects new steam room TR-1
+        updated_steam_rooms = get_steam_therapy_rooms()
+        assert "TR-1" in updated_steam_rooms
+
+        # When TR-12 and TR-9 are both booked at 08:30:
+        RoomBooking.objects.create(
+            room=self.tr12,
+            date=self.target_date,
+            time_slot=self.slot_0830,
+            status="BOOKED"
+        )
+        RoomBooking.objects.create(
+            room=self.tr9,
+            date=self.target_date,
+            time_slot=self.slot_0830,
+            status="BOOKED"
+        )
+
+        # Allocate room for steam therapy: should now dynamically pick newly toggled TR-1!
+        room = allocate_treatment_room(
+            date=self.target_date,
+            time_slot=self.slot_0830,
+            therapy_name=self.steam_therapy.therapy_name,
+            patient_staying_room="DS-1",
+            patient=self.patient
+        )
+        assert room is not None
+        assert room.room_no == "TR-1"
+
+        # If we toggle TR-1 back OFF:
+        self.tr1.is_steam_room = False
+        self.tr1.save()
+
+        # It should no longer be eligible for steam therapy when TR-12 and TR-9 are booked
+        room_after_toggle_off = allocate_treatment_room(
+            date=self.target_date,
+            time_slot=self.slot_0830,
+            therapy_name=self.steam_therapy.therapy_name,
+            patient_staying_room="DS-1",
+            patient=self.patient
+        )
+        assert room_after_toggle_off is None
+
+    def test_treatment_room_master_toggle_steam_view(self):
+        """Validates the toggle view endpoint changes is_steam_room status."""
+        from django.contrib.auth import get_user_model
+        from django.test import Client
+        from django.urls import reverse
+
+        User = get_user_model()
+        admin_user, _ = User.objects.get_or_create(
+            username="test_superadmin",
+            defaults={"is_superuser": True, "is_staff": True, "role": "super_admin"}
+        )
+        if getattr(admin_user, 'role', None) != 'super_admin':
+            admin_user.role = 'super_admin'
+            admin_user.save()
+        client = Client()
+        client.force_login(admin_user)
+
+        # Ensure TR-1 starts with is_steam_room=False
+        self.tr1.is_steam_room = False
+        self.tr1.save()
+
+        url = reverse("treatment_room_master_toggle_steam", kwargs={"pk": self.tr1.room_no})
+        response = client.get(url, follow=True)
+        assert response.status_code == 200
+
+        self.tr1.refresh_from_db()
+        assert self.tr1.is_steam_room is True
+
+        # Toggle back
+        response2 = client.get(url, follow=True)
+        assert response2.status_code == 200
+
+        self.tr1.refresh_from_db()
+        assert self.tr1.is_steam_room is False

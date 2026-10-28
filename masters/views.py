@@ -1533,6 +1533,14 @@ class TherapyMasterManagementView(ListView):
                                      'no_of_super_senior_therapist', 'no_of_senior_therapist',
                                      'no_of_junior_therapist', 'no_of_trainee_therapist', 'is_active']
         context['optional_fields'] = ['therapy_group']
+        try:
+            from reshedule import get_steam_therapy_rooms
+            steam_rooms = get_steam_therapy_rooms()
+            context['steam_rooms'] = steam_rooms
+            context['steam_rooms_display'] = ', '.join(steam_rooms)
+        except Exception:
+            context['steam_rooms'] = ['TR-12', 'TR-9']
+            context['steam_rooms_display'] = 'TR-12, TR-9'
         return context
 
 class TherapyMasterCreateView(CreateView):
@@ -1540,6 +1548,18 @@ class TherapyMasterCreateView(CreateView):
     fields = ['therapy_name', 'therapy_group', 'therapy_category', 'therapy_duration', 'bathing_required', 'treatment_room_required', 'cost_of_therapy', 'patient_type', 'is_steam_therapy', 'no_of_super_senior_therapist', 'no_of_senior_therapist', 'no_of_junior_therapist', 'no_of_trainee_therapist', 'is_active']
     template_name = 'masters/therapy_master_form.html'
     success_url = reverse_lazy('therapy_master_manage')
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        try:
+            from reshedule import get_steam_therapy_rooms
+            steam_rooms = get_steam_therapy_rooms()
+            context['steam_rooms'] = steam_rooms
+            context['steam_rooms_display'] = ', '.join(steam_rooms)
+        except Exception:
+            context['steam_rooms'] = ['TR-12', 'TR-9']
+            context['steam_rooms_display'] = 'TR-12, TR-9'
+        return context
 
     def get_form(self, form_class=None):
         form = super().get_form(form_class)
@@ -1617,6 +1637,18 @@ class TherapyMasterUpdateView(UpdateView):
     template_name = 'masters/therapy_master_form.html'
     success_url = reverse_lazy('therapy_master_manage')
     
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        try:
+            from reshedule import get_steam_therapy_rooms
+            steam_rooms = get_steam_therapy_rooms()
+            context['steam_rooms'] = steam_rooms
+            context['steam_rooms_display'] = ', '.join(steam_rooms)
+        except Exception:
+            context['steam_rooms'] = ['TR-12', 'TR-9']
+            context['steam_rooms_display'] = 'TR-12, TR-9'
+        return context
+
     def get_form(self, form_class=None):
         form = super().get_form(form_class)
         # Make therapy_code read-only since it shouldn't be changed
@@ -2551,12 +2583,19 @@ class TreatmentRoomManagementView(ListView):
         elif status == 'inactive':
             queryset = queryset.filter(is_active=False)
 
+        steam = self.request.GET.get('steam', '')
+        if steam == 'yes':
+            queryset = queryset.filter(is_steam_room=True)
+        elif steam == 'no':
+            queryset = queryset.filter(is_steam_room=False)
+
         return queryset.order_by('room_no')
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context['search'] = self.request.GET.get('search', '')
         context['status_filter'] = self.request.GET.get('status', '')
+        context['steam_filter'] = self.request.GET.get('steam', '')
         context['master_type'] = 'treatmentroom'
         context['master_name'] = 'Treatment Room Master'
         return context
@@ -2565,17 +2604,21 @@ class TreatmentRoomManagementView(ListView):
 class TreatmentRoomForm(forms.ModelForm):
     class Meta:
         model = TreatmentRoom
-        fields = ['room_no', 'room_name', 'floor_master', 'description', 'is_active']
+        fields = ['room_no', 'room_name', 'floor_master', 'description', 'is_steam_room', 'is_active']
         widgets = {
             'room_no': forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'e.g., TR-1, RM-101'}),
             'room_name': forms.Select(attrs={'class': 'form-select'}),
             'floor_master': forms.Select(attrs={'class': 'form-select'}),
             'description': forms.Textarea(attrs={'class': 'form-control', 'rows': 3}),
+            'is_steam_room': forms.CheckboxInput(attrs={'class': 'form-check-input'}),
+            'is_active': forms.CheckboxInput(attrs={'class': 'form-check-input'}),
         }
         labels = {
             'room_no': 'Room Number',
             'room_name': 'Room Name',
             'floor_master': 'Floor',
+            'is_steam_room': 'Steam Therapy Room',
+            'is_active': 'Active',
         }
 
     def __init__(self, *args, **kwargs):
@@ -2652,6 +2695,21 @@ def treatment_room_master_disable(request, pk):
     room.save()
     _log_master_audit(request, 'update', 'TreatmentRoom', str(pk), f'Disabled TreatmentRoom: {room.room_no}')
     messages.success(request, f'Treatment room {room.room_no} disabled successfully.')
+    return redirect('treatment_room_master_manage')
+
+@login_required
+@super_admin_required
+@require_http_methods(["GET", "POST"])
+def treatment_room_master_toggle_steam(request, pk):
+    """Toggle steam therapy room status for a treatment room"""
+    room = get_object_or_404(TreatmentRoom, pk=pk)
+    room.is_steam_room = not room.is_steam_room
+    room.save(update_fields=['is_steam_room', 'updated_at'])
+    status_str = "Steam Therapy Room" if room.is_steam_room else "Regular Treatment Room"
+    _log_master_audit(request, 'update', 'TreatmentRoom', str(pk), f'Changed TreatmentRoom {room.room_no} steam room status to: {status_str}')
+    if request.headers.get('x-requested-with') == 'XMLHttpRequest' or request.content_type == 'application/json':
+        return JsonResponse({'success': True, 'is_steam_room': room.is_steam_room, 'message': f'Room {room.room_no} is now designated as {status_str}.'})
+    messages.success(request, f'Treatment room {room.room_no} is now designated as {status_str}.')
     return redirect('treatment_room_master_manage')
 
 
