@@ -655,6 +655,21 @@ def allocate_treatment_room(date, time_slot, last_room=None, therapy_name=None, 
     except Exception as _vm_err:
         print(f"[ROOM RESTRICTION] Error checking Vamanam room: {_vm_err}")
 
+    # VASTHI THERAPY RESTRICTION: Dedicated room allocation function for Vasthi treatments
+    # - Cottage patients preferably assigned matching TRC room
+    # - If multiple patients in same cottage room, only one gets TRC room, others get other suitable treatment rooms
+    try:
+        from reshedule import is_vasthi_treatment, allocate_vasthi_treatment_room
+        if is_vasthi_treatment(therapy_name, getattr(patient, 'therapy_code', None) if patient else None):
+            vasthi_room = allocate_vasthi_treatment_room(
+                date, time_slot, last_room=last_room, therapy_name=therapy_name,
+                patient_id=patient_id, patient_staying_room=patient_staying_room,
+                patient=patient
+            )
+            return vasthi_room
+    except Exception as _vsth_err:
+        print(f"[ROOM RESTRICTION] Error in Vasthi room allocation: {_vsth_err}")
+
     # NEW: Primary logic - allocate based on patient staying room
     # Special handling: If patient_staying_room starts with "OP-", treat it as if there's no staying room
     # (OP patients are handled in the OP patient fallback logic below)
@@ -2115,21 +2130,26 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
 
         # preferred slot only
         pref_slot = getattr(booking, 'timeslot', None) or getattr(allocation, 'timeslot', None)
-        # Vasthi therapy group (masters), except Mathra THEB037: final schedule must use 08:30 only
+        # Vasthi therapy (marked via TherapyMaster.is_vasthi or Vasthi group, except Mathra THEB037): schedule in dynamic Vasthi slot (defaults to 08:30)
         try:
-            from reshedule import is_group_vasthi_0830_only
-            if is_group_vasthi_0830_only(therapy_name, getattr(allocation, 'therapy_code', None)):
-                sm0830 = SlotMaster.objects.filter(
-                    slot_time=datetime.strptime('08:30', '%H:%M').time(),
-                    is_active=True,
-                ).first()
-                if sm0830:
-                    pref_slot = sm0830
-                    if create_bookings and getattr(booking, 'timeslot_id', None) != sm0830.id:
-                        booking.timeslot = sm0830
-                        booking.save(update_fields=['timeslot', 'updated_at'])
-                else:
-                    print('[VASTHI GROUP] Final schedule: no active SlotMaster for 08:30')
+            from reshedule import is_vasthi_treatment, get_vasthi_slots
+            if is_vasthi_treatment(therapy_name, getattr(allocation, 'therapy_code', None)):
+                # If pref_slot is already designated as an active Vasthi slot, keep it
+                is_current_slot_vasthi = bool(pref_slot and getattr(pref_slot, 'is_vasthi_slot', False) and getattr(pref_slot, 'is_active', True))
+                if not is_current_slot_vasthi:
+                    vasthi_slot_obj = SlotMaster.objects.filter(is_vasthi_slot=True, is_active=True).order_by('slot_time').first()
+                    if not vasthi_slot_obj:
+                        vasthi_slot_obj = SlotMaster.objects.filter(
+                            slot_time=datetime.strptime('08:30', '%H:%M').time(),
+                            is_active=True,
+                        ).first()
+                    if vasthi_slot_obj:
+                        pref_slot = vasthi_slot_obj
+                        if create_bookings and getattr(booking, 'timeslot_id', None) != vasthi_slot_obj.id:
+                            booking.timeslot = vasthi_slot_obj
+                            booking.save(update_fields=['timeslot', 'updated_at'])
+                    else:
+                        print('[VASTHI GROUP] Final schedule: no active SlotMaster for Vasthi slot')
         except Exception as _gv_e:
             print(f'[SLOT RULE] Final schedule slot rule skipped: {_gv_e}')
         requested_slot_value = None

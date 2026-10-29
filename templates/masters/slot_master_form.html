@@ -140,6 +140,21 @@
                                     </div>
                                     {% endif %}
                                     <small class="form-text text-danger">When enabled, this slot is EXCLUSIVELY reserved for Vamanam therapies and will NEVER be assigned to regular treatments.</small>
+
+                                    <div class="form-check form-switch mt-3">
+                                        {{ form.is_vasthi_slot }}
+                                        <label class="form-check-label fw-bold text-success" for="{{ form.is_vasthi_slot.id_for_label }}">
+                                            <i class="fas fa-prescription-bottle-alt me-1"></i>Vasthi Special Slot
+                                        </label>
+                                    </div>
+                                    {% if form.is_vasthi_slot.errors %}
+                                    <div class="invalid-feedback d-block">
+                                        {% for error in form.is_vasthi_slot.errors %}
+                                        {{ error }}
+                                        {% endfor %}
+                                    </div>
+                                    {% endif %}
+                                    <small class="form-text text-success">Designate this slot for Vasthi treatments (default 08:30 AM).</small>
                                 </div>
                             </div>
 

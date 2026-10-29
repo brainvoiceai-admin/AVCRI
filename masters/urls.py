@@ -58,6 +58,7 @@ urlpatterns = [
     path('therapy/<int:pk>/delete/', views.therapy_master_delete, name='therapy_master_delete'),
     path('therapy/<int:pk>/enable/', views.therapy_master_enable, name='therapy_master_enable'),
     path('therapy/<int:pk>/disable/', views.therapy_master_disable, name='therapy_master_disable'),
+    path('therapy/<int:pk>/toggle-vasthi/', views.therapy_master_toggle_vasthi, name='therapy_master_toggle_vasthi'),
     # Therapy Group Master CRUD
     path('therapy-groups/', views.TherapyGroupManagementView.as_view(), name='therapy_group_manage'),
     path('therapy-groups/add/', views.TherapyGroupCreateView.as_view(), name='therapy_group_add'),
@@ -87,6 +88,7 @@ urlpatterns = [
     path('slots/<int:pk>/enable/', views.slot_master_enable, name='slot_master_enable'),
     path('slots/<int:pk>/disable/', views.slot_master_disable, name='slot_master_disable'),
     path('slots/<int:pk>/toggle-vamanam/', views.slot_master_toggle_vamanam, name='slot_master_toggle_vamanam'),
+    path('slots/<int:pk>/toggle-vasthi/', views.slot_master_toggle_vasthi, name='slot_master_toggle_vasthi'),
 
     # Shift Master CRUD
     path('shifts/', views.ShiftMasterManagementView.as_view(), name='shift_master_manage'),

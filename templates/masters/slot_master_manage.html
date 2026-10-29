@@ -115,6 +115,9 @@
                                 <td>{{ slot.slot_name|default:"-" }}</td>
                                 <td>
                                     <span class="badge bg-info">{{ slot.slot_time|time:"g:i A" }}</span>
+                                    {% if slot.is_vasthi_slot %}
+                                    <span class="badge bg-success ms-1"><i class="fas fa-prescription-bottle-alt me-1"></i>Vasthi</span>
+                                    {% endif %}
                                 </td>
                                 <td>
                                     {% if slot.is_active %}
@@ -136,6 +139,11 @@
                                             class="btn btn-sm btn-outline-danger" title="Convert to Vamanam Exclusive Slot"
                                             onclick="return confirm('Restrict Slot {{ slot.slot_number }} ({{ slot.slot_time|time:"g:i A" }}) exclusively to Vamanam treatments? Regular treatments will no longer be scheduled here.');">
                                             <i class="fas fa-heartbeat"></i>
+                                        </a>
+                                        <a href="{% url 'slot_master_toggle_vasthi' slot.pk %}"
+                                            class="btn btn-sm {% if slot.is_vasthi_slot %}btn-success text-white{% else %}btn-outline-success{% endif %}" title="Toggle Vasthi Treatment Slot"
+                                            onclick="return confirm('Toggle Vasthi designation for Slot {{ slot.slot_number }} ({{ slot.slot_time|time:"g:i A" }})?');">
+                                            <i class="fas fa-prescription-bottle-alt"></i>
                                         </a>
                                         {% if slot.is_active %}
                                         <a href="{% url 'slot_master_disable' slot.pk %}"

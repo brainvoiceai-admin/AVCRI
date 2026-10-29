@@ -211,6 +211,11 @@ class TherapyMaster(models.Model):
         verbose_name="Vamanam Therapy",
         help_text="If enabled, this therapy is strictly allocated to designated Vamanam slots (e.g. 05:00 AM, 05:30 AM) and Vamanam treatment rooms."
     )
+    is_vasthi = models.BooleanField(
+        default=False,
+        verbose_name="Vasthi Therapy",
+        help_text="If enabled, this therapy is scheduled in the 8:30 AM Vasthi slot and uses dedicated Vasthi Cottage Room allocation rules."
+    )
     is_active = models.BooleanField(default=True, verbose_name="Active")
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="Created At")
     updated_at = models.DateTimeField(auto_now=True, verbose_name="Updated At")
@@ -306,6 +311,11 @@ class SlotMaster(models.Model):
         default=False,
         verbose_name="Vamanam Slot (Exclusive)",
         help_text="Designate this slot exclusively for Vamanam treatments. Regular treatments will not use this slot."
+    )
+    is_vasthi_slot = models.BooleanField(
+        default=False,
+        verbose_name="Vasthi Slot",
+        help_text="Designate this slot for Vasthi treatments (default 08:30 AM)."
     )
     is_active = models.BooleanField(default=True, verbose_name="Active")
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="Created At")

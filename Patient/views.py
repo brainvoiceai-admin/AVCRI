@@ -1514,11 +1514,12 @@ def compute_available_slots_for_date(date_obj, therapy_name, patient_type, thera
         candidate_slots = [s for s in candidate_slots if s not in ["11:30", "17:30"]]
 
     try:
-        from reshedule import is_group_vasthi_0830_only
-        if is_group_vasthi_0830_only(therapy_name, therapy_code):
-            candidate_slots = [s for s in candidate_slots if s == "08:30"]
+        from reshedule import is_vasthi_treatment, get_vasthi_slots
+        if is_vasthi_treatment(therapy_name, therapy_code):
+            v_slots = get_vasthi_slots()
+            candidate_slots = [s for s in candidate_slots if s in v_slots]
             if not candidate_slots:
-                candidate_slots = ["08:30"]
+                candidate_slots = list(v_slots)
     except Exception:
         pass
 
@@ -1676,11 +1677,12 @@ def time_slots(request):
       { "slots": [ {"slot_number":1, "start_time":"06:30", "label":"6:30 AM", "is_vamanam_slot": false}, ... ] }
     """
     from masters.models import SlotMaster
-    from reshedule import is_vamanam_treatment
+    from reshedule import is_vamanam_treatment, is_vasthi_treatment
 
     therapy_name = request.GET.get('therapy_name', '').strip()
     therapy_code = request.GET.get('therapy_code', '').strip()
     is_vam_param = request.GET.get('is_vamanam')
+    is_vasthi_param = request.GET.get('is_vasthi')
     filter_type = (request.GET.get('filter_type') or '').strip().lower()
 
     is_vam = False
@@ -1689,9 +1691,17 @@ def time_slots(request):
     elif therapy_name or therapy_code:
         is_vam = is_vamanam_treatment(therapy_name, therapy_code)
 
+    is_vasthi = False
+    if is_vasthi_param is not None:
+        is_vasthi = str(is_vasthi_param).lower() in ('1', 'true', 'yes')
+    elif (therapy_name or therapy_code) and not is_vam:
+        is_vasthi = is_vasthi_treatment(therapy_name, therapy_code)
+
     qs = SlotMaster.objects.filter(is_active=True).order_by('slot_number')
     if is_vam or filter_type == 'vamanam_only':
         qs = qs.filter(is_vamanam_slot=True)
+    elif is_vasthi or filter_type == 'vasthi_only':
+        qs = qs.filter(is_vasthi_slot=True)
     elif filter_type == 'regular_only' or request.GET.get('exclude_vamanam', '').lower() in ('1', 'true', 'yes'):
         qs = qs.filter(is_vamanam_slot=False)
 
@@ -1703,7 +1713,8 @@ def time_slots(request):
             "slot_number": t.slot_number, 
             "start_time": st, 
             "label": label,
-            "is_vamanam_slot": getattr(t, 'is_vamanam_slot', False)
+            "is_vamanam_slot": getattr(t, 'is_vamanam_slot', False),
+            "is_vasthi_slot": getattr(t, 'is_vasthi_slot', False)
         })
     return JsonResponse({"slots": slots})
 

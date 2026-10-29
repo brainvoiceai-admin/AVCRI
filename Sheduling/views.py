@@ -1720,16 +1720,20 @@ def therapy_entry(request):
                         not is_nurse_treatment(payload.get('therapy_code'), payload.get('therapy_name'))
                         and is_group_vasthi_0830_only(payload.get('therapy_name'), payload.get('therapy_code'))
                     ):
-                        from_time_0830 = datetime.strptime('08:30', '%H:%M').time()
-                        if SlotMaster is not None:
-                            slot0830 = SlotMaster.objects.filter(slot_time=from_time_0830, is_active=True).first()
-                            if slot0830:
-                                timeslot_obj = slot0830
+                        if timeslot_obj and getattr(timeslot_obj, 'is_vasthi_slot', False) and getattr(timeslot_obj, 'is_active', True):
+                            pass
+                        elif SlotMaster is not None:
+                            slot_vasthi = SlotMaster.objects.filter(is_vasthi_slot=True, is_active=True).order_by('slot_time').first()
+                            if not slot_vasthi:
+                                from_time_0830 = datetime.strptime('08:30', '%H:%M').time()
+                                slot_vasthi = SlotMaster.objects.filter(slot_time=from_time_0830, is_active=True).first()
+                            if slot_vasthi:
+                                timeslot_obj = slot_vasthi
                             else:
                                 return JsonResponse(
                                     {
-                                        'error': 'vasthi_group_requires_0830',
-                                        'message': 'Therapies in the Vasthi therapy group require 08:30; no active 08:30 SlotMaster',
+                                        'error': 'vasthi_group_requires_vasthi_slot',
+                                        'message': 'Vasthi therapies require a designated Vasthi slot; no active SlotMaster found',
                                     },
                                     status=400,
                                 )
@@ -2102,14 +2106,16 @@ def therapy_entry(request):
             if q:
                 qs = qs.filter(Q(therapy_name__icontains=q) | Q(therapy_code__icontains=q))
             qs = qs[:50]
-            from reshedule import is_vamanam_treatment
+            from reshedule import is_vamanam_treatment, is_vasthi_treatment
             for t in qs:
                 is_vam = bool(getattr(t, 'is_vamanam', False) or is_vamanam_treatment(getattr(t, 'therapy_name', ''), getattr(t, 'therapy_code', '')))
+                is_vsth = bool(getattr(t, 'is_vasthi', False) or is_vasthi_treatment(getattr(t, 'therapy_name', ''), getattr(t, 'therapy_code', '')))
                 results.append({
                     'therapy_code': getattr(t, 'therapy_code', ''),
                     'therapy_name': getattr(t, 'therapy_name', ''),
                     'therapy_category': getattr(t, 'therapy_category', '') or '',
-                    'is_vamanam': is_vam
+                    'is_vamanam': is_vam,
+                    'is_vasthi': is_vsth
                 })
 
         # Add nurse treatments from NurseTreatmentMaster
@@ -2126,7 +2132,8 @@ def therapy_entry(request):
                     'therapy_code': getattr(nt, 'treatment_code', ''),
                     'therapy_name': getattr(nt, 'name', ''),
                     'therapy_category': 'Nurse Treatment',  # Mark as nurse treatment
-                    'is_vamanam': False
+                    'is_vamanam': False,
+                    'is_vasthi': False
                 })
 
         return JsonResponse(results, safe=False)
@@ -2205,11 +2212,12 @@ def therapy_entry(request):
         results = []
         if SlotMaster is not None:
             try:
-                from reshedule import is_vamanam_treatment
+                from reshedule import is_vamanam_treatment, is_vasthi_treatment
 
                 req_therapy_name = request.GET.get('therapy_name', '').strip()
                 req_therapy_code = request.GET.get('therapy_code', '').strip()
                 req_is_vamanam = request.GET.get('is_vamanam')
+                req_is_vasthi = request.GET.get('is_vasthi')
                 filter_type = (request.GET.get('filter_type') or '').strip().lower()
 
                 is_vam = False
@@ -2218,10 +2226,18 @@ def therapy_entry(request):
                 elif req_therapy_name or req_therapy_code:
                     is_vam = is_vamanam_treatment(req_therapy_name, req_therapy_code)
 
+                is_vsth = False
+                if req_is_vasthi is not None:
+                    is_vsth = str(req_is_vasthi).lower() in ('1', 'true', 'yes')
+                elif (req_therapy_name or req_therapy_code) and not is_vam:
+                    is_vsth = is_vasthi_treatment(req_therapy_name, req_therapy_code)
+
                 qs = SlotMaster.objects.filter(is_active=True).all().order_by('slot_number')
 
                 if is_vam or filter_type == 'vamanam_only':
                     qs = qs.filter(is_vamanam_slot=True)
+                elif is_vsth or filter_type == 'vasthi_only':
+                    qs = qs.filter(is_vasthi_slot=True)
                 elif filter_type == 'regular_only' or request.GET.get('exclude_vamanam', '').lower() in ('1', 'true', 'yes'):
                     qs = qs.filter(is_vamanam_slot=False)
 
@@ -2234,7 +2250,8 @@ def therapy_entry(request):
                     results.append({
                         'slot_number': getattr(s, 'slot_number', ''), 
                         'start_time': start_s,
-                        'is_vamanam_slot': getattr(s, 'is_vamanam_slot', False)
+                        'is_vamanam_slot': getattr(s, 'is_vamanam_slot', False),
+                        'is_vasthi_slot': getattr(s, 'is_vasthi_slot', False)
                     })
             except Exception as e:
                 print(f"Error loading slots: {e}")
@@ -4026,18 +4043,23 @@ def allocate_therapy(request):
         try:
             from reshedule import is_group_vasthi_0830_only
             if is_group_vasthi_0830_only(payload.get("therapy_name"), payload.get("therapy_code")):
-                t0830 = parse_time_hhmm("08:30")
-                slot0830 = SlotMaster.objects.filter(slot_time=t0830, is_active=True).first() if t0830 else None
-                if slot0830:
-                    timeslot = slot0830
+                if timeslot and getattr(timeslot, 'is_vasthi_slot', False) and getattr(timeslot, 'is_active', True):
+                    pass
                 else:
-                    return JsonResponse(
-                        {
-                            "error": "vasthi_group_requires_0830",
-                            "message": "Therapies in the Vasthi therapy group require 08:30; SlotMaster for 08:30 not found",
-                        },
-                        status=400,
-                    )
+                    slot_vasthi = SlotMaster.objects.filter(is_vasthi_slot=True, is_active=True).order_by('slot_time').first()
+                    if not slot_vasthi:
+                        t0830 = parse_time_hhmm("08:30")
+                        slot_vasthi = SlotMaster.objects.filter(slot_time=t0830, is_active=True).first() if t0830 else None
+                    if slot_vasthi:
+                        timeslot = slot_vasthi
+                    else:
+                        return JsonResponse(
+                            {
+                                "error": "vasthi_group_requires_vasthi_slot",
+                                "message": "Vasthi therapies require a designated Vasthi slot; SlotMaster for Vasthi slot not found",
+                            },
+                            status=400,
+                        )
         except Exception:
             pass
 

@@ -5,15 +5,15 @@ $(function () {
   const FALLBACK_PROCURED = [{ name: 'IP Pharmacy' }, { name: 'Kashaya room' }];
   const FALLBACK_OIL = [{ name: 'Dhara' }, { name: 'Pizichil' }, { name: 'Head' }];
   const FALLBACK_SLOTS = [
-    { start_time: '05:00', is_vamanam_slot: true },
-    { start_time: '05:30', is_vamanam_slot: true },
-    { start_time: '06:30', is_vamanam_slot: false },
-    { start_time: '08:30', is_vamanam_slot: false },
-    { start_time: '10:00', is_vamanam_slot: false },
-    { start_time: '11:30', is_vamanam_slot: false },
-    { start_time: '14:30', is_vamanam_slot: false },
-    { start_time: '16:00', is_vamanam_slot: false },
-    { start_time: '17:30', is_vamanam_slot: false }
+    { start_time: '05:00', is_vamanam_slot: true, is_vasthi_slot: false },
+    { start_time: '05:30', is_vamanam_slot: true, is_vasthi_slot: false },
+    { start_time: '06:30', is_vamanam_slot: false, is_vasthi_slot: false },
+    { start_time: '08:30', is_vamanam_slot: false, is_vasthi_slot: true },
+    { start_time: '10:00', is_vamanam_slot: false, is_vasthi_slot: false },
+    { start_time: '11:30', is_vamanam_slot: false, is_vasthi_slot: false },
+    { start_time: '14:30', is_vamanam_slot: false, is_vasthi_slot: false },
+    { start_time: '16:00', is_vamanam_slot: false, is_vasthi_slot: false },
+    { start_time: '17:30', is_vamanam_slot: false, is_vasthi_slot: false }
   ];
 
   // --- helpers ---
@@ -751,20 +751,22 @@ $(function () {
           therapy_name: t.therapy_name,
           therapy_code: t.therapy_code,
           therapy_category: t.therapy_category || '',
-          is_vamanam: !!t.is_vamanam
+          is_vamanam: !!t.is_vamanam,
+          is_vasthi: !!t.is_vasthi
         }))
       }),
       cache: true
     }
   });
 
-  // Function to update slots based on selected therapy (Vamanam vs Normal) and difficulty
+  // Function to update slots based on selected therapy (Vamanam vs Vasthi vs Normal) and difficulty
   function updateSlotsForTherapy() {
     const selectedTherapy = $therapySelect.select2('data');
     if (!selectedTherapy || selectedTherapy.length === 0) {
       $('#vamanam-slot-badge').hide();
+      $('#vasthi-slot-badge').hide();
       // No therapy selected, show normal slots (exclude Vamanam slots)
-      return populateSlots([], false);
+      return populateSlots([], 'regular');
     }
 
     const therapy = selectedTherapy[0];
@@ -777,18 +779,33 @@ $(function () {
                       /vamanam|vamana/i.test(therapyName) || 
                       /vamanam|vamana/i.test(therapyCode);
 
+    // Check if Vasthi treatment (exempt Mathra Vasthi THEB037)
+    const isMathraVasthi = (therapyCode === 'THEB037') || /mathra\s*vasthi/i.test(therapyName);
+    const isVasthi = !isMathraVasthi && (
+      !!therapy.is_vasthi ||
+      /vasthi|basti/i.test(therapyName) ||
+      /vasthi|basti/i.test(therapyCode)
+    );
+
     if (isVamanam) {
       $('#vamanam-slot-badge').show();
+      $('#vasthi-slot-badge').hide();
       // Vamanam treatment: show ONLY Vamanam slots (e.g. 5:00 AM, 5:30 AM)
-      return populateSlots([], true);
+      return populateSlots([], 'vamanam_only');
+    } else if (isVasthi) {
+      $('#vamanam-slot-badge').hide();
+      $('#vasthi-slot-badge').show();
+      // Vasthi treatment: show ONLY Vasthi slots (e.g. 8:30 AM)
+      return populateSlots([], 'vasthi_only');
     } else {
       $('#vamanam-slot-badge').hide();
+      $('#vasthi-slot-badge').hide();
       // Normal treatment: show other slots EXCEPT Vamanam slots
       // If therapy difficulty is "Hard", also filter out 5:30 PM (17:30) and 11:30 AM (11:30)
       if (therapyCategory === 'hard') {
-        return populateSlots(['17:30', '11:30'], false);
+        return populateSlots(['17:30', '11:30'], 'regular');
       } else {
-        return populateSlots([], false);
+        return populateSlots([], 'regular');
       }
     }
   }
@@ -802,11 +819,16 @@ $(function () {
     return `${hours.padStart(2, '0')}:${minutes}`;
   }
 
-  // Function to populate slots with optional exclusion list and Vamanam filtering
-  function populateSlots(excludeSlots = [], onlyVamanam = false) {
+  // Function to populate slots with optional exclusion list and Vamanam/Vasthi filtering
+  function populateSlots(excludeSlots = [], slotMode = 'regular') {
+    if (slotMode === true) slotMode = 'vamanam_only';
+    if (slotMode === false) slotMode = 'regular';
+
     const params = { action: 'slots' };
-    if (onlyVamanam) {
+    if (slotMode === 'vamanam_only') {
       params.filter_type = 'vamanam_only';
+    } else if (slotMode === 'vasthi_only') {
+      params.filter_type = 'vasthi_only';
     } else {
       params.filter_type = 'regular_only';
     }
@@ -826,9 +848,16 @@ $(function () {
                            normalizedSlotTime === '05:00' || normalizedSlotTime === '05:30' ||
                            normalizedSlotTime === '5:00' || normalizedSlotTime === '5:30');
 
-        if (onlyVamanam) {
+        // Check if slot is a Vasthi slot
+        const isVasthiSlot = (s.is_vasthi_slot === true || s.is_vasthi_slot === 'true' || s.is_vasthi_slot === 1 ||
+                              normalizedSlotTime === '08:30' || normalizedSlotTime === '8:30');
+
+        if (slotMode === 'vamanam_only') {
           // Show ONLY Vamanam slots
           if (!isVamSlot) return;
+        } else if (slotMode === 'vasthi_only') {
+          // Show ONLY Vasthi slots
+          if (!isVasthiSlot) return;
         } else {
           // Normal treatment: show other slots EXCEPT Vamanam slots
           if (isVamSlot) return;
@@ -854,16 +883,19 @@ $(function () {
         let normalizedSlotTime = normalizeSlotTime(slotTime);
 
         const isVamSlot = (s.is_vamanam_slot === true || normalizedSlotTime === '05:00' || normalizedSlotTime === '05:30');
+        const isVasthiSlot = (s.is_vasthi_slot === true || normalizedSlotTime === '08:30' || normalizedSlotTime === '8:30');
 
-        if (onlyVamanam) {
+        if (slotMode === 'vamanam_only') {
           if (!isVamSlot) return;
+        } else if (slotMode === 'vasthi_only') {
+          if (!isVasthiSlot) return;
         } else {
           if (isVamSlot) return;
         }
 
         const shouldExclude = excludeSlots.some(exclude => {
           let normalizedExclude = normalizeSlotTime(exclude);
-          return normalizedSlotTime === normalizedExclude;
+          return normalizedExclude === normalizedSlotTime;
         });
 
         if (!shouldExclude) {
@@ -1811,7 +1843,8 @@ $(function () {
         therapy_name: t.therapy_name,
         therapy_code: t.therapy_code,
         therapy_category: t.therapy_category || '',
-        is_vamanam: !!t.is_vamanam || /vamanam|vamana/i.test(t.therapy_name || '')
+        is_vamanam: !!t.is_vamanam || /vamanam|vamana/i.test(t.therapy_name || ''),
+        is_vasthi: !!t.is_vasthi || (/vasthi/i.test(t.therapy_name || '') && !/mathra/i.test(t.therapy_name || ''))
       });
       $therapySelect.append(opt);
       $existingOpt = $therapySelect.find(`option[value="${t.therapy_code}"]`);
