@@ -1539,13 +1539,63 @@ class TherapyMasterManagementView(ListView):
                                      'no_of_super_senior_therapist', 'no_of_senior_therapist',
                                      'no_of_junior_therapist', 'no_of_trainee_therapist', 'is_active']
         context['optional_fields'] = ['therapy_group']
+        try:
+            from reshedule import get_steam_therapy_rooms, get_vamanam_treatment_rooms, get_vamanam_slots, get_vasthi_slot_names
+            steam_rooms = get_steam_therapy_rooms()
+            context['steam_rooms'] = steam_rooms
+            context['steam_rooms_display'] = ', '.join(steam_rooms)
+            v_rooms = get_vamanam_treatment_rooms()
+            v_slots = get_vamanam_slots()
+            context['vamanam_rooms'] = v_rooms
+            context['vamanam_rooms_display'] = ', '.join(v_rooms) if v_rooms else 'None configured'
+            context['vamanam_slots'] = v_slots
+            context['vamanam_slots_display'] = ', '.join(v_slots) if v_slots else '05:00, 05:30'
+            vasthi_slots = get_vasthi_slot_names()
+            context['vasthi_slots'] = vasthi_slots
+            context['vasthi_slots_display'] = ', '.join(vasthi_slots) if vasthi_slots else 'None configured'
+        except Exception:
+            context['steam_rooms'] = ['TR-12', 'TR-9']
+            context['steam_rooms_display'] = 'TR-12, TR-9'
+            context['vamanam_rooms'] = []
+            context['vamanam_rooms_display'] = 'None configured'
+            context['vamanam_slots'] = ['05:00', '05:30']
+            context['vamanam_slots_display'] = '05:00, 05:30'
+            context['vasthi_slots'] = ['08:30 AM']
+            context['vasthi_slots_display'] = '08:30 AM'
         return context
 
 class TherapyMasterCreateView(CreateView):
     model = TherapyMaster
-    fields = ['therapy_name', 'therapy_group', 'therapy_category', 'therapy_duration', 'bathing_required', 'treatment_room_required', 'cost_of_therapy', 'patient_type', 'is_steam_therapy', 'no_of_super_senior_therapist', 'no_of_senior_therapist', 'no_of_junior_therapist', 'no_of_trainee_therapist', 'is_active']
+    fields = ['therapy_name', 'therapy_group', 'therapy_category', 'therapy_duration', 'bathing_required', 'treatment_room_required', 'cost_of_therapy', 'patient_type', 'is_steam_therapy', 'is_vamanam', 'is_vasthi', 'no_of_super_senior_therapist', 'no_of_senior_therapist', 'no_of_junior_therapist', 'no_of_trainee_therapist', 'is_active']
     template_name = 'masters/therapy_master_form.html'
     success_url = reverse_lazy('therapy_master_manage')
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        try:
+            from reshedule import get_steam_therapy_rooms, get_vamanam_treatment_rooms, get_vamanam_slots, get_vasthi_slot_names
+            steam_rooms = get_steam_therapy_rooms()
+            context['steam_rooms'] = steam_rooms
+            context['steam_rooms_display'] = ', '.join(steam_rooms)
+            v_rooms = get_vamanam_treatment_rooms()
+            v_slots = get_vamanam_slots()
+            context['vamanam_rooms'] = v_rooms
+            context['vamanam_rooms_display'] = ', '.join(v_rooms) if v_rooms else 'None configured'
+            context['vamanam_slots'] = v_slots
+            context['vamanam_slots_display'] = ', '.join(v_slots) if v_slots else '05:00, 05:30'
+            vasthi_slots = get_vasthi_slot_names()
+            context['vasthi_slots'] = vasthi_slots
+            context['vasthi_slots_display'] = ', '.join(vasthi_slots) if vasthi_slots else 'None configured'
+        except Exception:
+            context['steam_rooms'] = ['TR-12', 'TR-9']
+            context['steam_rooms_display'] = 'TR-12, TR-9'
+            context['vamanam_rooms'] = []
+            context['vamanam_rooms_display'] = 'None configured'
+            context['vamanam_slots'] = ['05:00', '05:30']
+            context['vamanam_slots_display'] = '05:00, 05:30'
+            context['vasthi_slots'] = ['08:30 AM']
+            context['vasthi_slots_display'] = '08:30 AM'
+        return context
 
     def get_form(self, form_class=None):
         form = super().get_form(form_class)
@@ -1619,10 +1669,37 @@ class TherapyMasterCreateView(CreateView):
 
 class TherapyMasterUpdateView(UpdateView):
     model = TherapyMaster
-    fields = ['therapy_name', 'therapy_group', 'therapy_category', 'therapy_duration', 'bathing_required', 'treatment_room_required', 'cost_of_therapy', 'patient_type', 'is_steam_therapy', 'no_of_super_senior_therapist', 'no_of_senior_therapist', 'no_of_junior_therapist', 'no_of_trainee_therapist', 'is_active']
+    fields = ['therapy_name', 'therapy_group', 'therapy_category', 'therapy_duration', 'bathing_required', 'treatment_room_required', 'cost_of_therapy', 'patient_type', 'is_steam_therapy', 'is_vamanam', 'is_vasthi', 'no_of_super_senior_therapist', 'no_of_senior_therapist', 'no_of_junior_therapist', 'no_of_trainee_therapist', 'is_active']
     template_name = 'masters/therapy_master_form.html'
     success_url = reverse_lazy('therapy_master_manage')
     
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        try:
+            from reshedule import get_steam_therapy_rooms, get_vamanam_treatment_rooms, get_vamanam_slots, get_vasthi_slot_names
+            steam_rooms = get_steam_therapy_rooms()
+            context['steam_rooms'] = steam_rooms
+            context['steam_rooms_display'] = ', '.join(steam_rooms)
+            v_rooms = get_vamanam_treatment_rooms()
+            v_slots = get_vamanam_slots()
+            context['vamanam_rooms'] = v_rooms
+            context['vamanam_rooms_display'] = ', '.join(v_rooms) if v_rooms else 'None configured'
+            context['vamanam_slots'] = v_slots
+            context['vamanam_slots_display'] = ', '.join(v_slots) if v_slots else '05:00, 05:30'
+            vasthi_slots = get_vasthi_slot_names()
+            context['vasthi_slots'] = vasthi_slots
+            context['vasthi_slots_display'] = ', '.join(vasthi_slots) if vasthi_slots else 'None configured'
+        except Exception:
+            context['steam_rooms'] = ['TR-12', 'TR-9']
+            context['steam_rooms_display'] = 'TR-12, TR-9'
+            context['vamanam_rooms'] = []
+            context['vamanam_rooms_display'] = 'None configured'
+            context['vamanam_slots'] = ['05:00', '05:30']
+            context['vamanam_slots_display'] = '05:00, 05:30'
+            context['vasthi_slots'] = ['08:30 AM']
+            context['vasthi_slots_display'] = '08:30 AM'
+        return context
+
     def get_form(self, form_class=None):
         form = super().get_form(form_class)
         # Make therapy_code read-only since it shouldn't be changed
@@ -1705,6 +1782,22 @@ def therapy_master_disable(request, pk):
     therapy.save()
     _log_master_audit(request, 'update', 'TherapyMaster', str(pk), f'Disabled TherapyMaster: {therapy.therapy_name}')
     messages.success(request, f'Therapy "{therapy.therapy_name}" disabled successfully.')
+    return redirect('therapy_master_manage')
+
+
+@login_required
+@super_admin_required
+@require_http_methods(["GET", "POST"])
+def therapy_master_toggle_vasthi(request, pk):
+    """Toggle Vasthi status for a therapy"""
+    therapy = get_object_or_404(TherapyMaster, pk=pk)
+    therapy.is_vasthi = not therapy.is_vasthi
+    therapy.save(update_fields=['is_vasthi', 'updated_at'])
+    status_str = "Vasthi Therapy" if therapy.is_vasthi else "Regular Therapy"
+    _log_master_audit(request, 'update', 'TherapyMaster', str(pk), f'Changed TherapyMaster {therapy.therapy_code} Vasthi status to: {status_str}')
+    if request.headers.get('x-requested-with') == 'XMLHttpRequest' or request.content_type == 'application/json':
+        return JsonResponse({'success': True, 'is_vasthi': therapy.is_vasthi, 'message': f'Therapy "{therapy.therapy_name}" is now designated as {status_str}.'})
+    messages.success(request, f'Therapy "{therapy.therapy_name}" is now designated as {status_str}.')
     return redirect('therapy_master_manage')
 
 # Item Master CRUD Views
@@ -2134,17 +2227,30 @@ class SlotMasterManagementView(ListView):
         context['master_type'] = 'slot'
         context['master_name'] = 'Slot Master'
         context['required_fields'] = ['slot_number', 'slot_time']
-        context['optional_fields'] = ['slot_name', 'is_active']
+        context['optional_fields'] = ['slot_name', 'is_vamanam_slot', 'is_vasthi_slot', 'is_active']
         context['search'] = self.request.GET.get('search', '')
         context['status_filter'] = self.request.GET.get('status', '')
+        
+        # Separate regular treatment slots and dedicated Vamanam slots
+        queryset = self.get_queryset()
+        context['regular_slot_list'] = queryset.filter(is_vamanam_slot=False)
+        context['vamanam_slot_list'] = queryset.filter(is_vamanam_slot=True)
+        context['slot_list'] = context['regular_slot_list']
         return context
 
 class SlotMasterCreateView(CreateView):
     model = SlotMaster
-    fields = ['slot_name', 'slot_time', 'is_active']
+    fields = ['slot_name', 'slot_time', 'is_vamanam_slot', 'is_vasthi_slot', 'is_active']
     template_name = 'masters/slot_master_form.html'
     success_url = reverse_lazy('slot_master_manage')
     
+    def get_initial(self):
+        initial = super().get_initial()
+        if self.request.GET.get('type') == 'vamanam':
+            initial['is_vamanam_slot'] = True
+            initial['slot_name'] = 'Vamanam Slot'
+        return initial
+
     def form_valid(self, form):
         # Auto-generate slot_number
         with transaction.atomic():
@@ -2160,7 +2266,7 @@ class SlotMasterCreateView(CreateView):
 
 class SlotMasterUpdateView(UpdateView):
     model = SlotMaster
-    fields = ['slot_number', 'slot_name', 'slot_time', 'is_active']
+    fields = ['slot_number', 'slot_name', 'slot_time', 'is_vamanam_slot', 'is_vasthi_slot', 'is_active']
     template_name = 'masters/slot_master_form.html'
     success_url = reverse_lazy('slot_master_manage')
     
@@ -2209,6 +2315,37 @@ def slot_master_disable(request, pk):
     slot.save()
     _log_master_audit(request, 'update', 'SlotMaster', str(pk), f'Disabled SlotMaster: {slot.slot_number}')
     messages.success(request, f'Slot {slot.slot_number} disabled successfully.')
+    return redirect('slot_master_manage')
+
+@login_required
+@super_admin_required
+@require_http_methods(["GET", "POST"])
+def slot_master_toggle_vamanam(request, pk):
+    """Toggle Vamanam slot status for a slot"""
+    slot = get_object_or_404(SlotMaster, pk=pk)
+    slot.is_vamanam_slot = not slot.is_vamanam_slot
+    slot.save(update_fields=['is_vamanam_slot', 'updated_at'])
+    status_str = "Vamanam Special Slot" if slot.is_vamanam_slot else "Standard Treatment Slot"
+    _log_master_audit(request, 'update', 'SlotMaster', str(pk), f'Changed SlotMaster {slot.slot_number} Vamanam status to: {status_str}')
+    if request.headers.get('x-requested-with') == 'XMLHttpRequest' or request.content_type == 'application/json':
+        return JsonResponse({'success': True, 'is_vamanam_slot': slot.is_vamanam_slot, 'message': f'Slot {slot.slot_number} is now designated as {status_str}.'})
+    messages.success(request, f'Slot {slot.slot_number} is now designated as {status_str}.')
+    return redirect('slot_master_manage')
+
+
+@login_required
+@super_admin_required
+@require_http_methods(["GET", "POST"])
+def slot_master_toggle_vasthi(request, pk):
+    """Toggle Vasthi slot status for a slot"""
+    slot = get_object_or_404(SlotMaster, pk=pk)
+    slot.is_vasthi_slot = not slot.is_vasthi_slot
+    slot.save(update_fields=['is_vasthi_slot', 'updated_at'])
+    status_str = "Vasthi Slot" if slot.is_vasthi_slot else "Standard Treatment Slot"
+    _log_master_audit(request, 'update', 'SlotMaster', str(pk), f'Changed SlotMaster {slot.slot_number} Vasthi status to: {status_str}')
+    if request.headers.get('x-requested-with') == 'XMLHttpRequest' or request.content_type == 'application/json':
+        return JsonResponse({'success': True, 'is_vasthi_slot': slot.is_vasthi_slot, 'message': f'Slot {slot.slot_number} is now designated as {status_str}.'})
+    messages.success(request, f'Slot {slot.slot_number} is now designated as {status_str}.')
     return redirect('slot_master_manage')
 
 # -----------------------
@@ -2557,12 +2694,26 @@ class TreatmentRoomManagementView(ListView):
         elif status == 'inactive':
             queryset = queryset.filter(is_active=False)
 
+        steam = self.request.GET.get('steam', '')
+        if steam == 'yes':
+            queryset = queryset.filter(is_steam_room=True)
+        elif steam == 'no':
+            queryset = queryset.filter(is_steam_room=False)
+
+        vamanam = self.request.GET.get('vamanam', '')
+        if vamanam == 'yes':
+            queryset = queryset.filter(is_vamanam_room=True)
+        elif vamanam == 'no':
+            queryset = queryset.filter(is_vamanam_room=False)
+
         return queryset.order_by('room_no')
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context['search'] = self.request.GET.get('search', '')
         context['status_filter'] = self.request.GET.get('status', '')
+        context['steam_filter'] = self.request.GET.get('steam', '')
+        context['vamanam_filter'] = self.request.GET.get('vamanam', '')
         context['master_type'] = 'treatmentroom'
         context['master_name'] = 'Treatment Room Master'
         return context
@@ -2571,17 +2722,23 @@ class TreatmentRoomManagementView(ListView):
 class TreatmentRoomForm(forms.ModelForm):
     class Meta:
         model = TreatmentRoom
-        fields = ['room_no', 'room_name', 'floor_master', 'description', 'is_active']
+        fields = ['room_no', 'room_name', 'floor_master', 'description', 'is_steam_room', 'is_vamanam_room', 'is_active']
         widgets = {
             'room_no': forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'e.g., TR-1, RM-101'}),
             'room_name': forms.Select(attrs={'class': 'form-select'}),
             'floor_master': forms.Select(attrs={'class': 'form-select'}),
             'description': forms.Textarea(attrs={'class': 'form-control', 'rows': 3}),
+            'is_steam_room': forms.CheckboxInput(attrs={'class': 'form-check-input'}),
+            'is_vamanam_room': forms.CheckboxInput(attrs={'class': 'form-check-input'}),
+            'is_active': forms.CheckboxInput(attrs={'class': 'form-check-input'}),
         }
         labels = {
             'room_no': 'Room Number',
             'room_name': 'Room Name',
             'floor_master': 'Floor',
+            'is_steam_room': 'Steam Therapy Room',
+            'is_vamanam_room': 'Vamanam Treatment Room',
+            'is_active': 'Active',
         }
 
     def __init__(self, *args, **kwargs):
@@ -2658,6 +2815,36 @@ def treatment_room_master_disable(request, pk):
     room.save()
     _log_master_audit(request, 'update', 'TreatmentRoom', str(pk), f'Disabled TreatmentRoom: {room.room_no}')
     messages.success(request, f'Treatment room {room.room_no} disabled successfully.')
+    return redirect('treatment_room_master_manage')
+
+@login_required
+@super_admin_required
+@require_http_methods(["GET", "POST"])
+def treatment_room_master_toggle_steam(request, pk):
+    """Toggle steam therapy room status for a treatment room"""
+    room = get_object_or_404(TreatmentRoom, pk=pk)
+    room.is_steam_room = not room.is_steam_room
+    room.save(update_fields=['is_steam_room', 'updated_at'])
+    status_str = "Steam Therapy Room" if room.is_steam_room else "Regular Treatment Room"
+    _log_master_audit(request, 'update', 'TreatmentRoom', str(pk), f'Changed TreatmentRoom {room.room_no} steam room status to: {status_str}')
+    if request.headers.get('x-requested-with') == 'XMLHttpRequest' or request.content_type == 'application/json':
+        return JsonResponse({'success': True, 'is_steam_room': room.is_steam_room, 'message': f'Room {room.room_no} is now designated as {status_str}.'})
+    messages.success(request, f'Treatment room {room.room_no} is now designated as {status_str}.')
+    return redirect('treatment_room_master_manage')
+
+@login_required
+@super_admin_required
+@require_http_methods(["GET", "POST"])
+def treatment_room_master_toggle_vamanam(request, pk):
+    """Toggle Vamanam room status for a treatment room"""
+    room = get_object_or_404(TreatmentRoom, pk=pk)
+    room.is_vamanam_room = not room.is_vamanam_room
+    room.save(update_fields=['is_vamanam_room', 'updated_at'])
+    status_str = "Vamanam Treatment Room" if room.is_vamanam_room else "Regular Treatment Room"
+    _log_master_audit(request, 'update', 'TreatmentRoom', str(pk), f'Changed TreatmentRoom {room.room_no} Vamanam room status to: {status_str}')
+    if request.headers.get('x-requested-with') == 'XMLHttpRequest' or request.content_type == 'application/json':
+        return JsonResponse({'success': True, 'is_vamanam_room': room.is_vamanam_room, 'message': f'Room {room.room_no} is now designated as {status_str}.'})
+    messages.success(request, f'Treatment room {room.room_no} is now designated as {status_str}.')
     return redirect('treatment_room_master_manage')
 
 

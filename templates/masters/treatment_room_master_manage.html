@@ -47,12 +47,12 @@
         <div class="card mb-4">
             <div class="card-body">
                 <form method="get" action="{% url 'treatment_room_master_manage' %}" id="filterForm">
-                    <div class="row">
-                        <div class="col-md-5">
+                    <div class="row g-2">
+                        <div class="col-md-3">
                             <input type="text" class="form-control" name="search" id="searchInput"
                                 placeholder="Search rooms..." value="{{ search|default:'' }}">
                         </div>
-                        <div class="col-md-3">
+                        <div class="col-md-2">
                             <select class="form-select" name="status" id="statusFilter">
                                 <option value="">All Status</option>
                                 <option value="active" {% if status_filter == 'active' %}selected{% endif %}>Active</option>
@@ -60,14 +60,28 @@
                             </select>
                         </div>
                         <div class="col-md-2">
+                            <select class="form-select" name="steam" id="steamFilter">
+                                <option value="">All Steam Types</option>
+                                <option value="yes" {% if steam_filter == 'yes' %}selected{% endif %}>Steam Rooms</option>
+                                <option value="no" {% if steam_filter == 'no' %}selected{% endif %}>Non-Steam</option>
+                            </select>
+                        </div>
+                        <div class="col-md-2">
+                            <select class="form-select" name="vamanam" id="vamanamFilter">
+                                <option value="">All Vamanam Types</option>
+                                <option value="yes" {% if vamanam_filter == 'yes' %}selected{% endif %}>Vamanam Rooms</option>
+                                <option value="no" {% if vamanam_filter == 'no' %}selected{% endif %}>Non-Vamanam</option>
+                            </select>
+                        </div>
+                        <div class="col-md-1">
                             <button type="submit" class="btn btn-primary w-100" id="filterButton">
-                                <i class="fas fa-search me-1"></i>Filter
+                                <i class="fas fa-search"></i>
                             </button>
                         </div>
                         <div class="col-md-2">
-                            <button type="button" class="btn btn-outline-secondary w-100" id="clearFilters">
+                            <a href="{% url 'treatment_room_master_manage' %}" class="btn btn-outline-secondary w-100" id="clearFilters">
                                 <i class="fas fa-times me-1"></i>Clear
-                            </button>
+                            </a>
                         </div>
                     </div>
                 </form>
@@ -91,6 +105,8 @@
                                 <th>TR Code</th>
                                 <th>Room Name</th>
                                 <th>Floor</th>
+                                <th>Steam Therapy</th>
+                                <th>Vamanam Therapy</th>
                                 <th>Description</th>
                                 <th>Status</th>
                                 <th>Created</th>
@@ -104,6 +120,40 @@
                                 <td>{{ room.tr_code|default:"-" }}</td>
                                 <td>{{ room.room_name.name|default:"-" }}</td>
                                 <td>{{ room.floor_master.name|default:"-" }}</td>
+                                <td>
+                                    {% if room.is_steam_room %}
+                                    <a href="{% url 'treatment_room_master_toggle_steam' room.room_no %}" 
+                                       class="badge bg-warning text-dark text-decoration-none" 
+                                       title="Click to toggle Steam Room status"
+                                       onclick="return confirm('Change steam therapy status for {{ room.room_no }}?');">
+                                        <i class="fas fa-wind me-1"></i>Steam Room
+                                    </a>
+                                    {% else %}
+                                    <a href="{% url 'treatment_room_master_toggle_steam' room.room_no %}" 
+                                       class="badge bg-secondary text-decoration-none" 
+                                       title="Click to toggle Steam Room status"
+                                       onclick="return confirm('Designate {{ room.room_no }} as a Steam Therapy Room?');">
+                                        Regular
+                                    </a>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if room.is_vamanam_room %}
+                                    <a href="{% url 'treatment_room_master_toggle_vamanam' room.room_no %}" 
+                                       class="badge bg-danger text-white text-decoration-none" 
+                                       title="Click to toggle Vamanam Room status"
+                                       onclick="return confirm('Remove Vamanam designation from {{ room.room_no }}?');">
+                                        <i class="fas fa-heartbeat me-1"></i>Vamanam Room
+                                    </a>
+                                    {% else %}
+                                    <a href="{% url 'treatment_room_master_toggle_vamanam' room.room_no %}" 
+                                       class="badge bg-secondary text-decoration-none" 
+                                       title="Click to toggle Vamanam Room status"
+                                       onclick="return confirm('Designate {{ room.room_no }} as a Vamanam Therapy Room?');">
+                                        Regular
+                                    </a>
+                                    {% endif %}
+                                </td>
                                 <td>{{ room.description|default:"-"|truncatewords:10 }}</td>
                                 <td>
                                     {% if room.is_active %}
@@ -120,6 +170,18 @@
                                         <a href="{% url 'treatment_room_master_update' room.room_no %}"
                                             class="btn btn-sm btn-outline-primary" title="Edit">
                                             <i class="fas fa-edit"></i>
+                                        </a>
+                                        <a href="{% url 'treatment_room_master_toggle_steam' room.room_no %}"
+                                            class="btn btn-sm {% if room.is_steam_room %}btn-warning text-dark{% else %}btn-outline-secondary{% endif %}" 
+                                            title="Toggle Steam Therapy Room designation"
+                                            onclick="return confirm('Toggle steam room designation for {{ room.room_no }}?');">
+                                            <i class="fas fa-wind"></i>
+                                        </a>
+                                        <a href="{% url 'treatment_room_master_toggle_vamanam' room.room_no %}"
+                                            class="btn btn-sm {% if room.is_vamanam_room %}btn-danger text-white{% else %}btn-outline-secondary{% endif %}" 
+                                            title="Toggle Vamanam Therapy Room designation"
+                                            onclick="return confirm('Toggle Vamanam room designation for {{ room.room_no }}?');">
+                                            <i class="fas fa-heartbeat"></i>
                                         </a>
                                         {% if room.is_active %}
                                         <a href="{% url 'treatment_room_master_disable' room.room_no %}"
@@ -143,7 +205,7 @@
                             </tr>
                             {% empty %}
                             <tr>
-                                <td colspan="8" class="text-center py-4">
+                                <td colspan="10" class="text-center py-4">
                                     <div class="text-muted">
                                         <i class="fas fa-door-open fa-3x mb-3"></i>
                                         <p>No treatment rooms found. <a href="{% url 'treatment_room_master_add' %}">Add the first room</a></p>

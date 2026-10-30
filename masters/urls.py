@@ -58,6 +58,7 @@ urlpatterns = [
     path('therapy/<int:pk>/delete/', views.therapy_master_delete, name='therapy_master_delete'),
     path('therapy/<int:pk>/enable/', views.therapy_master_enable, name='therapy_master_enable'),
     path('therapy/<int:pk>/disable/', views.therapy_master_disable, name='therapy_master_disable'),
+    path('therapy/<int:pk>/toggle-vasthi/', views.therapy_master_toggle_vasthi, name='therapy_master_toggle_vasthi'),
     # Therapy Group Master CRUD
     path('therapy-groups/', views.TherapyGroupManagementView.as_view(), name='therapy_group_manage'),
     path('therapy-groups/add/', views.TherapyGroupCreateView.as_view(), name='therapy_group_add'),
@@ -86,6 +87,8 @@ urlpatterns = [
     path('slots/<int:pk>/delete/', views.slot_master_delete, name='slot_master_delete'),
     path('slots/<int:pk>/enable/', views.slot_master_enable, name='slot_master_enable'),
     path('slots/<int:pk>/disable/', views.slot_master_disable, name='slot_master_disable'),
+    path('slots/<int:pk>/toggle-vamanam/', views.slot_master_toggle_vamanam, name='slot_master_toggle_vamanam'),
+    path('slots/<int:pk>/toggle-vasthi/', views.slot_master_toggle_vasthi, name='slot_master_toggle_vasthi'),
 
     # Shift Master CRUD
     path('shifts/', views.ShiftMasterManagementView.as_view(), name='shift_master_manage'),
@@ -111,6 +114,8 @@ urlpatterns = [
     path('treatment-rooms/<str:pk>/delete/', views.treatment_room_master_delete, name='treatment_room_master_delete'),
     path('treatment-rooms/<str:pk>/enable/', views.treatment_room_master_enable, name='treatment_room_master_enable'),
     path('treatment-rooms/<str:pk>/disable/', views.treatment_room_master_disable, name='treatment_room_master_disable'),
+    path('treatment-rooms/<str:pk>/toggle-steam/', views.treatment_room_master_toggle_steam, name='treatment_room_master_toggle_steam'),
+    path('treatment-rooms/<str:pk>/toggle-vamanam/', views.treatment_room_master_toggle_vamanam, name='treatment_room_master_toggle_vamanam'),
     # Therapist Master CRUD
     path('therapists/', views.TherapistMasterManagementView.as_view(), name='therapist_master_manage'),
     path('therapists/add/', views.TherapistMasterCreateView.as_view(), name='therapist_master_add'),

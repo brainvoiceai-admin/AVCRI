@@ -4,7 +4,17 @@ $(function () {
   const API_URL = window.location.pathname;
   const FALLBACK_PROCURED = [{ name: 'IP Pharmacy' }, { name: 'Kashaya room' }];
   const FALLBACK_OIL = [{ name: 'Dhara' }, { name: 'Pizichil' }, { name: 'Head' }];
-  const FALLBACK_SLOTS = [{ start_time: '06:30' }, { start_time: '08:30' }, { start_time: '10:00' }, { start_time: '11:30' }, { start_time: '14:30' }, { start_time: '16:00' }, { start_time: '17:30' }];
+  const FALLBACK_SLOTS = [
+    { start_time: '05:00', is_vamanam_slot: true, is_vasthi_slot: false },
+    { start_time: '05:30', is_vamanam_slot: true, is_vasthi_slot: false },
+    { start_time: '06:30', is_vamanam_slot: false, is_vasthi_slot: false },
+    { start_time: '08:30', is_vamanam_slot: false, is_vasthi_slot: true },
+    { start_time: '10:00', is_vamanam_slot: false, is_vasthi_slot: false },
+    { start_time: '11:30', is_vamanam_slot: false, is_vasthi_slot: false },
+    { start_time: '14:30', is_vamanam_slot: false, is_vasthi_slot: false },
+    { start_time: '16:00', is_vamanam_slot: false, is_vasthi_slot: false },
+    { start_time: '17:30', is_vamanam_slot: false, is_vasthi_slot: false }
+  ];
 
   // --- helpers ---
   function ajax(params) {
@@ -738,31 +748,65 @@ $(function () {
         results: (data || []).map(t => ({
           id: t.therapy_code,
           text: t.therapy_name,
-          therapy_category: t.therapy_category || ''
+          therapy_name: t.therapy_name,
+          therapy_code: t.therapy_code,
+          therapy_category: t.therapy_category || '',
+          is_vamanam: !!t.is_vamanam,
+          is_vasthi: !!t.is_vasthi
         }))
       }),
       cache: true
     }
   });
 
-  // Function to update slots based on therapy difficulty
+  // Function to update slots based on selected therapy (Vamanam vs Vasthi vs Normal) and difficulty
   function updateSlotsForTherapy() {
     const selectedTherapy = $therapySelect.select2('data');
     if (!selectedTherapy || selectedTherapy.length === 0) {
-      // No therapy selected, show all slots
-      return populateSlots();
+      $('#vamanam-slot-badge').hide();
+      $('#vasthi-slot-badge').hide();
+      // No therapy selected, show normal slots (exclude Vamanam slots)
+      return populateSlots([], 'regular');
     }
 
     const therapy = selectedTherapy[0];
-    const therapyCategory = therapy.therapy_category || '';
+    const therapyCategory = (therapy.therapy_category || '').toLowerCase();
+    const therapyName = therapy.therapy_name || therapy.text || '';
+    const therapyCode = therapy.therapy_code || therapy.id || '';
 
-    // If therapy difficulty is "Hard", filter out 5:30 PM and 11:30 AM slots
-    if (therapyCategory.toLowerCase() === 'hard') {
-      // Exclude 17:30 (5:30 PM) and 11:30 (11:30 AM) in HH:MM format
-      return populateSlots(['17:30', '11:30']);
+    // Check if Vamanam treatment (by is_vamanam flag, name, or code)
+    const isVamanam = !!therapy.is_vamanam || 
+                      /vamanam|vamana/i.test(therapyName) || 
+                      /vamanam|vamana/i.test(therapyCode);
+
+    // Check if Vasthi treatment (exempt Mathra Vasthi THEB037)
+    const isMathraVasthi = (therapyCode === 'THEB037') || /mathra\s*vasthi/i.test(therapyName);
+    const isVasthi = !isMathraVasthi && (
+      !!therapy.is_vasthi ||
+      /vasthi|basti/i.test(therapyName) ||
+      /vasthi|basti/i.test(therapyCode)
+    );
+
+    if (isVamanam) {
+      $('#vamanam-slot-badge').show();
+      $('#vasthi-slot-badge').hide();
+      // Vamanam treatment: show ONLY Vamanam slots (e.g. 5:00 AM, 5:30 AM)
+      return populateSlots([], 'vamanam_only');
+    } else if (isVasthi) {
+      $('#vamanam-slot-badge').hide();
+      $('#vasthi-slot-badge').show();
+      // Vasthi treatment: show ONLY Vasthi slots (e.g. 8:30 AM)
+      return populateSlots([], 'vasthi_only');
     } else {
-      // Show all slots for other difficulties
-      return populateSlots();
+      $('#vamanam-slot-badge').hide();
+      $('#vasthi-slot-badge').hide();
+      // Normal treatment: show other slots EXCEPT Vamanam slots
+      // If therapy difficulty is "Hard", also filter out 5:30 PM (17:30) and 11:30 AM (11:30)
+      if (therapyCategory === 'hard') {
+        return populateSlots(['17:30', '11:30'], 'regular');
+      } else {
+        return populateSlots([], 'regular');
+      }
     }
   }
 
@@ -775,9 +819,21 @@ $(function () {
     return `${hours.padStart(2, '0')}:${minutes}`;
   }
 
-  // Function to populate slots with optional exclusion list
-  function populateSlots(excludeSlots = []) {
-    return ajax({ action: 'slots' }).then(resp => {
+  // Function to populate slots with optional exclusion list and Vamanam/Vasthi filtering
+  function populateSlots(excludeSlots = [], slotMode = 'regular') {
+    if (slotMode === true) slotMode = 'vamanam_only';
+    if (slotMode === false) slotMode = 'regular';
+
+    const params = { action: 'slots' };
+    if (slotMode === 'vamanam_only') {
+      params.filter_type = 'vamanam_only';
+    } else if (slotMode === 'vasthi_only') {
+      params.filter_type = 'vasthi_only';
+    } else {
+      params.filter_type = 'regular_only';
+    }
+
+    return ajax(params).then(resp => {
       const slots = (resp && resp.slots) || resp || FALLBACK_SLOTS;
       $slotSelect.find('option').not(':first').remove();
       (slots || FALLBACK_SLOTS).forEach(s => {
@@ -787,9 +843,28 @@ $(function () {
         // Normalize slot time to HH:MM format for comparison
         let normalizedSlotTime = normalizeSlotTime(slotTime);
 
+        // Check if slot is a Vamanam slot
+        const isVamSlot = (s.is_vamanam_slot === true || s.is_vamanam_slot === 'true' || s.is_vamanam_slot === 1 || 
+                           normalizedSlotTime === '05:00' || normalizedSlotTime === '05:30' ||
+                           normalizedSlotTime === '5:00' || normalizedSlotTime === '5:30');
+
+        // Check if slot is a Vasthi slot
+        const isVasthiSlot = (s.is_vasthi_slot === true || s.is_vasthi_slot === 'true' || s.is_vasthi_slot === 1 ||
+                              normalizedSlotTime === '08:30' || normalizedSlotTime === '8:30');
+
+        if (slotMode === 'vamanam_only') {
+          // Show ONLY Vamanam slots
+          if (!isVamSlot) return;
+        } else if (slotMode === 'vasthi_only') {
+          // Show ONLY Vasthi slots
+          if (!isVasthiSlot) return;
+        } else {
+          // Normal treatment: show other slots EXCEPT Vamanam slots
+          if (isVamSlot) return;
+        }
+
         // Check if this slot should be excluded
         const shouldExclude = excludeSlots.some(exclude => {
-          // Normalize exclude time to HH:MM format
           let normalizedExclude = normalizeSlotTime(exclude);
           return normalizedSlotTime === normalizedExclude;
         });
@@ -805,15 +880,22 @@ $(function () {
       FALLBACK_SLOTS.forEach(s => {
         const st = s.start_time || s;
         const slotTime = typeof st === 'string' ? st : (st.strftime ? st.strftime('%H:%M') : String(st));
-
-        // Normalize slot time to HH:MM format for comparison
         let normalizedSlotTime = normalizeSlotTime(slotTime);
 
-        // Check if this slot should be excluded
+        const isVamSlot = (s.is_vamanam_slot === true || normalizedSlotTime === '05:00' || normalizedSlotTime === '05:30');
+        const isVasthiSlot = (s.is_vasthi_slot === true || normalizedSlotTime === '08:30' || normalizedSlotTime === '8:30');
+
+        if (slotMode === 'vamanam_only') {
+          if (!isVamSlot) return;
+        } else if (slotMode === 'vasthi_only') {
+          if (!isVasthiSlot) return;
+        } else {
+          if (isVamSlot) return;
+        }
+
         const shouldExclude = excludeSlots.some(exclude => {
-          // Normalize exclude time to HH:MM format
           let normalizedExclude = normalizeSlotTime(exclude);
-          return normalizedSlotTime === normalizedExclude;
+          return normalizedExclude === normalizedSlotTime;
         });
 
         if (!shouldExclude) {
@@ -830,6 +912,7 @@ $(function () {
 
   // Listen for therapy selection changes
   $therapySelect.on('change', function () {
+    const currentVal = $slotSelect.val();
     updateSlotsForTherapy().then(() => {
       // If there's a pending slot value (from edit mode), restore it after slots are populated
       if (pendingSlotValue) {
@@ -855,10 +938,15 @@ $(function () {
           if (foundValue) {
             $slotSelect.val(foundValue);
           } else {
-            $slotSelect.val(pendingSlotValue);
+            $slotSelect.val('');
           }
           pendingSlotValue = null; // Clear after setting
         }, 50);
+      } else if (currentVal) {
+        // If the current slot is not among the newly populated options, clear it
+        if (!$slotSelect.find(`option[value="${currentVal}"]`).length) {
+          $slotSelect.val('');
+        }
       }
     });
   });
@@ -1749,6 +1837,15 @@ $(function () {
     if (!$existingOpt.length && t.therapy_code) {
       // Fallback: create an option if none exists (e.g. legacy allocation)
       const opt = new Option(t.therapy_name, t.therapy_code, true, true);
+      $(opt).data('data', {
+        id: t.therapy_code,
+        text: t.therapy_name,
+        therapy_name: t.therapy_name,
+        therapy_code: t.therapy_code,
+        therapy_category: t.therapy_category || '',
+        is_vamanam: !!t.is_vamanam || /vamanam|vamana/i.test(t.therapy_name || ''),
+        is_vasthi: !!t.is_vasthi || (/vasthi/i.test(t.therapy_name || '') && !/mathra/i.test(t.therapy_name || ''))
+      });
       $therapySelect.append(opt);
       $existingOpt = $therapySelect.find(`option[value="${t.therapy_code}"]`);
     }
