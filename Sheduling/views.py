@@ -719,7 +719,7 @@ def therapy_entry(request):
                 
                 # Log audit event
                 log_therapy_audit(
-                    user=request.user if request.user.is_authenticated else None,
+                    user=request.user if getattr(request, 'user', None) and request.user.is_authenticated else None,
                     action='cancel_therapy',
                     therapy_allocation=allocation,
                     description=f"Therapy '{allocation.therapy_name}' cancelled for patient {allocation.patient.pat_reg_no} from {cancel_from} to {cancel_to}. Reason: {reason}",
@@ -1006,7 +1006,7 @@ def therapy_entry(request):
                 
                 # Log audit event
                 log_therapy_audit(
-                    user=request.user if request.user.is_authenticated else None,
+                    user=request.user if getattr(request, 'user', None) and request.user.is_authenticated else None,
                     action='resume_therapy',
                     therapy_allocation=allocation,
                     description=f"Therapy '{allocation.therapy_name}' resumed for patient {allocation.patient.pat_reg_no} from {resume_from} to {resume_to}",
@@ -1109,30 +1109,6 @@ def therapy_entry(request):
                     allocation.to_date = new_to_date
                     allocation.days = (allocation.to_date - allocation.from_date).days + 1
 
-                # HARD TREATMENT RESTRICTION: Two hard treatments should not be scheduled in the same session
-                target_slot = new_timeslot if new_timeslot is not None else allocation.timeslot
-                target_name = payload.get('therapy_name') or allocation.therapy_name
-                target_code = payload.get('therapy_code') or getattr(allocation, 'therapy_code', None)
-                target_fdate = new_from_date if new_from_date else allocation.from_date
-                target_tdate = new_to_date if new_to_date else allocation.to_date
-                if target_slot:
-                    from reshedule import is_hard_treatment, get_slot_session, patient_has_hard_treatment_in_session
-                    if is_hard_treatment(therapy_obj=allocation, therapy_name=target_name, therapy_code=target_code):
-                        session = get_slot_session(target_slot)
-                        if session and getattr(allocation, 'patient', None):
-                            cur_d = target_fdate
-                            while cur_d <= target_tdate:
-                                if patient_has_hard_treatment_in_session(
-                                    patient_id=allocation.patient.id,
-                                    target_date=cur_d,
-                                    session=session,
-                                    exclude_allocation_id=allocation.id
-                                ):
-                                    return JsonResponse({
-                                        'error': 'two_hard_treatments_same_session',
-                                        'message': f"Two hard treatments cannot be scheduled in the same {session} session on {cur_d}."
-                                    }, status=400)
-                                cur_d += timedelta(days=1)
 
                 # Delete bookings outside the new date range if dates changed
                 # After 5:30 AM (schedule timezone): do not change today or past; only future.
@@ -1233,7 +1209,7 @@ def therapy_entry(request):
                             from .models import AllocationChange
                             AllocationChange.objects.create(
                                 allocation=allocation,
-                                changed_by=request.user if request.user.is_authenticated else None,
+                                changed_by=request.user if getattr(request, 'user', None) and request.user.is_authenticated else None,
                                 change_type='change_slot',
                                 diff={
                                     'old_slot_id': old_slot_id,
@@ -1620,14 +1596,16 @@ def therapy_entry(request):
                         allocation.save(update_fields=['status'])
                 
                 # Log audit event
+                req_u = getattr(request, 'user', None)
+                is_u_auth = req_u.is_authenticated if req_u else False
                 log_therapy_audit(
-                    user=request.user if request.user.is_authenticated else None,
+                    user=req_u if is_u_auth else None,
                     action='update_therapy',
                     therapy_allocation=allocation,
                     description=f"Therapy '{allocation.therapy_name}' updated for patient {allocation.patient.pat_reg_no}",
                     additional_data={
                         'updated_fields': list(payload.keys()),
-                        'updated_by': request.user.username if request.user.is_authenticated else 'Anonymous'
+                        'updated_by': req_u.username if is_u_auth else 'Anonymous'
                     },
                     request=request
                 )
@@ -1660,7 +1638,7 @@ def therapy_entry(request):
                     
                     # Log audit event
                     log_therapy_audit(
-                        user=request.user if request.user.is_authenticated else None,
+                        user=request.user if getattr(request, 'user', None) and request.user.is_authenticated else None,
                         action='remove_item',
                         therapy_allocation=allocation,
                         description=f"Item removed from therapy '{allocation.therapy_name}' for patient {allocation.patient.pat_reg_no}",
@@ -1813,20 +1791,6 @@ def therapy_entry(request):
                 if changed:
                     ps.save(update_fields=['pat_name', 'pat_age', 'pat_sex', 'pat_room_no', 'pat_ref_id', 'updated_at'])
 
-                # HARD TREATMENT RESTRICTION: Two hard treatments should not be scheduled in the same session
-                if timeslot_obj:
-                    from reshedule import is_hard_treatment, get_slot_session, patient_has_hard_treatment_in_session
-                    if is_hard_treatment(therapy_name=payload.get('therapy_name'), therapy_code=payload.get('therapy_code')):
-                        session = get_slot_session(timeslot_obj)
-                        if session:
-                            cur_d = fdate
-                            while cur_d <= tdate:
-                                if patient_has_hard_treatment_in_session(patient_id=ps.pk, target_date=cur_d, session=session):
-                                    return JsonResponse({
-                                        'error': 'two_hard_treatments_same_session',
-                                        'message': f"Two hard treatments cannot be scheduled in the same {session} session on {cur_d}."
-                                    }, status=400)
-                                cur_d += timedelta(days=1)
 
                 # create allocation and per-date bookings atomically (all-or-nothing)
                 try:
@@ -4201,23 +4165,10 @@ def allocate_therapy(request):
     if changed:
         patient_snapshot.save(update_fields=["pat_name","pat_age","pat_sex","pat_ref_id","updated_at"])
 
-    # HARD TREATMENT RESTRICTION: Two hard treatments should not be scheduled in the same session
-    if timeslot:
-        from reshedule import is_hard_treatment, get_slot_session, patient_has_hard_treatment_in_session
-        if is_hard_treatment(therapy_name=payload.get("therapy_name"), therapy_code=payload.get("therapy_code")):
-            session = get_slot_session(timeslot)
-            if session:
-                cur_d = from_date
-                while cur_d <= to_date:
-                    if patient_has_hard_treatment_in_session(patient_id=patient_snapshot.pk, target_date=cur_d, session=session):
-                        return JsonResponse({
-                            'error': 'two_hard_treatments_same_session',
-                            'message': f"Two hard treatments cannot be scheduled in the same {session} session on {cur_d}."
-                        }, status=400)
-                    cur_d += timedelta(days=1)
 
     # start atomic transaction for entire allocation (all-or-nothing)
     try:
+        from .models import Booking, BookingItem, BookingAssignment
         with transaction.atomic():
             allocation = TherapyAllocation.objects.create(
                 patient=patient_snapshot,

@@ -1259,16 +1259,17 @@ $(function () {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(therapyData)
     })
-      .then(response => {
+      .then(async response => {
         // Check if response is ok before parsing JSON
         if (!response.ok) {
-          // Try to parse error response as JSON
-          return response.json().then(data => {
-            throw new Error(data.error || `Server error: ${response.status} ${response.statusText}`);
-          }).catch(() => {
-            // If JSON parsing fails, throw with status text
-            throw new Error(`Server error: ${response.status} ${response.statusText}`);
-          });
+          let errorMsg = `Server error: ${response.status} ${response.statusText}`;
+          try {
+            const data = await response.json();
+            errorMsg = data.message || data.error || errorMsg;
+          } catch (e) {
+            // If JSON parsing fails, keep default errorMsg
+          }
+          throw new Error(errorMsg);
         }
         return response.json();
       })
@@ -1319,7 +1320,7 @@ $(function () {
 
           alert('Therapy added and saved to server as Draft.');
         } else {
-          alert('Error: ' + (data.error || 'Failed to save therapy'));
+          alert('Error: ' + (data.message || data.error || 'Failed to save therapy'));
         }
       })
       .catch(error => {
@@ -2061,7 +2062,7 @@ $(function () {
             renderAll();
           }
         } else {
-          alert('Failed to update therapy: ' + JSON.stringify(j));
+          alert('Failed to update therapy: ' + (j.message || j.error || JSON.stringify(j)));
           renderAll();
         }
       }).catch(() => {

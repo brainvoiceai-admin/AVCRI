@@ -512,10 +512,10 @@ class TestHardTreatmentScheduling(TestCase):
         )
         b_h2.refresh_from_db()
         assert b_h2.status == "failed"
-        assert b_h2.failure_reason == "hard_treatment_same_session_conflict"
+        assert b_h2.failure_reason == "hard_treatment_same_session_conflict" 
 
-    def test_api_therapy_entry_blocks_two_hard_treatments_same_session(self):
-        """therapy_entry action='allocate' returns 400 when two hard treatments are scheduled in the same session."""
+    def test_api_therapy_entry_allows_selection_and_saves_draft(self):
+        """therapy_entry action='allocate' allows selecting morning slot without error and saves as draft."""
         # 1. Allocate first Hard treatment in morning (08:30)
         payload1 = {
             "action": "allocate",
@@ -543,7 +543,7 @@ class TestHardTreatmentScheduling(TestCase):
             date=self.target_date,
         ).update(status="scheduled")
 
-        # 2. Attempt to allocate second Hard treatment in morning (10:00)
+        # 2. Allocate second Hard treatment in morning (10:00) -> Allowed without error!
         payload2 = {
             "action": "allocate",
             "patient_reg_no": self.patient.pat_reg_no,
@@ -562,33 +562,12 @@ class TestHardTreatmentScheduling(TestCase):
             content_type="application/json",
         )
         res2 = therapy_entry(req2)
-        assert res2.status_code == 400
+        assert res2.status_code in (200, 201), res2.content
         data2 = json.loads(res2.content.decode("utf-8"))
-        assert data2.get("error") == "two_hard_treatments_same_session"
+        assert data2.get("status") == "ok"
 
-        # 3. EXCEPTION VERIFIED: Allocate Medium or Easy treatment (Lepam) in morning (10:00) -> Allowed!
-        payload_easy = {
-            "action": "allocate",
-            "patient_reg_no": self.patient.pat_reg_no,
-            "patient_name": self.patient.pat_name,
-            "patient_age": self.patient.pat_age,
-            "patient_sex": self.patient.pat_sex,
-            "therapy_code": self.therapy_easy.therapy_code,
-            "therapy_name": self.therapy_easy.therapy_name,
-            "from_date": self.target_date.strftime("%Y-%m-%d"),
-            "to_date": self.target_date.strftime("%Y-%m-%d"),
-            "timeslot": "10:00",
-        }
-        req_easy = self.factory.post(
-            "/scheduling/therapy-entry/",
-            data=json.dumps(payload_easy),
-            content_type="application/json",
-        )
-        res_easy = therapy_entry(req_easy)
-        assert res_easy.status_code in (200, 201), res_easy.content
-
-    def test_api_allocate_therapy_blocks_two_hard_treatments_same_session(self):
-        """allocate_therapy view returns 400 when two hard treatments are scheduled in the same session."""
+    def test_api_allocate_therapy_allows_selection_and_saves_draft(self):
+        """allocate_therapy view allows selecting morning slot without error and saves as draft."""
         # Create active morning hard booking
         alloc_h1 = TherapyAllocation.objects.create(
             patient=self.patient,
@@ -608,7 +587,7 @@ class TestHardTreatmentScheduling(TestCase):
             snapshot_therapy_name=self.therapy_hard_1.therapy_name,
         )
 
-        # Attempt to allocate second Hard treatment via allocate_therapy API at 10:00
+        # Allocate second Hard treatment via allocate_therapy API at 10:00 -> Allowed!
         payload = {
             "patient_reg_no": self.patient.pat_reg_no,
             "patient_name": self.patient.pat_name,
@@ -625,12 +604,12 @@ class TestHardTreatmentScheduling(TestCase):
             content_type="application/json",
         )
         res = allocate_therapy(req)
-        assert res.status_code == 400
+        assert res.status_code in (200, 201), res.content
         data = json.loads(res.content.decode("utf-8"))
-        assert data.get("error") == "two_hard_treatments_same_session"
+        assert data.get("status") in ("ok", "success")
 
-    def test_api_update_therapy_blocks_two_hard_treatments_same_session(self):
-        """therapy_entry action='update_therapy' blocks changing timeslot of a hard treatment into a session with another hard treatment."""
+    def test_api_update_therapy_allows_timeslot_update(self):
+        """therapy_entry action='update_therapy' allows changing timeslot without entry restriction."""
         # 1. Existing morning hard treatment
         alloc_h1 = TherapyAllocation.objects.create(
             patient=self.patient,
@@ -669,7 +648,7 @@ class TestHardTreatmentScheduling(TestCase):
             snapshot_therapy_name=self.therapy_hard_2.therapy_name,
         )
 
-        # 3. Attempt to update alloc_h2 timeslot from 14:30 (evening) to 10:00 (morning) -> Should return 400!
+        # 3. Update alloc_h2 timeslot from 14:30 to 10:00 -> Allowed!
         update_payload = {
             "action": "update_therapy",
             "allocation_id": alloc_h2.id,
@@ -680,10 +659,11 @@ class TestHardTreatmentScheduling(TestCase):
             data=json.dumps(update_payload),
             content_type="application/json",
         )
+        req_update.user = self.admin_user
         res_update = therapy_entry(req_update)
-        assert res_update.status_code == 400
+        assert res_update.status_code == 200, res_update.content
         data_update = json.loads(res_update.content.decode("utf-8"))
-        assert data_update.get("error") == "two_hard_treatments_same_session"
+        assert data_update.get("status") == "ok"
 
     def test_reschedule_options_api_excludes_conflicting_session(self):
         """reschedule_options_api excludes slots in morning session when patient already has a morning hard treatment."""
