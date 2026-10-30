@@ -1491,10 +1491,17 @@ def compute_available_slots_for_date(date_obj, therapy_name, patient_type, thera
       - therapist capacity & leave (uses TherapistBooking and TherapistLeave)
     """
     from .models import TimeSlot, TreatmentRoom, RoomBooking, Therapist, TherapistBooking, TherapistLeave, TherapyDetails
+    from reshedule import is_vamanam_treatment, get_vamanam_slots
 
-    candidate_slots = GENERAL_SLOTS.copy()
-    if patient_type == "OP":
-        candidate_slots = ["11:30", "17:30"]
+    is_vam = is_vamanam_treatment(therapy_name, therapy_code)
+    vam_slots = get_vamanam_slots()
+
+    if is_vam:
+        candidate_slots = list(vam_slots)
+    else:
+        candidate_slots = [s for s in GENERAL_SLOTS if s not in vam_slots]
+        if patient_type == "OP":
+            candidate_slots = [s for s in ["11:30", "17:30"] if s not in vam_slots]
 
     try:
         details = TherapyDetails.objects.get(therapy_name__iexact=therapy_name)
@@ -1507,11 +1514,12 @@ def compute_available_slots_for_date(date_obj, therapy_name, patient_type, thera
         candidate_slots = [s for s in candidate_slots if s not in ["11:30", "17:30"]]
 
     try:
-        from reshedule import is_group_vasthi_0830_only
-        if is_group_vasthi_0830_only(therapy_name, therapy_code):
-            candidate_slots = [s for s in candidate_slots if s == "08:30"]
+        from reshedule import is_vasthi_treatment, get_vasthi_slots
+        if is_vasthi_treatment(therapy_name, therapy_code):
+            v_slots = get_vasthi_slots()
+            candidate_slots = [s for s in candidate_slots if s in v_slots]
             if not candidate_slots:
-                candidate_slots = ["08:30"]
+                candidate_slots = list(v_slots)
     except Exception:
         pass
 
@@ -1666,16 +1674,48 @@ def available_slots(request):
 def time_slots(request):
     """
     Return all SlotMaster rows in order:
-      { "slots": [ {"slot_number":1, "start_time":"06:30", "label":"6:30 AM"}, ... ] }
+      { "slots": [ {"slot_number":1, "start_time":"06:30", "label":"6:30 AM", "is_vamanam_slot": false}, ... ] }
     """
     from masters.models import SlotMaster
+    from reshedule import is_vamanam_treatment, is_vasthi_treatment
+
+    therapy_name = request.GET.get('therapy_name', '').strip()
+    therapy_code = request.GET.get('therapy_code', '').strip()
+    is_vam_param = request.GET.get('is_vamanam')
+    is_vasthi_param = request.GET.get('is_vasthi')
+    filter_type = (request.GET.get('filter_type') or '').strip().lower()
+
+    is_vam = False
+    if is_vam_param is not None:
+        is_vam = str(is_vam_param).lower() in ('1', 'true', 'yes')
+    elif therapy_name or therapy_code:
+        is_vam = is_vamanam_treatment(therapy_name, therapy_code)
+
+    is_vasthi = False
+    if is_vasthi_param is not None:
+        is_vasthi = str(is_vasthi_param).lower() in ('1', 'true', 'yes')
+    elif (therapy_name or therapy_code) and not is_vam:
+        is_vasthi = is_vasthi_treatment(therapy_name, therapy_code)
+
     qs = SlotMaster.objects.filter(is_active=True).order_by('slot_number')
+    if is_vam or filter_type == 'vamanam_only':
+        qs = qs.filter(is_vamanam_slot=True)
+    elif is_vasthi or filter_type == 'vasthi_only':
+        qs = qs.filter(is_vasthi_slot=True)
+    elif filter_type == 'regular_only' or request.GET.get('exclude_vamanam', '').lower() in ('1', 'true', 'yes'):
+        qs = qs.filter(is_vamanam_slot=False)
+
     slots = []
     for t in qs:
-        # use slot_time field; format HH:MM and friendly label in 12-hour format
         st = t.slot_time.strftime("%H:%M")
         label = t.slot_time.strftime("%I:%M %p").lstrip("0")
-        slots.append({"slot_number": t.slot_number, "start_time": st, "label": label})
+        slots.append({
+            "slot_number": t.slot_number, 
+            "start_time": st, 
+            "label": label,
+            "is_vamanam_slot": getattr(t, 'is_vamanam_slot', False),
+            "is_vasthi_slot": getattr(t, 'is_vasthi_slot', False)
+        })
     return JsonResponse({"slots": slots})
 
 

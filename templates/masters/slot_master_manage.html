@@ -28,7 +28,10 @@
                 </button>
                 {% endif %}
                 <a href="{% url 'slot_master_add' %}" class="btn btn-success">
-                    <i class="fas fa-plus me-2"></i>Add New Slot
+                    <i class="fas fa-plus me-2"></i>Add Regular Slot
+                </a>
+                <a href="{% url 'slot_master_add' %}?type=vamanam" class="btn btn-danger">
+                    <i class="fas fa-heartbeat me-2"></i>Add Vamanam Slot
                 </a>
                 <a href="{% url 'master_management_dashboard' %}" class="btn btn-secondary">
                     <i class="fas fa-arrow-left me-2"></i>Back to Dashboard
@@ -79,13 +82,16 @@
             </div>
         </div>
 
-        <!-- Slots Table -->
-        <div class="card">
-            <div class="card-header">
+        <!-- Standard Slots Table -->
+        <div class="card mb-4">
+            <div class="card-header bg-light d-flex justify-content-between align-items-center">
                 <h5 class="mb-0">
-                    <i class="fas fa-list me-2"></i>Time Slots List
-                    <span class="badge bg-primary ms-2" id="totalCount">{{ slot_list|length }}</span>
+                    <i class="fas fa-clock text-primary me-2"></i>Standard Treatment Slots
+                    <span class="badge bg-primary ms-2" id="regularCount">{{ regular_slot_list|length }}</span>
                 </h5>
+                <a href="{% url 'slot_master_add' %}" class="btn btn-sm btn-outline-primary">
+                    <i class="fas fa-plus me-1"></i>Add Regular Slot
+                </a>
             </div>
             <div class="card-body p-0">
                 <div class="table-responsive">
@@ -101,7 +107,7 @@
                             </tr>
                         </thead>
                         <tbody>
-                            {% for slot in slot_list %}
+                            {% for slot in regular_slot_list %}
                             <tr>
                                 <td>
                                     <strong>{{ slot.slot_number }}</strong>
@@ -109,6 +115,9 @@
                                 <td>{{ slot.slot_name|default:"-" }}</td>
                                 <td>
                                     <span class="badge bg-info">{{ slot.slot_time|time:"g:i A" }}</span>
+                                    {% if slot.is_vasthi_slot %}
+                                    <span class="badge bg-success ms-1"><i class="fas fa-prescription-bottle-alt me-1"></i>Vasthi</span>
+                                    {% endif %}
                                 </td>
                                 <td>
                                     {% if slot.is_active %}
@@ -125,6 +134,16 @@
                                         <a href="{% url 'slot_master_update' slot.pk %}"
                                             class="btn btn-sm btn-outline-primary" title="Edit">
                                             <i class="fas fa-edit"></i>
+                                        </a>
+                                        <a href="{% url 'slot_master_toggle_vamanam' slot.pk %}"
+                                            class="btn btn-sm btn-outline-danger" title="Convert to Vamanam Exclusive Slot"
+                                            onclick="return confirm('Restrict Slot {{ slot.slot_number }} ({{ slot.slot_time|time:"g:i A" }}) exclusively to Vamanam treatments? Regular treatments will no longer be scheduled here.');">
+                                            <i class="fas fa-heartbeat"></i>
+                                        </a>
+                                        <a href="{% url 'slot_master_toggle_vasthi' slot.pk %}"
+                                            class="btn btn-sm {% if slot.is_vasthi_slot %}btn-success text-white{% else %}btn-outline-success{% endif %}" title="Toggle Vasthi Treatment Slot"
+                                            onclick="return confirm('Toggle Vasthi designation for Slot {{ slot.slot_number }} ({{ slot.slot_time|time:"g:i A" }})?');">
+                                            <i class="fas fa-prescription-bottle-alt"></i>
                                         </a>
                                         {% if slot.is_active %}
                                         <a href="{% url 'slot_master_disable' slot.pk %}"
@@ -151,8 +170,109 @@
                                 <td colspan="6" class="text-center py-4">
                                     <div class="text-muted">
                                         <i class="fas fa-clock fa-3x mb-3"></i>
-                                        <p>No time slots found. <a href="{% url 'slot_master_add' %}">Add the first
-                                                slot</a></p>
+                                        <p>No standard time slots found. <a href="{% url 'slot_master_add' %}">Add standard slot</a></p>
+                                    </div>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Dedicated Vamanam Slots Table -->
+        <div class="card border-danger mb-4 shadow-sm">
+            <div class="card-header bg-danger text-white d-flex justify-content-between align-items-center">
+                <div>
+                    <h5 class="mb-0 text-white">
+                        <i class="fas fa-heartbeat me-2"></i>Vamanam Special Treatment Slots
+                        <span class="badge bg-light text-danger ms-2" id="vamanamCount">{{ vamanam_slot_list|length }}</span>
+                    </h5>
+                    <small class="text-white-50">Dedicated early morning slots (e.g., 05:00 AM, 05:30 AM). Exclusively reserved for Vamanam therapies; never assigned to regular treatments.</small>
+                </div>
+                <div>
+                    <a href="{% url 'slot_master_add' %}?type=vamanam" class="btn btn-light btn-sm text-danger fw-bold">
+                        <i class="fas fa-plus me-1"></i>Add Vamanam Slot
+                    </a>
+                </div>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0" id="vamanamSlotTable">
+                        <thead class="table-danger text-dark">
+                            <tr>
+                                <th>Slot Number</th>
+                                <th>Slot Name</th>
+                                <th>Slot Time</th>
+                                <th>Treatment Scope</th>
+                                <th>Status</th>
+                                <th>Created</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for slot in vamanam_slot_list %}
+                            <tr class="table-light">
+                                <td>
+                                    <strong class="text-danger">{{ slot.slot_number }}</strong>
+                                </td>
+                                <td>{{ slot.slot_name|default:"Vamanam Slot" }}</td>
+                                <td>
+                                    <span class="badge bg-danger fs-6">{{ slot.slot_time|time:"g:i A" }}</span>
+                                </td>
+                                <td>
+                                    <span class="badge bg-danger text-white">
+                                        <i class="fas fa-lock me-1"></i>Vamanam Exclusive
+                                    </span>
+                                </td>
+                                <td>
+                                    {% if slot.is_active %}
+                                    <span class="badge bg-success">Active</span>
+                                    {% else %}
+                                    <span class="badge bg-danger">Inactive</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    <small class="text-muted">{{ slot.created_at|date:"d/m/Y" }}</small>
+                                </td>
+                                <td>
+                                    <div class="btn-group" role="group">
+                                        <a href="{% url 'slot_master_update' slot.pk %}"
+                                            class="btn btn-sm btn-outline-primary" title="Edit">
+                                            <i class="fas fa-edit"></i>
+                                        </a>
+                                        <a href="{% url 'slot_master_toggle_vamanam' slot.pk %}"
+                                            class="btn btn-sm btn-outline-secondary" title="Convert to Regular Slot"
+                                            onclick="return confirm('Remove Vamanam restriction from Slot {{ slot.slot_number }}? It will become a regular slot.');">
+                                            <i class="fas fa-unlock"></i>
+                                        </a>
+                                        {% if slot.is_active %}
+                                        <a href="{% url 'slot_master_disable' slot.pk %}"
+                                           class="btn btn-sm btn-outline-warning" title="Disable"
+                                           onclick="return confirm('Are you sure you want to disable Slot {{ slot.slot_number }}?');">
+                                            <i class="fas fa-ban"></i>
+                                        </a>
+                                        {% else %}
+                                        <a href="{% url 'slot_master_enable' slot.pk %}"
+                                           class="btn btn-sm btn-outline-success" title="Enable">
+                                            <i class="fas fa-check"></i>
+                                        </a>
+                                        {% endif %}
+                                        <a href="{% url 'slot_master_delete' slot.pk %}"
+                                            class="btn btn-sm btn-outline-danger" title="Delete"
+                                            onclick="return confirm('Are you sure you want to delete Slot {{ slot.slot_number }}? This action cannot be undone.');">
+                                            <i class="fas fa-trash"></i>
+                                        </a>
+                                    </div>
+                                </td>
+                            </tr>
+                            {% empty %}
+                            <tr>
+                                <td colspan="7" class="text-center py-4">
+                                    <div class="text-muted">
+                                        <i class="fas fa-heartbeat fa-3x mb-3 text-danger"></i>
+                                        <p>No dedicated Vamanam slots configured. <a href="{% url 'slot_master_add' %}?type=vamanam" class="text-danger fw-bold">Add Vamanam slot (e.g. 05:00 AM)</a></p>
                                     </div>
                                 </td>
                             </tr>

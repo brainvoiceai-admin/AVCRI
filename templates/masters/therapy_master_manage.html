@@ -125,6 +125,12 @@
                                     {% if therapy.is_steam_therapy %}
                                     <span class="badge bg-warning text-dark ms-1" title="Allocates strictly to configured steam rooms: {% if steam_rooms_display %}{{ steam_rooms_display }}{% else %}Room Master configured{% endif %}"><i class="fas fa-wind me-1"></i>Steam Room ({% if steam_rooms_display %}{{ steam_rooms_display }}{% else %}Dynamic{% endif %})</span>
                                     {% endif %}
+                                    {% if therapy.is_vamanam %}
+                                    <span class="badge bg-danger text-white ms-1" title="Allocates strictly to Vamanam slots ({% if vamanam_slots_display %}{{ vamanam_slots_display }}{% else %}05:00, 05:30{% endif %}) and Vamanam rooms ({% if vamanam_rooms_display %}{{ vamanam_rooms_display }}{% else %}Configured in Room Master{% endif %})"><i class="fas fa-heartbeat me-1"></i>Vamanam</span>
+                                    {% endif %}
+                                    {% if therapy.is_vasthi %}
+                                    <span class="badge bg-success text-white ms-1" title="Vasthi treatment (Slots: {% if vasthi_slots_display %}{{ vasthi_slots_display }}{% else %}Configured in Slot Master{% endif %})"><i class="fas fa-prescription-bottle-alt me-1"></i>Vasthi</span>
+                                    {% endif %}
                                 </td>
                                 <td>{{ therapy.therapy_group|default:"-" }}</td>
                                 <td>{{ therapy.therapy_category|default:"-" }}</td>
@@ -184,8 +190,14 @@
                                 <td>
                                     <div class="btn-group" role="group">
                                         <a href="{% url 'therapy_master_update' therapy.pk %}"
-                                            class="btn btn-sm btn-outline-primary">
+                                            class="btn btn-sm btn-outline-primary" title="Edit">
                                             <i class="fas fa-edit"></i>
+                                        </a>
+                                        <a href="{% url 'therapy_master_toggle_vasthi' therapy.pk %}"
+                                            class="btn btn-sm {% if therapy.is_vasthi %}btn-success text-white{% else %}btn-outline-success{% endif %}"
+                                            title="Toggle Vasthi Treatment Status"
+                                            onclick="return confirm('Toggle Vasthi treatment designation for {{ therapy.therapy_name }}?');">
+                                            <i class="fas fa-prescription-bottle-alt"></i>
                                         </a>
                                         {% if therapy.is_active %}
                                         <a href="{% url 'therapy_master_disable' therapy.pk %}"

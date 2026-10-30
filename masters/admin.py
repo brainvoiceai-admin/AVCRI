@@ -73,14 +73,14 @@ class TherapyGroupAdmin(admin.ModelAdmin):
 
 @admin.register(TherapyMaster)
 class TherapyMasterAdmin(admin.ModelAdmin):
-    list_display = ['therapy_code', 'therapy_name', 'therapy_group', 'is_steam_therapy', 'total_no_of_therapist', 'is_active', 'created_at']
-    list_filter = ['is_active', 'is_steam_therapy', 'therapy_group', 'therapy_category', 'created_at']
+    list_display = ['therapy_code', 'therapy_name', 'therapy_group', 'is_steam_therapy', 'is_vamanam', 'is_vasthi', 'total_no_of_therapist', 'is_active', 'created_at']
+    list_filter = ['is_active', 'is_steam_therapy', 'is_vamanam', 'is_vasthi', 'therapy_group', 'therapy_category', 'created_at']
     search_fields = ['therapy_code', 'therapy_name', 'therapy_group__name']
-    list_editable = ['is_active', 'is_steam_therapy']
+    list_editable = ['is_active', 'is_steam_therapy', 'is_vamanam', 'is_vasthi']
     ordering = ['therapy_name']
     fieldsets = (
         ('Basic Information', {
-            'fields': ('therapy_code', 'therapy_name', 'therapy_group', 'therapy_category', 'is_steam_therapy')
+            'fields': ('therapy_code', 'therapy_name', 'therapy_group', 'therapy_category', 'is_steam_therapy', 'is_vamanam', 'is_vasthi')
         }),
         ('Therapy Details', {
             'fields': ('therapy_duration', 'bathing_required', 'treatment_room_required', 'cost_of_therapy')
@@ -124,14 +124,14 @@ class ItemMasterAdmin(admin.ModelAdmin):
 
 @admin.register(SlotMaster)
 class SlotMasterAdmin(admin.ModelAdmin):
-    list_display = ['slot_number', 'slot_name', 'slot_time', 'is_active', 'created_at']
-    list_filter = ['is_active', 'created_at']
+    list_display = ['slot_number', 'slot_name', 'slot_time', 'is_vamanam_slot', 'is_vasthi_slot', 'is_active', 'created_at']
+    list_filter = ['is_active', 'is_vamanam_slot', 'is_vasthi_slot', 'created_at']
     search_fields = ['slot_name', 'slot_number']
-    list_editable = ['is_active']
+    list_editable = ['is_active', 'is_vamanam_slot', 'is_vasthi_slot']
     ordering = ['slot_number']
     fieldsets = (
         ('Slot Information', {
-            'fields': ('slot_number', 'slot_name', 'slot_time')
+            'fields': ('slot_number', 'slot_name', 'slot_time', 'is_vamanam_slot', 'is_vasthi_slot')
         }),
         ('Status', {
             'fields': ('is_active',)

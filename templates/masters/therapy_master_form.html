@@ -210,11 +210,25 @@
                         Active (uncheck to disable this therapy)
                     </label>
                 </div>
-                <div class="form-check form-switch">
+                <div class="form-check form-switch mb-3">
                     <input class="form-check-input" type="checkbox" id="id_is_steam_therapy" name="is_steam_therapy" 
                            {% if form.is_steam_therapy.value %}checked{% endif %}>
                     <label class="form-check-label" for="id_is_steam_therapy">
                         <strong>Steam Therapy</strong> (Allocates dynamically to configured Steam Rooms: <strong class="text-primary">{% if steam_rooms_display %}{{ steam_rooms_display }}{% else %}configured in Room Master{% endif %}</strong> with no slot restrictions)
+                    </label>
+                </div>
+                <div class="form-check form-switch mb-3">
+                    <input class="form-check-input" type="checkbox" id="id_is_vamanam" name="is_vamanam" 
+                           {% if form.is_vamanam.value %}checked{% endif %}>
+                    <label class="form-check-label" for="id_is_vamanam">
+                        <strong class="text-danger"><i class="fas fa-heartbeat me-1"></i>Vamanam Special Therapy</strong> (Restricts scheduling strictly to Vamanam slots: <strong class="text-primary">{% if vamanam_slots_display %}{{ vamanam_slots_display }}{% else %}05:00 AM, 05:30 AM{% endif %}</strong> and Vamanam treatment rooms: <strong class="text-primary">{% if vamanam_rooms_display %}{{ vamanam_rooms_display }}{% else %}configured in Room Master{% endif %}</strong>. Regular therapies will never be scheduled in these slots.)
+                    </label>
+                </div>
+                <div class="form-check form-switch">
+                    <input class="form-check-input" type="checkbox" id="id_is_vasthi" name="is_vasthi" 
+                           {% if form.is_vasthi.value %}checked{% endif %}>
+                    <label class="form-check-label" for="id_is_vasthi">
+                        <strong class="text-success"><i class="fas fa-prescription-bottle-alt me-1"></i>Vasthi Therapy</strong> (Vasthi Slots: <strong class="text-primary">{% if vasthi_slots_display %}{{ vasthi_slots_display }}{% else %}Configured in Slot Master{% endif %}</strong>)
                     </label>
                 </div>
             </div>

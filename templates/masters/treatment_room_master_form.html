@@ -104,23 +104,32 @@
                             </div>
 
                             <div class="row">
-                                <div class="col-md-6 mb-3">
+                                <div class="col-md-4 mb-3">
                                     <div class="form-check form-switch">
                                         {{ form.is_steam_room }}
                                         <label class="form-check-label fw-bold" for="{{ form.is_steam_room.id_for_label }}">
-                                            <i class="fas fa-wind text-warning me-1"></i>Steam Therapy Room
+                                            <i class="fas fa-wind text-warning me-1"></i>Steam Room
                                         </label>
                                     </div>
-                                    <small class="form-text text-muted">Designates this room to accommodate Steam Therapies</small>
+                                    <small class="form-text text-muted">Accommodates Steam Therapies</small>
                                 </div>
-                                <div class="col-md-6 mb-3">
+                                <div class="col-md-4 mb-3">
+                                    <div class="form-check form-switch">
+                                        {{ form.is_vamanam_room }}
+                                        <label class="form-check-label fw-bold text-danger" for="{{ form.is_vamanam_room.id_for_label }}">
+                                            <i class="fas fa-heartbeat me-1"></i>Vamanam Room
+                                        </label>
+                                    </div>
+                                    <small class="form-text text-muted">Accommodates Vamanam Therapies</small>
+                                </div>
+                                <div class="col-md-4 mb-3">
                                     <div class="form-check form-switch">
                                         {{ form.is_active }}
                                         <label class="form-check-label fw-bold" for="{{ form.is_active.id_for_label }}">
                                             Active
                                         </label>
                                     </div>
-                                    <small class="form-text text-muted">Only active rooms appear in room selection</small>
+                                    <small class="form-text text-muted">Only active rooms appear in selection</small>
                                 </div>
                             </div>
 

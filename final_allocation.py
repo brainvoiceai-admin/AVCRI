@@ -637,6 +637,39 @@ def allocate_treatment_room(date, time_slot, last_room=None, therapy_name=None, 
     except Exception as _st_err:
         print(f"[ROOM RESTRICTION] Error checking steam therapy room: {_st_err}")
 
+    # VAMANAM THERAPY RESTRICTION: Always allocate strictly to designated Vamanam treatment rooms (dynamic from Room Master)
+    try:
+        from reshedule import is_vamanam_treatment, get_vamanam_treatment_rooms
+        if is_vamanam_treatment(therapy_name):
+            vamanam_rooms = get_vamanam_treatment_rooms()
+            if not vamanam_rooms:
+                print(f"[ROOM RESTRICTION] Vamanam therapy detected - no Vamanam rooms configured in Room Master.")
+                return None
+            for candidate_room_no in vamanam_rooms:
+                v_room = check_room_availability(candidate_room_no)
+                if v_room:
+                    print(f"[ROOM RESTRICTION] Vamanam therapy detected - assigned {candidate_room_no} room.")
+                    return v_room
+            print(f"[ROOM RESTRICTION] Vamanam therapy detected - all Vamanam rooms ({', '.join(vamanam_rooms)}) are unavailable on {date} at {time_slot}.")
+            return None
+    except Exception as _vm_err:
+        print(f"[ROOM RESTRICTION] Error checking Vamanam room: {_vm_err}")
+
+    # VASTHI THERAPY RESTRICTION: Dedicated room allocation function for Vasthi treatments
+    # - Cottage patients preferably assigned matching TRC room
+    # - If multiple patients in same cottage room, only one gets TRC room, others get other suitable treatment rooms
+    try:
+        from reshedule import is_vasthi_treatment, allocate_vasthi_treatment_room
+        if is_vasthi_treatment(therapy_name, getattr(patient, 'therapy_code', None) if patient else None):
+            vasthi_room = allocate_vasthi_treatment_room(
+                date, time_slot, last_room=last_room, therapy_name=therapy_name,
+                patient_id=patient_id, patient_staying_room=patient_staying_room,
+                patient=patient
+            )
+            return vasthi_room
+    except Exception as _vsth_err:
+        print(f"[ROOM RESTRICTION] Error in Vasthi room allocation: {_vsth_err}")
+
     # NEW: Primary logic - allocate based on patient staying room
     # Special handling: If patient_staying_room starts with "OP-", treat it as if there's no staying room
     # (OP patients are handled in the OP patient fallback logic below)
@@ -2097,21 +2130,26 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
 
         # preferred slot only
         pref_slot = getattr(booking, 'timeslot', None) or getattr(allocation, 'timeslot', None)
-        # Vasthi therapy group (masters), except Mathra THEB037: final schedule must use 08:30 only
+        # Vasthi therapy (marked via TherapyMaster.is_vasthi or Vasthi group, except Mathra THEB037): schedule in dynamic Vasthi slot (defaults to 08:30)
         try:
-            from reshedule import is_group_vasthi_0830_only
-            if is_group_vasthi_0830_only(therapy_name, getattr(allocation, 'therapy_code', None)):
-                sm0830 = SlotMaster.objects.filter(
-                    slot_time=datetime.strptime('08:30', '%H:%M').time(),
-                    is_active=True,
-                ).first()
-                if sm0830:
-                    pref_slot = sm0830
-                    if create_bookings and getattr(booking, 'timeslot_id', None) != sm0830.id:
-                        booking.timeslot = sm0830
-                        booking.save(update_fields=['timeslot', 'updated_at'])
-                else:
-                    print('[VASTHI GROUP] Final schedule: no active SlotMaster for 08:30')
+            from reshedule import is_vasthi_treatment, get_vasthi_slots
+            if is_vasthi_treatment(therapy_name, getattr(allocation, 'therapy_code', None)):
+                # If pref_slot is already designated as an active Vasthi slot, keep it
+                is_current_slot_vasthi = bool(pref_slot and getattr(pref_slot, 'is_vasthi_slot', False) and getattr(pref_slot, 'is_active', True))
+                if not is_current_slot_vasthi:
+                    vasthi_slot_obj = SlotMaster.objects.filter(is_vasthi_slot=True, is_active=True).order_by('slot_time').first()
+                    if not vasthi_slot_obj:
+                        vasthi_slot_obj = SlotMaster.objects.filter(
+                            slot_time=datetime.strptime('08:30', '%H:%M').time(),
+                            is_active=True,
+                        ).first()
+                    if vasthi_slot_obj:
+                        pref_slot = vasthi_slot_obj
+                        if create_bookings and getattr(booking, 'timeslot_id', None) != vasthi_slot_obj.id:
+                            booking.timeslot = vasthi_slot_obj
+                            booking.save(update_fields=['timeslot', 'updated_at'])
+                    else:
+                        print('[VASTHI GROUP] Final schedule: no active SlotMaster for Vasthi slot')
         except Exception as _gv_e:
             print(f'[SLOT RULE] Final schedule slot rule skipped: {_gv_e}')
         requested_slot_value = None
@@ -3204,10 +3242,16 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
         if needs_room_flag and not room_candidate:
             # Build detailed error message based on patient staying room or OP status
             reason = "no_room_available"
-            from reshedule import is_steam_therapy_treatment, get_steam_therapy_rooms
+            from reshedule import is_steam_therapy_treatment, get_steam_therapy_rooms, is_vamanam_treatment, get_vamanam_treatment_rooms
             if is_steam_therapy_treatment(therapy_name):
                 steam_rooms = get_steam_therapy_rooms()
                 reason = f"no_room_available: All steam therapy rooms ({', '.join(steam_rooms)}) are not available"
+            elif is_vamanam_treatment(therapy_name):
+                v_rooms = get_vamanam_treatment_rooms()
+                if v_rooms:
+                    reason = f"no_room_available: All Vamanam treatment rooms ({', '.join(v_rooms)}) are not available"
+                else:
+                    reason = "no_room_available: No Vamanam treatment rooms configured in Room Master"
             elif patient_staying_room:
                 staying_room_upper = str(patient_staying_room).strip().upper()
                 # Check if it's an OP- prefix (not a real staying room)
@@ -3347,7 +3391,7 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                         ).exclude(pk=booking.pk).first()
                         
                         if existing_booking:
-                            from reshedule import is_steam_therapy_treatment, get_steam_therapy_rooms
+                            from reshedule import is_steam_therapy_treatment, get_steam_therapy_rooms, is_vamanam_treatment, get_vamanam_treatment_rooms
                             if is_steam_therapy_treatment(therapy_name):
                                 current_room_no = getattr(room_candidate, 'room_no', None)
                                 steam_rooms = get_steam_therapy_rooms()
@@ -3369,6 +3413,27 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                                             break
                                 if not alt_found:
                                     raise RuntimeError(f"no_room_available: All steam therapy rooms ({', '.join(steam_rooms)}) are booked on {target_date} at {slot_master}")
+                            elif is_vamanam_treatment(therapy_name):
+                                current_room_no = getattr(room_candidate, 'room_no', None)
+                                v_rooms = get_vamanam_treatment_rooms()
+                                alt_v_rooms = [r for r in v_rooms if r != current_room_no]
+                                from Patient.models import TreatmentRoom
+                                alt_found = False
+                                for alt_v_room_no in alt_v_rooms:
+                                    alt_room_obj = TreatmentRoom.objects.filter(room_no=alt_v_room_no, is_active=True).first()
+                                    if alt_room_obj:
+                                        alt_conflict = BookingModel.objects.filter(
+                                            room=alt_room_obj,
+                                            date=target_date,
+                                            timeslot=slot_master
+                                        ).exclude(pk=booking.pk).first()
+                                        if not alt_conflict:
+                                            room_candidate = alt_room_obj
+                                            print(f"[DEBUG] Using alternative Vamanam room: {alt_room_obj.room_no}")
+                                            alt_found = True
+                                            break
+                                if not alt_found:
+                                    raise RuntimeError(f"no_room_available: All Vamanam treatment rooms ({', '.join(v_rooms)}) are booked on {target_date} at {slot_master}")
                             else:
                                 print(f"[DEBUG] Room {room_candidate.room_no} already booked for {target_date} at {slot_master}, trying alternative room...")
                             alternative_room = allocate_treatment_room(
