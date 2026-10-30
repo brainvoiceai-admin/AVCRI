@@ -149,6 +149,11 @@ class TreatmentRoom(models.Model):
     )
     description = models.TextField(null=True, blank=True)
     tr_code = models.CharField(max_length=20, null=True, blank=True, verbose_name="TR Code")
+    is_steam_room = models.BooleanField(
+        default=False,
+        verbose_name="Steam Therapy Room",
+        help_text="Designate this treatment room for steam therapies"
+    )
     is_active = models.BooleanField(default=True, verbose_name="Active")
     created_at = models.DateTimeField(auto_now_add=True, null=True, blank=True, verbose_name="Created At")
     updated_at = models.DateTimeField(auto_now=True, null=True, blank=True, verbose_name="Updated At")
