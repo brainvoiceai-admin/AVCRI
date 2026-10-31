@@ -675,3 +675,87 @@ tr.patient-group-alt:hover {
     flex-shrink: 0 !important;
 }
 
+
+/* ==========================================================================
+   Emergency Rescheduling Modal Styles (Large, Visible, Spacious)
+   ========================================================================== */
+#emergencyRescheduleModal.modal {
+    display: none;
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    width: 100vw !important;
+    height: 100vh !important;
+    background-color: rgba(15, 23, 42, 0.75) !important;
+    backdrop-filter: blur(6px) !important;
+    z-index: 10000 !important;
+    padding: 24px !important;
+    box-sizing: border-box !important;
+    overflow-y: auto !important;
+}
+
+#emergencyRescheduleModal.modal[style*="display: flex"],
+#emergencyRescheduleModal.modal[style*="display: block"] {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+}
+
+#emergencyRescheduleModal .modal-content {
+    background-color: #ffffff !important;
+    margin: auto !important;
+    padding: 0 !important;
+    border-radius: 16px !important;
+    width: 95vw !important;
+    max-width: 1100px !important;
+    height: 88vh !important;
+    max-height: 88vh !important;
+    display: flex !important;
+    flex-direction: column !important;
+    box-shadow: 0 25px 60px -15px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(0, 0, 0, 0.08) !important;
+    border: none !important;
+    overflow: hidden !important;
+    position: relative !important;
+    animation: rescheduleModalIn 0.22s ease-out;
+}
+
+#emergencyRescheduleModal .modal-header {
+    padding: 20px 28px !important;
+    border-bottom: 1px solid #e2e8f0 !important;
+    display: flex !important;
+    justify-content: space-between !important;
+    align-items: center !important;
+    background: #ffffff !important;
+    flex-shrink: 0 !important;
+    margin-bottom: 0 !important;
+}
+
+#emergencyRescheduleModal .modal-title {
+    font-size: 20px !important;
+    font-weight: 700 !important;
+    color: #0f172a !important;
+    margin: 0 !important;
+    letter-spacing: -0.01em;
+}
+
+#emergencyRescheduleModal .modal-body {
+    padding: 24px 28px !important;
+    overflow-y: auto !important;
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+    margin-bottom: 0 !important;
+}
+
+#emergencyRescheduleModal .modal-footer {
+    padding: 16px 28px !important;
+    border-top: 1px solid #e2e8f0 !important;
+    background: #f8fafc !important;
+    display: flex !important;
+    justify-content: space-between !important;
+    align-items: center !important;
+    flex-shrink: 0 !important;
+    gap: 12px !important;
+}
+

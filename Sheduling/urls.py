@@ -18,6 +18,13 @@ urlpatterns = [
     path('scheduling/api/reschedule-all-failed/', views.reschedule_all_failed_api, name='reschedule_all_failed_api'),
     path('scheduling/api/therapy-change-log/', views.therapy_change_log_api, name='therapy_change_log_api'),
 
+    # Emergency Rescheduling & Audit Logs
+    path('scheduling/audit-logs/', views.scheduling_audit_logs_view, name='scheduling_audit_logs'),
+    path('scheduling/api/audit-logs-data/', views.scheduling_audit_logs_data_api, name='scheduling_audit_logs_data_api'),
+    path('scheduling/api/emergency-filter-treatments/', views.emergency_filter_treatments_api, name='emergency_filter_treatments_api'),
+    path('scheduling/api/emergency-available-therapists/', views.emergency_available_therapists_api, name='emergency_available_therapists_api'),
+    path('scheduling/api/emergency-replace-therapist/', views.emergency_replace_therapist_api, name='emergency_replace_therapist_api'),
+
     # Therapist Preference & Doctor Approval URLs
     path('therapist-preference-approvals/', preference_views.therapist_preference_approvals_view, name='therapist_preference_approvals'),
     path('api/therapist-preference/request/', preference_views.create_therapist_preference_api, name='create_therapist_preference_api'),

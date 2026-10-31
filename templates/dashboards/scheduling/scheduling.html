@@ -315,6 +315,113 @@
         #confirmSingleRescheduleBtn:active {
             transform: translateY(0) !important;
         }
+
+        /* ==========================================================================
+           Emergency Rescheduling Modal - Spacious, Centered & High Legibility
+           ========================================================================== */
+        #emergencyRescheduleModal.modal {
+            display: none;
+            position: fixed !important;
+            top: 0 !important;
+            left: 0 !important;
+            right: 0 !important;
+            bottom: 0 !important;
+            width: 100vw !important;
+            height: 100vh !important;
+            background-color: rgba(15, 23, 42, 0.72) !important;
+            backdrop-filter: blur(5px) !important;
+            z-index: 10000 !important;
+            padding: 20px !important;
+            box-sizing: border-box !important;
+            overflow-y: auto !important;
+        }
+
+        #emergencyRescheduleModal.modal[style*="display: flex"],
+        #emergencyRescheduleModal.modal[style*="display: block"] {
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+        }
+
+        #emergencyRescheduleModal .modal-content {
+            background-color: #ffffff !important;
+            margin: auto !important;
+            padding: 0 !important;
+            border-radius: 16px !important;
+            width: 95vw !important;
+            max-width: 1100px !important;
+            height: 88vh !important;
+            max-height: 88vh !important;
+            display: flex !important;
+            flex-direction: column !important;
+            box-shadow: 0 25px 60px -15px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(0, 0, 0, 0.08) !important;
+            border: none !important;
+            overflow: hidden !important;
+            position: relative !important;
+            animation: rescheduleModalIn 0.22s ease-out;
+        }
+
+        #emergencyRescheduleModal .modal-header {
+            padding: 20px 28px !important;
+            border-bottom: 1px solid #e2e8f0 !important;
+            display: flex !important;
+            justify-content: space-between !important;
+            align-items: center !important;
+            background: #ffffff !important;
+            flex-shrink: 0 !important;
+            margin-bottom: 0 !important;
+        }
+
+        #emergencyRescheduleModal .modal-title {
+            font-size: 20px !important;
+            font-weight: 700 !important;
+            color: #0f172a !important;
+            margin: 0 !important;
+            letter-spacing: -0.01em;
+            display: flex !important;
+            align-items: center !important;
+            gap: 10px !important;
+        }
+
+        #emergencyRescheduleModal .modal-header .close {
+            font-size: 28px !important;
+            font-weight: 400 !important;
+            color: #64748b !important;
+            cursor: pointer !important;
+            line-height: 1 !important;
+            border-radius: 8px !important;
+            width: 36px !important;
+            height: 36px !important;
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            transition: all 0.15s ease !important;
+        }
+
+        #emergencyRescheduleModal .modal-header .close:hover {
+            color: #0f172a !important;
+            background: #f1f5f9 !important;
+        }
+
+        #emergencyRescheduleModal .modal-body {
+            padding: 24px 28px !important;
+            overflow-y: auto !important;
+            flex: 1 1 auto !important;
+            min-height: 0 !important;
+            margin-bottom: 0 !important;
+        }
+
+        #emergencyRescheduleModal .modal-footer {
+            padding: 16px 28px !important;
+            border-top: 1px solid #e2e8f0 !important;
+            background: #f8fafc !important;
+            display: flex !important;
+            justify-content: space-between !important;
+            align-items: center !important;
+            flex-shrink: 0 !important;
+            gap: 12px !important;
+        }
+
     </style>
 </head>
 
@@ -600,14 +707,19 @@
                                 <div class="card-subtitle">Successfully scheduled therapies with therapist and nurse
                                     assignments. Use date filter to view schedules for specific dates.</div>
                             </div>
-                            <div style="display: flex; gap: 12px; align-items: center;">
+                            <div style="display: flex; gap: 12px; align-items: center; flex-wrap: nowrap;">
+                                <button class="btn" id="emergency-reschedule-btn" title="Emergency Therapist Rescheduling"
+                                    type="button" onclick="openEmergencyRescheduleModal()"
+                                    style="background: #f59e0b; color: white; font-weight: 600; padding: 10px 18px; display: inline-flex; align-items: center; gap: 8px; border: none; border-radius: 8px; cursor: pointer; box-shadow: 0 2px 6px rgba(245,158,11,0.25); white-space: nowrap; font-size: 14px; height: 42px;">
+                                    <span style="font-size: 16px;">🚨</span> Emergency Rescheduling
+                                </button>
                                 <button class="btn btn-primary" id="export-therapy-excel" title="Export to Excel"
-                                    style="background: #10b981; color: white; font-weight: 600; padding: 12px 24px; display: flex; align-items: center; gap: 8px;">
-                                    <span style="font-size: 18px;">📊</span> Export to Excel
+                                    style="background: #10b981; color: white; font-weight: 600; padding: 10px 18px; display: inline-flex; align-items: center; gap: 8px; border: none; border-radius: 8px; cursor: pointer; white-space: nowrap; font-size: 14px; height: 42px;">
+                                    <span style="font-size: 16px;">📊</span> Export to Excel
                                 </button>
                                 <button class="btn btn-primary" id="print-therapy-pdf" title="Print to PDF"
-                                    style="background: #2ed573; color: white; font-weight: 600; padding: 12px 24px; display: flex; align-items: center; gap: 8px;">
-                                    <span style="font-size: 18px;">🖨️</span> Print to PDF
+                                    style="background: #2ed573; color: white; font-weight: 600; padding: 10px 18px; display: inline-flex; align-items: center; gap: 8px; border: none; border-radius: 8px; cursor: pointer; white-space: nowrap; font-size: 14px; height: 42px;">
+                                    <span style="font-size: 16px;">🖨️</span> Print to PDF
                                 </button>
                             </div>
                         </div>
@@ -985,6 +1097,178 @@
                 <div class="modal-footer">
                     <button type="button" class="btn btn-outline btn-cancel" onclick="closeSingleRescheduleModal()">Cancel</button>
                     <button type="button" class="btn btn-primary" id="confirmSingleRescheduleBtn" onclick="submitSingleReschedule()">Confirm Reschedule</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Emergency Therapist Rescheduling Modal -->
+        <div id="emergencyRescheduleModal" class="modal" style="display: none;">
+            <div class="modal-content">
+                <div class="modal-header" style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #e2e8f0; padding-bottom: 14px;">
+                    <div>
+                        <h3 class="modal-title" style="margin: 0; font-size: 18px; font-weight: 700; color: #1e293b; display: flex; align-items: center; gap: 8px;">
+                            <span>🚨</span> Emergency Therapist Rescheduling
+                        </h3>
+                        <div style="font-size: 12px; color: #64748b; margin-top: 2px;">
+                            Filter by therapist, patient, or room, select treatment, replace therapist, and designate bathing role.
+                        </div>
+                    </div>
+                    <span class="close" onclick="closeEmergencyRescheduleModal()" title="Close" style="font-size: 26px; cursor: pointer; color: #94a3b8;">&times;</span>
+                </div>
+
+                <div class="modal-body" style="padding: 20px 0;">
+                    <!-- STEP 1: Search & Treatment Selection -->
+                    <div id="emStep1Container">
+                        <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 16px; margin-bottom: 20px;">
+                            <div style="font-size: 13px; font-weight: 700; color: #334155; margin-bottom: 12px; display: flex; align-items: center; gap: 6px;">
+                                <i class="fas fa-filter" style="color: #f59e0b;"></i> Filter Treatments to Reschedule
+                            </div>
+                            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; align-items: flex-end;">
+                                <div>
+                                    <label style="font-size: 11px; font-weight: 600; color: #64748b; text-transform: uppercase;">Date</label>
+                                    <input type="date" id="emFilterDate" class="form-control" style="padding: 8px 12px; font-size: 13px;" onchange="loadEmergencyTreatments()">
+                                </div>
+                                <div>
+                                    <label style="font-size: 11px; font-weight: 600; color: #64748b; text-transform: uppercase;">Filter by Therapist</label>
+                                    <select id="emFilterTherapist" class="form-control" style="padding: 8px 12px; font-size: 13px;" onchange="loadEmergencyTreatments()">
+                                        <option value="">-- All Therapists --</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label style="font-size: 11px; font-weight: 600; color: #64748b; text-transform: uppercase;">Patient Name / Reg No</label>
+                                    <input type="text" id="emFilterPatient" class="form-control" placeholder="Type patient name..." style="padding: 8px 12px; font-size: 13px;" onkeyup="if(event.key==='Enter') loadEmergencyTreatments()">
+                                </div>
+                                <div>
+                                    <label style="font-size: 11px; font-weight: 600; color: #64748b; text-transform: uppercase;">Room Number</label>
+                                    <input type="text" id="emFilterRoom" class="form-control" placeholder="Room no..." style="padding: 8px 12px; font-size: 13px;" onkeyup="if(event.key==='Enter') loadEmergencyTreatments()">
+                                </div>
+                                <div style="display: flex; gap: 8px;">
+                                    <button type="button" class="btn btn-primary" onclick="loadEmergencyTreatments()" style="padding: 8px 16px; font-size: 13px;">
+                                        <i class="fas fa-search"></i> Search
+                                    </button>
+                                    <button type="button" class="btn btn-outline" onclick="resetEmergencyFilters()" style="padding: 8px 12px; font-size: 13px;">
+                                        Reset
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Treatments Table -->
+                        <div style="font-size: 14px; font-weight: 600; color: #1e293b; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center;">
+                            <span>Select Treatment to Replace Therapist:</span>
+                            <span id="emTreatmentCountBadge" style="font-size: 12px; color: #64748b; font-weight: normal;">0 treatments found</span>
+                        </div>
+                        <div style="max-height: 380px; overflow-y: auto; border: 1px solid #e2e8f0; border-radius: 8px;">
+                            <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+                                <thead style="position: sticky; top: 0; background: #f1f5f9; z-index: 1;">
+                                    <tr>
+                                        <th style="padding: 10px 12px; text-align: left; border-bottom: 1px solid #cbd5e1;">Patient</th>
+                                        <th style="padding: 10px 12px; text-align: left; border-bottom: 1px solid #cbd5e1;">Treatment</th>
+                                        <th style="padding: 10px 12px; text-align: left; border-bottom: 1px solid #cbd5e1;">Slot / Room</th>
+                                        <th style="padding: 10px 12px; text-align: left; border-bottom: 1px solid #cbd5e1;">Assigned Therapists</th>
+                                        <th style="padding: 10px 12px; text-align: center; border-bottom: 1px solid #cbd5e1;">Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="emTreatmentsTableBody">
+                                    <tr>
+                                        <td colspan="5" style="text-align: center; padding: 30px; color: #94a3b8;">
+                                            Loading scheduled treatments...
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- STEP 2: Therapist Replacement & Bathing Selection -->
+                    <div id="emStep2Container" style="display: none;">
+                        <!-- Selected Treatment Info Banner -->
+                        <div style="background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 14px 16px; margin-bottom: 18px; display: flex; justify-content: space-between; align-items: center;">
+                            <div>
+                                <div style="font-size: 14px; font-weight: 700; color: #1e40af;">
+                                    <span id="emSelPatient">Patient</span> (<span id="emSelReg">Reg</span>) • Room: <span id="emSelPatientRoom">—</span>
+                                </div>
+                                <div style="font-size: 12px; color: #3b82f6; margin-top: 2px;">
+                                    <strong>Therapy:</strong> <span id="emSelTherapy">Therapy</span> | 
+                                    <strong>Time:</strong> <span id="emSelSlot">Slot</span> | 
+                                    <strong>Room:</strong> <span id="emSelRoom">Room</span> | 
+                                    <strong>Date:</strong> <span id="emSelDate">Date</span>
+                                </div>
+                            </div>
+                            <button type="button" class="btn btn-outline" onclick="backToEmergencyTreatments()" style="padding: 6px 12px; font-size: 12px;">
+                                ← Change Treatment
+                            </button>
+                        </div>
+
+                        <!-- 1. Select Therapist to Replace -->
+                        <div style="margin-bottom: 20px;">
+                            <label style="font-size: 13px; font-weight: 700; color: #1e293b; display: block; margin-bottom: 8px;">
+                                1. Select the Therapist to Replace:
+                            </label>
+                            <div id="emTargetTherapistsList" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px;">
+                                <!-- Radio cards for current therapists -->
+                            </div>
+                        </div>
+
+                        <!-- 2. Select Replacement Therapist -->
+                        <div style="margin-bottom: 20px;">
+                            <label style="font-size: 13px; font-weight: 700; color: #1e293b; display: block; margin-bottom: 4px;">
+                                2. Select Replacement Therapist (Available in Slot):
+                            </label>
+                            <div style="font-size: 12px; color: #64748b; margin-bottom: 8px;" id="emGenderRequirementLabel">
+                                Filtered by required gender. Only showing available therapists with &lt; 6 sessions.
+                            </div>
+                            <select id="emReplacementDropdown" class="form-control" style="font-size: 14px; padding: 10px 12px; border: 1px solid #cbd5e1; border-radius: 8px; width: 100%;" onchange="onReplacementTherapistSelected()">
+                                <option value="">-- Choose Replacement Therapist --</option>
+                            </select>
+                            <div id="emNoTherapistsMsg" style="display: none; color: #b91c1c; font-size: 12px; margin-top: 6px; font-weight: 500;">
+                                ⚠️ No available therapists found matching the required gender and time slot.
+                            </div>
+                        </div>
+
+                        <!-- 3. Designate Bathing Therapist -->
+                        <div style="background: #fffbeb; border: 1px solid #fef3c7; border-radius: 10px; padding: 16px; margin-bottom: 20px;">
+                            <label style="font-size: 13px; font-weight: 700; color: #92400e; display: flex; align-items: center; gap: 6px; margin-bottom: 4px;">
+                                <i class="fas fa-star" style="color: #f59e0b;"></i> 3. Designate Bathing Therapist (*):
+                            </label>
+                            <div id="emBathingAlertNotice" style="font-size: 12px; color: #b45309; margin-bottom: 12px; line-height: 1.5;">
+                                Select whether to mark the replacement therapist as the bathing therapist or choose among the remaining therapists.
+                            </div>
+                            <div id="emBathingRadioGroup" style="display: flex; flex-direction: column; gap: 8px;">
+                                <!-- Bathing therapist radio choices -->
+                            </div>
+                        </div>
+
+                        <!-- 4. Mandatory Reason -->
+                        <div style="margin-bottom: 16px;">
+                            <label style="font-size: 13px; font-weight: 700; color: #1e293b; display: flex; align-items: center; gap: 4px; margin-bottom: 6px;">
+                                4. Mandatory Reason for Emergency Replacement <span style="color: #ef4444;">*</span>
+                            </label>
+                            <div style="display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px;">
+                                <button type="button" class="btn btn-outline" style="padding: 4px 10px; font-size: 11px;" onclick="setQuickReason('Medical emergency / sudden sickness')">🤒 Medical emergency</button>
+                                <button type="button" class="btn btn-outline" style="padding: 4px 10px; font-size: 11px;" onclick="setQuickReason('Therapist absent on emergency leave')">🚨 Emergency leave</button>
+                                <button type="button" class="btn btn-outline" style="padding: 4px 10px; font-size: 11px;" onclick="setQuickReason('Sudden unannounced absence')">❌ Sudden absence</button>
+                                <button type="button" class="btn btn-outline" style="padding: 4px 10px; font-size: 11px;" onclick="setQuickReason('Patient requested therapist change')">👤 Patient request</button>
+                                <button type="button" class="btn btn-outline" style="padding: 4px 10px; font-size: 11px;" onclick="setQuickReason('Clinical / operational reassignment')">🏥 Operational reassign</button>
+                            </div>
+                            <textarea id="emReasonInput" class="form-control" rows="3" placeholder="Enter specific mandatory reason for replacing the therapist (required for audit logging)..." style="width: 100%; border: 1px solid #cbd5e1; border-radius: 8px; padding: 10px 12px; font-size: 13px;" required></textarea>
+                            <div id="emReasonError" style="display: none; color: #ef4444; font-size: 12px; margin-top: 4px; font-weight: 500;">
+                                Please provide a reason for the replacement.
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="modal-footer" style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid #e2e8f0; padding-top: 14px;">
+                    <div>
+                        <span id="emStatusMsg" style="font-size: 13px; font-weight: 500;"></span>
+                    </div>
+                    <div style="display: flex; gap: 10px;">
+                        <button type="button" class="btn btn-outline" onclick="closeEmergencyRescheduleModal()">Cancel</button>
+                        <button type="button" class="btn btn-warning" id="emConfirmSubmitBtn" onclick="submitEmergencyReplacement()" style="background: #f59e0b; color: white; font-weight: 700; padding: 10px 22px; display: none;">
+                            <i class="fas fa-check"></i> Confirm Therapist Replacement
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -1516,6 +1800,484 @@
     </script>
     <script src="{% static 'js/scheduling.js' %}"></script>
     <script src="{% static 'js/dashboards_nav.js' %}"></script>
+
+    <!-- Emergency Rescheduling Logic -->
+    <script>
+        let currentEmergencyTreatments = [];
+        let selectedEmergencyBooking = null;
+        let availableReplacementTherapists = [];
+
+        function getCsrfToken() {
+            let cookieValue = '';
+            if (document.cookie && document.cookie !== '') {
+                const cookies = document.cookie.split(';');
+                for (let i = 0; i < cookies.length; i++) {
+                    const cookie = cookies[i].trim();
+                    if (cookie.substring(0, 10) === 'csrftoken=') {
+                        cookieValue = decodeURIComponent(cookie.substring(10));
+                        break;
+                    }
+                }
+            }
+            if (!cookieValue) {
+                const input = document.querySelector('input[name="csrfmiddlewaretoken"]');
+                if (input) cookieValue = input.value;
+            }
+            return cookieValue || '';
+        }
+        window.getCookie = getCsrfToken;
+
+        function openEmergencyRescheduleModal() {
+            const scheduledDate = document.getElementById('scheduled-date')?.value || new Date().toISOString().split('T')[0];
+            document.getElementById('emFilterDate').value = scheduledDate;
+            document.getElementById('emergencyRescheduleModal').style.display = 'flex';
+            backToEmergencyTreatments();
+            loadEmergencyTreatments();
+        }
+
+        function closeEmergencyRescheduleModal() {
+            document.getElementById('emergencyRescheduleModal').style.display = 'none';
+        }
+
+        function resetEmergencyFilters() {
+            const scheduledDate = document.getElementById('scheduled-date')?.value || new Date().toISOString().split('T')[0];
+            document.getElementById('emFilterDate').value = scheduledDate;
+            document.getElementById('emFilterTherapist').value = '';
+            document.getElementById('emFilterPatient').value = '';
+            document.getElementById('emFilterRoom').value = '';
+            loadEmergencyTreatments();
+        }
+
+        function loadEmergencyTreatments() {
+            const date = document.getElementById('emFilterDate').value;
+            const therapist = document.getElementById('emFilterTherapist').value;
+            const patient = document.getElementById('emFilterPatient').value.trim();
+            const room = document.getElementById('emFilterRoom').value.trim();
+
+            const tbody = document.getElementById('emTreatmentsTableBody');
+            tbody.innerHTML = `<tr><td colspan="5" style="text-align: center; padding: 24px; color: #64748b;"><i class="fas fa-spinner fa-spin"></i> Loading treatments...</td></tr>`;
+
+            const url = `/sheduling/scheduling/api/emergency-filter-treatments/?date=${encodeURIComponent(date)}&therapist=${encodeURIComponent(therapist)}&patient=${encodeURIComponent(patient)}&room=${encodeURIComponent(room)}`;
+
+            fetch(url, { headers: { 'Accept': 'application/json' } })
+                .then(res => res.json())
+                .then(data => {
+                    if (data.error) {
+                        tbody.innerHTML = `<tr><td colspan="5" style="text-align:center; color:#ef4444; padding:20px;">Error: ${data.error}</td></tr>`;
+                        return;
+                    }
+
+                    currentEmergencyTreatments = data.treatments || [];
+                    document.getElementById('emTreatmentCountBadge').textContent = `${currentEmergencyTreatments.length} treatments found`;
+
+                    // Populate therapist filter if not already populated
+                    const therapistSelect = document.getElementById('emFilterTherapist');
+                    if (therapistSelect.options.length <= 1 && data.scheduled_therapists) {
+                        data.scheduled_therapists.forEach(t => {
+                            const opt = document.createElement('option');
+                            opt.value = t.code;
+                            opt.textContent = `${t.name} (${t.code})`;
+                            therapistSelect.appendChild(opt);
+                        });
+                    }
+
+                    renderEmergencyTreatmentsTable(currentEmergencyTreatments);
+                })
+                .catch(err => {
+                    tbody.innerHTML = `<tr><td colspan="5" style="text-align:center; color:#ef4444; padding:20px;">Failed to load treatments: ${err}</td></tr>`;
+                });
+        }
+
+        function renderEmergencyTreatmentsTable(treatments) {
+            const tbody = document.getElementById('emTreatmentsTableBody');
+            if (!treatments || treatments.length === 0) {
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="5" style="text-align: center; padding: 36px; color: #94a3b8;">
+                            <div style="font-size: 24px; margin-bottom: 6px;">🔍</div>
+                            <div style="font-weight: 600; color: #475569;">No Scheduled Treatments Found</div>
+                            <div style="font-size: 12px; margin-top: 2px;">Try changing the date or search criteria.</div>
+                        </td>
+                    </tr>
+                `;
+                return;
+            }
+
+            tbody.innerHTML = treatments.map(t => {
+                const therapistsHtml = t.therapists.map(th => {
+                    const bathTag = th.is_bathing ? '<span style="color:#d97706; font-weight:bold;">*</span>' : '';
+                    const bathTitle = th.is_bathing ? ' (Designated Bathing)' : '';
+                    return `
+                        <span class="therapist-badge ${th.is_bathing ? 'bathing-therapist' : ''}" title="${th.name} (${th.grade})${bathTitle}" style="font-size: 11px; padding: 3px 8px; margin: 2px;">
+                            ${bathTag}${th.name} <span style="font-size: 10px; opacity: 0.85;">[${th.grade || 'General'}]</span>
+                        </span>
+                    `;
+                }).join('');
+
+                return `
+                    <tr style="border-bottom: 1px solid #f1f5f9;">
+                        <td style="padding: 10px 12px;">
+                            <div style="font-weight: 600; color: #1e293b;">${t.patient_name}</div>
+                            <div style="font-size: 11px; color: #64748b;">${t.patient_reg_no} • Room: ${t.patient_room_no || '—'}</div>
+                        </td>
+                        <td style="padding: 10px 12px;">
+                            <div style="font-weight: 600; color: #1e293b;">${t.therapy_name}</div>
+                        </td>
+                        <td style="padding: 10px 12px; white-space: nowrap;">
+                            <div style="font-weight: 500; color: #1e293b;">${t.timeslot}</div>
+                            <div style="font-size: 11px; color: #64748b;">Room: ${t.room_no}</div>
+                        </td>
+                        <td style="padding: 10px 12px;">
+                            <div style="display: flex; flex-wrap: wrap; gap: 4px;">
+                                ${therapistsHtml || '<span style="color:#94a3b8;">No therapists</span>'}
+                            </div>
+                        </td>
+                        <td style="padding: 10px 12px; text-align: center;">
+                            <button type="button" class="btn btn-primary btn-small" onclick="selectEmergencyBookingById(${t.booking_id})" style="padding: 6px 12px; font-size: 12px; font-weight: 600;">
+                                Select
+                            </button>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        function selectEmergencyBookingById(bookingId) {
+            const booking = currentEmergencyTreatments.find(t => t.booking_id === bookingId);
+            if (!booking) return;
+            selectedEmergencyBooking = booking;
+
+            // Populate Step 2 banner
+            document.getElementById('emSelPatient').textContent = booking.patient_name;
+            document.getElementById('emSelReg').textContent = booking.patient_reg_no;
+            document.getElementById('emSelPatientRoom').textContent = booking.patient_room_no || '—';
+            document.getElementById('emSelTherapy').textContent = booking.therapy_name;
+            document.getElementById('emSelSlot').textContent = booking.timeslot;
+            document.getElementById('emSelRoom').textContent = booking.room_no;
+            document.getElementById('emSelDate').textContent = booking.date;
+
+            document.getElementById('emStep1Container').style.display = 'none';
+            document.getElementById('emStep2Container').style.display = 'block';
+            document.getElementById('emConfirmSubmitBtn').style.display = 'inline-block';
+            document.getElementById('emReasonInput').value = '';
+            document.getElementById('emReasonError').style.display = 'none';
+            document.getElementById('emStatusMsg').textContent = '';
+
+            // Fetch available therapists and current assignments
+            loadAvailableTherapistsForBooking(bookingId);
+        }
+
+        function backToEmergencyTreatments() {
+            document.getElementById('emStep1Container').style.display = 'block';
+            document.getElementById('emStep2Container').style.display = 'none';
+            document.getElementById('emConfirmSubmitBtn').style.display = 'none';
+            selectedEmergencyBooking = null;
+        }
+
+        function loadAvailableTherapistsForBooking(bookingId, targetReplacedCode) {
+            let url = `/sheduling/scheduling/api/emergency-available-therapists/?booking_id=${bookingId}`;
+            if (targetReplacedCode) {
+                url += `&replaced_therapist_code=${encodeURIComponent(targetReplacedCode)}`;
+            }
+
+            fetch(url, { headers: { 'Accept': 'application/json' } })
+                .then(res => res.json())
+                .then(data => {
+                    if (data.error) {
+                        alert('Error loading therapists: ' + data.error);
+                        return;
+                    }
+
+                    availableReplacementTherapists = data.available_therapists || [];
+                    const currentTherapists = data.current_therapists || [];
+                    const desiredGender = data.desired_gender || '';
+
+                    document.getElementById('emGenderRequirementLabel').textContent = 
+                        `Filtered by required gender (${desiredGender.toUpperCase()}). Showing active therapists available in this timeslot.`;
+
+                    renderCurrentTherapistsToReplace(currentTherapists, targetReplacedCode);
+                    renderReplacementDropdown(availableReplacementTherapists);
+                    updateBathingOptions();
+                })
+                .catch(err => {
+                    console.error('Error fetching available therapists:', err);
+                });
+        }
+
+        function renderCurrentTherapistsToReplace(currentTherapists, selectedCode) {
+            const container = document.getElementById('emTargetTherapistsList');
+            if (!currentTherapists || currentTherapists.length === 0) {
+                container.innerHTML = '<span style="color:#ef4444;">No assigned therapists found for this booking.</span>';
+                return;
+            }
+
+            // Default selection: target or first one
+            let chosenCode = selectedCode || currentTherapists[0].code;
+
+            container.innerHTML = currentTherapists.map(t => {
+                const isSelected = (t.code === chosenCode);
+                const bathBadge = t.is_bathing 
+                    ? `<span style="background: #fef3c7; color: #b45309; padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: 700; margin-left: 6px;">⭐ Bathing Therapist</span>`
+                    : '';
+
+                return `
+                    <label style="border: 2px solid ${isSelected ? '#f59e0b' : '#e2e8f0'}; background: ${isSelected ? '#fffbeb' : '#fff'}; border-radius: 8px; padding: 12px; cursor: pointer; display: flex; align-items: flex-start; gap: 10px; transition: all 0.15s ease;">
+                        <input type="radio" name="emTargetTherapist" value="${t.code}" ${isSelected ? 'checked' : ''} onchange="onTargetTherapistChanged('${t.code}')" style="margin-top: 3px;">
+                        <div style="flex: 1;">
+                            <div style="font-weight: 700; color: #1e293b; font-size: 13px;">
+                                ${t.name} ${bathBadge}
+                            </div>
+                            <div style="font-size: 11px; color: #64748b; margin-top: 2px;">
+                                Code: <strong>${t.code}</strong> • Grade: <strong>${t.grade || 'General'}</strong> • Gender: <strong>${t.gender}</strong>
+                            </div>
+                        </div>
+                    </label>
+                `;
+            }).join('');
+
+            // Store currently loaded therapists in selectedEmergencyBooking
+            if (selectedEmergencyBooking) {
+                selectedEmergencyBooking.assignedTherapists = currentTherapists;
+            }
+        }
+
+        function onTargetTherapistChanged(code) {
+            if (!selectedEmergencyBooking) return;
+            loadAvailableTherapistsForBooking(selectedEmergencyBooking.booking_id, code);
+        }
+
+        function renderReplacementDropdown(therapists) {
+            const select = document.getElementById('emReplacementDropdown');
+            const noMsg = document.getElementById('emNoTherapistsMsg');
+            select.innerHTML = '<option value="">-- Choose Replacement Therapist --</option>';
+
+            if (!therapists || therapists.length === 0) {
+                noMsg.style.display = 'block';
+                return;
+            }
+            noMsg.style.display = 'none';
+
+            therapists.forEach(t => {
+                const opt = document.createElement('option');
+                opt.value = t.therapist_code;
+                const bathCapable = t.is_bathing_therapist ? ' [Bathing Capable]' : '';
+                opt.textContent = `${t.therapist_name} (${t.therapist_code}) — Grade: ${t.grade} — Gender: ${t.gender}${bathCapable}`;
+                select.appendChild(opt);
+            });
+        }
+
+        function onReplacementTherapistSelected() {
+            updateBathingOptions();
+        }
+
+        function updateBathingOptions() {
+            const container = document.getElementById('emBathingRadioGroup');
+            const alertNotice = document.getElementById('emBathingAlertNotice');
+            if (!selectedEmergencyBooking || !selectedEmergencyBooking.assignedTherapists) return;
+
+            const targetCode = document.querySelector('input[name="emTargetTherapist"]:checked')?.value;
+            const replacementCode = document.getElementById('emReplacementDropdown').value;
+            const replacementTherapist = availableReplacementTherapists.find(t => t.therapist_code === replacementCode);
+
+            const targetTherapist = selectedEmergencyBooking.assignedTherapists.find(t => t.code === targetCode);
+            const targetWasBathing = targetTherapist ? targetTherapist.is_bathing : false;
+
+            if (targetWasBathing) {
+                alertNotice.innerHTML = `
+                    <span style="font-weight: 700; color: #b45309;">⚠️ Note:</span> The therapist being replaced (<strong>${targetTherapist.name}</strong>) was the designated bathing therapist (*). 
+                    You must designate who will perform the bathing role: choose the <strong>replacement therapist</strong> or one of the <strong>remaining therapists</strong>.
+                `;
+            } else {
+                alertNotice.innerHTML = `
+                    Select whether to make the replacement therapist the bathing therapist or designate one of the remaining therapists.
+                `;
+            }
+
+            // Remaining therapists (excluding target replaced therapist)
+            const remainingTherapists = selectedEmergencyBooking.assignedTherapists.filter(t => t.code !== targetCode);
+
+            let optionsHtml = '';
+
+            // Option 1: Replacement therapist
+            if (replacementCode && replacementTherapist) {
+                const isBathChecked = targetWasBathing ? 'checked' : '';
+                optionsHtml += `
+                    <label style="background: #fff; border: 1px solid #cbd5e1; border-radius: 8px; padding: 10px 14px; display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                        <input type="radio" name="emBathingTherapist" value="${replacementCode}" ${isBathChecked}>
+                        <div>
+                            <span style="font-weight: 600; color: #15803d;">⭐ Make Replacement Therapist: ${replacementTherapist.therapist_name} (${replacementCode}) as Bathing Therapist</span>
+                            <span style="font-size: 11px; color: #64748b; margin-left: 6px;">[Grade: ${replacementTherapist.grade}]</span>
+                        </div>
+                    </label>
+                `;
+            } else {
+                optionsHtml += `
+                    <label style="background: #f8fafc; border: 1px dashed #cbd5e1; border-radius: 8px; padding: 10px 14px; display: flex; align-items: center; gap: 10px; color: #94a3b8;">
+                        <input type="radio" disabled>
+                        <span>Select a replacement therapist above to enable designating them as bathing therapist.</span>
+                    </label>
+                `;
+            }
+
+            // Options for each remaining therapist
+            remainingTherapists.forEach(rem => {
+                const isBathChecked = (!targetWasBathing && rem.is_bathing) ? 'checked' : '';
+                optionsHtml += `
+                    <label style="background: #fff; border: 1px solid #cbd5e1; border-radius: 8px; padding: 10px 14px; display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                        <input type="radio" name="emBathingTherapist" value="${rem.code}" ${isBathChecked}>
+                        <div>
+                            <span style="font-weight: 600; color: #1e293b;">⭐ Designate ${rem.name} (${rem.code}) as Bathing Therapist</span>
+                            <span style="font-size: 11px; color: #64748b; margin-left: 6px;">[Grade: ${rem.grade || 'General'}]</span>
+                            ${rem.is_bathing ? '<span style="font-size: 11px; color: #d97706; font-weight: 700; margin-left: 6px;">(Currently Designated)</span>' : ''}
+                        </div>
+                    </label>
+                `;
+            });
+
+            // Option for None / Non-bathing
+            optionsHtml += `
+                <label style="background: #fff; border: 1px solid #cbd5e1; border-radius: 8px; padding: 8px 14px; display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                    <input type="radio" name="emBathingTherapist" value="">
+                    <span style="font-size: 12px; color: #64748b;">No bathing therapist / Standard treatment</span>
+                </label>
+            `;
+
+            container.innerHTML = optionsHtml;
+        }
+
+        function setQuickReason(text) {
+            document.getElementById('emReasonInput').value = text;
+            document.getElementById('emReasonError').style.display = 'none';
+        }
+
+        function submitEmergencyReplacement() {
+            try {
+                if (!selectedEmergencyBooking) {
+                    alert('Please select a treatment first.');
+                    return;
+                }
+
+                const targetTherapistCode = document.querySelector('input[name="emTargetTherapist"]:checked')?.value;
+                const replacementTherapistCode = document.getElementById('emReplacementDropdown')?.value;
+                const bathingTherapistCode = document.querySelector('input[name="emBathingTherapist"]:checked')?.value || '';
+                const reason = (document.getElementById('emReasonInput')?.value || '').trim();
+
+                if (!targetTherapistCode) {
+                    alert('Please select the therapist to replace.');
+                    return;
+                }
+                if (!replacementTherapistCode) {
+                    alert('Please select a replacement therapist.');
+                    return;
+                }
+                if (!reason || reason.length < 3) {
+                    document.getElementById('emReasonError').style.display = 'block';
+                    document.getElementById('emReasonInput')?.focus();
+                    return;
+                }
+
+                document.getElementById('emReasonError').style.display = 'none';
+                const statusMsg = document.getElementById('emStatusMsg');
+                const submitBtn = document.getElementById('emConfirmSubmitBtn');
+
+                if (submitBtn) {
+                    submitBtn.disabled = true;
+                    submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing replacement...';
+                }
+                if (statusMsg) {
+                    statusMsg.style.color = '#0284c7';
+                    statusMsg.textContent = 'Updating therapist assignments and audit log...';
+                }
+
+                const payload = {
+                    booking_id: selectedEmergencyBooking.booking_id,
+                    replaced_therapist_code: targetTherapistCode,
+                    replacement_therapist_code: replacementTherapistCode,
+                    bathing_therapist_code: bathingTherapistCode,
+                    reason: reason,
+                };
+
+                const headers = {
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json',
+                };
+                const csrfToken = getCsrfToken();
+                if (csrfToken) {
+                    headers['X-CSRFToken'] = csrfToken;
+                }
+
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+                fetch('/sheduling/scheduling/api/emergency-replace-therapist/', {
+                    method: 'POST',
+                    headers: headers,
+                    body: JSON.stringify(payload),
+                    signal: controller.signal
+                })
+                .then(res => {
+                    clearTimeout(timeoutId);
+                    return res.json().then(data => ({ ok: res.ok, status: res.status, data: data }))
+                        .catch(() => ({ ok: res.ok, status: res.status, data: { error: `Server response error (${res.status})` } }));
+                })
+                .then(result => {
+                    if (submitBtn) {
+                        submitBtn.disabled = false;
+                        submitBtn.innerHTML = '<i class="fas fa-check"></i> Confirm Therapist Replacement';
+                    }
+
+                    const data = result.data || {};
+                    if (result.ok && data.success) {
+                        if (statusMsg) {
+                            statusMsg.style.color = '#15803d';
+                            statusMsg.textContent = data.message;
+                        }
+                        alert('Success: ' + data.message);
+                        closeEmergencyRescheduleModal();
+
+                        // Refresh scheduled table
+                        const curDate = document.getElementById('scheduled-date')?.value || '';
+                        if (typeof loadTherapyData === 'function') {
+                            loadTherapyData('allocated', curDate);
+                        } else {
+                            window.location.reload();
+                        }
+                    } else {
+                        const errMsg = data.error || data.message || `Request failed (${result.status})`;
+                        if (statusMsg) {
+                            statusMsg.style.color = '#b91c1c';
+                            statusMsg.textContent = errMsg;
+                        }
+                        alert('Error: ' + errMsg);
+                    }
+                })
+                .catch(err => {
+                    clearTimeout(timeoutId);
+                    if (submitBtn) {
+                        submitBtn.disabled = false;
+                        submitBtn.innerHTML = '<i class="fas fa-check"></i> Confirm Therapist Replacement';
+                    }
+                    const errMsg = (err.name === 'AbortError')
+                        ? 'Request timed out after 15 seconds. Please try again.'
+                        : ('Network error: ' + (err.message || err));
+                    if (statusMsg) {
+                        statusMsg.style.color = '#b91c1c';
+                        statusMsg.textContent = errMsg;
+                    }
+                    alert(errMsg);
+                });
+            } catch (ex) {
+                console.error('Error during emergency replacement submission:', ex);
+                const submitBtn = document.getElementById('emConfirmSubmitBtn');
+                if (submitBtn) {
+                    submitBtn.disabled = false;
+                    submitBtn.innerHTML = '<i class="fas fa-check"></i> Confirm Therapist Replacement';
+                }
+                alert('Client error: ' + ex.message);
+            }
+        }
+    </script>
 </body>
+
 
 </html>
