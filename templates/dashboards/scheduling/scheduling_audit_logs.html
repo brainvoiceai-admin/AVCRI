@@ -10,11 +10,20 @@
     <link rel="stylesheet" href="{% static 'css/dashboards_nav.css' %}">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <style>
+        /* Base page layout */
+        .main-content .container {
+            max-width: 100% !important;
+            padding: 24px 36px !important;
+            box-sizing: border-box !important;
+        }
+
         .audit-header-actions {
             display: flex;
             align-items: center;
             gap: 12px;
         }
+
+        /* Stats Grid */
         .stats-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -22,11 +31,11 @@
             margin-bottom: 24px;
         }
         .stat-box {
-            background: #fff;
+            background: #ffffff;
             padding: 18px 20px;
             border-radius: 12px;
             box-shadow: 0 2px 8px rgba(0,0,0,0.04);
-            border: 1px solid var(--border, #e2e8f0);
+            border: 1px solid #e2e8f0;
             display: flex;
             align-items: center;
             gap: 16px;
@@ -39,6 +48,7 @@
             align-items: center;
             justify-content: center;
             font-size: 22px;
+            flex-shrink: 0;
         }
         .stat-icon-blue { background: #eff6ff; color: #2563eb; }
         .stat-icon-amber { background: #fffbeb; color: #d97706; }
@@ -59,7 +69,7 @@
 
         /* Changes by Date track */
         .date-summary-card {
-            background: #fff;
+            background: #ffffff;
             border: 1px solid #e2e8f0;
             border-radius: 12px;
             padding: 16px 20px;
@@ -67,49 +77,59 @@
             box-shadow: 0 2px 8px rgba(0,0,0,0.04);
         }
         .date-summary-title {
-            font-size: 14px;
-            font-weight: 600;
-            color: #475569;
+            font-size: 13px;
+            font-weight: 700;
+            color: #334155;
             margin-bottom: 12px;
             display: flex;
             align-items: center;
             gap: 8px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
         }
         .date-chips-container {
             display: flex;
             gap: 10px;
             overflow-x: auto;
-            padding-bottom: 6px;
+            padding-bottom: 4px;
+            align-items: center;
+        }
+        .date-chips-container::-webkit-scrollbar {
+            height: 6px;
+        }
+        .date-chips-container::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 3px;
         }
         .date-chip {
             flex-shrink: 0;
             background: #f8fafc;
             border: 1px solid #cbd5e1;
             border-radius: 20px;
-            padding: 8px 16px;
+            padding: 7px 14px;
             font-size: 13px;
             color: #334155;
             cursor: pointer;
-            transition: all 0.2s ease;
-            display: flex;
+            transition: all 0.15s ease;
+            display: inline-flex;
             align-items: center;
             gap: 8px;
-            font-weight: 500;
+            font-weight: 600;
             text-decoration: none;
         }
         .date-chip:hover {
-            background: #e2e8f0;
+            background: #f1f5f9;
             border-color: #94a3b8;
         }
         .date-chip.active {
             background: #2563eb;
-            color: #fff;
+            color: #ffffff;
             border-color: #1d4ed8;
-            font-weight: 600;
+            box-shadow: 0 2px 6px rgba(37,99,235,0.25);
         }
         .date-chip.active .chip-badge {
             background: rgba(255, 255, 255, 0.25);
-            color: #fff;
+            color: #ffffff;
         }
         .chip-badge {
             background: #e2e8f0;
@@ -120,13 +140,14 @@
             font-weight: 700;
         }
 
-        /* Filter bar */
+        /* Filter Panel */
         .filter-panel {
-            background: #fff;
-            padding: 16px 20px;
+            background: #ffffff;
+            padding: 18px 20px;
             border-radius: 12px;
             border: 1px solid #e2e8f0;
             margin-bottom: 24px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.04);
             display: flex;
             flex-wrap: wrap;
             gap: 16px;
@@ -136,24 +157,25 @@
             display: flex;
             flex-direction: column;
             gap: 6px;
-            min-width: 160px;
         }
         .filter-item label {
-            font-size: 12px;
-            font-weight: 600;
+            font-size: 11px;
+            font-weight: 700;
             color: #475569;
             text-transform: uppercase;
             letter-spacing: 0.5px;
         }
         .filter-input {
-            padding: 9px 12px;
+            height: 40px;
+            padding: 0 12px;
             border: 1px solid #cbd5e1;
             border-radius: 8px;
-            font-size: 14px;
+            font-size: 13px;
             color: #1e293b;
-            background: #fff;
+            background: #ffffff;
             outline: none;
-            transition: border 0.15s ease;
+            box-sizing: border-box;
+            transition: border-color 0.15s ease, box-shadow 0.15s ease;
         }
         .filter-input:focus {
             border-color: #2563eb;
@@ -165,7 +187,7 @@
             display: inline-flex;
             align-items: center;
             gap: 6px;
-            padding: 4px 10px;
+            padding: 5px 10px;
             border-radius: 6px;
             font-size: 12px;
             font-weight: 600;
@@ -186,37 +208,67 @@
             color: #475569;
             border: 1px solid #e2e8f0;
         }
+
+        /* Reason Box Styling - Never crushed */
         .reason-box {
-            background: #f8fafc;
+            background: #fffbeb;
             border-left: 3px solid #f59e0b;
-            padding: 6px 10px;
+            padding: 8px 12px;
             border-radius: 0 6px 6px 0;
-            font-size: 12px;
-            color: #334155;
+            font-size: 12.5px;
+            line-height: 1.5;
+            color: #78350f;
+            min-width: 200px;
             max-width: 280px;
-            word-break: break-word;
+            word-break: normal;
+            overflow-wrap: break-word;
+            white-space: normal;
+            display: block;
+            box-sizing: border-box;
         }
 
-        /* Table Styling */
+        /* Table Styling with guaranteed column breathing room & scrollbar */
         .audit-table-wrap {
-            background: #fff;
+            background: #ffffff;
             border-radius: 12px;
             border: 1px solid #e2e8f0;
             box-shadow: 0 2px 8px rgba(0,0,0,0.04);
-            overflow: hidden;
+            overflow-x: auto;
+            overflow-y: hidden;
+            width: 100%;
+            -webkit-overflow-scrolling: touch;
         }
+        .audit-table-wrap::-webkit-scrollbar {
+            height: 8px;
+        }
+        .audit-table-wrap::-webkit-scrollbar-track {
+            background: #f8fafc;
+            border-radius: 4px;
+        }
+        .audit-table-wrap::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 4px;
+        }
+        .audit-table-wrap::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8;
+        }
+
         .audit-table {
             width: 100%;
+            min-width: 1360px;
             border-collapse: collapse;
             font-size: 13px;
         }
         .audit-table th {
             background: #f8fafc;
             color: #475569;
-            font-weight: 600;
+            font-weight: 700;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
             text-align: left;
             padding: 14px 16px;
-            border-bottom: 1px solid #e2e8f0;
+            border-bottom: 2px solid #e2e8f0;
             white-space: nowrap;
         }
         .audit-table td {
@@ -224,15 +276,17 @@
             border-bottom: 1px solid #f1f5f9;
             color: #1e293b;
             vertical-align: middle;
+            font-size: 13px;
         }
         .audit-table tr:hover td {
             background: #f8fafc;
         }
+
         .btn-view-detail {
-            background: #3b82f6;
-            color: #fff;
+            background: #2563eb;
+            color: #ffffff;
             border: none;
-            padding: 6px 14px;
+            padding: 7px 14px;
             border-radius: 6px;
             font-size: 12px;
             font-weight: 600;
@@ -240,13 +294,74 @@
             display: inline-flex;
             align-items: center;
             gap: 6px;
-            transition: background 0.15s ease;
+            transition: all 0.15s ease;
+            white-space: nowrap;
         }
         .btn-view-detail:hover {
-            background: #2563eb;
+            background: #1d4ed8;
+            box-shadow: 0 2px 6px rgba(37,99,235,0.25);
         }
 
-        /* Modal custom styles */
+        /* Detail Modal Styles */
+        #auditLogDetailModal.modal {
+            display: none;
+            position: fixed !important;
+            top: 0 !important;
+            left: 0 !important;
+            right: 0 !important;
+            bottom: 0 !important;
+            width: 100vw !important;
+            height: 100vh !important;
+            background-color: rgba(15, 23, 42, 0.72) !important;
+            backdrop-filter: blur(5px) !important;
+            z-index: 10000 !important;
+            padding: 20px !important;
+            box-sizing: border-box !important;
+            overflow-y: auto !important;
+        }
+        #auditLogDetailModal.modal[style*="display: flex"],
+        #auditLogDetailModal.modal[style*="display: block"] {
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+        }
+        #auditLogDetailModal .modal-content {
+            background-color: #ffffff !important;
+            margin: auto !important;
+            padding: 0 !important;
+            border-radius: 16px !important;
+            width: 95vw !important;
+            max-width: 920px !important;
+            height: auto !important;
+            max-height: 88vh !important;
+            display: flex !important;
+            flex-direction: column !important;
+            box-shadow: 0 25px 60px -15px rgba(0, 0, 0, 0.35) !important;
+            border: none !important;
+            overflow: hidden !important;
+        }
+        #auditLogDetailModal .modal-header {
+            padding: 20px 28px !important;
+            border-bottom: 1px solid #e2e8f0 !important;
+            background: #ffffff !important;
+            flex-shrink: 0 !important;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        #auditLogDetailModal .modal-body {
+            padding: 24px 28px !important;
+            overflow-y: auto !important;
+            flex: 1 1 auto !important;
+        }
+        #auditLogDetailModal .modal-footer {
+            padding: 16px 28px !important;
+            border-top: 1px solid #e2e8f0 !important;
+            background: #f8fafc !important;
+            flex-shrink: 0 !important;
+            text-align: right;
+        }
+
         .detail-grid {
             display: grid;
             grid-template-columns: 1fr 1fr;
@@ -316,79 +431,12 @@
             font-size: 12px;
             font-weight: 500;
             margin: 4px 4px 4px 0;
-            background: #fff;
+            background: #ffffff;
             border: 1px solid #cbd5e1;
         }
         .bathing-star {
             color: #eab308;
             font-weight: bold;
-        }
-        .replaced-tag {
-            background: #fee2e2;
-            color: #b91c1c;
-            border-color: #fca5a5;
-            text-decoration: line-through;
-        }
-        .replacement-tag {
-            background: #dcfce7;
-            color: #15803d;
-            border-color: #86efac;
-            font-weight: 600;
-        }
-
-        #auditLogDetailModal.modal {
-            display: none;
-            position: fixed !important;
-            top: 0 !important;
-            left: 0 !important;
-            right: 0 !important;
-            bottom: 0 !important;
-            width: 100vw !important;
-            height: 100vh !important;
-            background-color: rgba(15, 23, 42, 0.72) !important;
-            backdrop-filter: blur(5px) !important;
-            z-index: 10000 !important;
-            padding: 20px !important;
-            box-sizing: border-box !important;
-            overflow-y: auto !important;
-        }
-        #auditLogDetailModal.modal[style*="display: flex"],
-        #auditLogDetailModal.modal[style*="display: block"] {
-            display: flex !important;
-            align-items: center !important;
-            justify-content: center !important;
-        }
-        #auditLogDetailModal .modal-content {
-            background-color: #ffffff !important;
-            margin: auto !important;
-            padding: 0 !important;
-            border-radius: 16px !important;
-            width: 95vw !important;
-            max-width: 960px !important;
-            height: auto !important;
-            max-height: 88vh !important;
-            display: flex !important;
-            flex-direction: column !important;
-            box-shadow: 0 25px 60px -15px rgba(0, 0, 0, 0.35) !important;
-            border: none !important;
-            overflow: hidden !important;
-        }
-        #auditLogDetailModal .modal-header {
-            padding: 20px 28px !important;
-            border-bottom: 1px solid #e2e8f0 !important;
-            background: #ffffff !important;
-            flex-shrink: 0 !important;
-        }
-        #auditLogDetailModal .modal-body {
-            padding: 24px 28px !important;
-            overflow-y: auto !important;
-            flex: 1 1 auto !important;
-        }
-        #auditLogDetailModal .modal-footer {
-            padding: 16px 28px !important;
-            border-top: 1px solid #e2e8f0 !important;
-            background: #f8fafc !important;
-            flex-shrink: 0 !important;
         }
     </style>
 </head>
@@ -396,18 +444,18 @@
     {% include 'dashboards/nav.html' %}
 
     <div class="main-content">
-        <div class="container" style="max-width: 1400px; padding: 24px 32px;">
+        <div class="container">
             <header style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 24px;">
                 <div>
-                    <h1 style="font-size: 26px; font-weight: 700; color: #1e293b; margin: 0 0 6px 0;">
-                        📋 Scheduling Audit Logs
+                    <h1 style="font-size: 26px; font-weight: 700; color: #1e293b; margin: 0 0 6px 0; display: flex; align-items: center; gap: 10px;">
+                        <span>📋</span> Scheduling Change Logs
                     </h1>
                     <div class="subtitle" style="color: #64748b; font-size: 14px;">
-                        Complete history of emergency therapist replacements, reschedules, and scheduling modifications with mandatory reasons.
+                        Complete history of emergency therapist replacements and scheduling modifications with mandatory reasons.
                     </div>
                 </div>
                 <div class="audit-header-actions">
-                    <a href="{% url 'scheduling_dashboard' %}" class="btn btn-outline" style="padding: 10px 18px; display: flex; align-items: center; gap: 8px;">
+                    <a href="{% url 'scheduling_dashboard' %}" class="btn btn-outline" style="padding: 10px 18px; display: inline-flex; align-items: center; gap: 8px; height: 40px; font-weight: 600;">
                         <i class="fas fa-arrow-left"></i> Back to Scheduling
                     </a>
                 </div>
@@ -420,54 +468,53 @@
                         <i class="fas fa-history"></i>
                     </div>
                     <div class="stat-info">
-                        <div class="stat-num" id="stat-total">{{ stats.total_changes }}</div>
-                        <div class="stat-lbl">Total Changes Logged</div>
-                    </div>
-                </div>
-                <div class="stat-box">
-                    <div class="stat-icon stat-icon-green">
-                        <i class="fas fa-calendar-day"></i>
-                    </div>
-                    <div class="stat-info">
-                        <div class="stat-num" id="stat-today">{{ stats.today_changes }}</div>
-                        <div class="stat-lbl">Changes Scheduled Today</div>
+                        <div class="stat-num" id="statTotalChanges">{{ total_changes }}</div>
+                        <div class="stat-lbl">Total Audit Records</div>
                     </div>
                 </div>
                 <div class="stat-box">
                     <div class="stat-icon stat-icon-amber">
-                        <i class="fas fa-user-clock"></i>
+                        <i class="fas fa-ambulance"></i>
                     </div>
                     <div class="stat-info">
-                        <div class="stat-num" id="stat-replacements">{{ stats.emergency_replacements_count }}</div>
+                        <div class="stat-num" id="statEmergencyCount">{{ emergency_count }}</div>
                         <div class="stat-lbl">Emergency Replacements</div>
                     </div>
                 </div>
                 <div class="stat-box">
-                    <div class="stat-icon stat-icon-purple">
-                        <i class="fas fa-calendar-alt"></i>
+                    <div class="stat-icon stat-icon-green">
+                        <i class="fas fa-calendar-check"></i>
                     </div>
                     <div class="stat-info">
-                        <div class="stat-num" id="stat-reschedules">{{ stats.reschedules_count }}</div>
-                        <div class="stat-lbl">Slot/Room Reschedules</div>
+                        <div class="stat-num" id="statRescheduleCount">{{ reschedule_count }}</div>
+                        <div class="stat-lbl">Reschedule Shifts</div>
+                    </div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-icon stat-icon-purple">
+                        <i class="fas fa-calendar-day"></i>
+                    </div>
+                    <div class="stat-info">
+                        <div class="stat-num" id="statTodayCount">{{ today_count }}</div>
+                        <div class="stat-lbl">Changes Made Today</div>
                     </div>
                 </div>
             </div>
 
-            <!-- "Specify how many changes made in each date" - Changes by Date Bar -->
+            <!-- Changes by Date Track -->
             <div class="date-summary-card">
                 <div class="date-summary-title">
-                    <i class="fas fa-calendar-check" style="color: #2563eb;"></i>
-                    <span>Changes by Date (Click to filter):</span>
+                    <i class="fas fa-calendar-alt" style="color: #2563eb;"></i> Changes by Date (Click date to filter):
                 </div>
                 <div class="date-chips-container" id="dateChipsContainer">
                     <button type="button" class="date-chip {% if not date_filter %}active{% endif %}" onclick="selectDateChip('')">
                         <span>All Dates</span>
-                        <span class="chip-badge">{{ stats.total_changes }}</span>
+                        <span class="chip-badge">{{ total_changes }}</span>
                     </button>
-                    {% for date_item in changes_by_date %}
-                    <button type="button" class="date-chip {% if date_item.is_selected %}active{% endif %}" onclick="selectDateChip('{{ date_item.date_str }}')">
-                        <span>📅 {{ date_item.formatted_date }} ({{ date_item.day_name }})</span>
-                        <span class="chip-badge">{{ date_item.count }}</span>
+                    {% for item in changes_by_date %}
+                    <button type="button" class="date-chip {% if date_filter == item.date_str %}active{% endif %}" onclick="selectDateChip('{{ item.date_str }}')">
+                        <span>📅 {{ item.formatted_date }} ({{ item.day_name }})</span>
+                        <span class="chip-badge">{{ item.count }}</span>
                     </button>
                     {% empty %}
                     <div style="font-size: 13px; color: #94a3b8; padding: 4px 8px;">No dated changes found.</div>
@@ -489,19 +536,19 @@
                         <option value="reschedule">Reschedule</option>
                     </select>
                 </div>
-                <div class="filter-item" style="flex: 1; min-width: 200px;">
+                <div class="filter-item" style="flex: 1; min-width: 180px;">
                     <label>Patient Search</label>
                     <input type="text" id="filterPatient" class="filter-input" placeholder="Patient name or Reg No..." onkeyup="handleSearchKeyUp(event)">
                 </div>
-                <div class="filter-item" style="flex: 1; min-width: 200px;">
+                <div class="filter-item" style="flex: 1; min-width: 180px;">
                     <label>Therapist Search</label>
                     <input type="text" id="filterTherapist" class="filter-input" placeholder="Therapist name or code..." onkeyup="handleSearchKeyUp(event)">
                 </div>
                 <div style="display: flex; gap: 8px;">
-                    <button type="button" class="btn btn-primary" onclick="applyFilters()" style="padding: 10px 18px;">
+                    <button type="button" class="btn btn-primary" onclick="applyFilters()" style="height: 40px; padding: 0 18px; font-weight: 600; display: inline-flex; align-items: center; gap: 6px; border-radius: 8px;">
                         <i class="fas fa-search"></i> Search
                     </button>
-                    <button type="button" class="btn btn-outline" onclick="resetFilters()" style="padding: 10px 14px;">
+                    <button type="button" class="btn btn-outline" onclick="resetFilters()" style="height: 40px; padding: 0 14px; font-weight: 600; display: inline-flex; align-items: center; gap: 6px; border-radius: 8px;">
                         <i class="fas fa-times"></i> Clear
                     </button>
                 </div>
@@ -512,15 +559,15 @@
                 <table class="audit-table" id="auditTable">
                     <thead>
                         <tr>
-                            <th>Action Time</th>
-                            <th>Change Type</th>
-                            <th>Schedule Date & Slot</th>
-                            <th>Patient</th>
-                            <th>Treatment & Room</th>
-                            <th>Therapist Change Summary</th>
-                            <th>Reason</th>
-                            <th>Changed By</th>
-                            <th>Action</th>
+                            <th style="width: 140px; min-width: 130px;">Action Time</th>
+                            <th style="width: 180px; min-width: 160px;">Change Type</th>
+                            <th style="width: 140px; min-width: 130px;">Schedule Date & Slot</th>
+                            <th style="width: 180px; min-width: 160px;">Patient</th>
+                            <th style="width: 170px; min-width: 150px;">Treatment & Room</th>
+                            <th style="width: 220px; min-width: 200px;">Therapist Change</th>
+                            <th style="width: 260px; min-width: 220px;">Reason</th>
+                            <th style="width: 130px; min-width: 110px;">Changed By</th>
+                            <th style="width: 90px; min-width: 80px; text-align: center;">Action</th>
                         </tr>
                     </thead>
                     <tbody id="auditTableBody">
@@ -559,13 +606,13 @@
                             </td>
                             <td>
                                 {% if log.change_type == 'emergency_replacement' %}
-                                <div>
-                                    <span style="color: #ef4444; text-decoration: line-through;">{{ log.replaced_therapist_name|default:log.replaced_therapist_code }}</span>
-                                    <span style="margin: 0 4px; color: #94a3b8;">➔</span>
-                                    <span style="color: #10b981; font-weight: 600;">{{ log.replacement_therapist_name|default:log.replacement_therapist_code }}</span>
+                                <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+                                    <span style="color: #ef4444; text-decoration: line-through; font-weight: 500;">{{ log.replaced_therapist_name|default:log.replaced_therapist_code }}</span>
+                                    <span style="color: #94a3b8; font-size: 11px;">→</span>
+                                    <span style="color: #10b981; font-weight: 700;">{{ log.replacement_therapist_name|default:log.replacement_therapist_code }}</span>
                                 </div>
                                 {% if log.designated_bathing_therapist_name %}
-                                <div style="font-size: 11px; color: #d97706; margin-top: 2px;">
+                                <div style="font-size: 11px; color: #d97706; margin-top: 4px; font-weight: 600;">
                                     <i class="fas fa-star" style="font-size: 10px;"></i> Bathing: {{ log.designated_bathing_therapist_name }}
                                 </div>
                                 {% endif %}
@@ -583,7 +630,7 @@
                             <td style="font-size: 12px; color: #475569; white-space: nowrap;">
                                 {{ log.changed_by_name|default:"System" }}
                             </td>
-                            <td>
+                            <td style="text-align: center;">
                                 <button type="button" class="btn-view-detail" onclick="viewLogDetail({{ log.id }})">
                                     <i class="fas fa-eye"></i> View
                                 </button>
@@ -607,14 +654,14 @@
 
     <!-- Full Details Modal -->
     <div id="auditLogDetailModal" class="modal" style="display: none;">
-        <div class="modal-content" style="max-width: 800px; width: 90%; max-height: 90vh; overflow-y: auto;">
-            <div class="modal-header" style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #e2e8f0; padding-bottom: 14px;">
+        <div class="modal-content">
+            <div class="modal-header">
                 <h3 class="modal-title" style="margin: 0; font-size: 18px; font-weight: 700; color: #1e293b; display: flex; align-items: center; gap: 8px;">
                     <span id="modalChangeIcon">📋</span> <span id="modalTitle">Scheduling Change Details</span>
                 </h3>
                 <span class="close" onclick="closeAuditModal()" style="font-size: 24px; cursor: pointer; color: #94a3b8;">&times;</span>
             </div>
-            <div class="modal-body" style="padding: 20px 0;">
+            <div class="modal-body">
                 <div id="modalLoading" style="text-align: center; padding: 30px; color: #64748b;">
                     <i class="fas fa-spinner fa-spin" style="font-size: 24px;"></i>
                     <div style="margin-top: 8px;">Loading full change details...</div>
@@ -655,7 +702,7 @@
                             </div>
                             <div class="detail-row">
                                 <span class="detail-label">Time Slot & Room:</span>
-                                <span class="detail-val" id="mdSlotRoom">—</span>
+                                <span class="detail-val" id="mdTimeSlotRoom">—</span>
                             </div>
                         </div>
                     </div>
@@ -710,7 +757,7 @@
                     </div>
                 </div>
             </div>
-            <div class="modal-footer" style="border-top: 1px solid #e2e8f0; padding-top: 14px; text-align: right;">
+            <div class="modal-footer">
                 <button type="button" class="btn btn-outline" onclick="closeAuditModal()">Close</button>
             </div>
         </div>
@@ -719,6 +766,18 @@
     {% include 'dashboards/footer.html' %}
 
     <script>
+        function escapeHtml(text) {
+            if (!text) return '';
+            const map = {
+                '&': '&amp;',
+                '<': '&lt;',
+                '>': '&gt;',
+                '"': '&quot;',
+                "'": '&#039;'
+            };
+            return String(text).replace(/[&<>"']/g, m => map[m]);
+        }
+
         function selectDateChip(dateStr) {
             document.getElementById('filterDate').value = dateStr;
             applyFilters();
@@ -804,7 +863,7 @@
                 tbody.innerHTML = `
                     <tr>
                         <td colspan="9" style="text-align: center; padding: 48px; color: #94a3b8;">
-                            <div style="font-size: 32px; margin-bottom: 8px;">🔍</div>
+                            <div style="font-size: 32px; margin-bottom: 8px;">📋</div>
                             <div style="font-size: 16px; font-weight: 600; color: #475569;">No Matching Audit Records</div>
                             <div style="font-size: 13px; margin-top: 4px;">Try clearing search filters or selecting another date.</div>
                         </td>
@@ -822,47 +881,47 @@
                 let changeSummary = '';
                 if (isEmergency) {
                     changeSummary = `
-                        <div>
-                            <span style="color: #ef4444; text-decoration: line-through;">${log.replaced_therapist_name || log.replaced_therapist_code || '—'}</span>
-                            <span style="margin: 0 4px; color: #94a3b8;">➔</span>
-                            <span style="color: #10b981; font-weight: 600;">${log.replacement_therapist_name || log.replacement_therapist_code || '—'}</span>
+                        <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+                            <span style="color: #ef4444; text-decoration: line-through; font-weight: 500;">${escapeHtml(log.replaced_therapist_name || log.replaced_therapist_code || '—')}</span>
+                            <span style="color: #94a3b8; font-size: 11px;">→</span>
+                            <span style="color: #10b981; font-weight: 700;">${escapeHtml(log.replacement_therapist_name || log.replacement_therapist_code || '—')}</span>
                         </div>
                     `;
                     if (log.designated_bathing_therapist_name) {
                         changeSummary += `
-                            <div style="font-size: 11px; color: #d97706; margin-top: 2px;">
-                                <i class="fas fa-star" style="font-size: 10px;"></i> Bathing: ${log.designated_bathing_therapist_name}
+                            <div style="font-size: 11px; color: #d97706; margin-top: 4px; font-weight: 600;">
+                                <i class="fas fa-star" style="font-size: 10px;"></i> Bathing: ${escapeHtml(log.designated_bathing_therapist_name)}
                             </div>
                         `;
                     }
                 } else {
-                    changeSummary = `<div style="font-size: 12px; color: #475569;">Rescheduled to ${log.time_slot_label || 'New Slot'}</div>`;
+                    changeSummary = `<div style="font-size: 12px; color: #475569;">Rescheduled to ${escapeHtml(log.time_slot_label || 'New Slot')}</div>`;
                 }
 
                 return `
                     <tr data-log-id="${log.id}">
-                        <td style="white-space: nowrap; font-size: 12px; color: #64748b;">${log.created_at}</td>
+                        <td style="white-space: nowrap; font-size: 12px; color: #64748b;">${escapeHtml(log.created_at)}</td>
                         <td>${typeBadge}</td>
                         <td style="white-space: nowrap;">
-                            <div style="font-weight: 600; color: #1e293b;">${log.schedule_date}</div>
-                            <div style="font-size: 12px; color: #64748b;">${log.time_slot_label || '—'}</div>
+                            <div style="font-weight: 600; color: #1e293b;">${escapeHtml(log.schedule_date)}</div>
+                            <div style="font-size: 12px; color: #64748b;">${escapeHtml(log.time_slot_label || '—')}</div>
                         </td>
                         <td>
-                            <div style="font-weight: 600; color: #1e293b;">${log.patient_name}</div>
+                            <div style="font-weight: 600; color: #1e293b;">${escapeHtml(log.patient_name)}</div>
                             <div style="font-size: 12px; color: #64748b;">
-                                ${log.patient_reg_no}${log.patient_room_no ? ` • Room: ${log.patient_room_no}` : ''}
+                                ${escapeHtml(log.patient_reg_no)}${log.patient_room_no ? ` • Room: ${escapeHtml(log.patient_room_no)}` : ''}
                             </div>
                         </td>
                         <td>
-                            <div style="font-weight: 600; color: #1e293b;">${log.therapy_name}</div>
-                            <div style="font-size: 12px; color: #64748b;">Room: ${log.room_number || '—'}</div>
+                            <div style="font-weight: 600; color: #1e293b;">${escapeHtml(log.therapy_name)}</div>
+                            <div style="font-size: 12px; color: #64748b;">Room: ${escapeHtml(log.room_number || '—')}</div>
                         </td>
                         <td>${changeSummary}</td>
                         <td>
-                            <div class="reason-box" title="${log.reason}">${log.reason}</div>
+                            <div class="reason-box" title="${escapeHtml(log.reason)}">${escapeHtml(log.reason)}</div>
                         </td>
-                        <td style="font-size: 12px; color: #475569; white-space: nowrap;">${log.changed_by_name || 'System'}</td>
-                        <td>
+                        <td style="font-size: 12px; color: #475569; white-space: nowrap;">${escapeHtml(log.changed_by_name || 'System')}</td>
+                        <td style="text-align: center;">
                             <button type="button" class="btn-view-detail" onclick="viewLogDetail(${log.id})">
                                 <i class="fas fa-eye"></i> View
                             </button>
@@ -894,75 +953,71 @@
                     content.style.display = 'block';
 
                     document.getElementById('modalTitle').textContent = `${log.change_type_display} Details`;
-                    document.getElementById('modalChangeIcon').textContent = log.change_type === 'emergency_replacement' ? '🚨' : '🔄';
+                    document.getElementById('modalChangeIcon').textContent = log.change_type === 'emergency_replacement' ? '🚨' : '🕒';
 
-                    // Patient & Therapy
                     document.getElementById('mdPatientName').textContent = log.patient_name || '—';
                     document.getElementById('mdPatientReg').textContent = log.patient_reg_no || '—';
                     document.getElementById('mdPatientRoom').textContent = log.patient_room_no || '—';
-
                     document.getElementById('mdTherapyName').textContent = log.therapy_name || '—';
                     document.getElementById('mdScheduleDate').textContent = log.schedule_date || '—';
-                    document.getElementById('mdSlotRoom').textContent = `${log.time_slot_label || '—'} • Room: ${log.room_number || '—'}`;
+                    document.getElementById('mdTimeSlotRoom').textContent = `${log.time_slot_label || '—'} (Room: ${log.room_number || '—'})`;
 
-                    // Before vs After Therapists
-                    const beforeBox = document.getElementById('beforeTherapistsList');
-                    const afterBox = document.getElementById('afterTherapistsList');
+                    const beforeDiv = document.getElementById('beforeTherapistsList');
+                    const afterDiv = document.getElementById('afterTherapistsList');
+                    beforeDiv.innerHTML = '';
+                    afterDiv.innerHTML = '';
 
-                    const beforeList = (log.before_state && log.before_state.therapists) ? log.before_state.therapists : [];
-                    const afterList = (log.after_state && log.after_state.therapists) ? log.after_state.therapists : [];
+                    const beforeT = log.before_state?.therapists || [];
+                    const afterT = log.after_state?.therapists || [];
 
-                    if (beforeList.length === 0) {
-                        beforeBox.innerHTML = '<span style="color:#94a3b8;font-size:12px;">No previous therapists</span>';
+                    if (beforeT.length === 0) {
+                        beforeDiv.innerHTML = '<span style="color:#94a3b8; font-size:12px;">No recorded therapist data</span>';
                     } else {
-                        beforeBox.innerHTML = beforeList.map(t => {
-                            const isReplaced = (log.change_type === 'emergency_replacement' && t.code === log.replaced_therapist_code);
-                            const bathStar = t.is_bathing ? '<span class="bathing-star" title="Designated Bathing Therapist">⭐</span>' : '';
-                            return `
-                                <div class="therapist-chip-item ${isReplaced ? 'replaced-tag' : ''}">
-                                    ${bathStar}
-                                    <span>${t.name || t.code}</span>
-                                    <span style="font-size:10px;color:#64748b;">(${t.grade || 'General'})</span>
-                                </div>
+                        beforeT.forEach(t => {
+                            const isReplaced = (t.code === log.replaced_therapist_code);
+                            beforeDiv.innerHTML += `
+                                <span class="therapist-chip-item ${isReplaced ? 'replaced-tag' : ''}">
+                                    ${t.is_bathing ? '<span class="bathing-star">★</span>' : ''}
+                                    ${escapeHtml(t.name)} [${escapeHtml(t.grade || 'General')}]
+                                    ${isReplaced ? '<span style="color:#b91c1c; font-size:10px; font-weight:700;">(Replaced)</span>' : ''}
+                                </span>
                             `;
-                        }).join('');
+                        });
                     }
 
-                    if (afterList.length === 0) {
-                        afterBox.innerHTML = '<span style="color:#94a3b8;font-size:12px;">No current therapists</span>';
+                    if (afterT.length === 0) {
+                        afterDiv.innerHTML = '<span style="color:#94a3b8; font-size:12px;">No recorded therapist data</span>';
                     } else {
-                        afterBox.innerHTML = afterList.map(t => {
-                            const isNew = (log.change_type === 'emergency_replacement' && t.code === log.replacement_therapist_code);
-                            const bathStar = t.is_bathing ? '<span class="bathing-star" title="Designated Bathing Therapist">⭐</span>' : '';
-                            return `
-                                <div class="therapist-chip-item ${isNew ? 'replacement-tag' : ''}">
-                                    ${bathStar}
-                                    <span>${t.name || t.code}</span>
-                                    <span style="font-size:10px;color:#64748b;">(${t.grade || 'General'})</span>
-                                </div>
+                        afterT.forEach(t => {
+                            const isReplacement = (t.code === log.replacement_therapist_code);
+                            afterDiv.innerHTML += `
+                                <span class="therapist-chip-item" style="${isReplacement ? 'border-color:#86efac; background:#f0fdf4;' : ''}">
+                                    ${t.is_bathing ? '<span class="bathing-star">★</span>' : ''}
+                                    <strong style="${isReplacement ? 'color:#15803d;' : ''}">${escapeHtml(t.name)}</strong> [${escapeHtml(t.grade || 'General')}]
+                                    ${isReplacement ? '<span style="color:#15803d; font-size:10px; font-weight:700;">(New Replacement)</span>' : ''}
+                                    ${t.is_bathing ? '<span style="color:#b45309; font-size:10px; font-weight:700;">(Bathing)</span>' : ''}
+                                </span>
                             `;
-                        }).join('');
+                        });
                     }
 
-                    // Emergency replacement highlight
-                    const replSection = document.getElementById('replacementHighlightSection');
+                    const replSec = document.getElementById('replacementHighlightSection');
                     if (log.change_type === 'emergency_replacement') {
-                        replSection.style.display = 'block';
-                        document.getElementById('mdOldTherapist').textContent = `${log.replaced_therapist_name || log.replaced_therapist_code} (${log.replaced_therapist_grade || 'General'})`;
-                        document.getElementById('mdNewTherapist').textContent = `${log.replacement_therapist_name || log.replacement_therapist_code} (${log.replacement_therapist_grade || 'General'})`;
-                        document.getElementById('mdBathingTherapist').textContent = log.designated_bathing_therapist_name ? `${log.designated_bathing_therapist_name} (${log.designated_bathing_therapist_code})` : 'None / Default';
+                        replSec.style.display = 'block';
+                        document.getElementById('mdOldTherapist').textContent = `${log.replaced_therapist_name || log.replaced_therapist_code} [${log.replaced_therapist_grade || 'General'}]`;
+                        document.getElementById('mdNewTherapist').textContent = `${log.replacement_therapist_name || log.replacement_therapist_code} [${log.replacement_therapist_grade || 'General'}]`;
+                        document.getElementById('mdBathingTherapist').textContent = log.designated_bathing_therapist_name || 'None / Not designated';
                     } else {
-                        replSection.style.display = 'none';
+                        replSec.style.display = 'none';
                     }
 
-                    // Reason & Audit metadata
-                    document.getElementById('mdReasonText').textContent = log.reason || 'No specific reason entered.';
+                    document.getElementById('mdReasonText').textContent = log.reason || 'No reason specified';
                     document.getElementById('mdChangedBy').textContent = log.changed_by_name || 'System';
                     document.getElementById('mdCreatedAt').textContent = log.created_at || '—';
                 })
                 .catch(err => {
                     loading.style.display = 'none';
-                    alert('Error loading details: ' + err);
+                    alert('Network error loading details: ' + err);
                     closeAuditModal();
                 });
         }
@@ -970,13 +1025,6 @@
         function closeAuditModal() {
             document.getElementById('auditLogDetailModal').style.display = 'none';
         }
-
-        window.onclick = function(event) {
-            const modal = document.getElementById('auditLogDetailModal');
-            if (event.target === modal) {
-                closeAuditModal();
-            }
-        };
     </script>
 </body>
 </html>
