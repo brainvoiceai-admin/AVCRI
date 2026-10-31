@@ -125,6 +125,21 @@ urlpatterns = [
     path('therapists/<int:pk>/disable/', views.therapist_master_disable, name='therapist_master_disable'),
     path('therapists/<int:pk>/toggle-helping/', views.toggle_helping_therapist_status, name='therapist_master_toggle_helping'),
     path('therapists/export-excel/', views.therapist_master_export_excel, name='therapist_master_export_excel'),
+    # Therapist Deputation URLs
+    path('therapists/deputation/create/', views.mark_therapist_deputed_api, name='therapist_deputation_create'),
+    path('therapists/deputation/<int:pk>/approve/', views.approve_therapist_deputation_api, name='therapist_deputation_approve'),
+    path('therapists/deputation/<int:pk>/reject/', views.reject_therapist_deputation_api, name='therapist_deputation_reject'),
+    path('therapists/deputations/', views.therapist_deputation_approvals_view, name='therapist_deputation_approvals'),
+    path('therapists/<int:pk>/deputation-history/', views.therapist_deputation_history_api, name='therapist_deputation_history'),
+    # Therapist Treatment Omission URLs
+    path('therapists/treatment-omissions/', views.therapist_treatment_omission_approvals_view, name='therapist_treatment_omission_approvals'),
+    path('therapists/<int:pk>/treatment-omissions/create/', views.therapist_treatment_omission_create, name='therapist_treatment_omission_create'),
+    path('therapists/treatment-omissions/<int:pk>/approve/', views.approve_therapist_treatment_omission_api, name='therapist_treatment_omission_approve'),
+    path('therapists/treatment-omissions/<int:pk>/reject/', views.reject_therapist_treatment_omission_api, name='therapist_treatment_omission_reject'),
+    path('therapists/treatment-omissions/<int:pk>/delete/', views.delete_therapist_treatment_omission_api, name='therapist_treatment_omission_delete'),
+    path('therapists/treatment-omissions/batch/<str:batch_id>/approve/', views.approve_therapist_treatment_omission_batch_api, name='therapist_treatment_omission_batch_approve'),
+    path('therapists/treatment-omissions/batch/<str:batch_id>/reject/', views.reject_therapist_treatment_omission_batch_api, name='therapist_treatment_omission_batch_reject'),
+    path('therapists/treatment-omissions/batch/<str:batch_id>/delete/', views.delete_therapist_treatment_omission_batch_api, name='therapist_treatment_omission_batch_delete'),
     # Therapist Grade CRUD
     path('therapist-grades/', views.TherapistGradeManagementView.as_view(), name='therapistgrade_manage'),
     path('therapist-grades/add/', views.TherapistGradeCreateView.as_view(), name='therapistgrade_add'),

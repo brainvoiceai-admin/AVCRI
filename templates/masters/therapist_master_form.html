@@ -180,7 +180,140 @@
                                     <small class="form-text text-muted d-block">Therapist is currently active</small>
                                 </div>
                             </div>
+
+                            {% if can_request_deputation %}
+                            <div class="col-md-12 mb-2">
+                                <hr class="my-2">
+                                <div class="form-check form-switch fs-6">
+                                    <input class="form-check-input" type="checkbox" id="id_is_deputed" 
+                                           name="is_deputed" {% if pending_deputation or current_deputation %}checked{% endif %}
+                                           onchange="toggleDeputationFields(this.checked)">
+                                    <label class="form-check-label fw-bold text-dark" for="id_is_deputed">
+                                        <i class="fas fa-plane-departure text-warning me-1"></i>Mark as Deputed Therapist
+                                    </label>
+                                    <small class="form-text text-muted d-block">
+                                        Check to depute this therapist to another destination. Sent to Admin (GM) & HR for approval before scheduling exclusion.
+                                    </small>
+                                </div>
+                            </div>
+                            {% elif current_deputation or pending_deputation %}
+                            <div class="col-md-12 mb-2">
+                                <hr class="my-2">
+                                <div class="border rounded p-3" style="background-color: #fffdf2; border-left: 4px solid #ffc107 !important;">
+                                    <div class="d-flex justify-content-between align-items-center mb-2">
+                                        <h6 class="text-warning mb-0 fw-bold">
+                                            <i class="fas fa-plane-departure me-2"></i>Therapist Deputation Status
+                                        </h6>
+                                        {% if pending_deputation %}
+                                            <span class="badge bg-warning text-dark"><i class="fas fa-clock me-1"></i>Pending Admin (GM)/HR Approval</span>
+                                        {% elif current_deputation %}
+                                            <span class="badge bg-success"><i class="fas fa-check me-1"></i>Approved (Active)</span>
+                                        {% endif %}
+                                    </div>
+                                    {% if pending_deputation %}
+                                    <div class="small">
+                                        <strong>Destination:</strong> {{ pending_deputation.destination }} | 
+                                        <strong>Duration:</strong> {{ pending_deputation.duration_days }} days ({{ pending_deputation.start_date|date:"d/m/Y" }} to {{ pending_deputation.end_date|date:"d/m/Y" }})<br>
+                                        <strong>Assigned Doctor:</strong> {{ pending_deputation.assigned_doctor_name|default:"N/A" }}<br>
+                                        {% if pending_deputation.remarks %}<strong>Remarks:</strong> {{ pending_deputation.remarks }}<br>{% endif %}
+                                        <span class="text-muted">Awaiting approval by Admin (GM) or HR.</span>
+                                    </div>
+                                    {% elif current_deputation %}
+                                    <div class="small">
+                                        <strong>Destination:</strong> {{ current_deputation.destination }} | 
+                                        <strong>Duration:</strong> {{ current_deputation.duration_days }} days ({{ current_deputation.start_date|date:"d/m/Y" }} to {{ current_deputation.end_date|date:"d/m/Y" }})<br>
+                                        <strong>Assigned Doctor:</strong> {{ current_deputation.assigned_doctor_name|default:"N/A" }}<br>
+                                        {% if current_deputation.remarks %}<strong>Remarks:</strong> {{ current_deputation.remarks }}<br>{% endif %}
+                                        <span class="text-success fw-bold">Currently deputed. Excluded from scheduling until {{ current_deputation.end_date|date:"d/m/Y" }}.</span>
+                                    </div>
+                                    {% endif %}
+                                </div>
+                            </div>
+                            {% endif %}
                         </div>
+
+                        {% if can_request_deputation %}
+                        <!-- Deputation Details Section -->
+                        <div id="deputation_section" class="border rounded p-3 mt-3" style="{% if not pending_deputation and not current_deputation %}display: none;{% endif %} background-color: #fffdf2; border-left: 4px solid #ffc107 !important;">
+                            <div class="d-flex justify-content-between align-items-center mb-3">
+                                <h6 class="text-warning mb-0 fw-bold">
+                                    <i class="fas fa-plane-departure me-2"></i>Deputation Details
+                                </h6>
+                                {% if pending_deputation %}
+                                    <span class="badge bg-warning text-dark"><i class="fas fa-clock me-1"></i>Pending HR/Super Admin Approval</span>
+                                {% elif current_deputation %}
+                                    <span class="badge bg-success"><i class="fas fa-check me-1"></i>Approved (Active)</span>
+                                {% endif %}
+                            </div>
+
+                            {% if pending_deputation %}
+                            <div class="alert alert-warning py-2 mb-3 small">
+                                <i class="fas fa-info-circle me-1"></i>
+                                <strong>Request in review:</strong> Destination <strong>{{ pending_deputation.destination }}</strong> for <strong>{{ pending_deputation.duration_days }} days</strong> ({{ pending_deputation.start_date|date:"d/m/Y" }} to {{ pending_deputation.end_date|date:"d/m/Y" }}).
+                            </div>
+                            {% elif current_deputation %}
+                            <div class="alert alert-success py-2 mb-3 small">
+                                <i class="fas fa-check-circle me-1"></i>
+                                <strong>Currently deputed:</strong> Excluded from scheduling until <strong>{{ current_deputation.end_date|date:"d/m/Y" }}</strong>.
+                            </div>
+                            {% endif %}
+
+                            <div class="row">
+                                <div class="col-md-6 mb-3">
+                                    <label for="deputation_destination" class="form-label required-field fw-bold">Destination</label>
+                                    <input type="text" class="form-control" id="deputation_destination" name="deputation_destination" 
+                                           placeholder="e.g. Coimbatore Branch, Outstation Camp, Satellite Clinic"
+                                           value="{{ deputation_destination|default:'' }}">
+                                    <div class="invalid-feedback">Please enter the deputation destination.</div>
+                                </div>
+
+                                <div class="col-md-3 mb-3">
+                                    <label for="deputation_start_date" class="form-label required-field fw-bold">Start Date</label>
+                                    <input type="date" class="form-control" id="deputation_start_date" name="deputation_start_date" 
+                                           value="{{ deputation_start_date|default:today_date }}"
+                                           onchange="updateEndDatePreview()">
+                                </div>
+
+                                <div class="col-md-3 mb-3">
+                                    <label for="deputation_duration_days" class="form-label required-field fw-bold">Duration (No. of Days)</label>
+                                    <input type="number" class="form-control" id="deputation_duration_days" name="deputation_duration_days" 
+                                           min="1" max="365"
+                                           value="{{ deputation_duration_days|default:1 }}"
+                                           oninput="updateEndDatePreview()">
+                                    <small class="form-text text-muted">End date: <span id="preview_end_date" class="fw-bold text-primary">-</span></small>
+                                </div>
+                            </div>
+
+                            <div class="row">
+                                <div class="col-md-6 mb-3">
+                                    <label for="deputation_doctor" class="form-label fw-bold">Assigned Doctor</label>
+                                    <select class="form-select" id="deputation_doctor" name="deputation_doctor" onchange="syncDoctorName(this)">
+                                        <option value="">-- Select Assigned Doctor --</option>
+                                        {% for doc in doctors %}
+                                        <option value="{{ doc.id }}" data-name="Dr. {{ doc.get_full_name|default:doc.username }}"
+                                                {% if deputation_doctor_id == doc.id %}selected{% endif %}>
+                                            Dr. {{ doc.get_full_name|default:doc.username }} ({{ doc.username }})
+                                        </option>
+                                        {% endfor %}
+                                    </select>
+                                    <input type="text" class="form-control mt-2" id="deputation_doctor_name" name="deputation_doctor_name"
+                                           placeholder="Or enter doctor name if not listed above"
+                                           value="{{ deputation_doctor_name|default:'' }}">
+                                </div>
+
+                                <div class="col-md-6 mb-3">
+                                    <label for="deputation_remarks" class="form-label fw-bold">Relevant Deputation Details (Remarks)</label>
+                                    <textarea class="form-control" id="deputation_remarks" name="deputation_remarks" rows="3"
+                                              placeholder="Enter reason for deputation, reference letter, special responsibilities...">{{ deputation_remarks|default:'' }}</textarea>
+                                </div>
+                            </div>
+
+                            <div class="alert alert-secondary py-2 mb-0 d-flex align-items-center small">
+                                <i class="fas fa-shield-alt text-primary fa-lg me-2"></i>
+                                <span><strong>Approval Required:</strong> Strictly <strong>Admin (GM) and HR</strong> profiles can approve deputations. The therapist will not come under scheduling until the duration expires.</span>
+                            </div>
+                        </div>
+                        {% endif %}
                     </div>
                 </div>
                 
@@ -265,6 +398,470 @@
                 </div>
             </div>
             {% endif %}
+
+            <!-- Treatment Omission Section (only for existing therapists) -->
+            {% if object %}
+            <div class="form-section mt-4" id="treatment_omission_section">
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <h5 class="text-primary mb-0">
+                        <i class="fas fa-ban text-danger me-2"></i>Omit Treatments (Special Request)
+                    </h5>
+                    {% if pending_omissions %}
+                    <span class="badge bg-warning text-dark">
+                        <i class="fas fa-clock me-1"></i>{{ pending_omissions|length }} Pending Approval
+                    </span>
+                    {% endif %}
+                </div>
+
+                <div class="alert alert-info py-2 mb-3 small">
+                    <i class="fas fa-info-circle me-1"></i>
+                    <strong>Special Request Treatment Omissions:</strong> Therapists may omit particular treatments on special request. Selecting treatments below will send requests for approval to HR and Admin. Once accepted, their name will not be scheduled for the selected treatments in the scheduling list.
+                </div>
+
+                <!-- Currently Approved Omitted Treatments -->
+                <div class="card mb-3 border-danger">
+                    <div class="card-header bg-danger bg-opacity-10 py-2 d-flex justify-content-between align-items-center">
+                        <span class="fw-bold text-danger">
+                            <i class="fas fa-check-circle me-1"></i>Approved Omitted Treatments (Excluded from Scheduling)
+                        </span>
+                        <span class="badge bg-danger">{{ approved_omissions|length }} Active</span>
+                    </div>
+                    <div class="card-body p-0">
+                        {% if approved_omissions %}
+                        <div class="table-responsive">
+                            <table class="table table-sm table-hover mb-0">
+                                <thead class="table-light small">
+                                    <tr>
+                                        <th>Code</th>
+                                        <th>Treatment Name</th>
+                                        <th>Category</th>
+                                        <th>Reason / Remarks</th>
+                                        <th>Approved By</th>
+                                        <th>Approved Date</th>
+                                        <th class="text-end">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for o in approved_omissions %}
+                                    <tr>
+                                        <td><code>{{ o.treatment.therapy_code }}</code></td>
+                                        <td class="fw-bold">{{ o.treatment.therapy_name }}</td>
+                                        <td><span class="badge bg-secondary">{{ o.treatment.therapy_category|default:"-" }}</span></td>
+                                        <td class="small">{{ o.reason|default:"Special Request" }}</td>
+                                        <td class="small">{{ o.approved_by.get_full_name|default:o.approved_by.username|default:"Admin/HR" }}</td>
+                                        <td class="small">{{ o.approved_at|date:"d/m/Y" }}</td>
+                                        <td class="text-end">
+                                            <a href="{% url 'therapist_treatment_omission_delete' o.pk %}" 
+                                               class="btn btn-outline-danger btn-sm py-0 px-2"
+                                               onclick="return confirm('Revoke omission for {{ o.treatment.therapy_name }}? The therapist will once again be eligible for scheduling.');"
+                                               title="Revoke Omission">
+                                                <i class="fas fa-trash-alt me-1"></i>Revoke
+                                            </a>
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                        {% else %}
+                        <div class="p-3 text-muted text-center small">
+                            <i class="fas fa-info-circle me-1"></i>No treatments are currently omitted for this therapist.
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <!-- Pending Omission Requests -->
+                {% if pending_omission_requests or pending_omissions %}
+                <div class="card mb-3 border-warning">
+                    <div class="card-header bg-warning bg-opacity-10 py-2 d-flex justify-content-between align-items-center">
+                        <span class="fw-bold text-warning-emphasis">
+                            <i class="fas fa-clock me-1"></i>Pending HR & Admin Approvals
+                        </span>
+                        <div>
+                            {% if pending_omission_requests %}
+                                <span class="badge bg-warning text-dark">{{ pending_omission_requests|length }} Request{{ pending_omission_requests|length|pluralize }}</span>
+                                <span class="badge bg-secondary ms-1">{{ pending_omissions|length }} Treatments</span>
+                            {% else %}
+                                <span class="badge bg-warning text-dark">{{ pending_omissions|length }} Pending</span>
+                            {% endif %}
+                        </div>
+                    </div>
+                    <div class="card-body p-3">
+                        {% if pending_omission_requests %}
+                            {% for req in pending_omission_requests %}
+                            <div class="border rounded p-3 mb-2 bg-light">
+                                <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-2">
+                                    <div>
+                                        <h6 class="mb-1 fw-bold text-dark">
+                                            <i class="fas fa-file-alt text-warning me-1"></i>
+                                            Omission Request: {{ req.total_count }} Treatment{{ req.total_count|pluralize }}
+                                            <span class="badge bg-warning text-dark ms-2">Pending HR/Admin</span>
+                                        </h6>
+                                        <small class="text-muted">
+                                            Ref: <code>{{ req.batch_id }}</code> | Requested by: <strong>{{ req.requested_by.get_full_name|default:req.requested_by.username|default:"Self" }}</strong> on {{ req.created_at|date:"d/m/Y H:i" }}
+                                        </small>
+                                    </div>
+                                    <div class="d-flex align-items-center gap-1">
+                                        {% if can_approve_omissions %}
+                                        <form method="post" action="{% url 'therapist_treatment_omission_batch_approve' req.action_identifier %}" class="d-inline">
+                                            {% csrf_token %}
+                                            <input type="hidden" name="next" value="{% url 'therapist_master_update' object.pk %}">
+                                            <button type="submit" class="btn btn-success btn-sm py-1 px-3"
+                                                    onclick="return confirm('Approve omission of all {{ req.total_count }} treatments for {{ object.therapist_name }}?');">
+                                                <i class="fas fa-check me-1"></i>Approve All ({{ req.total_count }})
+                                            </button>
+                                        </form>
+                                        <form method="post" action="{% url 'therapist_treatment_omission_batch_reject' req.action_identifier %}" class="d-inline">
+                                            {% csrf_token %}
+                                            <input type="hidden" name="next" value="{% url 'therapist_master_update' object.pk %}">
+                                            <button type="submit" class="btn btn-danger btn-sm py-1 px-3"
+                                                    onclick="return confirm('Reject this omission request for all {{ req.total_count }} treatments?');">
+                                                <i class="fas fa-times me-1"></i>Reject Request
+                                            </button>
+                                        </form>
+                                        {% endif %}
+                                        <form method="post" action="{% url 'therapist_treatment_omission_batch_delete' req.action_identifier %}" class="d-inline">
+                                            {% csrf_token %}
+                                            <input type="hidden" name="next" value="{% url 'therapist_master_update' object.pk %}">
+                                            <button type="submit" class="btn btn-outline-danger btn-sm py-1 px-2"
+                                                    onclick="return confirm('Cancel this entire request of {{ req.total_count }} treatments?');"
+                                                    title="Cancel Request">
+                                                <i class="fas fa-trash-alt me-1"></i>Cancel Request
+                                            </button>
+                                        </form>
+                                    </div>
+                                </div>
+
+                                <div class="mb-2">
+                                    {% if req.hard_count %}<span class="badge bg-danger me-1">{{ req.hard_count }} Hard</span>{% endif %}
+                                    {% if req.medium_count %}<span class="badge bg-warning text-dark me-1">{{ req.medium_count }} Medium</span>{% endif %}
+                                    {% if req.easy_count %}<span class="badge bg-success me-1">{{ req.easy_count }} Easy</span>{% endif %}
+                                    <span class="text-muted small ms-2"><strong>Reason:</strong> {{ req.reason|default:"Special Request" }}</span>
+                                </div>
+
+                                <!-- Collapsible Treatments List -->
+                                <div>
+                                    <button class="btn btn-sm btn-link p-0 text-decoration-none" type="button" data-bs-toggle="collapse" data-bs-target="#collapseReq_{{ forloop.counter }}" aria-expanded="false">
+                                        <i class="fas fa-list me-1"></i><span>View all {{ req.total_count }} treatments in this request</span> <i class="fas fa-chevron-down ms-1"></i>
+                                    </button>
+                                    <div class="collapse mt-2" id="collapseReq_{{ forloop.counter }}">
+                                        <div class="card card-body bg-white p-2 border" style="max-height: 280px; overflow-y: auto;">
+                                            <table class="table table-sm table-borderless table-striped mb-0 small">
+                                                <thead>
+                                                    <tr>
+                                                        <th>#</th>
+                                                        <th>Code</th>
+                                                        <th>Treatment Name</th>
+                                                        <th>Category</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {% for o in req.omissions %}
+                                                    <tr>
+                                                        <td>{{ forloop.counter }}</td>
+                                                        <td><code>{{ o.treatment.therapy_code }}</code></td>
+                                                        <td class="fw-bold">{{ o.treatment.therapy_name }}</td>
+                                                        <td><span class="badge bg-secondary">{{ o.treatment.therapy_category|default:"-" }}</span></td>
+                                                    </tr>
+                                                    {% endfor %}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                </div>
+
+                            </div>
+                            {% endfor %}
+                        {% else %}
+                            <div class="table-responsive">
+                                <table class="table table-sm table-hover mb-0">
+                                    <thead class="table-light small">
+                                        <tr>
+                                            <th>Code</th>
+                                            <th>Treatment Name</th>
+                                            <th>Category</th>
+                                            <th>Reason</th>
+                                            <th>Requested By</th>
+                                            <th>Requested Date</th>
+                                            <th>Status</th>
+                                            <th class="text-end">Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for o in pending_omissions %}
+                                        <tr>
+                                            <td><code>{{ o.treatment.therapy_code }}</code></td>
+                                            <td class="fw-bold">{{ o.treatment.therapy_name }}</td>
+                                            <td><span class="badge bg-secondary">{{ o.treatment.therapy_category|default:"-" }}</span></td>
+                                            <td class="small">{{ o.reason|default:"Special Request" }}</td>
+                                            <td class="small">{{ o.requested_by.get_full_name|default:o.requested_by.username|default:"Self" }}</td>
+                                            <td class="small">{{ o.created_at|date:"d/m/Y H:i" }}</td>
+                                            <td>
+                                                <span class="badge bg-warning text-dark">
+                                                    <i class="fas fa-clock me-1"></i>Pending HR/Admin
+                                                </span>
+                                            </td>
+                                            <td class="text-end">
+                                                {% if can_approve_omissions %}
+                                                <a href="{% url 'therapist_treatment_omission_approve' o.pk %}?next={% url 'therapist_master_update' object.pk %}" 
+                                                   class="btn btn-success btn-sm py-0 px-2 me-1"
+                                                   onclick="return confirm('Approve omission of {{ o.treatment.therapy_name }}?');">
+                                                    <i class="fas fa-check me-1"></i>Approve
+                                                </a>
+                                                <a href="{% url 'therapist_treatment_omission_reject' o.pk %}?next={% url 'therapist_master_update' object.pk %}" 
+                                                   class="btn btn-danger btn-sm py-0 px-2 me-1"
+                                                   onclick="return confirm('Reject omission request?');">
+                                                    <i class="fas fa-times me-1"></i>Reject
+                                                </a>
+                                                {% endif %}
+                                                <a href="{% url 'therapist_treatment_omission_delete' o.pk %}?next={% url 'therapist_master_update' object.pk %}" 
+                                                   class="btn btn-outline-secondary btn-sm py-0 px-2"
+                                                   onclick="return confirm('Cancel this omission request?');"
+                                                   title="Cancel Request">
+                                                    <i class="fas fa-times"></i>
+                                                </a>
+                                            </td>
+                                        </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                        {% endif %}
+                    </div>
+                </div>
+                {% endif %}
+
+                <!-- Add New Treatment Omission Request Card -->
+                <div class="card border-primary shadow-sm">
+                    <div class="card-header bg-primary text-white py-2 d-flex justify-content-between align-items-center">
+                        <div>
+                            <i class="fas fa-plus-circle me-1"></i><strong>Select Treatments to Omit on Special Request</strong>
+                        </div>
+                        <span id="selected_summary_badge" class="badge bg-light text-primary border fw-bold px-2 py-1">
+                            0 treatments selected
+                        </span>
+                    </div>
+                    <div class="card-body">
+                        <!-- Quick Actions Toolbar -->
+                        <div class="bg-light p-2 rounded mb-3 border">
+                            <div class="d-flex flex-wrap align-items-center justify-content-between gap-2">
+                                <div class="d-flex flex-wrap align-items-center gap-1">
+                                    <span class="small fw-bold text-muted text-uppercase me-1"><i class="fas fa-bolt text-warning me-1"></i>Quick Select:</span>
+                                    <button type="button" class="btn btn-sm btn-outline-danger" onclick="selectByCategory('hard')" title="Select all Hard difficulty treatments">
+                                        <i class="fas fa-fire me-1"></i>Select All Hard ({{ hard_treatments_count|default:"0" }})
+                                    </button>
+                                    <button type="button" class="btn btn-sm btn-outline-warning text-dark" onclick="selectByCategory('medium')" title="Select all Medium difficulty treatments">
+                                        <i class="fas fa-layer-group me-1"></i>Select All Medium ({{ medium_treatments_count|default:"0" }})
+                                    </button>
+                                    <button type="button" class="btn btn-sm btn-outline-success" onclick="selectByCategory('easy')" title="Select all Easy difficulty treatments">
+                                        <i class="fas fa-feather-alt me-1"></i>Select All Easy ({{ easy_treatments_count|default:"0" }})
+                                    </button>
+                                    <button type="button" class="btn btn-sm btn-outline-primary" onclick="selectAllVisible()" title="Select all currently visible treatments">
+                                        <i class="fas fa-check-double me-1"></i>Select All
+                                    </button>
+                                </div>
+                                <div>
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" onclick="deselectAll()" title="Clear all selected treatments">
+                                        <i class="fas fa-undo me-1"></i>Clear All
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Filter and Search Row -->
+                        <div class="row g-2 mb-2 align-items-center">
+                            <!-- Category Filter Pills -->
+                            <div class="col-md-7 d-flex flex-wrap gap-1 align-items-center">
+                                <span class="small text-muted me-1 fw-bold">Filter View:</span>
+                                <div class="btn-group btn-group-sm" role="group" id="category_filter_group">
+                                    <button type="button" class="btn btn-primary active cat-filter-btn" data-category="all" onclick="setCategoryFilter('all')">
+                                        All ({{ all_treatments|length }})
+                                    </button>
+                                    <button type="button" class="btn btn-outline-secondary cat-filter-btn" data-category="hard" onclick="setCategoryFilter('hard')">
+                                        Hard ({{ hard_treatments_count|default:"0" }})
+                                    </button>
+                                    <button type="button" class="btn btn-outline-secondary cat-filter-btn" data-category="medium" onclick="setCategoryFilter('medium')">
+                                        Medium ({{ medium_treatments_count|default:"0" }})
+                                    </button>
+                                    <button type="button" class="btn btn-outline-secondary cat-filter-btn" data-category="easy" onclick="setCategoryFilter('easy')">
+                                        Easy ({{ easy_treatments_count|default:"0" }})
+                                    </button>
+                                </div>
+                            </div>
+
+                            <!-- Live Search Input -->
+                            <div class="col-md-5">
+                                <div class="input-group input-group-sm">
+                                    <span class="input-group-text bg-white"><i class="fas fa-search text-muted"></i></span>
+                                    <input type="text" id="treatment_search_filter" class="form-control" 
+                                           placeholder="Type treatment name, code..." 
+                                           oninput="filterTreatments()" autocomplete="off">
+                                    <button type="button" class="btn btn-outline-secondary" onclick="clearSearchFilter()" title="Clear search">
+                                        <i class="fas fa-times"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Selected Treatments Preview Chips -->
+                        <div class="card mb-3 bg-light border-0">
+                            <div class="card-body p-2">
+                                <div class="d-flex justify-content-between align-items-center mb-1">
+                                    <span class="small fw-bold text-dark">
+                                        <i class="fas fa-check-circle text-primary me-1"></i>Selected Treatments for Submission:
+                                    </span>
+                                    <span id="selected_count_text" class="small text-muted">0 selected</span>
+                                </div>
+                                <div id="selected_chips_container" class="d-flex flex-wrap gap-1" style="max-height: 80px; overflow-y: auto;">
+                                    <span class="text-muted small fst-italic py-1" id="no_selection_hint">
+                                        No treatments selected. Use the quick buttons or click checkboxes below.
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Checkable Treatments List Container -->
+                        <div class="border rounded bg-white shadow-sm" style="max-height: 340px; overflow-y: auto;" id="treatments_list_wrapper">
+                            {% for t in all_treatments %}
+                            <div class="treatment-row p-2 border-bottom d-flex align-items-center justify-content-between" 
+                                 id="treatment_row_{{ t.id }}"
+                                 data-id="{{ t.id }}"
+                                 data-name="{{ t.therapy_name|lower }}"
+                                 data-code="{{ t.therapy_code|lower }}"
+                                 data-category="{{ t.therapy_category|lower|default:'' }}"
+                                 {% if t.id in approved_omitted_treatment_ids %}
+                                     style="background-color: #fff5f5; opacity: 0.75; cursor: not-allowed;"
+                                 {% elif t.id in pending_omitted_treatment_ids %}
+                                     style="background-color: #fffdf2; opacity: 0.85;"
+                                 {% else %}
+                                     style="cursor: pointer;"
+                                     onclick="toggleTreatmentRow({{ t.id }}, event)"
+                                 {% endif %}>
+                                
+                                <div class="d-flex align-items-center flex-grow-1">
+                                    <div class="form-check m-0 me-2">
+                                        <input class="form-check-input treatment-checkbox fs-6" 
+                                               type="checkbox" 
+                                               name="omit_treatment_ids" 
+                                               value="{{ t.id }}" 
+                                               id="omit_check_{{ t.id }}"
+                                               data-id="{{ t.id }}"
+                                               data-name="{{ t.therapy_name }}"
+                                               data-code="{{ t.therapy_code }}"
+                                               data-category="{{ t.therapy_category|lower|default:'' }}"
+                                               {% if t.id in approved_omitted_treatment_ids %}
+                                                   disabled checked
+                                               {% elif t.id in pending_omitted_treatment_ids %}
+                                                   disabled
+                                               {% endif %}
+                                               onchange="handleCheckboxToggle(this, event)">
+                                    </div>
+                                    <div>
+                                        <label class="form-check-label fw-bold text-dark mb-0" for="omit_check_{{ t.id }}" style="cursor: pointer;">
+                                            {{ t.therapy_name }}
+                                        </label>
+                                        <span class="badge bg-light text-secondary border ms-1">{{ t.therapy_code }}</span>
+                                    </div>
+                                </div>
+
+                                <div class="d-flex align-items-center gap-1 ms-2">
+                                    {% if t.therapy_category|lower == 'hard' %}
+                                        <span class="badge bg-danger"><i class="fas fa-fire me-1"></i>Hard</span>
+                                    {% elif t.therapy_category|lower == 'medium' %}
+                                        <span class="badge bg-warning text-dark"><i class="fas fa-layer-group me-1"></i>Medium</span>
+                                    {% elif t.therapy_category|lower == 'easy' %}
+                                        <span class="badge bg-success"><i class="fas fa-feather-alt me-1"></i>Easy</span>
+                                    {% else %}
+                                        <span class="badge bg-secondary">{{ t.therapy_category|default:"General" }}</span>
+                                    {% endif %}
+
+                                    {% if t.id in approved_omitted_treatment_ids %}
+                                        <span class="badge bg-danger ms-1"><i class="fas fa-ban me-1"></i>Already Omitted</span>
+                                    {% elif t.id in pending_omitted_treatment_ids %}
+                                        <span class="badge bg-warning text-dark ms-1"><i class="fas fa-clock me-1"></i>Pending Approval</span>
+                                    {% endif %}
+                                </div>
+                            </div>
+                            {% empty %}
+                            <div class="p-3 text-center text-muted small">
+                                No treatments available.
+                            </div>
+                            {% endfor %}
+                            <div id="no_filter_matches" class="p-4 text-center text-muted small" style="display: none;">
+                                <i class="fas fa-search me-1"></i>No treatments match your search filter or category.
+                            </div>
+                        </div>
+
+                        <!-- Reason and Confirmation Note -->
+                        <div class="row mt-3">
+                            <div class="col-md-12">
+                                <label for="omit_reason" class="form-label fw-bold">
+                                    Reason for Special Request / Omission <span class="text-muted fw-normal">(Optional but recommended for HR/Admin approval)</span>
+                                </label>
+                                <textarea class="form-control" id="omit_reason" name="omit_reason" rows="2" 
+                                          placeholder="Enter reasons (e.g. Physical limitation, health condition, specific therapist request, etc.)..."></textarea>
+                                <div class="alert alert-secondary py-2 mt-2 mb-0 small d-flex align-items-center">
+                                    <i class="fas fa-shield-alt text-primary fa-lg me-2"></i>
+                                    <span>
+                                        <strong>Submission Note:</strong> Clicking <strong>"Update Therapist"</strong> below will submit the selected treatments for <strong>HR and Admin (GM)</strong> approval. Once approved, the therapist's name will NOT appear in the scheduling list for those treatments.
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+            
+            <!-- Deputation History Section (only for existing therapists) -->
+            {% if deputations_history %}
+            <div class="form-section mt-4">
+                <h5 class="text-primary mb-3">
+                    <i class="fas fa-history me-2"></i>Deputation History
+                </h5>
+                <div class="card">
+                    <div class="card-body p-0">
+                        <div class="table-responsive">
+                            <table class="table table-hover table-striped mb-0">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th>Destination</th>
+                                        <th>Duration</th>
+                                        <th>Dates</th>
+                                        <th>Assigned Doctor</th>
+                                        <th>Status</th>
+                                        <th>Requested By</th>
+                                        <th>Remarks</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for dep in deputations_history %}
+                                    <tr>
+                                        <td><strong>{{ dep.destination }}</strong></td>
+                                        <td>{{ dep.duration_days }} days</td>
+                                        <td>{{ dep.start_date|date:"d/m/Y" }} to {{ dep.end_date|date:"d/m/Y" }}</td>
+                                        <td>{{ dep.assigned_doctor_name|default:"N/A" }}</td>
+                                        <td>
+                                            {% if dep.status == 'approved' %}
+                                                <span class="badge bg-success"><i class="fas fa-check me-1"></i>Approved</span>
+                                            {% elif dep.status == 'pending' %}
+                                                <span class="badge bg-warning text-dark"><i class="fas fa-clock me-1"></i>Pending HR/Admin</span>
+                                            {% else %}
+                                                <span class="badge bg-danger"><i class="fas fa-times me-1"></i>Rejected</span>
+                                            {% endif %}
+                                        </td>
+                                        <td><small>{{ dep.requested_by.get_full_name|default:"System" }}</small></td>
+                                        <td><small class="text-muted">{{ dep.remarks|default:"-" }}</small></td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
             
             <!-- Form Actions -->
             <div class="row mt-4">
@@ -296,5 +893,240 @@
     
     <script src="{% static 'js/masters_therapist_master_form.js' %}"></script>
     <script src="{% static 'js/dashboards_nav.js' %}"></script>
+
+    <script>
+    function toggleDeputationFields(checked) {
+        const sec = document.getElementById('deputation_section');
+        if (sec) {
+            sec.style.display = checked ? 'block' : 'none';
+            const destInput = document.getElementById('deputation_destination');
+            if (checked && destInput) {
+                destInput.focus();
+            }
+        }
+    }
+
+    function syncDoctorName(selectElem) {
+        const selectedOption = selectElem.options[selectElem.selectedIndex];
+        const docNameInput = document.getElementById('deputation_doctor_name');
+        if (selectedOption && selectedOption.dataset.name && docNameInput) {
+            docNameInput.value = selectedOption.dataset.name;
+        }
+    }
+
+    function updateEndDatePreview() {
+        const startDateInput = document.getElementById('deputation_start_date');
+        const durationInput = document.getElementById('deputation_duration_days');
+        const previewSpan = document.getElementById('preview_end_date');
+        if (!startDateInput || !durationInput || !previewSpan) return;
+
+        const startVal = startDateInput.value;
+        const durVal = parseInt(durationInput.value, 10) || 1;
+        if (startVal) {
+            const d = new Date(startVal);
+            if (!isNaN(d.getTime())) {
+                d.setDate(d.getDate() + Math.max(1, durVal) - 1);
+                const dd = String(d.getDate()).padStart(2, '0');
+                const mm = String(d.getMonth() + 1).padStart(2, '0');
+                const yyyy = d.getFullYear();
+                previewSpan.textContent = `${dd}/${mm}/${yyyy}`;
+                return;
+            }
+        }
+        previewSpan.textContent = '-';
+    }
+
+    let currentCategoryFilter = 'all';
+
+    function setCategoryFilter(category) {
+        currentCategoryFilter = (category || 'all').toLowerCase();
+        
+        // Update category filter button active styles
+        document.querySelectorAll('.cat-filter-btn').forEach(btn => {
+            if (btn.getAttribute('data-category') === currentCategoryFilter) {
+                btn.classList.remove('btn-outline-secondary');
+                btn.classList.add('btn-primary');
+            } else {
+                btn.classList.remove('btn-primary');
+                btn.classList.add('btn-outline-secondary');
+            }
+        });
+        
+        filterTreatments();
+    }
+
+    function clearSearchFilter() {
+        const input = document.getElementById('treatment_search_filter');
+        if (input) {
+            input.value = '';
+            filterTreatments();
+        }
+    }
+
+    function filterTreatments() {
+        const searchInput = document.getElementById('treatment_search_filter');
+        const query = (searchInput ? searchInput.value : '').toLowerCase().trim();
+        const rows = document.querySelectorAll('.treatment-row');
+        let visibleCount = 0;
+
+        rows.forEach(row => {
+            const cat = (row.getAttribute('data-category') || '').toLowerCase();
+            const name = (row.getAttribute('data-name') || '').toLowerCase();
+            const code = (row.getAttribute('data-code') || '').toLowerCase();
+
+            const matchesCategory = (currentCategoryFilter === 'all') || (cat === currentCategoryFilter);
+            const matchesQuery = !query || name.includes(query) || code.includes(query) || cat.includes(query);
+
+            if (matchesCategory && matchesQuery) {
+                row.style.setProperty('display', 'flex', 'important');
+                visibleCount++;
+            } else {
+                row.style.setProperty('display', 'none', 'important');
+            }
+        });
+
+        const noMatches = document.getElementById('no_filter_matches');
+        if (noMatches) {
+            noMatches.style.display = (visibleCount === 0) ? 'block' : 'none';
+        }
+    }
+
+    function toggleTreatmentRow(id, event) {
+        // If click originated from the checkbox itself, let handleCheckboxToggle handle it
+        if (event && event.target && event.target.classList && event.target.classList.contains('form-check-input')) {
+            return;
+        }
+        
+        const checkbox = document.getElementById('omit_check_' + id);
+        if (!checkbox || checkbox.disabled) return;
+        
+        checkbox.checked = !checkbox.checked;
+        updateSingleRowStyle(checkbox);
+        updateSelectedChipsAndCount();
+    }
+
+    function handleCheckboxToggle(checkbox, event) {
+        if (event) event.stopPropagation();
+        updateSingleRowStyle(checkbox);
+        updateSelectedChipsAndCount();
+    }
+
+    function updateSingleRowStyle(checkbox) {
+        const id = checkbox.getAttribute('data-id');
+        const row = document.getElementById('treatment_row_' + id);
+        if (!row) return;
+        if (checkbox.checked && !checkbox.disabled) {
+            row.style.backgroundColor = '#e8f4fd';
+        } else if (!checkbox.disabled) {
+            row.style.backgroundColor = '';
+        }
+    }
+
+    function selectByCategory(category) {
+        const catLower = (category || '').toLowerCase();
+        const checkboxes = document.querySelectorAll('.treatment-checkbox:not(:disabled)');
+        let selectedAny = false;
+        
+        checkboxes.forEach(cb => {
+            const itemCat = (cb.getAttribute('data-category') || '').toLowerCase();
+            if (itemCat === catLower) {
+                cb.checked = true;
+                updateSingleRowStyle(cb);
+                selectedAny = true;
+            }
+        });
+        
+        updateSelectedChipsAndCount();
+    }
+
+    function selectAllVisible() {
+        const rows = document.querySelectorAll('.treatment-row');
+        rows.forEach(row => {
+            if (row.style.display !== 'none') {
+                const cb = row.querySelector('.treatment-checkbox:not(:disabled)');
+                if (cb) {
+                    cb.checked = true;
+                    updateSingleRowStyle(cb);
+                }
+            }
+        });
+        updateSelectedChipsAndCount();
+    }
+
+    function deselectAll() {
+        const checkboxes = document.querySelectorAll('.treatment-checkbox:not(:disabled)');
+        checkboxes.forEach(cb => {
+            cb.checked = false;
+            updateSingleRowStyle(cb);
+        });
+        updateSelectedChipsAndCount();
+    }
+
+    function removeTreatmentChip(id) {
+        const checkbox = document.getElementById('omit_check_' + id);
+        if (checkbox && !checkbox.disabled) {
+            checkbox.checked = false;
+            updateSingleRowStyle(checkbox);
+            updateSelectedChipsAndCount();
+        }
+    }
+
+    function updateSelectedChipsAndCount() {
+        const checkedBoxes = document.querySelectorAll('.treatment-checkbox:checked:not(:disabled)');
+        const count = checkedBoxes.length;
+
+        // Update Badges
+        const badge = document.getElementById('selected_summary_badge');
+        if (badge) {
+            badge.textContent = `${count} treatment${count === 1 ? '' : 's'} selected`;
+            if (count > 0) {
+                badge.className = 'badge bg-primary text-white fw-bold px-2 py-1';
+            } else {
+                badge.className = 'badge bg-light text-primary border fw-bold px-2 py-1';
+            }
+        }
+
+        const countText = document.getElementById('selected_count_text');
+        if (countText) {
+            countText.textContent = `${count} selected`;
+        }
+
+        // Update Chips Container
+        const container = document.getElementById('selected_chips_container');
+        if (!container) return;
+
+        if (count === 0) {
+            container.innerHTML = '<span class="text-muted small fst-italic py-1" id="no_selection_hint">No treatments selected. Use the quick buttons or click checkboxes below.</span>';
+            return;
+        }
+
+        let chipsHtml = '';
+        checkedBoxes.forEach(cb => {
+            const id = cb.getAttribute('data-id');
+            const name = cb.getAttribute('data-name');
+            const code = cb.getAttribute('data-code');
+            const cat = (cb.getAttribute('data-category') || '').toLowerCase();
+            
+            let catClass = 'bg-primary';
+            if (cat === 'hard') catClass = 'bg-danger';
+            else if (cat === 'medium') catClass = 'bg-warning text-dark';
+            else if (cat === 'easy') catClass = 'bg-success';
+
+            chipsHtml += `
+                <span class="badge ${catClass} d-inline-flex align-items-center py-1 px-2 mb-1" style="font-size: 0.82rem;">
+                    <span class="me-1">${name} (${code})</span>
+                    <i class="fas fa-times-circle ms-1" style="cursor: pointer;" onclick="removeTreatmentChip(${id})" title="Remove"></i>
+                </span>
+            `;
+        });
+
+        container.innerHTML = chipsHtml;
+    }
+
+    document.addEventListener('DOMContentLoaded', function() {
+        updateEndDatePreview();
+        updateSelectedChipsAndCount();
+    });
+    </script>
 </body>
 </html>

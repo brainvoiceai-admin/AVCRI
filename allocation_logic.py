@@ -275,7 +275,14 @@ def allocate_therapists(date, time_slot, therapy_requirements, last_therapists=N
         full_leave_emp_codes = set()
         half_day_leaves = []
 
-    # Helper to decide if a therapist is on leave (recurring or emergency)
+    # Preload deputed therapist IDs for date
+    try:
+        from masters.models import get_deputed_therapist_ids_for_date
+        deputed_therapist_ids = get_deputed_therapist_ids_for_date(date)
+    except Exception:
+        deputed_therapist_ids = set()
+
+    # Helper to decide if a therapist is on leave (recurring, emergency, or deputed)
     def therapist_on_leave(t: TherapistMaster, slot=None):
         target_slot = slot if slot is not None else time_slot
         # 1) recurring leave (weekday)
@@ -291,6 +298,12 @@ def allocate_therapists(date, time_slot, therapy_requirements, last_therapists=N
             if (t_id and el.therapist_id == t_id) or (emp_code and el.employee_code == emp_code):
                 if el.is_slot_on_leave(date, target_slot):
                     return True
+        # 2) deputation check
+        if t_id and t_id in deputed_therapist_ids:
+            return True
+        from masters.models import is_therapist_deputed
+        if is_therapist_deputed(t, date):
+            return True
         return False
 
     total_required = sum(v for v in grade_map.values() if v > 0)
@@ -301,7 +314,7 @@ def allocate_therapists(date, time_slot, therapy_requirements, last_therapists=N
             if needed <= 0:
                 continue
             candidates_qs = TherapistMaster.objects.filter(
-                therapist_grade=grade, 
+                therapist_grade__name__iexact=grade, 
                 is_active=True,
                 is_helping_therapist=is_helping_flag
             )
@@ -350,7 +363,8 @@ def allocate_therapists(date, time_slot, therapy_requirements, last_therapists=N
             except TherapistMaster.DoesNotExist:
                 continue
 
-            if grade_map.get(t.therapist_grade, 0) > 0:
+            t_grade_name = getattr(getattr(t, 'therapist_grade', None), 'name', '')
+            if grade_map.get(t_grade_name, 0) > 0:
                 if therapist_on_leave(t):
                     continue
                 if shift_filter_enabled and t.id in mapped_ids and t.id not in eligible_ids:
@@ -358,7 +372,7 @@ def allocate_therapists(date, time_slot, therapy_requirements, last_therapists=N
                 if TherapistBooking.objects.filter(therapist=t, date=date, time_slot=time_slot, status='BOOKED').exists():
                     continue
                 allocated.append(t)
-                grade_map[t.therapist_grade] -= 1
+                grade_map[t_grade_name] -= 1
 
     # Allocate remaining normal primary therapists
     _allocate_per_grade(is_helping_flag=False)

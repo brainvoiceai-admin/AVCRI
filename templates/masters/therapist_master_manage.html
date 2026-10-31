@@ -31,7 +31,19 @@
                 <a href="{% url 'therapist_master_export_excel' %}" class="btn btn-info me-2">
                     <i class="fas fa-file-excel me-2"></i>Export to Excel
                 </a>
-                <a href="{% url 'therapist_master_add' %}" class="btn btn-success">
+                {% if can_approve_deputation %}
+                <a href="{% url 'therapist_deputation_approvals' %}" class="btn btn-warning me-2">
+                    <i class="fas fa-plane-departure me-2"></i>Deputation Approvals
+                    {% if pending_deputations_count %}<span class="badge bg-danger ms-1">{{ pending_deputations_count }}</span>{% endif %}
+                </a>
+                {% endif %}
+                {% if can_approve_omissions %}
+                <a href="{% url 'therapist_treatment_omission_approvals' %}" class="btn btn-outline-danger me-2">
+                    <i class="fas fa-ban me-2"></i>Treatment Omission Approvals
+                    {% if pending_omissions_count %}<span class="badge bg-danger ms-1">{{ pending_omissions_count }}</span>{% endif %}
+                </a>
+                {% endif %}
+                <a href="{% url 'therapist_master_add' %}" class="btn btn-success me-2">
                     <i class="fas fa-plus me-2"></i>Add New Therapist
                 </a>
                 <a href="{% url 'master_management_dashboard' %}" class="btn btn-secondary">
@@ -65,6 +77,8 @@
                                 <option value="inactive" {% if status_filter == 'inactive' %}selected{% endif %}>Inactive</option>
                                 <option value="primary" {% if status_filter == 'primary' %}selected{% endif %}>Primary Therapists</option>
                                 <option value="helping" {% if status_filter == 'helping' %}selected{% endif %}>Helping Therapists</option>
+                                <option value="deputed" {% if status_filter == 'deputed' %}selected{% endif %}>Deputed (Approved)</option>
+                                <option value="deputed_pending" {% if status_filter == 'deputed_pending' %}selected{% endif %}>Deputed (Pending Approval)</option>
                             </select>
                         </div>
                         <div class="col-md-2">
@@ -121,9 +135,11 @@
                                 <th>Grade</th>
                                 <th>Employee Code</th>
                                 <th>Gender</th>
-                                <th>Bathing Therapist</th>
-                                <th>Helping Therapist</th>
+                                <th>Bathing</th>
+                                <th>Helping</th>
                                 <th>Leave Days</th>
+                                <th>Deputation</th>
+                                <th>Omitted Treatments</th>
                                 <th>Status</th>
                                 <th>Created</th>
                                 <th>Actions</th>
@@ -184,6 +200,47 @@
                                     {% endwith %}
                                 </td>
                                 <td>
+                                    {% if therapist.current_deputation %}
+                                    <span class="badge bg-success" title="Approved deputation to {{ therapist.current_deputation.destination }} until {{ therapist.current_deputation.end_date|date:'d/m/Y' }}">
+                                        <i class="fas fa-plane-departure me-1"></i>Deputed
+                                    </span>
+                                    <div class="text-muted" style="font-size: 0.72rem;">
+                                        {{ therapist.current_deputation.destination|truncatechars:14 }} (till {{ therapist.current_deputation.end_date|date:"d/m" }})
+                                    </div>
+                                    {% elif therapist.pending_deputation %}
+                                    <span class="badge bg-warning text-dark" title="Pending HR/Admin approval for {{ therapist.pending_deputation.destination }}">
+                                        <i class="fas fa-clock me-1"></i>Pending Appr.
+                                    </span>
+                                    <div class="text-muted" style="font-size: 0.72rem;">
+                                        {{ therapist.pending_deputation.destination|truncatechars:14 }}
+                                    </div>
+                                    {% else %}
+                                    <span class="text-muted small">-</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% with therapist.approved_omitted_treatments as approved_om %}
+                                    {% with therapist.pending_omitted_treatments as pending_om %}
+                                        {% if approved_om %}
+                                        <span class="badge bg-danger" title="{% for o in approved_om %}{{ o.treatment.therapy_name }}{% if not forloop.last %}, {% endif %}{% endfor %}">
+                                            <i class="fas fa-ban me-1"></i>{{ approved_om|length }} Omitted
+                                        </span>
+                                        <div class="text-muted text-truncate" style="font-size: 0.72rem; max-width: 130px;" title="{% for o in approved_om %}{{ o.treatment.therapy_name }}{% if not forloop.last %}, {% endif %}{% endfor %}">
+                                            {% for o in approved_om %}{{ o.treatment.therapy_name|truncatechars:12 }}{% if not forloop.last %}, {% endif %}{% endfor %}
+                                        </div>
+                                        {% endif %}
+                                        {% if pending_om %}
+                                        <span class="badge bg-warning text-dark mt-1" title="Pending HR/Admin approval for {{ pending_om|length }} treatments">
+                                            <i class="fas fa-clock me-1"></i>{{ pending_om|length }} Pending
+                                        </span>
+                                        {% endif %}
+                                        {% if not approved_om and not pending_om %}
+                                        <span class="text-muted small">-</span>
+                                        {% endif %}
+                                    {% endwith %}
+                                    {% endwith %}
+                                </td>
+                                <td>
                                     {% if therapist.is_active %}
                                     <span class="badge bg-success">Active</span>
                                     {% else %}
@@ -195,6 +252,13 @@
                                 </td>
                                 <td>
                                     <div class="btn-group" role="group">
+                                        {% if can_request_deputation %}
+                                        <button type="button" class="btn btn-sm btn-outline-warning" 
+                                                title="Mark as Deputed Therapist"
+                                                onclick="openDeputeModal('{{ therapist.pk }}', '{{ therapist.therapist_name|escapejs }}', '{{ therapist.therapist_code }}')">
+                                            <i class="fas fa-plane-departure"></i>
+                                        </button>
+                                        {% endif %}
                                         <a href="{% url 'therapist_master_update' therapist.pk %}"
                                             class="btn btn-sm btn-outline-primary" title="Edit">
                                             <i class="fas fa-edit"></i>
@@ -221,7 +285,7 @@
                             </tr>
                             {% empty %}
                             <tr>
-                                <td colspan="11" class="text-center py-4">
+                                <td colspan="13" class="text-center py-4">
                                     <div class="text-muted">
                                         <i class="fas fa-user-md fa-3x mb-3"></i>
                                         <p>No therapists found. <a href="{% url 'therapist_master_add' %}">Add the first
@@ -274,6 +338,80 @@
         {% endif %}
     </div>
 
+    <!-- Depute Therapist Modal -->
+    <div class="modal fade" id="deputeModal" tabindex="-1" aria-labelledby="deputeModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <form id="deputeForm" method="post" action="{% url 'therapist_deputation_create' %}">
+                    {% csrf_token %}
+                    <input type="hidden" name="therapist_id" id="modal_therapist_id">
+                    <div class="modal-header bg-warning text-dark">
+                        <h5 class="modal-title" id="deputeModalLabel">
+                            <i class="fas fa-plane-departure me-2"></i>Mark Therapist as Deputed
+                        </h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="alert alert-info py-2 mb-3">
+                            <i class="fas fa-info-circle me-1"></i>
+                            Deputing therapist: <strong id="modal_therapist_display"></strong>
+                            <div class="small mt-1 text-muted">
+                                When submitted, this deputation request will be sent to <strong>Admin (GM) and HR for approval</strong> (only they can approve). After approval, this therapist will not come under scheduling until the duration expires.
+                            </div>
+                        </div>
+
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label fw-bold required-field">Destination</label>
+                                <input type="text" class="form-control" name="destination" id="modal_destination"
+                                       placeholder="e.g. Coimbatore Branch, Outstation Camp, Satellite Clinic" required>
+                                <div class="invalid-feedback">Please enter the destination.</div>
+                            </div>
+                            <div class="col-md-3 mb-3">
+                                <label class="form-label fw-bold required-field">Start Date</label>
+                                <input type="date" class="form-control" name="start_date" id="modal_start_date"
+                                       value="{{ today_date }}" required onchange="updateModalEndDatePreview()">
+                            </div>
+                            <div class="col-md-3 mb-3">
+                                <label class="form-label fw-bold required-field">Duration (No. of Days)</label>
+                                <input type="number" class="form-control" name="duration_days" id="modal_duration_days"
+                                       min="1" max="365" value="1" required oninput="updateModalEndDatePreview()">
+                                <small class="text-muted">End date: <span id="modal_preview_end_date" class="fw-bold text-primary">-</span></small>
+                            </div>
+                        </div>
+
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label fw-bold">Assigned Doctor</label>
+                                <select class="form-select" name="assigned_doctor" id="modal_assigned_doctor" onchange="syncModalDoctorName(this)">
+                                    <option value="">-- Select Assigned Doctor --</option>
+                                    {% for doc in doctors %}
+                                    <option value="{{ doc.id }}" data-name="Dr. {{ doc.get_full_name|default:doc.username }}">
+                                        Dr. {{ doc.get_full_name|default:doc.username }} ({{ doc.username }})
+                                    </option>
+                                    {% endfor %}
+                                </select>
+                                <input type="text" class="form-control mt-2" name="assigned_doctor_name" id="modal_assigned_doctor_name"
+                                       placeholder="Or enter doctor name if not listed above">
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label fw-bold">Relevant Deputation Details (Remarks)</label>
+                                <textarea class="form-control" name="remarks" id="modal_remarks" rows="3"
+                                          placeholder="Enter purpose of deputation, emergency contact, instructions..."></textarea>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                        <button type="submit" class="btn btn-warning">
+                            <i class="fas fa-paper-plane me-1"></i>Submit for HR & Admin Approval
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 
     {% if master_type %}
@@ -283,6 +421,52 @@
     <script src="{% static 'js/master_filter_handler.js' %}"></script>
     <script src="{% static 'js/masters_therapist_master_manage.js' %}"></script>
     <script src="{% static 'js/dashboards_nav.js' %}"></script>
+
+    <script>
+    function openDeputeModal(therapistId, therapistName, therapistCode) {
+        document.getElementById('modal_therapist_id').value = therapistId;
+        document.getElementById('modal_therapist_display').textContent = `${therapistName} (${therapistCode})`;
+        document.getElementById('modal_destination').value = '';
+        document.getElementById('modal_duration_days').value = '1';
+        document.getElementById('modal_remarks').value = '';
+        document.getElementById('modal_assigned_doctor').selectedIndex = 0;
+        document.getElementById('modal_assigned_doctor_name').value = '';
+        updateModalEndDatePreview();
+
+        const modal = new bootstrap.Modal(document.getElementById('deputeModal'));
+        modal.show();
+    }
+
+    function syncModalDoctorName(selectElem) {
+        const selectedOption = selectElem.options[selectElem.selectedIndex];
+        const docNameInput = document.getElementById('modal_assigned_doctor_name');
+        if (selectedOption && selectedOption.dataset.name && docNameInput) {
+            docNameInput.value = selectedOption.dataset.name;
+        }
+    }
+
+    function updateModalEndDatePreview() {
+        const startDateInput = document.getElementById('modal_start_date');
+        const durationInput = document.getElementById('modal_duration_days');
+        const previewSpan = document.getElementById('modal_preview_end_date');
+        if (!startDateInput || !durationInput || !previewSpan) return;
+
+        const startVal = startDateInput.value;
+        const durVal = parseInt(durationInput.value, 10) || 1;
+        if (startVal) {
+            const d = new Date(startVal);
+            if (!isNaN(d.getTime())) {
+                d.setDate(d.getDate() + Math.max(1, durVal) - 1);
+                const dd = String(d.getDate()).padStart(2, '0');
+                const mm = String(d.getMonth() + 1).padStart(2, '0');
+                const yyyy = d.getFullYear();
+                previewSpan.textContent = `${dd}/${mm}/${yyyy}`;
+                return;
+            }
+        }
+        previewSpan.textContent = '-';
+    }
+    </script>
 </body>
 
 </html>

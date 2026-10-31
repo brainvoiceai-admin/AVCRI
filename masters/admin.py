@@ -4,7 +4,7 @@ from .models import (
     PrescriptionScope, UnitNo, TherapyMaster, TherapyGroup, ItemMaster, ItemGroup, SlotMaster,
     TherapistMaster, TherapistLeaveMaster, TherapistGrade, StayingRoom,
     ShiftMaster, ShiftSlotMapping, TherapistShiftMapping,
-    NurseTreatmentMaster, NurseMaster
+    NurseTreatmentMaster, NurseMaster, TherapistDeputation
 )
 
 @admin.register(Procured)
@@ -166,10 +166,10 @@ class TherapistShiftMappingAdmin(admin.ModelAdmin):
 
 @admin.register(TherapistMaster)
 class TherapistMasterAdmin(admin.ModelAdmin):
-    list_display = ['therapist_code', 'therapist_name', 'therapist_grade', 'employee_code', 'get_gender', 'is_bathing_therapist', 'is_helping_therapist', 'is_active', 'created_at']
-    list_filter = ['is_active', 'is_helping_therapist', 'is_bathing_therapist', 'therapist_grade', 'user__gender', 'created_at']
+    list_display = ['therapist_code', 'therapist_name', 'therapist_grade', 'employee_code', 'get_gender', 'is_bathing_therapist', 'is_helping_therapist', 'is_deputed', 'is_active', 'created_at']
+    list_filter = ['is_active', 'is_deputed', 'is_helping_therapist', 'is_bathing_therapist', 'therapist_grade', 'user__gender', 'created_at']
     search_fields = ['therapist_code', 'therapist_name', 'employee_code']
-    list_editable = ['is_active', 'is_bathing_therapist', 'is_helping_therapist']
+    list_editable = ['is_active', 'is_bathing_therapist', 'is_helping_therapist', 'is_deputed']
     ordering = ['therapist_name']
     fieldsets = (
         ('Basic Information', {
@@ -180,20 +180,41 @@ class TherapistMasterAdmin(admin.ModelAdmin):
             'description': 'Link to user account for gender and other user details'
         }),
         ('Therapist Details', {
-            'fields': ('is_bathing_therapist', 'is_helping_therapist')
+            'fields': ('is_bathing_therapist', 'is_helping_therapist', 'is_deputed')
         }),
         ('Status', {
             'fields': ('is_active',)
         }),
     )
-    
+
     def get_gender(self, obj):
-        """Display gender from associated user"""
+        """Display gender from therapist_gender or associated user"""
+        if obj.therapist_gender:
+            return obj.therapist_gender
         if obj.user:
             return obj.user.gender
-        return 'No User'
+        return 'N/A'
     get_gender.short_description = 'Gender'
-    get_gender.admin_order_field = 'user__gender'
+    get_gender.admin_order_field = 'therapist_gender'
+
+
+@admin.register(TherapistDeputation)
+class TherapistDeputationAdmin(admin.ModelAdmin):
+    list_display = ['therapist', 'destination', 'start_date', 'duration_days', 'end_date', 'assigned_doctor_name', 'status', 'approved_by', 'created_at']
+    list_filter = ['status', 'start_date', 'created_at']
+    search_fields = ['therapist__therapist_name', 'therapist__therapist_code', 'destination', 'assigned_doctor_name']
+    ordering = ['-created_at']
+    fieldsets = (
+        ('Deputation Information', {
+            'fields': ('therapist', 'destination', 'start_date', 'duration_days', 'end_date')
+        }),
+        ('Doctor & Details', {
+            'fields': ('assigned_doctor', 'assigned_doctor_name', 'remarks')
+        }),
+        ('Approval Status', {
+            'fields': ('status', 'requested_by', 'approved_by', 'approved_at', 'approval_remarks')
+        }),
+    )
 
 @admin.register(TherapistGrade)
 class TherapistGradeAdmin(admin.ModelAdmin):

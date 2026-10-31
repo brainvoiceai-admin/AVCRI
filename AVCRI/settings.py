@@ -16,7 +16,7 @@ import os
 from dotenv import load_dotenv
 from celery.schedules import crontab
 
-load_dotenv() # This line reads the .env file
+load_dotenv(override=True) # This line reads the .env file and overrides any existing env vars
 
 SECRET_KEY = os.environ.get('SECRET_KEY')
 DEBUG = os.environ.get('DEBUG', 'False').lower() == 'true'

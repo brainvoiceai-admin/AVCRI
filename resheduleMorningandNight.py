@@ -264,6 +264,13 @@ def get_emergency_leave_sets_for_date(target_date, slot=None):
 
         em_ids = set(el.therapist_id for el in matching_leaves if el.therapist_id)
         em_codes = set(el.employee_code for el in matching_leaves if el.employee_code)
+        # Include therapists on approved deputation covering target_date
+        try:
+            from masters.models import get_deputed_therapist_ids_for_date
+            deputed_ids = get_deputed_therapist_ids_for_date(target_date)
+            em_ids.update(deputed_ids)
+        except Exception as dep_err:
+            logger.debug("Error adding deputed therapists to leave sets: %s", dep_err)
         return em_ids, em_codes
     except Exception as e:
         logger.exception("Error fetching EmergencyLeave: %s", e)
@@ -776,8 +783,8 @@ def find_bathing_therapist_from_start_of_therapy(booking, allocation, target_dat
             if tid in seen:
                 continue
             seen.add(tid)
-            from masters.models import is_therapist_on_emergency_leave
-            if is_therapist_on_emergency_leave(t, target_date, slot):
+            from masters.models import is_therapist_on_emergency_leave, is_therapist_deputed
+            if is_therapist_on_emergency_leave(t, target_date, slot) or is_therapist_deputed(t, target_date):
                 continue
             if therapist_has_weekly_leave_on(t, target_date):
                 continue
@@ -1086,16 +1093,16 @@ def process_reassignments(target_date=None, dry_run=True, max_daily_normal=5, ma
         return summary
 
     affected = []
-    from masters.models import is_therapist_on_emergency_leave
+    from masters.models import is_therapist_on_emergency_leave, is_therapist_deputed
     for b in qs:
         thr = getattr(b, 'therapist', None)
         if not thr:
             continue
-        if is_therapist_on_emergency_leave(thr, target_date, b.time_slot):
+        if is_therapist_on_emergency_leave(thr, target_date, b.time_slot) or is_therapist_deputed(thr, target_date):
             affected.append(b)
 
     logger.info("Found %d affected bookings for date %s", len(affected), target_date.isoformat())
-    print(f"   [WARNING] Found {len(affected)} bookings with therapists on emergency leave")
+    print(f"   [WARNING] Found {len(affected)} bookings with therapists on emergency leave / deputation")
     if not affected:
         print("   [OK] No affected bookings - nothing to reassign")
         return summary

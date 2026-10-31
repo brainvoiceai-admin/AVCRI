@@ -69,6 +69,24 @@
         </div>
         {% endif %}
 
+        {% if request.user.role == "admin" or request.user.role == "hr" %}
+        <div class="menu-section">
+            <div class="menu-section-header" onclick="toggleSection('section-deputation-approvals')">
+                <span class="section-icon">✈️</span>
+                <span class="section-title">Admin (GM) & HR Approvals</span>
+                <span class="section-arrow" id="section-deputation-approvals-arrow">▼</span>
+            </div>
+            <div class="menu-subsection" id="section-deputation-approvals">
+                <a href="{% url 'therapist_deputation_approvals' %}" class="menu-item" data-url="{% url 'therapist_deputation_approvals' %}">
+                    <span>✈️</span> Therapist Deputation Approvals
+                </a>
+                <a href="{% url 'therapist_treatment_omission_approvals' %}" class="menu-item" data-url="{% url 'therapist_treatment_omission_approvals' %}">
+                    <span>🚫</span> Treatment Omission Approvals
+                </a>
+            </div>
+        </div>
+        {% endif %}
+
         {# ---------- Administration (role/module mgmt) - super_admin only ---------- #}
         {% if request.user.role == "super_admin" %}
         <div class="menu-section">

@@ -212,15 +212,21 @@ def therapist_requirements(allocation_or_therapy_obj):
     name = getattr(allocation_or_therapy_obj, 'therapy_name', None)
     details = get_therapy_details(name) if name else None
     if not details:
-        return {"super_senior":0, "senior":0, "junior":0, "trainee":0, "total":0, "therapy_code": None, "therapy_category": None}
+        return {
+            "super_senior": 0, "senior": 0, "junior": 0, "trainee": 0, "total": 0,
+            "therapy_code": getattr(allocation_or_therapy_obj, 'therapy_code', None),
+            "therapy_category": None,
+            "therapy_name": name
+        }
     return {
         "super_senior": int(getattr(details, 'no_of_super_senior_therapist', 0) or 0),
         "senior": int(getattr(details, 'no_of_senior_therapist', 0) or 0),
         "junior": int(getattr(details, 'no_of_junior_therapist', 0) or 0),
         "trainee": int(getattr(details, 'no_of_trainee_therapist', 0) or 0),
         "total": int(getattr(details, 'total_no_of_therapist', 0) or 0),
-        "therapy_code": getattr(details, 'therapy_code', None),
-        "therapy_category": getattr(details, 'therapy_category', None)
+        "therapy_code": getattr(details, 'therapy_code', getattr(allocation_or_therapy_obj, 'therapy_code', None)),
+        "therapy_category": getattr(details, 'therapy_category', None),
+        "therapy_name": getattr(details, 'therapy_name', name)
     }
 
 # -----------------------
@@ -292,7 +298,18 @@ def create_therapist_booking_safe(therapist, date, time_slot, therapy_name, pati
             print(f"[DEBUG create_therapist_booking_safe] BLOCKED: Therapist {getattr(therapist, 'therapist_code', 'UNKNOWN')} already has {current_session_count} sessions (max 6) - refusing to create booking")
             # Return None and False to indicate booking was not created due to session limit
             return None, False
-    
+
+    # Treatment Omission check: strictly prevent booking if therapist has approved omission for this treatment
+    if therapist:
+        try:
+            from masters.models import is_therapist_omitted_for_treatment
+            treatment_to_check = therapy_name or getattr(visit, 'therapy_name', None) or getattr(visit, 'therapy_code', None)
+            if treatment_to_check and is_therapist_omitted_for_treatment(therapist, treatment_to_check):
+                print(f"[DEBUG create_therapist_booking_safe] BLOCKED: Therapist {getattr(therapist, 'therapist_code', 'UNKNOWN')} has approved omission for treatment '{treatment_to_check}' - refusing to create booking")
+                return None, False
+        except Exception as e:
+            print(f"[DEBUG create_therapist_booking_safe] Error in treatment omission check: {e}")
+
     try:
         is_ht = getattr(therapist, 'is_helping_therapist', False)
         with transaction.atomic():
@@ -1032,8 +1049,281 @@ def get_vamanam_treatment_rooms():
     return []
 
 
+def is_hard_treatment(therapy_obj=None, therapy_name=None, therapy_code=None, category=None):
+    """
+    Returns True if the therapy difficulty category is 'hard' (case-insensitive).
+    Returns False for 'Medium', 'Easy', or any other category.
+    """
+    if category is not None and str(category).strip():
+        return str(category).strip().lower() == "hard"
 
-def get_allowed_slot_values(patient_type, therapy_category, used_slots=None, therapy_name=None, therapy_code=None):
+    if therapy_obj is not None:
+        # Check if therapy_obj is a dict (like therapy_requirements dict)
+        if isinstance(therapy_obj, dict):
+            c = therapy_obj.get("therapy_category")
+            if c is not None and str(c).strip():
+                return str(c).strip().lower() == "hard"
+            if not therapy_name:
+                therapy_name = therapy_obj.get("therapy_name")
+            if not therapy_code:
+                therapy_code = therapy_obj.get("therapy_code")
+        # Check if therapy_obj has therapy_category directly (TherapyMaster instance)
+        elif hasattr(therapy_obj, "therapy_category") and therapy_obj.therapy_category:
+            return str(therapy_obj.therapy_category).strip().lower() == "hard"
+        # Check if therapy_obj has therapy FK (e.g. Booking or RoomBooking or TherapistBooking)
+        elif hasattr(therapy_obj, "therapy") and therapy_obj.therapy:
+            th = therapy_obj.therapy
+            if hasattr(th, "therapy_category") and th.therapy_category:
+                return str(th.therapy_category).strip().lower() == "hard"
+            if hasattr(th, "therapy_name") and not therapy_name:
+                therapy_name = th.therapy_name
+            if hasattr(th, "therapy_code") and not therapy_code:
+                therapy_code = th.therapy_code
+        # Check if therapy_obj is a TherapyAllocation or Booking
+        if hasattr(therapy_obj, "therapy_code") and therapy_obj.therapy_code and not therapy_code:
+            therapy_code = therapy_obj.therapy_code
+        if hasattr(therapy_obj, "therapy_name") and therapy_obj.therapy_name and not therapy_name:
+            therapy_name = therapy_obj.therapy_name
+        if hasattr(therapy_obj, "snapshot_therapy_name") and therapy_obj.snapshot_therapy_name and not therapy_name:
+            therapy_name = therapy_obj.snapshot_therapy_name
+
+    # Resolve from TherapyMaster
+    try:
+        from masters.models import TherapyMaster
+        tm = None
+        if therapy_code:
+            tm = TherapyMaster.objects.filter(therapy_code__iexact=str(therapy_code).strip()).first()
+        if not tm and therapy_name:
+            tname = str(therapy_name).strip()
+            tm = TherapyMaster.objects.filter(therapy_name__iexact=tname).first()
+            if not tm:
+                norm_key = " ".join(tname.lower().split())
+                for cand in TherapyMaster.objects.all():
+                    cand_name = getattr(cand, "therapy_name", "") or ""
+                    if " ".join(cand_name.lower().split()) == norm_key:
+                        tm = cand
+                        break
+        if tm and getattr(tm, "therapy_category", None):
+            return str(tm.therapy_category).strip().lower() == "hard"
+    except Exception:
+        pass
+
+    return False
+
+
+def get_slot_session(slot):
+    """
+    Returns 'morning' if slot is in Forenoon / Morning (< 13:00, slots 1-4: 06:30, 08:30, 10:00, 11:30).
+    Returns 'evening' if slot is in Afternoon / Evening (>= 13:00, slots 5-7: 14:30, 16:00, 17:30).
+    Returns None if slot cannot be determined.
+    """
+    if slot is None:
+        return None
+    import datetime
+
+    # 1. SlotMaster or object with slot_time
+    if hasattr(slot, "slot_time") and slot.slot_time:
+        st = slot.slot_time
+        if isinstance(st, str):
+            for fmt in ("%H:%M:%S", "%H:%M", "%I:%M %p", "%I:%M%p"):
+                try:
+                    st = datetime.datetime.strptime(st.strip(), fmt).time()
+                    break
+                except ValueError:
+                    pass
+        if isinstance(st, datetime.time):
+            return "morning" if st < datetime.time(13, 0) else "evening"
+
+    # 2. Object with start_time
+    if hasattr(slot, "start_time") and slot.start_time:
+        st = slot.start_time
+        if isinstance(st, str):
+            for fmt in ("%H:%M:%S", "%H:%M", "%I:%M %p", "%I:%M%p"):
+                try:
+                    st = datetime.datetime.strptime(st.strip(), fmt).time()
+                    break
+                except ValueError:
+                    pass
+        if isinstance(st, datetime.time):
+            return "morning" if st < datetime.time(13, 0) else "evening"
+
+    # 3. datetime.time instance
+    if isinstance(slot, datetime.time):
+        return "morning" if slot < datetime.time(13, 0) else "evening"
+
+    # 4. Integer (slot_number 1..4 vs 5..7 or SlotMaster PK)
+    if isinstance(slot, int):
+        if 1 <= slot <= 4:
+            return "morning"
+        if 5 <= slot <= 7:
+            return "evening"
+        try:
+            from masters.models import SlotMaster
+            sm = SlotMaster.objects.filter(pk=slot).first()
+            if sm and sm.slot_time:
+                return "morning" if sm.slot_time < datetime.time(13, 0) else "evening"
+        except Exception:
+            pass
+
+    # 5. String (e.g. "06:30", "14:30", "Slot 1")
+    if isinstance(slot, str):
+        s = slot.strip().lower()
+        import re
+        m = re.search(r"slot\s*(\d+)", s)
+        if m:
+            num = int(m.group(1))
+            return "morning" if num <= 4 else "evening"
+        if s.isdigit():
+            num = int(s)
+            if 1 <= num <= 4:
+                return "morning"
+            if 5 <= num <= 7:
+                return "evening"
+        for fmt in ("%H:%M:%S", "%H:%M", "%I:%M %p", "%I:%M%p"):
+            try:
+                t = datetime.datetime.strptime(s, fmt).time()
+                return "morning" if t < datetime.time(13, 0) else "evening"
+            except ValueError:
+                pass
+
+    return None
+
+
+def patient_has_hard_treatment_in_session(patient_id, target_date, session, exclude_booking_id=None, exclude_allocation_id=None, in_memory_tasks=None):
+    """
+    Checks if the patient already has an active, scheduled, or booked Hard treatment
+    on target_date in the given session ('morning' or 'evening').
+    
+    Session definition:
+      'morning': slots with time < 13:00 (06:30, 08:30, 10:00, 11:30)
+      'evening': slots with time >= 13:00 (14:30, 16:00, 17:30)
+      
+    Exception: Medium and Easy treatments (e.g. Lepam) are not hard treatments,
+    so they do not conflict and are not blocked.
+    """
+    if not patient_id or not target_date or not session:
+        return False
+
+    session = str(session).strip().lower()
+    if session not in ('morning', 'evening'):
+        return False
+
+    if isinstance(target_date, str):
+        try:
+            target_date = datetime.strptime(target_date, "%Y-%m-%d").date()
+        except Exception:
+            pass
+
+    try:
+        from Sheduling.models import PatientSnapshot, Booking, TherapyAllocation
+        from Patient.models import TherapistBooking, RoomBooking
+
+        # 1. Resolve all relevant patient snapshot IDs and reg numbers
+        patient_snapshot_ids = set()
+        pat_reg_no = None
+
+        if hasattr(patient_id, 'pat_reg_no'):
+            pat_reg_no = getattr(patient_id, 'pat_reg_no', None)
+            if hasattr(patient_id, 'pk'):
+                patient_snapshot_ids.add(patient_id.pk)
+        elif isinstance(patient_id, int):
+            patient_snapshot_ids.add(patient_id)
+            ps = PatientSnapshot.objects.filter(pk=patient_id).first()
+            if ps and ps.pat_reg_no:
+                pat_reg_no = ps.pat_reg_no
+        elif isinstance(patient_id, str):
+            if patient_id.isdigit():
+                ps = PatientSnapshot.objects.filter(pk=int(patient_id)).first()
+                if ps:
+                    patient_snapshot_ids.add(ps.pk)
+                    pat_reg_no = ps.pat_reg_no
+            if not pat_reg_no:
+                pat_reg_no = patient_id
+
+        if pat_reg_no:
+            other_ids = PatientSnapshot.objects.filter(pat_reg_no=str(pat_reg_no).strip()).values_list('id', flat=True)
+            patient_snapshot_ids.update(other_ids)
+
+        # 2. Check TherapistBooking records (status='BOOKED')
+        tb_qs = TherapistBooking.objects.filter(
+            date=target_date,
+            status='BOOKED'
+        )
+        if patient_snapshot_ids:
+            tb_qs = tb_qs.filter(patient_id__in=patient_snapshot_ids)
+        if exclude_allocation_id:
+            tb_qs = tb_qs.exclude(visit_id=exclude_allocation_id)
+        
+        for tb in tb_qs.select_related('time_slot'):
+            tb_session = get_slot_session(tb.time_slot)
+            if tb_session == session:
+                th_obj = getattr(tb, 'therapy', None)
+                th_name = getattr(tb, 'therapy_name', None)
+                if is_hard_treatment(therapy_obj=th_obj, therapy_name=th_name):
+                    return True
+
+        # 3. Check RoomBooking records (status in ['BOOKED', 'scheduled'])
+        rb_qs = RoomBooking.objects.filter(
+            date=target_date,
+            status__in=['BOOKED', 'scheduled']
+        )
+        if patient_snapshot_ids:
+            rb_qs = rb_qs.filter(patient_id__in=patient_snapshot_ids)
+        if exclude_allocation_id:
+            rb_qs = rb_qs.exclude(therapy_id=exclude_allocation_id)
+            if hasattr(RoomBooking, 'visit'):
+                rb_qs = rb_qs.exclude(visit_id=exclude_allocation_id)
+
+        for rb in rb_qs.select_related('time_slot'):
+            rb_session = get_slot_session(rb.time_slot)
+            if rb_session == session:
+                th_obj = getattr(rb, 'therapy', None)
+                th_name = getattr(rb, 'therapy_name', None)
+                if is_hard_treatment(therapy_obj=th_obj, therapy_name=th_name):
+                    return True
+
+        # 4. Check Booking records (status in ['scheduled', 'allocated', 'BOOKED'])
+        b_qs = Booking.objects.filter(
+            date=target_date,
+            status__in=['scheduled', 'allocated', 'BOOKED']
+        )
+        if patient_snapshot_ids:
+            b_qs = b_qs.filter(allocation__patient__id__in=patient_snapshot_ids)
+        if exclude_booking_id:
+            b_qs = b_qs.exclude(pk=exclude_booking_id)
+        if exclude_allocation_id:
+            b_qs = b_qs.exclude(allocation_id=exclude_allocation_id)
+
+        for b in b_qs.select_related('timeslot', 'allocation'):
+            b_session = get_slot_session(b.timeslot)
+            if b_session == session:
+                alloc = getattr(b, 'allocation', None)
+                snap_name = getattr(b, 'snapshot_therapy_name', None)
+                if is_hard_treatment(therapy_obj=alloc, therapy_name=snap_name):
+                    return True
+
+        # 5. Check in_memory_tasks if provided
+        if in_memory_tasks:
+            for task in in_memory_tasks:
+                if isinstance(task, dict) and task.get('status') == 'BOOKED':
+                    if exclude_booking_id and task.get('booking_id') == exclude_booking_id:
+                        continue
+                    if exclude_allocation_id and task.get('allocation_id') == exclude_allocation_id:
+                        continue
+                    t_slot = task.get('slot')
+                    t_session = get_slot_session(t_slot)
+                    if t_session == session:
+                        t_name = task.get('therapy_name')
+                        if is_hard_treatment(therapy_name=t_name):
+                            return True
+
+    except Exception as e:
+        print(f"[DEBUG patient_has_hard_treatment_in_session] Error: {e}")
+
+    return False
+
+
+def get_allowed_slot_values(patient_type, therapy_category, used_slots=None, therapy_name=None, therapy_code=None, patient_id=None, target_date=None):
     """
     Return ordered list of allowed slot strings "HH:MM" for this patient_type and therapy_category.
     Excludes any used_slots provided (list of slot model instances).
@@ -1044,6 +1334,8 @@ def get_allowed_slot_values(patient_type, therapy_category, used_slots=None, the
         used_slots: List of slot model instances that are already used
         therapy_name: Name of the therapy (for treatment-specific restrictions)
         therapy_code: Therapy code (master lookup + THEB037 exemption)
+        patient_id: Optional patient ID or snapshot for session hard-treatment checks
+        target_date: Optional target date for session hard-treatment checks
     """
     # VAMANAM SPECIAL RULE: Vamanam therapies ONLY use designated Vamanam slots (e.g. 05:00, 05:30)
     if is_vamanam_treatment(therapy_name, therapy_code):
@@ -1109,6 +1401,19 @@ def get_allowed_slot_values(patient_type, therapy_category, used_slots=None, the
             allowed_slots = ["08:30"]
         print(f"[SLOT RESTRICTION] Vasthi therapy group -- only 08:30 allowed. Slots: {allowed_slots}")
 
+    # HARD TREATMENT RESTRICTION: Two hard treatments should not be scheduled in the same session
+    # Exception: Medium and Easy treatments (e.g. Lepam) can be assigned in the same session
+    if is_hard_treatment(therapy_name=therapy_name, therapy_code=therapy_code, category=therapy_category):
+        if patient_id and target_date:
+            has_morning_hard = patient_has_hard_treatment_in_session(patient_id, target_date, 'morning')
+            has_evening_hard = patient_has_hard_treatment_in_session(patient_id, target_date, 'evening')
+            if has_morning_hard:
+                allowed_slots = [s for s in allowed_slots if get_slot_session(s) != 'morning']
+                print(f"[SLOT RESTRICTION] Patient {patient_id} already has a hard treatment in morning session on {target_date} - excluding morning slots. Remaining: {allowed_slots}")
+            if has_evening_hard:
+                allowed_slots = [s for s in allowed_slots if get_slot_session(s) != 'evening']
+                print(f"[SLOT RESTRICTION] Patient {patient_id} already has a hard treatment in evening session on {target_date} - excluding evening slots. Remaining: {allowed_slots}")
+
     # remove any used slots (used_slots is list of slot model instances; use slot_time for SlotMaster)
     if used_slots:
         used_slot_strs = []
@@ -1155,6 +1460,27 @@ def allocate_therapists(date, time_slot, therapy_requirements, last_therapists=N
     exclusion_set = set(unpreferred_codes)
     if last_therapists and unpreferred_codes:
         last_therapists = [c for c in last_therapists if c not in unpreferred_codes]
+
+    # Treatment Omission Exclusions: Therapists with approved omissions for this treatment
+    omitted_codes = set()
+    omitted_ids = set()
+    th_code_req = (therapy_requirements or {}).get("therapy_code")
+    th_name_req = (therapy_requirements or {}).get("therapy_name")
+    try:
+        from masters.models import get_omitted_therapist_codes_for_treatment, get_omitted_therapist_ids_for_treatment
+        if th_code_req:
+            omitted_codes.update(get_omitted_therapist_codes_for_treatment(th_code_req))
+            omitted_ids.update(get_omitted_therapist_ids_for_treatment(th_code_req))
+        if th_name_req:
+            omitted_codes.update(get_omitted_therapist_codes_for_treatment(th_name_req))
+            omitted_ids.update(get_omitted_therapist_ids_for_treatment(th_name_req))
+    except Exception as e:
+        print(f"[DEBUG TreatmentOmission] Error resolving omitted therapists in reshedule.py: {e}")
+
+    if omitted_codes:
+        exclusion_set.update(omitted_codes)
+        if last_therapists:
+            last_therapists = [c for c in last_therapists if c not in omitted_codes]
 
     # Shift eligibility (additive): only enforced when shift masters/mappings are configured.
     shift_filter_enabled = False
@@ -1224,6 +1550,13 @@ def allocate_therapists(date, time_slot, therapy_requirements, last_therapists=N
         full_leave_emp_codes = set()
         half_day_leaves = []
 
+    # Preload deputed therapist IDs for date
+    try:
+        from masters.models import get_deputed_therapist_ids_for_date
+        deputed_therapist_ids = get_deputed_therapist_ids_for_date(date)
+    except Exception:
+        deputed_therapist_ids = set()
+
     def therapist_on_leave(t: TherapistMaster, slot=None):
         target_slot = slot if slot is not None else time_slot
         if TherapistLeaveMaster.objects.filter(therapist=t, leave_day=day_of_week).exists():
@@ -1238,6 +1571,18 @@ def allocate_therapists(date, time_slot, therapy_requirements, last_therapists=N
             if (t_id and el.therapist_id == t_id) or (emp_code and el.employee_code == emp_code):
                 if el.is_slot_on_leave(date, target_slot):
                     return True
+        if t_id and t_id in deputed_therapist_ids:
+            return True
+        from masters.models import is_therapist_deputed
+        if is_therapist_deputed(t, date):
+            return True
+        if t_id and t_id in omitted_ids:
+            return True
+        if emp_code and emp_code in omitted_codes:
+            return True
+        t_code = getattr(t, 'therapist_code', None)
+        if t_code and t_code in omitted_codes:
+            return True
         return False
 
     def get_therapist_gender(t):
@@ -1644,6 +1989,27 @@ def allocate_therapists_with_grade_substitution(date, time_slot, therapy_require
     allocated = []
     exclusion_set = set()
 
+    # Treatment Omission Exclusions
+    omitted_codes = set()
+    omitted_ids = set()
+    th_code_req = (therapy_requirements or {}).get("therapy_code")
+    th_name_req = (therapy_requirements or {}).get("therapy_name")
+    try:
+        from masters.models import get_omitted_therapist_codes_for_treatment, get_omitted_therapist_ids_for_treatment
+        if th_code_req:
+            omitted_codes.update(get_omitted_therapist_codes_for_treatment(th_code_req))
+            omitted_ids.update(get_omitted_therapist_ids_for_treatment(th_code_req))
+        if th_name_req:
+            omitted_codes.update(get_omitted_therapist_codes_for_treatment(th_name_req))
+            omitted_ids.update(get_omitted_therapist_ids_for_treatment(th_name_req))
+    except Exception:
+        pass
+
+    if omitted_codes:
+        exclusion_set.update(omitted_codes)
+        if last_therapists:
+            last_therapists = [c for c in last_therapists if c not in omitted_codes]
+
     # Shift eligibility (additive): only enforced when shift masters/mappings are configured.
     shift_filter_enabled = False
     mapped_ids, eligible_ids = (set(), set())
@@ -1693,6 +2059,13 @@ def allocate_therapists_with_grade_substitution(date, time_slot, therapy_require
         full_leave_emp_codes = set()
         half_day_leaves = []
 
+    # Preload deputed therapist IDs for date
+    try:
+        from masters.models import get_deputed_therapist_ids_for_date
+        deputed_therapist_ids = get_deputed_therapist_ids_for_date(date)
+    except Exception:
+        deputed_therapist_ids = set()
+
     def therapist_on_leave(t, slot=None):
         target_slot = slot if slot is not None else time_slot
         if TherapistLeaveMaster.objects.filter(therapist=t, leave_day=day_of_week).exists():
@@ -1707,6 +2080,18 @@ def allocate_therapists_with_grade_substitution(date, time_slot, therapy_require
             if (t_id and el.therapist_id == t_id) or (emp_code and el.employee_code == emp_code):
                 if el.is_slot_on_leave(date, target_slot):
                     return True
+        if t_id and t_id in deputed_therapist_ids:
+            return True
+        from masters.models import is_therapist_deputed
+        if is_therapist_deputed(t, date):
+            return True
+        if t_id and t_id in omitted_ids:
+            return True
+        if emp_code and emp_code in omitted_codes:
+            return True
+        t_code = getattr(t, 'therapist_code', None)
+        if t_code and t_code in omitted_codes:
+            return True
         return False
 
     def get_therapist_gender(t):
@@ -2067,6 +2452,45 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
             "therapists": []
         }, False, reason)
 
+    # HARD TREATMENT RESTRICTION: Two hard treatments should not be scheduled in the same session
+    # Exception: Medium and Easy treatments (e.g. Lepam) can be assigned in the same session
+    if is_hard_treatment(allocation, therapy_name=therapy_name) or (therapy_req and str(therapy_req.get("therapy_category", "")).strip().lower() == 'hard'):
+        slot_session = get_slot_session(canonical_slot)
+        if slot_session and patient_id and patient_has_hard_treatment_in_session(
+            patient_id=patient_id,
+            target_date=date,
+            session=slot_session,
+            exclude_booking_id=booking_id,
+            exclude_allocation_id=allocation.pk if allocation and hasattr(allocation, 'pk') else None
+        ):
+            reason = "hard_treatment_same_session_conflict"
+            print(f"[HARD TREATMENT RESTRICTION] BLOCKED: Patient {patient_id} already has a hard treatment in {slot_session} session on {date}")
+            if AllocationAttempt:
+                try:
+                    AllocationAttempt.objects.create(
+                        visit=allocation if allocation and hasattr(allocation, 'pk') else None,
+                        therapy=allocation if allocation and hasattr(allocation, 'pk') else None,
+                        date=date,
+                        requested_time_slot=canonical_slot,
+                        requested_time_slot_value=requested_slot_value or '',
+                        status='FAILED',
+                        reason=reason,
+                        extra={"booking_id": booking_id, "session": slot_session}
+                    )
+                except Exception:
+                    pass
+            return ({
+                "booking_id": booking_id,
+                "allocation_id": allocation.pk if allocation and hasattr(allocation, 'pk') else None,
+                "date": date.isoformat() if hasattr(date, 'isoformat') else str(date),
+                "therapy_name": therapy_name,
+                "slot": requested_slot_value,
+                "status": "FAILED",
+                "reason": reason,
+                "room_no": getattr(booking.room, 'room_no', None) if getattr(booking, 'room', None) else None,
+                "therapists": []
+            }, False, reason)
+
     # in-run used slot check (use slot_time for SlotMaster; avoid matching on None)
     canonical_time = _slot_time_value(canonical_slot)
     if canonical_time and used_slots:
@@ -2092,7 +2516,7 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
     previous_therapist_group = []  # All previous therapists (bathing + non-bathing) from most recent day
     try:
         from Patient.models import TherapistBooking
-        from masters.models import TherapistMaster, TherapistLeaveMaster, EmergencyLeave
+        from masters.models import TherapistMaster, TherapistLeaveMaster, EmergencyLeave, is_therapist_omitted_for_treatment
         from django.db.models import Q
         from django.db.models import Max
         
@@ -2154,6 +2578,12 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
                 # Check emergency leave
                 elif is_therapist_on_emergency_leave(prev_tm, date, canonical_slot):
                     is_available = False
+                # Check deputation
+                elif is_therapist_deputed(prev_tm, date):
+                    is_available = False
+                # Check treatment omission
+                elif is_therapist_omitted_for_treatment(prev_tm, therapy_name):
+                    is_available = False
                 
                 if is_available:
                     available_previous_therapists.append(prev_tm)
@@ -2196,8 +2626,12 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
                             on_leave = True
                         if not on_leave and TherapistLeaveMaster.objects.filter(therapist=th, leave_day=day_of_week).exists():
                             on_leave = True
-                        from masters.models import is_therapist_on_emergency_leave
+                        from masters.models import is_therapist_on_emergency_leave, is_therapist_deputed, is_therapist_omitted_for_treatment
                         if not on_leave and is_therapist_on_emergency_leave(th, date, canonical_slot):
+                            on_leave = True
+                        if not on_leave and is_therapist_deputed(th, date):
+                            on_leave = True
+                        if not on_leave and is_therapist_omitted_for_treatment(th, therapy_name):
                             on_leave = True
                         if not on_leave:
                             previous_bathing_therapist = th
@@ -2239,8 +2673,12 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
                             on_leave = True
                         if not on_leave and TherapistLeaveMaster.objects.filter(therapist=th, leave_day=day_of_week).exists():
                             on_leave = True
-                        from masters.models import is_therapist_on_emergency_leave
+                        from masters.models import is_therapist_on_emergency_leave, is_therapist_deputed, is_therapist_omitted_for_treatment
                         if not on_leave and is_therapist_on_emergency_leave(th, date, canonical_slot):
+                            on_leave = True
+                        if not on_leave and is_therapist_deputed(th, date):
+                            on_leave = True
+                        if not on_leave and is_therapist_omitted_for_treatment(th, therapy_name):
                             on_leave = True
                         if not on_leave:
                             previous_bathing_therapist = th
@@ -2415,6 +2853,15 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
                                                 ).exists():
                                                     print(f"[RESCHEDULE PASS2]   Therapist {therapist_code} is on weekly leave - skipping")
                                                     continue
+
+                                                # 1b. Check deputation
+                                                from masters.models import is_therapist_deputed, is_therapist_omitted_for_treatment
+                                                if is_therapist_deputed(therapist, date):
+                                                    print(f"[RESCHEDULE PASS2]   Therapist {therapist_code} is deputed - skipping")
+                                                    continue
+                                                if is_therapist_omitted_for_treatment(therapist, therapy_name):
+                                                    print(f"[RESCHEDULE PASS2]   Therapist {therapist_code} omitted treatment {therapy_name} - skipping")
+                                                    continue
                                                 
                                                 # 2. Check if already booked at this date+time_slot
                                                 if canonical_slot and TherapistBooking.objects.filter(
@@ -2581,6 +3028,11 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
                             continue
                         if TherapistLeaveMaster.objects.filter(therapist=t, leave_day=day_of_week).exists():
                             continue
+                        from masters.models import is_therapist_deputed, is_therapist_omitted_for_treatment
+                        if is_therapist_deputed(t, date):
+                            continue
+                        if is_therapist_omitted_for_treatment(t, therapy_name):
+                            continue
                         if TherapistBooking.objects.filter(therapist=t, date=date, time_slot=canonical_slot, status='BOOKED').exists():
                             continue
                         available += 1
@@ -2657,6 +3109,14 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
             elif is_therapist_on_emergency_leave(previous_bathing_therapist, date, canonical_slot):
                 can_add = False
                 print(f"[RESCHEDULE PASS2]   Previous bathing therapist is on emergency leave - cannot add")
+            # Check deputation
+            elif is_therapist_deputed(previous_bathing_therapist, date):
+                can_add = False
+                print(f"[RESCHEDULE PASS2]   Previous bathing therapist is deputed - cannot add")
+            # Check treatment omission
+            elif is_therapist_omitted_for_treatment(previous_bathing_therapist, therapy_name):
+                can_add = False
+                print(f"[RESCHEDULE PASS2]   Previous bathing therapist omitted treatment {therapy_name} - cannot add")
             # Check if already booked
             elif TherapistBooking.objects.filter(
                 therapist=previous_bathing_therapist,
@@ -2831,8 +3291,14 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
                     if TherapistLeaveMaster.objects.filter(therapist=alt_senior, leave_day=day_of_week).exists():
                         continue
                     # Check emergency leave
-                    from masters.models import is_therapist_on_emergency_leave
+                    from masters.models import is_therapist_on_emergency_leave, is_therapist_deputed, is_therapist_omitted_for_treatment
                     if is_therapist_on_emergency_leave(alt_senior, date, canonical_slot):
+                        continue
+                    # Check deputation
+                    if is_therapist_deputed(alt_senior, date):
+                        continue
+                    # Check treatment omission
+                    if is_therapist_omitted_for_treatment(alt_senior, therapy_name):
                         continue
                     
                     # Found alternative senior - replace current senior and use this one for bathing
@@ -3434,6 +3900,19 @@ def assign_continuity_therapists_pass1(booking, allocation, target_date, locked_
     
     if not slot_master:
         return result
+
+    # HARD TREATMENT RESTRICTION: Do not lock continuity therapists if patient already has a hard treatment in this session
+    if is_hard_treatment(allocation, therapy_name=therapy_name):
+        slot_session = get_slot_session(slot_master)
+        if slot_session and patient_id and patient_has_hard_treatment_in_session(
+            patient_id=patient_id,
+            target_date=target_date,
+            session=slot_session,
+            exclude_booking_id=getattr(booking, 'pk', None),
+            exclude_allocation_id=getattr(allocation, 'pk', None)
+        ):
+            print(f"[RESCHEDULE PASS1] Skipping booking {booking.pk} - patient {patient_id} already has a hard treatment in {slot_session} session on {target_date}")
+            return result
     
     # Get continuity therapists from plan
     continuity_therapists = []
@@ -3484,8 +3963,12 @@ def assign_continuity_therapists_pass1(booking, allocation, target_date, locked_
                         on_leave = False
                         if TherapistLeaveMaster.objects.filter(therapist=th, leave_day=day_w).exists():
                             on_leave = True
-                        from masters.models import is_therapist_on_emergency_leave
+                        from masters.models import is_therapist_on_emergency_leave, is_therapist_deputed, is_therapist_omitted_for_treatment
                         if not on_leave and is_therapist_on_emergency_leave(th, target_date, slot_master):
+                            on_leave = True
+                        if not on_leave and is_therapist_deputed(th, target_date):
+                            on_leave = True
+                        if not on_leave and is_therapist_omitted_for_treatment(th, allocation.therapy_name):
                             on_leave = True
                         if not on_leave and TherapistBooking.objects.filter(
                             therapist=th, date=target_date, time_slot=slot_master, status='BOOKED'
@@ -3638,8 +4121,12 @@ def assign_continuity_therapists_pass1(booking, allocation, target_date, locked_
                             is_on_leave = False
                             if TherapistLeaveMaster.objects.filter(therapist=therapist, leave_day=day_of_week).exists():
                                 is_on_leave = True
-                            from masters.models import is_therapist_on_emergency_leave
+                            from masters.models import is_therapist_on_emergency_leave, is_therapist_deputed, is_therapist_omitted_for_treatment
                             if not is_on_leave and is_therapist_on_emergency_leave(therapist, target_date, slot_master):
+                                is_on_leave = True
+                            if not is_on_leave and is_therapist_deputed(therapist, target_date):
+                                is_on_leave = True
+                            if not is_on_leave and is_therapist_omitted_for_treatment(therapist, allocation.therapy_name):
                                 is_on_leave = True
                             if not is_on_leave and TherapistBooking.objects.filter(
                                 therapist=therapist,
@@ -3718,6 +4205,11 @@ def assign_continuity_therapists_pass1(booking, allocation, target_date, locked_
             if (t_id and el.therapist_id == t_id) or (emp_code and el.employee_code == emp_code):
                 if el.is_slot_on_leave(target_date, slot_master):
                     return True
+        from masters.models import is_therapist_deputed, is_therapist_omitted_for_treatment
+        if is_therapist_deputed(t, target_date):
+            return True
+        if is_therapist_omitted_for_treatment(t, allocation.therapy_name):
+            return True
         return False
     
     def get_therapist_gender(t):
@@ -4181,6 +4673,8 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                 used_slots,
                 therapy_name,
                 getattr(allocation, "therapy_code", None),
+                patient_id=patient_id,
+                target_date=target_date,
             )
             allocated_here = False
             
@@ -4294,6 +4788,20 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
             except Exception as e:
                 print(f"[SLOT RESTRICTION] Vasthi therapy group preferred-slot normalization error: {e}")
 
+        # HARD TREATMENT RESTRICTION: Check if preferred slot is in a session where patient already has a hard treatment
+        if canonical_pref and (is_hard_treatment(allocation, therapy_name=therapy_name) or (therapy_req.get("therapy_category") and str(therapy_req.get("therapy_category")).strip().lower() == 'hard')):
+            pref_session = get_slot_session(canonical_pref)
+            if pref_session and patient_id and patient_has_hard_treatment_in_session(
+                patient_id=patient_id,
+                target_date=target_date,
+                session=pref_session,
+                exclude_booking_id=booking_id,
+                exclude_allocation_id=therapy_allocation_id
+            ):
+                print(f"[HARD TREATMENT RESTRICTION] Patient {patient_id} already has a hard treatment in {pref_session} session on {target_date}. Rejecting preferred slot and trying alternate slots.")
+                canonical_pref = None
+                preferred_rejected_reason = "hard_treatment_same_session_conflict"
+
         therapy_req = therapist_requirements(allocation)
         needs_room_flag = therapy_needs_room(allocation)
         needs_bath_flag = therapy_needs_bath(allocation)
@@ -4364,6 +4872,7 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                 "patient_already_has_booking",
                 "slot_already_used_in_run",
                 "bathing_therapist_unavailable",  # Also try alternate slots if bathing therapist unavailable
+                "hard_treatment_same_session_conflict",
             }
             # Always try alternate slots if preferred slot failed (unless it's a critical error that won't be fixed by slot change)
             # This ensures we try other slots when room/therapist/patient conflicts occur
@@ -4375,7 +4884,7 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                     should_try_fallback = True
                     print(f"[DEBUG Reschedule] Preferred slot failed with reason: {reason}. Will try alternate slots.")
                 # Also try fallback if reason contains keywords indicating availability issues
-                elif any(keyword in reason_str for keyword in ["room", "therapist", "patient", "bathing", "available", "booked"]):
+                elif any(keyword in reason_str for keyword in ["room", "therapist", "patient", "bathing", "available", "booked", "conflict"]):
                     should_try_fallback = True
                     print(f"[DEBUG Reschedule] Preferred slot failed with reason: {reason}. Will try alternate slots (keyword match).")
             else:
@@ -4391,6 +4900,8 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                     used_slots,
                     therapy_name,
                     getattr(allocation, "therapy_code", None),
+                    patient_id=patient_id,
+                    target_date=target_date,
                 )
                 print(f"[DEBUG Reschedule] Allowed slot values for patient_type={patient_type}, category={therapy_req.get('therapy_category')}: {allowed_slot_values}")
                 

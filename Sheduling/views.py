@@ -719,7 +719,7 @@ def therapy_entry(request):
                 
                 # Log audit event
                 log_therapy_audit(
-                    user=request.user if request.user.is_authenticated else None,
+                    user=request.user if getattr(request, 'user', None) and request.user.is_authenticated else None,
                     action='cancel_therapy',
                     therapy_allocation=allocation,
                     description=f"Therapy '{allocation.therapy_name}' cancelled for patient {allocation.patient.pat_reg_no} from {cancel_from} to {cancel_to}. Reason: {reason}",
@@ -1006,7 +1006,7 @@ def therapy_entry(request):
                 
                 # Log audit event
                 log_therapy_audit(
-                    user=request.user if request.user.is_authenticated else None,
+                    user=request.user if getattr(request, 'user', None) and request.user.is_authenticated else None,
                     action='resume_therapy',
                     therapy_allocation=allocation,
                     description=f"Therapy '{allocation.therapy_name}' resumed for patient {allocation.patient.pat_reg_no} from {resume_from} to {resume_to}",
@@ -1109,6 +1109,7 @@ def therapy_entry(request):
                     allocation.to_date = new_to_date
                     allocation.days = (allocation.to_date - allocation.from_date).days + 1
 
+
                 # Delete bookings outside the new date range if dates changed
                 # After 5:30 AM (schedule timezone): do not change today or past; only future.
                 lock_upto_date, first_editable_date = _schedule_lock_upto_date()
@@ -1208,7 +1209,7 @@ def therapy_entry(request):
                             from .models import AllocationChange
                             AllocationChange.objects.create(
                                 allocation=allocation,
-                                changed_by=request.user if request.user.is_authenticated else None,
+                                changed_by=request.user if getattr(request, 'user', None) and request.user.is_authenticated else None,
                                 change_type='change_slot',
                                 diff={
                                     'old_slot_id': old_slot_id,
@@ -1595,14 +1596,16 @@ def therapy_entry(request):
                         allocation.save(update_fields=['status'])
                 
                 # Log audit event
+                req_u = getattr(request, 'user', None)
+                is_u_auth = req_u.is_authenticated if req_u else False
                 log_therapy_audit(
-                    user=request.user if request.user.is_authenticated else None,
+                    user=req_u if is_u_auth else None,
                     action='update_therapy',
                     therapy_allocation=allocation,
                     description=f"Therapy '{allocation.therapy_name}' updated for patient {allocation.patient.pat_reg_no}",
                     additional_data={
                         'updated_fields': list(payload.keys()),
-                        'updated_by': request.user.username if request.user.is_authenticated else 'Anonymous'
+                        'updated_by': req_u.username if is_u_auth else 'Anonymous'
                     },
                     request=request
                 )
@@ -1635,7 +1638,7 @@ def therapy_entry(request):
                     
                     # Log audit event
                     log_therapy_audit(
-                        user=request.user if request.user.is_authenticated else None,
+                        user=request.user if getattr(request, 'user', None) and request.user.is_authenticated else None,
                         action='remove_item',
                         therapy_allocation=allocation,
                         description=f"Item removed from therapy '{allocation.therapy_name}' for patient {allocation.patient.pat_reg_no}",
@@ -1788,6 +1791,7 @@ def therapy_entry(request):
                 if changed:
                     ps.save(update_fields=['pat_name', 'pat_age', 'pat_sex', 'pat_room_no', 'pat_ref_id', 'updated_at'])
 
+
                 # create allocation and per-date bookings atomically (all-or-nothing)
                 try:
                     with transaction.atomic():
@@ -1813,7 +1817,7 @@ def therapy_entry(request):
                         days=(tdate - fdate).days + 1,
                         notes=payload.get('notes') or '',
                         status='draft',
-                        allocated_by=request.user if request.user.is_authenticated else None
+                        allocated_by=request.user if getattr(request, 'user', None) and request.user.is_authenticated else None
                     )
 
                     bookings_created = []
@@ -1990,8 +1994,10 @@ def therapy_entry(request):
                         print(f"Automatic scheduling check failed for allocation {alloc.id}: {e}")
 
                     # Log comprehensive audit event
+                    req_user = getattr(request, 'user', None)
+                    is_auth = req_user.is_authenticated if req_user else False
                     log_therapy_audit(
-                        user=request.user if request.user.is_authenticated else None,
+                        user=req_user if is_auth else None,
                         action='allocate_therapy',
                         therapy_allocation=alloc,
                         description=f"New therapy '{alloc.therapy_name}' allocated for patient {alloc.patient.pat_reg_no} from {alloc.from_date} to {alloc.to_date}",
@@ -2006,7 +2012,7 @@ def therapy_entry(request):
                             'days': alloc.days,
                             'items_groups': alloc.items_groups,
                             'bookings_created': len(bookings_created),
-                            'allocated_by': request.user.username if request.user.is_authenticated else 'Anonymous'
+                            'allocated_by': req_user.username if is_auth else 'Anonymous'
                         },
                         request=request
                     )
@@ -4116,7 +4122,7 @@ def allocate_therapy(request):
     # items_groups expected as list of groups (can be empty):
     # [{ "items":[{"item_code":"KAS","item_name":"Kashayam"}, ...], "dosage":"10 ml", "uno":"1" }, ...]
     # items_groups is optional - can be empty array (already set above)
-    items_groups = payload.get("items_groups") or []
+    items_groups = payload.get("items_groups", []) or []
     if not isinstance(items_groups, list):
         return JsonResponse({"error": "items_groups must be a list"}, status=400)
 
@@ -4159,8 +4165,10 @@ def allocate_therapy(request):
     if changed:
         patient_snapshot.save(update_fields=["pat_name","pat_age","pat_sex","pat_ref_id","updated_at"])
 
+
     # start atomic transaction for entire allocation (all-or-nothing)
     try:
+        from .models import Booking, BookingItem, BookingAssignment
         with transaction.atomic():
             allocation = TherapyAllocation.objects.create(
                 patient=patient_snapshot,
@@ -6154,7 +6162,9 @@ def reschedule_options_api(request):
             therapy_req.get("therapy_category"),
             used_slots=[],
             therapy_name=allocation.therapy_name,
-            therapy_code=getattr(allocation, "therapy_code", None)
+            therapy_code=getattr(allocation, "therapy_code", None),
+            patient_id=patient_id,
+            target_date=target_date,
         )
         
         dummy_last_allocation = {'therapists': [], 'continuity_assigned': {}}
@@ -6195,8 +6205,12 @@ def reschedule_options_api(request):
             for ht in ht_qs:
                 if TherapistLeaveMaster.objects.filter(therapist=ht, leave_day=day_of_week).exists():
                     continue
-                from masters.models import is_therapist_on_emergency_leave
+                from masters.models import is_therapist_on_emergency_leave, is_therapist_deputed, is_therapist_omitted_for_treatment
                 if is_therapist_on_emergency_leave(ht, target_date, canonical_reg_slot):
+                    continue
+                if is_therapist_deputed(ht, target_date):
+                    continue
+                if is_therapist_omitted_for_treatment(ht, allocation.therapy_name):
                     continue
                 if TherapistBooking.objects.filter(therapist=ht, date=target_date, time_slot=canonical_reg_slot, status='BOOKED').exists():
                     continue
