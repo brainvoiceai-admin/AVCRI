@@ -812,4 +812,72 @@ class HelpingTherapistAllocationLog(models.Model):
 
     def __str__(self):
         return f"Helping Therapist {self.helping_therapist.therapist_code} for Patient {self.patient_id} on {self.date}"
-
+
+
+class SchedulingAuditLog(models.Model):
+    """
+    Comprehensive Audit Log for all scheduling modifications:
+    Emergency therapist replacements, slot/room reschedules, batch reschedules, and allocation changes.
+    Tracks before/after states, replaced vs replacement therapists, bathing therapist assignments,
+    mandatory reason, and performing user.
+    """
+    CHANGE_TYPE_CHOICES = [
+        ('emergency_replacement', 'Emergency Therapist Replacement'),
+        ('reschedule', 'Reschedule'),
+        ('allocation_change', 'Allocation Change'),
+    ]
+
+    booking = models.ForeignKey(Booking, null=True, blank=True, on_delete=models.SET_NULL, related_name='scheduling_audit_logs')
+    allocation = models.ForeignKey(TherapyAllocation, null=True, blank=True, on_delete=models.SET_NULL, related_name='scheduling_audit_logs')
+    change_type = models.CharField(max_length=50, choices=CHANGE_TYPE_CHOICES, default='emergency_replacement', db_index=True)
+
+    # Patient details snapshot
+    patient_name = models.CharField(max_length=255, blank=True)
+    patient_reg_no = models.CharField(max_length=50, blank=True, db_index=True)
+    patient_room_no = models.CharField(max_length=50, blank=True)
+
+    # Therapy details snapshot
+    therapy_name = models.CharField(max_length=255, blank=True)
+    therapy_code = models.CharField(max_length=50, blank=True)
+
+    # Schedule details
+    schedule_date = models.DateField(db_index=True)
+    time_slot_label = models.CharField(max_length=100, blank=True)
+    room_number = models.CharField(max_length=50, blank=True)
+
+    # Emergency replacement specific fields
+    replaced_therapist_code = models.CharField(max_length=50, blank=True)
+    replaced_therapist_name = models.CharField(max_length=255, blank=True)
+    replaced_therapist_grade = models.CharField(max_length=100, blank=True)
+    replaced_therapist_was_bathing = models.BooleanField(default=False)
+
+    replacement_therapist_code = models.CharField(max_length=50, blank=True)
+    replacement_therapist_name = models.CharField(max_length=255, blank=True)
+    replacement_therapist_grade = models.CharField(max_length=100, blank=True)
+    replacement_therapist_is_bathing = models.BooleanField(default=False)
+
+    designated_bathing_therapist_code = models.CharField(max_length=50, blank=True)
+    designated_bathing_therapist_name = models.CharField(max_length=255, blank=True)
+
+    # Full State snapshots (JSON)
+    before_state = models.JSONField(default=dict, blank=True)
+    after_state = models.JSONField(default=dict, blank=True)
+
+    # Reason & Audit Metadata
+    reason = models.TextField(help_text="Mandatory reason for scheduling change")
+    changed_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name='scheduling_audit_logs')
+    changed_by_name = models.CharField(max_length=255, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['schedule_date', 'created_at']),
+            models.Index(fields=['change_type', 'created_at']),
+        ]
+        verbose_name = 'Scheduling Audit Log'
+        verbose_name_plural = 'Scheduling Audit Logs'
+
+    def __str__(self):
+        return f"[{self.get_change_type_display()}] {self.therapy_name} for {self.patient_name} on {self.schedule_date}"
+

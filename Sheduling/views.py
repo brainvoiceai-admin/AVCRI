@@ -6513,6 +6513,28 @@ def reschedule_therapy_api(request):
                                 rescheduled_by=request.user if request.user.is_authenticated else None,
                                 reason=resched_reason
                             )
+                            try:
+                                pat = allocation.patient
+                                SchedulingAuditLog.objects.create(
+                                    booking=booking,
+                                    allocation=allocation,
+                                    change_type='reschedule',
+                                    patient_name=getattr(pat, 'pat_name', '') if pat else '',
+                                    patient_reg_no=getattr(pat, 'pat_reg_no', '') if pat else '',
+                                    patient_room_no=get_staying_room_display_number(pat.pat_room_no) if pat and pat.pat_room_no else '',
+                                    therapy_name=allocation.therapy_name or '',
+                                    therapy_code=allocation.therapy_code or '',
+                                    schedule_date=booking.date,
+                                    time_slot_label=booking.timeslot.slot_time.strftime('%I:%M %p') if booking.timeslot else '—',
+                                    room_number=booking.room.room_no if booking.room else '—',
+                                    before_state={'therapists': before_therapists, 'slot': str(before_slot), 'room': str(before_room)},
+                                    after_state={'therapists': after_therapists, 'slot': str(booking.timeslot), 'room': str(booking.room)},
+                                    reason=resched_reason,
+                                    changed_by=request.user if request.user.is_authenticated else None,
+                                    changed_by_name=(request.user.get_full_name() or request.user.username) if request.user.is_authenticated else 'System',
+                                )
+                            except Exception as audit_err:
+                                print(f"[ERROR SchedulingAuditLog single resched]: {audit_err}")
                         except Exception as hist_err:
                             print(f"[ERROR BookingRescheduleHistory] {hist_err}")
 
@@ -6751,6 +6773,28 @@ def reschedule_all_failed_api(request):
                                     rescheduled_by=request.user if request.user.is_authenticated else None,
                                     reason=resched_reason
                                 )
+                                try:
+                                    pat = allocation.patient
+                                    SchedulingAuditLog.objects.create(
+                                        booking=booking,
+                                        allocation=allocation,
+                                        change_type='reschedule',
+                                        patient_name=getattr(pat, 'pat_name', '') if pat else '',
+                                        patient_reg_no=getattr(pat, 'pat_reg_no', '') if pat else '',
+                                        patient_room_no=get_staying_room_display_number(pat.pat_room_no) if pat and pat.pat_room_no else '',
+                                        therapy_name=allocation.therapy_name or '',
+                                        therapy_code=allocation.therapy_code or '',
+                                        schedule_date=booking.date,
+                                        time_slot_label=booking.timeslot.slot_time.strftime('%I:%M %p') if booking.timeslot else '—',
+                                        room_number=booking.room.room_no if booking.room else '—',
+                                        before_state={'therapists': before_therapists, 'slot': str(before_slot), 'room': str(before_room)},
+                                        after_state={'therapists': after_therapists, 'slot': str(booking.timeslot), 'room': str(booking.room)},
+                                        reason=resched_reason,
+                                        changed_by=request.user if request.user.is_authenticated else None,
+                                        changed_by_name=(request.user.get_full_name() or request.user.username) if request.user.is_authenticated else 'System',
+                                    )
+                                except Exception as audit_err:
+                                    print(f"[ERROR SchedulingAuditLog bulk resched]: {audit_err}")
                         except Exception as hist_err:
                             print(f"[ERROR BookingRescheduleHistory in reschedule_all_failed] {hist_err}")
 
@@ -7295,3 +7339,833 @@ def therapy_change_log_api(request):
         import traceback
         traceback.print_exc()
         return JsonResponse({'error': str(e)}, status=500)
+
+
+# =============================================================================
+# EMERGENCY THERAPIST RESCHEDULING & SCHEDULING AUDIT LOGS
+# =============================================================================
+
+@csrf_exempt
+@api_access_required
+def emergency_filter_treatments_api(request):
+    """
+    API endpoint to search and filter scheduled treatments for emergency therapist replacement.
+    Filterable by:
+      - date (YYYY-MM-DD, defaults to today)
+      - therapist (therapist code or name)
+      - patient (patient name or registration number)
+      - room (treatment room or patient staying room)
+    """
+    if request.method != 'GET':
+        return JsonResponse({'error': 'GET method required'}, status=405)
+
+    try:
+        from .models import Booking, BookingAssignment
+        from masters.models import TherapistMaster
+        from Patient.models import TreatmentRoom
+        from Patient.models import TherapistBooking
+        from .nurse_allocation import is_nurse_treatment
+        from reshedule import therapist_requirements
+
+        date_str = request.GET.get('date', '')
+        if date_str:
+            try:
+                filter_date = parse_date(date_str)
+            except Exception:
+                filter_date = timezone.localdate()
+        else:
+            filter_date = timezone.localdate()
+
+        therapist_filter = (request.GET.get('therapist') or '').strip().lower()
+        patient_filter = (request.GET.get('patient') or '').strip().lower()
+        room_filter = (request.GET.get('room') or '').strip().lower()
+
+        # Query scheduled bookings for that date
+        bookings = Booking.objects.filter(
+            date=filter_date,
+            status='scheduled'
+        ).select_related(
+            'allocation', 'allocation__patient', 'allocation__room', 'room', 'timeslot'
+        ).prefetch_related(
+            'assignments__therapist'
+        )
+
+        # Pre-fetch TherapistMaster and TherapistBooking to avoid N+1
+        all_therapist_masters = {tm.therapist_code: tm for tm in TherapistMaster.objects.all().select_related('therapist_grade')}
+        all_tb = {
+            (tb.visit_id, tb.therapist.therapist_code if tb.therapist else None): tb
+            for tb in TherapistBooking.objects.filter(date=filter_date, status='BOOKED').select_related('therapist')
+        }
+
+        treatments_list = []
+        scheduled_therapists_set = {}
+
+        for b in bookings:
+            alloc = b.allocation
+            if not alloc:
+                continue
+
+            # Skip nurse treatments
+            is_nurse = False
+            try:
+                is_nurse = is_nurse_treatment(alloc.therapy_code, alloc.therapy_name) is not None
+            except Exception:
+                is_nurse = False
+
+            req = therapist_requirements(alloc)
+            if not is_nurse and req.get('total', 1) == 0:
+                continue
+            if is_nurse:
+                continue
+
+            # Build assigned therapists list
+            assigned_list = []
+            for a in b.assignments.filter(status='assigned'):
+                tc = a.therapist.therapist_code
+                tm = all_therapist_masters.get(tc)
+                tb = all_tb.get((alloc.id, tc))
+                is_bathing = tb.is_bathing if tb else False
+
+                t_name = tm.therapist_name if tm else getattr(a.therapist, 'therapist_name', tc)
+                t_grade = tm.therapist_grade.name if (tm and tm.therapist_grade) else getattr(a.therapist, 'therapist_grade', '')
+                t_gender = tm.therapist_gender if tm else 'Male'
+
+                assigned_list.append({
+                    'code': tc,
+                    'name': t_name,
+                    'grade': t_grade,
+                    'gender': t_gender,
+                    'is_bathing': is_bathing,
+                })
+                scheduled_therapists_set[tc] = {
+                    'code': tc,
+                    'name': t_name,
+                    'grade': t_grade
+                }
+
+            # Skip treatments that have no therapists assigned (cannot replace non-existent therapists,
+            # and matches Scheduled Therapies tab which hides zero-therapist treatments)
+            if not assigned_list:
+                continue
+
+            # Filter by therapist
+            if therapist_filter:
+                match_therapist = any(
+                    therapist_filter in t['code'].lower() or therapist_filter in t['name'].lower()
+                    for t in assigned_list
+                )
+                if not match_therapist:
+                    continue
+
+            # Filter by patient
+            pat = alloc.patient
+            pat_name = getattr(pat, 'pat_name', '') or ''
+            pat_reg = getattr(pat, 'pat_reg_no', '') or ''
+            if patient_filter:
+                if (patient_filter not in pat_name.lower()) and (patient_filter not in pat_reg.lower()):
+                    continue
+
+            # Filter by room
+            room_no = b.room.room_no if b.room else (alloc.room.room_no if alloc.room else '')
+            pat_room = get_staying_room_display_number(pat.pat_room_no) if pat and pat.pat_room_no else ''
+            if room_filter:
+                if (room_filter not in (room_no or '').lower()) and (room_filter not in (pat_room or '').lower()):
+                    continue
+
+            treatments_list.append({
+                'booking_id': b.id,
+                'allocation_id': alloc.id,
+                'patient_name': pat_name,
+                'patient_reg_no': pat_reg,
+                'patient_room_no': pat_room,
+                'patient_sex': getattr(pat, 'pat_sex', '') or '',
+                'patient_age': getattr(pat, 'pat_age', '') or '',
+                'therapy_name': alloc.therapy_name,
+                'therapy_code': alloc.therapy_code or '',
+                'date': b.date.isoformat(),
+                'timeslot': b.timeslot.slot_time.strftime('%I:%M %p') if b.timeslot else '—',
+                'timeslot_id': b.timeslot_id,
+                'room_no': room_no or '—',
+                'therapists': assigned_list,
+            })
+
+        # Sort chronologically by timeslot, then patient name
+        treatments_list.sort(key=lambda x: (x.get('timeslot', ''), x.get('patient_name', '')))
+
+        return JsonResponse({
+            'success': True,
+            'date': filter_date.isoformat(),
+            'total_count': len(treatments_list),
+            'treatments': treatments_list,
+            'scheduled_therapists': sorted(list(scheduled_therapists_set.values()), key=lambda x: x['name']),
+        })
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return JsonResponse({'error': str(e)}, status=500)
+
+
+@csrf_exempt
+@api_access_required
+def emergency_available_therapists_api(request):
+    """
+    API endpoint to fetch available replacement therapists for a specific booking and slot.
+    Checks:
+      - Active status
+      - Gender requirement (male/female matching patient business rule or replaced therapist)
+      - Not on weekly leave (TherapistLeaveMaster)
+      - Not on emergency leave (EmergencyLeave)
+      - Not on deputation (TherapistDeputation)
+      - Not omitted for this therapy (TreatmentOmission)
+      - Not booked in same slot on that date (TherapistBooking & BookingAssignment)
+      - Not exceeding session limit (< 6 sessions per day)
+    """
+    if request.method != 'GET':
+        return JsonResponse({'error': 'GET method required'}, status=405)
+
+    try:
+        from .models import Booking, BookingAssignment
+        from masters.models import (
+            TherapistMaster, TherapistLeaveMaster,
+            is_therapist_on_emergency_leave, is_therapist_deputed, is_therapist_omitted_for_treatment
+        )
+        from Patient.models import TherapistBooking
+        from final_allocation import resolve_desired_gender
+
+        booking_id = request.GET.get('booking_id')
+        replaced_therapist_code = (request.GET.get('replaced_therapist_code') or '').strip()
+
+        if not booking_id:
+            return JsonResponse({'error': 'booking_id is required'}, status=400)
+
+        try:
+            booking = Booking.objects.select_related('allocation', 'allocation__patient', 'timeslot', 'room').get(id=booking_id)
+        except Booking.DoesNotExist:
+            return JsonResponse({'error': 'Booking not found'}, status=404)
+
+        alloc = booking.allocation
+        pat = alloc.patient if alloc else None
+        pat_sex = getattr(pat, 'pat_sex', None)
+        pat_age = getattr(pat, 'pat_age', None)
+
+        desired_gender = resolve_desired_gender(pat_sex, pat_age)
+
+        # Fallback to replaced therapist's gender if patient gender is undetermined
+        if not desired_gender and replaced_therapist_code:
+            rep_tm = TherapistMaster.objects.filter(therapist_code=replaced_therapist_code).first()
+            if rep_tm and rep_tm.therapist_gender:
+                desired_gender = 'female' if rep_tm.therapist_gender.lower().startswith('f') else 'male'
+
+        # Current assigned therapists on this booking
+        current_therapists = []
+        assigned_codes = set()
+        for asgn in booking.assignments.filter(status='assigned'):
+            tc = asgn.therapist.therapist_code
+            assigned_codes.add(tc)
+            tm = TherapistMaster.objects.filter(therapist_code=tc).select_related('therapist_grade').first()
+            tb = TherapistBooking.objects.filter(
+                visit=alloc,
+                date=booking.date,
+                time_slot=booking.timeslot,
+                therapist__therapist_code=tc,
+                status='BOOKED'
+            ).first()
+
+            is_bath = tb.is_bathing if tb else False
+            current_therapists.append({
+                'code': tc,
+                'name': tm.therapist_name if tm else asgn.therapist.therapist_name,
+                'grade': tm.therapist_grade.name if (tm and tm.therapist_grade) else getattr(asgn.therapist, 'therapist_grade', ''),
+                'gender': tm.therapist_gender if tm else 'Male',
+                'is_bathing': is_bath,
+                'is_target_for_replacement': (tc == replaced_therapist_code)
+            })
+
+        # Fetch candidate replacement therapists
+        candidates_qs = TherapistMaster.objects.filter(is_active=True).select_related('therapist_grade')
+        if desired_gender:
+            candidates_qs = candidates_qs.filter(therapist_gender__istartswith=desired_gender[0])
+
+        # Therapists booked in this timeslot
+        booked_codes = set(
+            TherapistBooking.objects.filter(
+                date=booking.date,
+                time_slot=booking.timeslot,
+                status='BOOKED'
+            ).exclude(visit=alloc).values_list('therapist__therapist_code', flat=True)
+        )
+        ba_booked_codes = set(
+            BookingAssignment.objects.filter(
+                booking_date=booking.date,
+                booking_timeslot=booking.timeslot,
+                status='assigned'
+            ).exclude(booking=booking).values_list('therapist__therapist_code', flat=True)
+        )
+
+        weekday = booking.date.weekday()
+        weekday_leave_ids = set(
+            TherapistLeaveMaster.objects.filter(leave_day=weekday).values_list('therapist_id', flat=True)
+        )
+
+        available_candidates = []
+        for tm in candidates_qs:
+            # Exclude already assigned on this booking
+            if tm.therapist_code in assigned_codes:
+                continue
+            # Exclude booked elsewhere
+            if tm.therapist_code in booked_codes or tm.therapist_code in ba_booked_codes:
+                continue
+            # Exclude weekday leave
+            if tm.id in weekday_leave_ids:
+                continue
+            # Exclude emergency leave
+            if is_therapist_on_emergency_leave(tm, booking.date, booking.timeslot):
+                continue
+            # Exclude deputation
+            if is_therapist_deputed(tm, booking.date):
+                continue
+            # Exclude treatment omission
+            if alloc and is_therapist_omitted_for_treatment(tm, alloc.therapy_name):
+                continue
+            # Session count check
+            session_count = TherapistBooking.objects.filter(
+                therapist=tm,
+                date=booking.date,
+                status='BOOKED'
+            ).count()
+            if session_count >= 6:
+                continue
+
+            available_candidates.append({
+                'therapist_code': tm.therapist_code,
+                'therapist_name': tm.therapist_name,
+                'grade': tm.therapist_grade.name if tm.therapist_grade else 'General',
+                'gender': tm.therapist_gender or 'Male',
+                'is_bathing_therapist': bool(tm.is_bathing_therapist),
+                'session_count': session_count,
+            })
+
+        # Sort available therapists: bathing capable first, then grade, then name
+        available_candidates.sort(key=lambda x: (not x['is_bathing_therapist'], x['grade'], x['therapist_name']))
+
+        return JsonResponse({
+            'success': True,
+            'booking_id': booking.id,
+            'desired_gender': desired_gender,
+            'current_therapists': current_therapists,
+            'available_therapists': available_candidates,
+            'available_count': len(available_candidates),
+        })
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return JsonResponse({'error': str(e)}, status=500)
+
+
+@csrf_exempt
+@api_access_required
+def emergency_replace_therapist_api(request):
+    """
+    API endpoint to execute emergency therapist replacement for a scheduled booking.
+    Replaces replaced_therapist_code with replacement_therapist_code, sets the chosen
+    bathing_therapist_code (which can be the replacement or one of the remaining therapists),
+    enforces a mandatory reason, and records an immutable audit trail.
+    """
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST method required'}, status=405)
+
+    try:
+        data = json.loads(request.body)
+        booking_id = data.get('booking_id')
+        replaced_therapist_code = (data.get('replaced_therapist_code') or '').strip()
+        replacement_therapist_code = (data.get('replacement_therapist_code') or '').strip()
+        bathing_therapist_code = (data.get('bathing_therapist_code') or '').strip()
+        reason = (data.get('reason') or '').strip()
+
+        if not booking_id:
+            return JsonResponse({'error': 'booking_id is required'}, status=400)
+        if not replaced_therapist_code or not replacement_therapist_code:
+            return JsonResponse({'error': 'Both replaced therapist and replacement therapist are required'}, status=400)
+        if not reason or len(reason) < 3:
+            return JsonResponse({'error': 'A mandatory reason of at least 3 characters is required'}, status=400)
+
+        from .models import Booking, BookingAssignment, SchedulingAuditLog, BookingRescheduleHistory, AuditLog
+        from masters.models import TherapistMaster, TherapyMaster
+        from Patient.models import Therapist, TherapistBooking
+        from django.db import transaction
+
+        with transaction.atomic():
+            try:
+                booking = Booking.objects.select_related(
+                    'allocation', 'allocation__patient', 'allocation__room', 'room', 'timeslot'
+                ).get(id=booking_id)
+            except Booking.DoesNotExist:
+                return JsonResponse({'error': 'Booking not found'}, status=404)
+
+            alloc = booking.allocation
+            pat = alloc.patient if alloc else None
+
+            # Verify replacement therapist exists in TherapistMaster
+            try:
+                new_tm = TherapistMaster.objects.select_related('therapist_grade').get(therapist_code=replacement_therapist_code)
+            except TherapistMaster.DoesNotExist:
+                return JsonResponse({'error': f'Replacement therapist {replacement_therapist_code} not found in masters'}, status=404)
+
+            old_tm = TherapistMaster.objects.filter(therapist_code=replaced_therapist_code).select_related('therapist_grade').first()
+            old_name = old_tm.therapist_name if old_tm else replaced_therapist_code
+            old_grade = old_tm.therapist_grade.name if (old_tm and old_tm.therapist_grade) else ''
+            new_name = new_tm.therapist_name
+            new_grade = new_tm.therapist_grade.name if new_tm.therapist_grade else ''
+
+            # Collect BEFORE state
+            before_therapists = []
+            replaced_was_bathing = False
+            for asgn in booking.assignments.filter(status='assigned'):
+                tc = asgn.therapist.therapist_code
+                tm = TherapistMaster.objects.filter(therapist_code=tc).first()
+                tb = TherapistBooking.objects.filter(
+                    visit=alloc,
+                    date=booking.date,
+                    time_slot=booking.timeslot,
+                    therapist__therapist_code=tc,
+                    status='BOOKED'
+                ).first()
+                is_bath = tb.is_bathing if tb else False
+                if tc == replaced_therapist_code and is_bath:
+                    replaced_was_bathing = True
+
+                before_therapists.append({
+                    'code': tc,
+                    'name': tm.therapist_name if tm else asgn.therapist.therapist_name,
+                    'grade': tm.therapist_grade.name if (tm and tm.therapist_grade) else getattr(asgn.therapist, 'therapist_grade', ''),
+                    'is_bathing': is_bath,
+                })
+
+            # 1. Update BookingAssignment: Remove replaced therapist
+            booking.assignments.filter(therapist__therapist_code=replaced_therapist_code).delete()
+
+            # Ensure Patient.Therapist exists for new therapist
+            new_patient_t, _ = Therapist.objects.get_or_create(
+                therapist_code=new_tm.therapist_code,
+                defaults={
+                    'therapist_name': new_tm.therapist_name,
+                    'therapist_grade': new_grade,
+                    'is_bathing_therapist': new_tm.is_bathing_therapist,
+                }
+            )
+
+            # Clean any stale assignment for new therapist in this date+timeslot
+            BookingAssignment.objects.filter(
+                therapist=new_patient_t,
+                booking_date=booking.date,
+                booking_timeslot=booking.timeslot
+            ).delete()
+
+            # Create new BookingAssignment
+            BookingAssignment.objects.create(
+                booking=booking,
+                therapist=new_patient_t,
+                booking_date=booking.date,
+                booking_timeslot=booking.timeslot,
+                role=new_grade,
+                assigned_for='booking',
+                status='assigned'
+            )
+
+            # 2. Update TherapistBooking: Remove old booking
+            TherapistBooking.objects.filter(
+                visit=alloc,
+                date=booking.date,
+                time_slot=booking.timeslot,
+                therapist__therapist_code=replaced_therapist_code
+            ).delete()
+
+            # Resolve therapy object FK
+            therapy_obj = None
+            if alloc and alloc.therapy_code:
+                therapy_obj = TherapyMaster.objects.filter(therapy_code=alloc.therapy_code).first()
+            if not therapy_obj and alloc and alloc.therapy_name:
+                therapy_obj = TherapyMaster.objects.filter(therapy_name__iexact=alloc.therapy_name).first()
+
+            patient_id = None
+            try:
+                pat_reg = pat.pat_reg_no if pat else None
+                digits = ''.join(ch for ch in str(pat_reg or '') if ch.isdigit())
+                patient_id = int(digits) if digits else None
+            except Exception:
+                patient_id = None
+
+            is_replacement_bathing = (bathing_therapist_code == replacement_therapist_code)
+
+            # Create or update new TherapistBooking
+            tb_new, tb_created = TherapistBooking.objects.get_or_create(
+                therapist=new_tm,
+                date=booking.date,
+                time_slot=booking.timeslot,
+                defaults={
+                    'therapy_name': alloc.therapy_name if alloc else '',
+                    'patient_id': patient_id,
+                    'status': 'BOOKED',
+                    'visit': alloc,
+                    'therapy': therapy_obj,
+                    'is_bathing': is_replacement_bathing,
+                }
+            )
+            if not tb_created:
+                tb_new.status = 'BOOKED'
+                tb_new.visit = alloc
+                tb_new.therapy = therapy_obj
+                tb_new.therapy_name = alloc.therapy_name if alloc else ''
+                tb_new.patient_id = patient_id
+                tb_new.is_bathing = is_replacement_bathing
+                tb_new.save()
+
+            # 3. Synchronize is_bathing flag across all therapists in this booking
+            current_assignments = list(booking.assignments.filter(status='assigned'))
+            for asgn in current_assignments:
+                tc = asgn.therapist.therapist_code
+                is_this_bathing = (tc == bathing_therapist_code)
+                TherapistBooking.objects.filter(
+                    visit=alloc,
+                    date=booking.date,
+                    time_slot=booking.timeslot,
+                    therapist__therapist_code=tc,
+                    status='BOOKED'
+                ).update(is_bathing=is_this_bathing)
+
+            # Collect AFTER state
+            after_therapists = []
+            for asgn in booking.assignments.filter(status='assigned'):
+                tc = asgn.therapist.therapist_code
+                tm = TherapistMaster.objects.filter(therapist_code=tc).first()
+                tb = TherapistBooking.objects.filter(
+                    visit=alloc,
+                    date=booking.date,
+                    time_slot=booking.timeslot,
+                    therapist__therapist_code=tc,
+                    status='BOOKED'
+                ).first()
+                after_therapists.append({
+                    'code': tc,
+                    'name': tm.therapist_name if tm else asgn.therapist.therapist_name,
+                    'grade': tm.therapist_grade.name if (tm and tm.therapist_grade) else getattr(asgn.therapist, 'therapist_grade', ''),
+                    'is_bathing': tb.is_bathing if tb else False,
+                })
+
+            bathing_tm = TherapistMaster.objects.filter(therapist_code=bathing_therapist_code).first()
+            bathing_name = bathing_tm.therapist_name if bathing_tm else bathing_therapist_code
+
+            # 4. Record to SchedulingAuditLog
+            audit_entry = SchedulingAuditLog.objects.create(
+                booking=booking,
+                allocation=alloc,
+                change_type='emergency_replacement',
+                patient_name=getattr(pat, 'pat_name', '') or '',
+                patient_reg_no=getattr(pat, 'pat_reg_no', '') or '',
+                patient_room_no=get_staying_room_display_number(pat.pat_room_no) if pat and pat.pat_room_no else '',
+                therapy_name=alloc.therapy_name if alloc else '',
+                therapy_code=alloc.therapy_code or '' if alloc else '',
+                schedule_date=booking.date,
+                time_slot_label=booking.timeslot.slot_time.strftime('%I:%M %p') if booking.timeslot else '—',
+                room_number=booking.room.room_no if booking.room else '—',
+                replaced_therapist_code=replaced_therapist_code,
+                replaced_therapist_name=old_name,
+                replaced_therapist_grade=old_grade,
+                replaced_therapist_was_bathing=replaced_was_bathing,
+                replacement_therapist_code=replacement_therapist_code,
+                replacement_therapist_name=new_name,
+                replacement_therapist_grade=new_grade,
+                replacement_therapist_is_bathing=is_replacement_bathing,
+                designated_bathing_therapist_code=bathing_therapist_code,
+                designated_bathing_therapist_name=bathing_name,
+                before_state={
+                    'therapists': before_therapists,
+                    'slot': str(booking.timeslot),
+                    'room': booking.room.room_no if booking.room else '—'
+                },
+                after_state={
+                    'therapists': after_therapists,
+                    'slot': str(booking.timeslot),
+                    'room': booking.room.room_no if booking.room else '—'
+                },
+                reason=reason,
+                changed_by=request.user if request.user.is_authenticated else None,
+                changed_by_name=(request.user.get_full_name() or request.user.username) if request.user.is_authenticated else 'System',
+            )
+
+            # 5. Record to BookingRescheduleHistory
+            try:
+                BookingRescheduleHistory.objects.create(
+                    booking=booking,
+                    allocation=alloc,
+                    before_date=booking.date,
+                    before_slot=booking.timeslot,
+                    before_room=booking.room,
+                    before_therapists=before_therapists,
+                    after_date=booking.date,
+                    after_slot=booking.timeslot,
+                    after_room=booking.room,
+                    after_therapists=after_therapists,
+                    rescheduled_by=request.user if request.user.is_authenticated else None,
+                    reason=f"Emergency therapist replacement: {reason}"
+                )
+            except Exception as hist_err:
+                print(f"[Warning BookingRescheduleHistory]: {hist_err}")
+
+            # 6. Record to AuditLog
+            try:
+                AuditLog.objects.create(
+                    user=request.user if request.user.is_authenticated else None,
+                    action='replace_therapist',
+                    obj_type='TherapyAllocation',
+                    obj_id=str(alloc.id) if alloc else str(booking.id),
+                    data={
+                        'action': 'replace_therapist',
+                        'booking_id': booking.id,
+                        'patient_name': getattr(pat, 'pat_name', ''),
+                        'patient_reg_no': getattr(pat, 'pat_reg_no', ''),
+                        'therapy_name': alloc.therapy_name if alloc else '',
+                        'date': booking.date.isoformat(),
+                        'slot': booking.timeslot.slot_time.strftime('%I:%M %p') if booking.timeslot else '—',
+                        'room': booking.room.room_no if booking.room else '—',
+                        'replaced_therapist': replaced_therapist_code,
+                        'replacement_therapist': replacement_therapist_code,
+                        'bathing_therapist': bathing_therapist_code,
+                        'reason': reason,
+                    }
+                )
+            except Exception as audit_err:
+                print(f"[Warning AuditLog]: {audit_err}")
+
+            return JsonResponse({
+                'success': True,
+                'message': f"Therapist {old_name} was successfully replaced by {new_name}.",
+                'audit_id': audit_entry.id,
+                'booking_id': booking.id,
+                'updated_therapists': after_therapists,
+            })
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return JsonResponse({'error': str(e)}, status=500)
+
+
+@scheduling_access_required
+def scheduling_audit_logs_view(request):
+    """
+    Dedicated Page for all Scheduling Audit Logs.
+    Displays:
+      - Full details of what changes were made in scheduling (before/after states, therapists, rooms, slots)
+      - Mandatory reasons provided
+      - View details modal option
+      - Date filter
+      - Specific count of how many changes were made on each date
+    """
+    from .models import SchedulingAuditLog
+    from django.db.models import Count
+
+    today = timezone.localdate()
+    date_filter = request.GET.get('date', '').strip()
+
+    # Query all logs
+    logs_qs = SchedulingAuditLog.objects.all().order_by('-created_at')
+
+    # Date breakdown: how many changes made in each date
+    date_counts_qs = (
+        SchedulingAuditLog.objects
+        .values('schedule_date')
+        .annotate(count=Count('id'))
+        .order_by('-schedule_date')
+    )
+
+    changes_by_date = []
+    for item in date_counts_qs:
+        d = item['schedule_date']
+        if d:
+            changes_by_date.append({
+                'date_str': d.isoformat(),
+                'formatted_date': d.strftime('%d %b %Y'),
+                'day_name': d.strftime('%a'),
+                'count': item['count'],
+                'is_today': (d == today),
+                'is_selected': (date_filter == d.isoformat()),
+            })
+
+    # Summary statistics
+    total_changes = SchedulingAuditLog.objects.count()
+    today_changes = SchedulingAuditLog.objects.filter(schedule_date=today).count()
+    emergency_replacements_count = SchedulingAuditLog.objects.filter(change_type='emergency_replacement').count()
+    reschedules_count = SchedulingAuditLog.objects.filter(change_type='reschedule').count()
+
+    # Apply date filter if provided
+    selected_date_obj = None
+    if date_filter:
+        try:
+            selected_date_obj = parse_date(date_filter)
+            if selected_date_obj:
+                logs_qs = logs_qs.filter(schedule_date=selected_date_obj)
+        except Exception:
+            pass
+
+    context = {
+        'audit_logs': logs_qs[:200],  # Show recent 200 initially
+        'date_filter': date_filter,
+        'selected_date_formatted': selected_date_obj.strftime('%d %b %Y') if selected_date_obj else '',
+        'changes_by_date': changes_by_date,
+        'stats': {
+            'total_changes': total_changes,
+            'today_changes': today_changes,
+            'emergency_replacements_count': emergency_replacements_count,
+            'reschedules_count': reschedules_count,
+        }
+    }
+    return render(request, 'dashboards/scheduling/scheduling_audit_logs.html', context)
+
+
+@csrf_exempt
+@api_access_required
+def scheduling_audit_logs_data_api(request):
+    """
+    JSON API for dynamic search, filter, and detailed view of Scheduling Audit Logs.
+    Query params:
+      - date: YYYY-MM-DD
+      - change_type: emergency_replacement / reschedule / all
+      - patient: string (name or reg no)
+      - therapist: string (code or name)
+      - log_id: (optional, to fetch a single record for full details modal)
+    """
+    if request.method != 'GET':
+        return JsonResponse({'error': 'GET method required'}, status=405)
+
+    try:
+        from .models import SchedulingAuditLog
+        from django.db.models import Count, Q
+
+        log_id = request.GET.get('log_id')
+        if log_id:
+            try:
+                log = SchedulingAuditLog.objects.select_related('changed_by').get(id=log_id)
+                return JsonResponse({
+                    'success': True,
+                    'log': {
+                        'id': log.id,
+                        'change_type': log.change_type,
+                        'change_type_display': log.get_change_type_display(),
+                        'patient_name': log.patient_name,
+                        'patient_reg_no': log.patient_reg_no,
+                        'patient_room_no': log.patient_room_no,
+                        'therapy_name': log.therapy_name,
+                        'therapy_code': log.therapy_code,
+                        'schedule_date': log.schedule_date.strftime('%d/%m/%Y'),
+                        'time_slot_label': log.time_slot_label,
+                        'room_number': log.room_number,
+                        'replaced_therapist_code': log.replaced_therapist_code,
+                        'replaced_therapist_name': log.replaced_therapist_name,
+                        'replaced_therapist_grade': log.replaced_therapist_grade,
+                        'replaced_therapist_was_bathing': log.replaced_therapist_was_bathing,
+                        'replacement_therapist_code': log.replacement_therapist_code,
+                        'replacement_therapist_name': log.replacement_therapist_name,
+                        'replacement_therapist_grade': log.replacement_therapist_grade,
+                        'replacement_therapist_is_bathing': log.replacement_therapist_is_bathing,
+                        'designated_bathing_therapist_code': log.designated_bathing_therapist_code,
+                        'designated_bathing_therapist_name': log.designated_bathing_therapist_name,
+                        'before_state': log.before_state,
+                        'after_state': log.after_state,
+                        'reason': log.reason,
+                        'changed_by_name': log.changed_by_name or (log.changed_by.get_full_name() if log.changed_by else 'System'),
+                        'created_at': log.created_at.strftime('%d/%m/%Y %I:%M %p'),
+                    }
+                })
+            except SchedulingAuditLog.DoesNotExist:
+                return JsonResponse({'error': 'Audit log record not found'}, status=404)
+
+        date_filter = request.GET.get('date', '').strip()
+        change_type = request.GET.get('change_type', '').strip()
+        patient_query = request.GET.get('patient', '').strip().lower()
+        therapist_query = request.GET.get('therapist', '').strip().lower()
+
+        qs = SchedulingAuditLog.objects.all().order_by('-created_at')
+
+        if date_filter:
+            try:
+                parsed_d = parse_date(date_filter)
+                if parsed_d:
+                    qs = qs.filter(schedule_date=parsed_d)
+            except Exception:
+                pass
+
+        if change_type and change_type != 'all':
+            qs = qs.filter(change_type=change_type)
+
+        if patient_query:
+            qs = qs.filter(Q(patient_name__icontains=patient_query) | Q(patient_reg_no__icontains=patient_query))
+
+        if therapist_query:
+            qs = qs.filter(
+                Q(replaced_therapist_code__icontains=therapist_query) |
+                Q(replaced_therapist_name__icontains=therapist_query) |
+                Q(replacement_therapist_code__icontains=therapist_query) |
+                Q(replacement_therapist_name__icontains=therapist_query) |
+                Q(designated_bathing_therapist_code__icontains=therapist_query) |
+                Q(designated_bathing_therapist_name__icontains=therapist_query)
+            )
+
+        logs_data = []
+        for log in qs[:150]:
+            logs_data.append({
+                'id': log.id,
+                'change_type': log.change_type,
+                'change_type_display': log.get_change_type_display(),
+                'patient_name': log.patient_name,
+                'patient_reg_no': log.patient_reg_no,
+                'patient_room_no': log.patient_room_no,
+                'therapy_name': log.therapy_name,
+                'schedule_date': log.schedule_date.strftime('%d/%m/%Y'),
+                'time_slot_label': log.time_slot_label,
+                'room_number': log.room_number,
+                'replaced_therapist_code': log.replaced_therapist_code,
+                'replaced_therapist_name': log.replaced_therapist_name,
+                'replacement_therapist_code': log.replacement_therapist_code,
+                'replacement_therapist_name': log.replacement_therapist_name,
+                'designated_bathing_therapist_code': log.designated_bathing_therapist_code,
+                'designated_bathing_therapist_name': log.designated_bathing_therapist_name,
+                'reason': log.reason,
+                'changed_by_name': log.changed_by_name,
+                'created_at': log.created_at.strftime('%d/%m/%Y %I:%M %p'),
+            })
+
+        # Calculate counts per date
+        today = timezone.localdate()
+        date_counts_qs = (
+            SchedulingAuditLog.objects
+            .values('schedule_date')
+            .annotate(count=Count('id'))
+            .order_by('-schedule_date')
+        )
+        changes_by_date = [
+            {
+                'date_str': item['schedule_date'].isoformat(),
+                'formatted_date': item['schedule_date'].strftime('%d %b %Y'),
+                'day_name': item['schedule_date'].strftime('%a'),
+                'count': item['count'],
+                'is_today': (item['schedule_date'] == today),
+                'is_selected': (date_filter == item['schedule_date'].isoformat())
+            }
+            for item in date_counts_qs if item['schedule_date']
+        ]
+
+        return JsonResponse({
+            'success': True,
+            'total_found': len(logs_data),
+            'logs': logs_data,
+            'changes_by_date': changes_by_date,
+        })
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return JsonResponse({'error': str(e)}, status=500)
+
