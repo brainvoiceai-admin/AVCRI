@@ -1088,6 +1088,10 @@ def therapy_entry(request):
                     allocation.ext_int = payload['ext_int'] or ''
                 if 'vamanam_timing' in payload:
                     allocation.vamanam_timing = payload.get('vamanam_timing') or None
+                if 'is_wheelchair' in payload:
+                    wc_bool = bool(payload['is_wheelchair'])
+                    allocation.is_wheelchair = wc_bool
+                    Booking.objects.filter(allocation=allocation, status='draft').update(is_wheelchair=wc_bool)
                 if new_timeslot is not None:
                     allocation.timeslot = new_timeslot
                 
@@ -1803,6 +1807,11 @@ def therapy_entry(request):
                         if TherapyAllocation is None or Booking is None or BookingItem is None:
                             return JsonResponse({'error': 'required models missing (TherapyAllocation/Booking/BookingItem)'}, status=500)
 
+                    is_wheelchair_val = bool(payload.get('is_wheelchair', False))
+                    if is_wheelchair_val and not getattr(ps, 'is_wheelchair', False):
+                        ps.is_wheelchair = True
+                        ps.save(update_fields=['is_wheelchair', 'updated_at'])
+
                     alloc = TherapyAllocation.objects.create(
                         patient=ps,
                         therapy_code=payload.get('therapy_code'),
@@ -1811,6 +1820,7 @@ def therapy_entry(request):
                         timeslot=timeslot_obj,
                         room=room_obj,
                         vamanam_timing=payload.get('vamanam_timing') or None,
+                        is_wheelchair=is_wheelchair_val,
                         items_groups=items_groups,
                         oil_class=payload.get('oil_class') or payload.get('oil_class_id') or '',
                         usage=payload.get('usage') or '',
@@ -1842,7 +1852,7 @@ def therapy_entry(request):
                             any_auto_cancelled = True
                         else:
                             booking_status = 'draft'
-                        b = Booking.objects.create(allocation=alloc, date=single_date, timeslot=timeslot_obj, room=room_obj, vamanam_timing=payload.get('vamanam_timing') or None, status=booking_status, snapshot_therapy_name=(alloc.therapy_name or '')[:255])
+                        b = Booking.objects.create(allocation=alloc, date=single_date, timeslot=timeslot_obj, room=room_obj, vamanam_timing=payload.get('vamanam_timing') or None, is_wheelchair=is_wheelchair_val, status=booking_status, snapshot_therapy_name=(alloc.therapy_name or '')[:255])
                         created_items = []
                         for grp in payload.get('items_groups', []):
                             grp_dosage = grp.get('dosage','')
@@ -2585,6 +2595,7 @@ def therapy_entry(request):
                     'ext_int': a.ext_int,
                     'slot': slot_value,
                     'vamanam_timing': getattr(a, 'vamanam_timing', '') or '',
+                    'is_wheelchair': bool(getattr(a, 'is_wheelchair', False)),
                     'oil_class': a.oil_class,
                     'usage': a.usage,
                     'procured': a.procured_from,

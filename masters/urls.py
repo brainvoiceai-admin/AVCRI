@@ -123,6 +123,7 @@ urlpatterns = [
     path('treatment-rooms/<str:pk>/disable/', views.treatment_room_master_disable, name='treatment_room_master_disable'),
     path('treatment-rooms/<str:pk>/toggle-steam/', views.treatment_room_master_toggle_steam, name='treatment_room_master_toggle_steam'),
     path('treatment-rooms/<str:pk>/toggle-vamanam/', views.treatment_room_master_toggle_vamanam, name='treatment_room_master_toggle_vamanam'),
+    path('treatment-rooms/<str:pk>/toggle-wheelchair/', views.treatment_room_master_toggle_wheelchair, name='treatment_room_master_toggle_wheelchair'),
     # Therapist Master CRUD
     path('therapists/', views.TherapistMasterManagementView.as_view(), name='therapist_master_manage'),
     path('therapists/add/', views.TherapistMasterCreateView.as_view(), name='therapist_master_add'),

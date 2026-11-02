@@ -2895,6 +2895,12 @@ class TreatmentRoomManagementView(ListView):
         elif vamanam == 'no':
             queryset = queryset.filter(is_vamanam_room=False)
 
+        wheelchair = self.request.GET.get('wheelchair', '')
+        if wheelchair == 'yes':
+            queryset = queryset.filter(is_wheelchair_accessible=True)
+        elif wheelchair == 'no':
+            queryset = queryset.filter(is_wheelchair_accessible=False)
+
         return queryset.order_by('room_no')
 
     def get_context_data(self, **kwargs):
@@ -2903,6 +2909,7 @@ class TreatmentRoomManagementView(ListView):
         context['status_filter'] = self.request.GET.get('status', '')
         context['steam_filter'] = self.request.GET.get('steam', '')
         context['vamanam_filter'] = self.request.GET.get('vamanam', '')
+        context['wheelchair_filter'] = self.request.GET.get('wheelchair', '')
         context['master_type'] = 'treatmentroom'
         context['master_name'] = 'Treatment Room Master'
         return context
@@ -2911,7 +2918,7 @@ class TreatmentRoomManagementView(ListView):
 class TreatmentRoomForm(forms.ModelForm):
     class Meta:
         model = TreatmentRoom
-        fields = ['room_no', 'room_name', 'floor_master', 'description', 'is_steam_room', 'is_vamanam_room', 'vamanam_room_type', 'is_active']
+        fields = ['room_no', 'room_name', 'floor_master', 'description', 'is_steam_room', 'is_vamanam_room', 'vamanam_room_type', 'is_wheelchair_accessible', 'is_active']
         widgets = {
             'room_no': forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'e.g., TR-1, RM-101'}),
             'room_name': forms.Select(attrs={'class': 'form-select'}),
@@ -2920,6 +2927,7 @@ class TreatmentRoomForm(forms.ModelForm):
             'is_steam_room': forms.CheckboxInput(attrs={'class': 'form-check-input'}),
             'is_vamanam_room': forms.CheckboxInput(attrs={'class': 'form-check-input'}),
             'vamanam_room_type': forms.Select(attrs={'class': 'form-select'}),
+            'is_wheelchair_accessible': forms.CheckboxInput(attrs={'class': 'form-check-input'}),
             'is_active': forms.CheckboxInput(attrs={'class': 'form-check-input'}),
         }
         labels = {
@@ -2929,6 +2937,7 @@ class TreatmentRoomForm(forms.ModelForm):
             'is_steam_room': 'Steam Therapy Room',
             'is_vamanam_room': 'Vamanam Treatment Room',
             'vamanam_room_type': 'Vamanam Classification (Primary / Secondary)',
+            'is_wheelchair_accessible': 'Wheelchair Accessible Room',
             'is_active': 'Active',
         }
 
@@ -3036,6 +3045,22 @@ def treatment_room_master_toggle_vamanam(request, pk):
     _log_master_audit(request, 'update', 'TreatmentRoom', str(pk), f'Changed TreatmentRoom {room.room_no} Vamanam room status to: {status_str}')
     if request.headers.get('x-requested-with') == 'XMLHttpRequest' or request.content_type == 'application/json':
         return JsonResponse({'success': True, 'is_vamanam_room': room.is_vamanam_room, 'message': f'Room {room.room_no} is now designated as {status_str}.'})
+    messages.success(request, f'Treatment room {room.room_no} is now designated as {status_str}.')
+    return redirect('treatment_room_master_manage')
+
+
+@login_required
+@super_admin_required
+@require_http_methods(["GET", "POST"])
+def treatment_room_master_toggle_wheelchair(request, pk):
+    """Toggle wheelchair accessible status for a treatment room"""
+    room = get_object_or_404(TreatmentRoom, pk=pk)
+    room.is_wheelchair_accessible = not room.is_wheelchair_accessible
+    room.save(update_fields=['is_wheelchair_accessible', 'updated_at'])
+    status_str = "Wheelchair Accessible" if room.is_wheelchair_accessible else "Standard Treatment Room"
+    _log_master_audit(request, 'update', 'TreatmentRoom', str(pk), f'Changed TreatmentRoom {room.room_no} wheelchair accessibility status to: {status_str}')
+    if request.headers.get('x-requested-with') == 'XMLHttpRequest' or request.content_type == 'application/json':
+        return JsonResponse({'success': True, 'is_wheelchair_accessible': room.is_wheelchair_accessible, 'message': f'Room {room.room_no} is now designated as {status_str}.'})
     messages.success(request, f'Treatment room {room.room_no} is now designated as {status_str}.')
     return redirect('treatment_room_master_manage')
 

@@ -136,6 +136,18 @@
                                 </div>
                                 <div class="col-md-3 mb-3">
                                     <div class="form-check form-switch">
+                                        {{ form.is_wheelchair_accessible }}
+                                        <label class="form-check-label fw-bold text-primary" for="{{ form.is_wheelchair_accessible.id_for_label }}">
+                                            <i class="fas fa-wheelchair me-1"></i>Wheelchair Accessible
+                                        </label>
+                                    </div>
+                                    <small class="form-text text-muted">Accessible for wheelchair patients</small>
+                                </div>
+                            </div>
+
+                            <div class="row">
+                                <div class="col-md-3 mb-3">
+                                    <div class="form-check form-switch">
                                         {{ form.is_active }}
                                         <label class="form-check-label fw-bold" for="{{ form.is_active.id_for_label }}">
                                             Active

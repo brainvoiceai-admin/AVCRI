@@ -1341,6 +1341,7 @@ $(function () {
       ext_int: $('#ext-int-select').val(),
       slot: $slotSelect.val() || '',
       vamanam_timing: isVamanam ? ($vamanamTimingSelect.val() || '') : '',
+      is_wheelchair: ($('#wheelchair-select').val() === 'Yes'),
       from_date: from,
       to_date: to,
       days: Math.ceil((new Date(to).getTime() - new Date(from).getTime()) / (1000 * 60 * 60 * 24)) + 1,
@@ -1396,7 +1397,7 @@ $(function () {
           // Reset form
           itemGroups = []; renderItemGroups();
           const _defDateAfterSave = _defaultFromDate();
-          $therapySelect.val(null).trigger('change'); $('#ext-int-select').val(''); $slotSelect.val(''); $fromDate.val(_defDateAfterSave).prop('value', _defDateAfterSave); $toDate.val(''); $daysInput.val(''); $therapyUsageInput.val(''); $procuredSelect.val('');
+          $therapySelect.val(null).trigger('change'); $('#ext-int-select').val(''); $slotSelect.val(''); $('#wheelchair-select').val('No'); $fromDate.val(_defDateAfterSave).prop('value', _defDateAfterSave); $toDate.val(''); $daysInput.val(''); $therapyUsageInput.val(''); $procuredSelect.val('');
 
           renderAll();
 
@@ -1566,7 +1567,7 @@ $(function () {
       const rowActionClass = getTodayTherapyColorClass(t);
       const row = `<tr class="${rowActionClass}">
         <td>${i + 1}</td>
-        <td>${esc(t.therapy_name)}</td>
+        <td>${esc(t.therapy_name)}${t.is_wheelchair ? `<br><span class="badge bg-primary text-white" style="font-size:11px; font-weight:600;"><i class="fas fa-wheelchair me-1"></i>Wheelchair</span>` : ''}</td>
         <td>${therapyUsageDisplay !== '—' ? esc(therapyUsageDisplay) : '—'}</td>
         <td>${esc(t.ext_int || '')}</td>
         <td>${esc(format12Hour(t.slot || ''))}${t.vamanam_timing ? `<br><span class="badge bg-danger text-white" style="font-size:11px; font-weight:600;"><i class="fas fa-stopwatch me-1"></i>${esc(t.vamanam_timing)}</span>` : ''}</td>
@@ -2039,6 +2040,7 @@ $(function () {
     } else {
       $vamanamTimingGroup.hide();
     }
+    $('#wheelchair-select').val(t.is_wheelchair ? 'Yes' : 'No');
 
     $allocateBtn.hide(); $updateBtn.show(); window.scrollTo({ top: 0, behavior: 'smooth' });
   }
@@ -2048,6 +2050,7 @@ $(function () {
 
     // Update local data
     t.ext_int = $('#ext-int-select').val();
+    t.is_wheelchair = ($('#wheelchair-select').val() === 'Yes');
     // reflect potential edits
     const selTherapy = $therapySelect.select2('data')[0];
     if (selTherapy && selTherapy.id) {
@@ -2118,6 +2121,7 @@ $(function () {
         therapy_name: t.therapy_name,
         slot: t.slot,
         vamanam_timing: t.vamanam_timing || '',
+        is_wheelchair: !!t.is_wheelchair,
         from_date: t.from_date,
         to_date: t.to_date,
         days: t.days, // Include updated days in payload
@@ -2207,6 +2211,7 @@ $(function () {
     $('#vamanam-slot-badge').hide();
     $('#vasthi-slot-badge').hide();
     $('#ext-int-select').val('');
+    $('#wheelchair-select').val('No');
 
     // Clear date fields - set from date: tomorrow after 5:30 PM, otherwise today
     var _defDate2 = _defaultFromDate();

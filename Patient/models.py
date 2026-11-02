@@ -168,6 +168,11 @@ class TreatmentRoom(models.Model):
         verbose_name="Vamanam Room Type",
         help_text="Primary or Secondary priority for Vamanam treatment room allocation"
     )
+    is_wheelchair_accessible = models.BooleanField(
+        default=False,
+        verbose_name="Wheelchair Accessible",
+        help_text="Designate if this treatment room is accessible for wheelchair patients"
+    )
     is_active = models.BooleanField(default=True, verbose_name="Active")
     created_at = models.DateTimeField(auto_now_add=True, null=True, blank=True, verbose_name="Created At")
     updated_at = models.DateTimeField(auto_now=True, null=True, blank=True, verbose_name="Updated At")

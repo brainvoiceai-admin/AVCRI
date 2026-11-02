@@ -458,9 +458,22 @@ def get_treatment_rooms_for_staying_room(patient_staying_room):
     # No match found
     return []
 
-def allocate_treatment_room(date, time_slot, last_room=None, therapy_name=None, patient_id=None, patient_staying_room=None, patient=None, booking_id=None):
+def get_wheelchair_accessible_rooms():
     """
-    Allocate treatment room based on patient staying room rules.
+    Returns list of active wheelchair accessible treatment room numbers.
+    Dynamically fetched from TreatmentRoom where is_wheelchair_accessible=True.
+    """
+    try:
+        from Patient.models import TreatmentRoom
+        return list(TreatmentRoom.objects.filter(is_active=True, is_wheelchair_accessible=True).order_by('room_no').values_list('room_no', flat=True))
+    except Exception as e:
+        print(f"[WHEELCHAIR ROOMS] Error querying wheelchair accessible rooms: {e}")
+        return []
+
+
+def allocate_treatment_room(date, time_slot, last_room=None, therapy_name=None, patient_id=None, patient_staying_room=None, patient=None, booking_id=None, is_wheelchair=False):
+    """
+    Allocate treatment room based on patient staying room rules and accessibility requirements.
     
     NEW LOGIC: Allocates treatment rooms based on patient staying room:
     - DS-1 to DS-6: Check TR-1/TR-2 first, then TR-3/TR-4, then TR-7/TR-8
@@ -471,6 +484,9 @@ def allocate_treatment_room(date, time_slot, last_room=None, therapy_name=None, 
     - MG-1 to MG-10, CB-1/CB-2, FG-1 to FG-12: Assign TR-9 to TR-14
     - CT-1, CT-2, etc.: Assign TRC-1, TRC-2, etc. (same number)
     
+    WHEELCHAIR REQUIREMENT:
+    - If is_wheelchair is True: ONLY treatment rooms with is_wheelchair_accessible=True can be allocated.
+    
     For OP patients (no staying room):
     - First try TR-9 to TR-14
     - If not available, try TR-5, TR-6, TR-7
@@ -479,26 +495,32 @@ def allocate_treatment_room(date, time_slot, last_room=None, therapy_name=None, 
     SPECIAL: For 'Dhara & Pizichil' therapies, tries to use previous room assignment first.
     
     If no room available from the list, returns None (allocation will fail).
-    
-    Args:
-        date: Date for allocation
-        time_slot: Time slot for allocation
-        last_room: Preferred room number (string) or room object (legacy, kept for compatibility)
-        therapy_name: Name of the therapy (for Dhara & Pizichil special handling)
-        patient_id: Patient ID (for Dhara & Pizichil special handling)
-        patient_staying_room: Patient staying room number (e.g., 'DS-1', 'NR-7', 'CT-1')
-        patient: Patient object (PatientSnapshot) to check if OP (optional)
-        booking_id: Current booking ID being scheduled (optional, to exclude from conflicts)
-    
-    Returns:
-        TreatmentRoom instance or None if no room available
     """
     from Patient.models import RoomBooking, TreatmentRoom
     
+    # Auto-detect wheelchair requirement from booking or patient if not explicitly passed
+    if not is_wheelchair:
+        if booking_id:
+            try:
+                from Sheduling.models import Booking
+                b = Booking.objects.filter(pk=booking_id).first()
+                if b and (getattr(b, 'is_wheelchair', False) or (b.allocation and getattr(b.allocation, 'is_wheelchair', False))):
+                    is_wheelchair = True
+            except Exception:
+                pass
+        if not is_wheelchair and patient:
+            if getattr(patient, 'is_wheelchair', False):
+                is_wheelchair = True
+
     # Helper function to check room availability
     def check_room_availability(room_no, exclude_trc=False):
         try:
             room = TreatmentRoom.objects.get(room_no=room_no)
+            if not room.is_active:
+                return None
+            # Wheelchair requirement: Wheelchair patients require accessible rooms.
+            if is_wheelchair and not getattr(room, 'is_wheelchair_accessible', False):
+                return None
             # Strictly exclude TRC rooms for OP patients
             if exclude_trc and room_no.upper().startswith('TRC'):
                 return None
@@ -579,6 +601,15 @@ def allocate_treatment_room(date, time_slot, last_room=None, therapy_name=None, 
                 if room:
                     return room
             
+            # If wheelchair patient and staying room rooms didn't yield an accessible room,
+            # fallback to any available wheelchair accessible rooms in facility
+            if is_wheelchair:
+                for wc_room_no in get_wheelchair_accessible_rooms():
+                    room = check_room_availability(wc_room_no)
+                    if room:
+                        return room
+                return None
+            
             # None of the assigned rooms are available
             return None
     
@@ -642,7 +673,22 @@ def allocate_treatment_room(date, time_slot, last_room=None, therapy_name=None, 
             if room:
                 return room
         
+        # If wheelchair patient, check all wheelchair accessible rooms
+        if is_wheelchair:
+            for wc_room_no in get_wheelchair_accessible_rooms():
+                room = check_room_availability(wc_room_no, exclude_trc=True)
+                if room:
+                    return room
+
         # No room available for OP patient - DO NOT fall through to legacy logic
+        return None
+
+    # If wheelchair patient has no staying room, try any accessible room
+    if is_wheelchair:
+        for wc_room_no in get_wheelchair_accessible_rooms():
+            room = check_room_availability(wc_room_no)
+            if room:
+                return room
         return None
     
     # SPECIAL: Check if this is a 'Dhara & Pizichil' therapy - try to use previous room first
@@ -3583,6 +3629,9 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
             # Get patient staying room from allocation
             patient_staying_room = getattr(allocation.patient, 'pat_room_no', None) if allocation and hasattr(allocation, 'patient') else None
             patient_obj = allocation.patient if allocation and hasattr(allocation, 'patient') else None
+            is_wc = getattr(allocation, 'is_wheelchair', False) if allocation else False
+            if not is_wc and booking:
+                is_wc = getattr(booking, 'is_wheelchair', False)
             # Pass therapy_name and patient_id for Dhara & Pizichil special handling
             room_candidate = allocate_treatment_room(
                 date, 
@@ -3592,7 +3641,8 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
                 patient_id=patient_id,
                 patient_staying_room=patient_staying_room,
                 patient=patient_obj,
-                booking_id=booking_id
+                booking_id=booking_id,
+                is_wheelchair=is_wc
             )
         except Exception:
             room_candidate = None
@@ -3600,7 +3650,9 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
     if needs_room_flag and not room_candidate:
         # Build detailed error message based on patient staying room or OP status
         reason = "no_room_available"
-        if is_steam_therapy_treatment(therapy_name):
+        if getattr(allocation, 'is_wheelchair', False) or (booking and getattr(booking, 'is_wheelchair', False)):
+            reason = "no_room_available: No wheelchair accessible treatment room available"
+        elif is_steam_therapy_treatment(therapy_name):
             steam_rooms = get_steam_therapy_rooms()
             reason = f"no_room_available: All steam therapy rooms ({', '.join(steam_rooms)}) are not available"
         elif is_vamanam_treatment(therapy_name):
