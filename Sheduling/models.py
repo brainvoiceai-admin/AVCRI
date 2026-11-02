@@ -51,6 +51,7 @@ class TherapyAllocation(models.Model):
     required_therapist_roles = models.JSONField(default=list, blank=True)
     allocated_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name='allocations_created')
     locked = models.BooleanField(default=False)
+    vamanam_timing = models.CharField(max_length=30, blank=True, null=True, verbose_name="Vamanam Timing", help_text="Configured Vamanam timing (e.g. 05:00 AM, 05:30 AM)")
     notes = models.TextField(blank=True)
     
     # Status and cancellation fields
@@ -92,6 +93,7 @@ class Booking(models.Model):
     date = models.DateField(db_index=True)
     timeslot = models.ForeignKey('masters.SlotMaster', null=True, blank=True, on_delete=models.SET_NULL)
     room = models.ForeignKey(TreatmentRoom, null=True, blank=True, on_delete=models.SET_NULL)
+    vamanam_timing = models.CharField(max_length=30, blank=True, null=True, verbose_name="Vamanam Timing")
     status = models.CharField(max_length=30, default='draft')  # draft / scheduled / partially_cancelled / cancelled / completed
     therapist_note = models.TextField(blank=True)
     failure_reason = models.CharField(max_length=512, blank=True, help_text="Exact reason when status is 'failed' (e.g. no_preferred_slot, insufficient_therapists)")

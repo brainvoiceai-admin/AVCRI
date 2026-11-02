@@ -2203,6 +2203,7 @@ class SlotMasterManagementView(ListView):
     paginate_by = 20
 
     def get_queryset(self):
+        import datetime
         queryset = SlotMaster.objects.all()
         
         # Search filter
@@ -2220,7 +2221,11 @@ class SlotMasterManagementView(ListView):
         elif status == 'inactive':
             queryset = queryset.filter(is_active=False)
         
-        return queryset.order_by('slot_number')
+        # Standard slots only: strictly exclude early-morning timing entries (< 06:30 AM)
+        # Slot Master strictly includes standard treatment slots
+        queryset = queryset.filter(slot_time__gte=datetime.time(6, 30))
+        
+        return queryset.order_by('slot_time')
     
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -2231,11 +2236,16 @@ class SlotMasterManagementView(ListView):
         context['search'] = self.request.GET.get('search', '')
         context['status_filter'] = self.request.GET.get('status', '')
         
-        # Separate regular treatment slots and dedicated Vamanam slots
+        # Standard slots list
+        from masters.models import VamanamTimingMaster
         queryset = self.get_queryset()
-        context['regular_slot_list'] = queryset.filter(is_vamanam_slot=False)
-        context['vamanam_slot_list'] = queryset.filter(is_vamanam_slot=True)
+        context['regular_slot_list'] = queryset.order_by('slot_time')
+        # All Vamanam timings (procedure start time indicators)
+        context['vamanam_timings'] = VamanamTimingMaster.objects.all().order_by('display_order', 'timing_time')
         context['slot_list'] = context['regular_slot_list']
+        # Next available priority
+        max_p = VamanamTimingMaster.objects.aggregate(db_models.Max('display_order'))['display_order__max']
+        context['next_vamanam_priority'] = (max_p or 0) + 1
         return context
 
 class SlotMasterCreateView(CreateView):
@@ -2243,13 +2253,6 @@ class SlotMasterCreateView(CreateView):
     fields = ['slot_name', 'slot_time', 'is_vamanam_slot', 'is_vasthi_slot', 'is_active']
     template_name = 'masters/slot_master_form.html'
     success_url = reverse_lazy('slot_master_manage')
-    
-    def get_initial(self):
-        initial = super().get_initial()
-        if self.request.GET.get('type') == 'vamanam':
-            initial['is_vamanam_slot'] = True
-            initial['slot_name'] = 'Vamanam Slot'
-        return initial
 
     def form_valid(self, form):
         # Auto-generate slot_number
@@ -2346,6 +2349,192 @@ def slot_master_toggle_vasthi(request, pk):
     if request.headers.get('x-requested-with') == 'XMLHttpRequest' or request.content_type == 'application/json':
         return JsonResponse({'success': True, 'is_vasthi_slot': slot.is_vasthi_slot, 'message': f'Slot {slot.slot_number} is now designated as {status_str}.'})
     messages.success(request, f'Slot {slot.slot_number} is now designated as {status_str}.')
+    return redirect('slot_master_manage')
+
+
+# -----------------------------------
+# Vamanam Timing Configuration Views
+# -----------------------------------
+@login_required
+@super_admin_required
+@require_http_methods(["POST"])
+def vamanam_timing_create(request):
+    """
+    Create a new Vamanam timing indicator (e.g. 5:00 AM, 5:30 AM, 6:00 AM).
+    This timing is NOT added to SlotMaster; it is managed separately for auto-generating
+    the procedure start time on the Add Therapy page based on priority.
+    """
+    import datetime
+    from masters.models import VamanamTimingMaster
+    timing_name = request.POST.get('timing_name', '').strip()
+    timing_time_raw = request.POST.get('timing_time', '').strip()
+    display_order_raw = request.POST.get('display_order', '').strip()
+    is_active = request.POST.get('is_active') == 'on' or request.POST.get('is_active') == 'true'
+
+    if not timing_time_raw:
+        messages.error(request, 'Timing time is required.')
+        return redirect('slot_master_manage')
+
+    try:
+        # Parse timing_time (e.g. '05:00', '05:30:00')
+        time_parts = timing_time_raw.split(':')
+        parsed_time = datetime.time(int(time_parts[0]), int(time_parts[1]))
+
+        # Calculate or parse display_order (priority)
+        if display_order_raw:
+            try:
+                display_order = int(display_order_raw)
+            except ValueError:
+                display_order = 1
+        else:
+            max_order = VamanamTimingMaster.objects.aggregate(db_models.Max('display_order'))['display_order__max']
+            display_order = (max_order or 0) + 1
+
+        if not timing_name:
+            timing_name = parsed_time.strftime('%I:%M %p')
+
+        timing = VamanamTimingMaster.objects.create(
+            timing_name=timing_name,
+            timing_time=parsed_time,
+            display_order=display_order,
+            is_active=is_active
+        )
+        _log_master_audit(request, 'create', 'VamanamTimingMaster', str(timing.pk), f'Created VamanamTimingMaster: {timing_name} at {parsed_time} (Priority #{display_order})')
+        messages.success(request, f'Vamanam timing "{timing_name}" ({parsed_time.strftime("%I:%M %p")}) created with Priority #{display_order}.')
+    except Exception as e:
+        messages.error(request, f'Error creating Vamanam timing: {str(e)}')
+
+    return redirect('slot_master_manage')
+
+
+@login_required
+@super_admin_required
+@require_http_methods(["POST"])
+def vamanam_timing_update(request, pk):
+    """Update an existing Vamanam timing indicator."""
+    import datetime
+    from masters.models import VamanamTimingMaster
+    timing = get_object_or_404(VamanamTimingMaster, pk=pk)
+
+    timing_name = request.POST.get('timing_name', '').strip()
+    timing_time_raw = request.POST.get('timing_time', '').strip()
+    display_order_raw = request.POST.get('display_order', '').strip()
+    is_active = request.POST.get('is_active') == 'on' or request.POST.get('is_active') == 'true'
+
+    try:
+        if timing_time_raw:
+            time_parts = timing_time_raw.split(':')
+            timing.timing_time = datetime.time(int(time_parts[0]), int(time_parts[1]))
+
+        if display_order_raw:
+            timing.display_order = int(display_order_raw)
+
+        if timing_name:
+            timing.timing_name = timing_name
+        elif timing.timing_time:
+            timing.timing_name = timing.timing_time.strftime('%I:%M %p')
+
+        timing.is_active = is_active
+        timing.save()
+
+        _log_master_audit(request, 'update', 'VamanamTimingMaster', str(timing.pk), f'Updated VamanamTimingMaster: {timing.timing_name} (Priority #{timing.display_order})')
+        messages.success(request, f'Vamanam timing "{timing.timing_name}" updated successfully.')
+    except Exception as e:
+        messages.error(request, f'Error updating Vamanam timing: {str(e)}')
+
+    return redirect('slot_master_manage')
+
+
+@login_required
+@super_admin_required
+@require_http_methods(["GET", "POST"])
+def vamanam_timing_reorder(request, pk):
+    """
+    Reorder Vamanam timing priorities.
+    Supports ?dir=up (increase priority / lower order number)
+    or ?dir=down (decrease priority / higher order number),
+    or direct priority assignment via POST 'new_order'.
+    """
+    from masters.models import VamanamTimingMaster
+    timing = get_object_or_404(VamanamTimingMaster, pk=pk)
+    direction = request.GET.get('dir') or request.POST.get('dir')
+    new_order = request.POST.get('new_order')
+
+    try:
+        with transaction.atomic():
+            if new_order:
+                timing.display_order = int(new_order)
+                timing.save(update_fields=['display_order', 'updated_at'])
+                messages.success(request, f'Updated priority for "{timing.timing_name}" to #{timing.display_order}.')
+            elif direction == 'up':
+                # Find item immediately above (highest order strictly less than current order)
+                neighbor = VamanamTimingMaster.objects.filter(
+                    display_order__lt=timing.display_order
+                ).order_by('-display_order').first()
+
+                if neighbor:
+                    curr_order = timing.display_order
+                    neigh_order = neighbor.display_order
+                    # Swap
+                    neighbor.display_order = curr_order
+                    timing.display_order = neigh_order
+                    neighbor.save(update_fields=['display_order', 'updated_at'])
+                    timing.save(update_fields=['display_order', 'updated_at'])
+                    messages.success(request, f'Moved "{timing.timing_name}" up to Priority #{timing.display_order}.')
+                else:
+                    messages.info(request, f'"{timing.timing_name}" is already at highest priority.')
+            elif direction == 'down':
+                # Find item immediately below (lowest order strictly greater than current order)
+                neighbor = VamanamTimingMaster.objects.filter(
+                    display_order__gt=timing.display_order
+                ).order_by('display_order').first()
+
+                if neighbor:
+                    curr_order = timing.display_order
+                    neigh_order = neighbor.display_order
+                    # Swap
+                    neighbor.display_order = curr_order
+                    timing.display_order = neigh_order
+                    neighbor.save(update_fields=['display_order', 'updated_at'])
+                    timing.save(update_fields=['display_order', 'updated_at'])
+                    messages.success(request, f'Moved "{timing.timing_name}" down to Priority #{timing.display_order}.')
+                else:
+                    messages.info(request, f'"{timing.timing_name}" is already at lowest priority.')
+
+        _log_master_audit(request, 'update', 'VamanamTimingMaster', str(timing.pk), f'Reordered VamanamTimingMaster: {timing.timing_name} now at Priority #{timing.display_order}')
+    except Exception as e:
+        messages.error(request, f'Error reordering timing: {str(e)}')
+
+    return redirect('slot_master_manage')
+
+
+@login_required
+@super_admin_required
+@require_http_methods(["GET", "POST"])
+def vamanam_timing_toggle(request, pk):
+    """Toggle active/inactive status of a Vamanam timing indicator."""
+    from masters.models import VamanamTimingMaster
+    timing = get_object_or_404(VamanamTimingMaster, pk=pk)
+    timing.is_active = not timing.is_active
+    timing.save(update_fields=['is_active', 'updated_at'])
+    status_str = "Active" if timing.is_active else "Inactive"
+    _log_master_audit(request, 'update', 'VamanamTimingMaster', str(pk), f'Toggled VamanamTimingMaster {timing.timing_name} status to: {status_str}')
+    messages.success(request, f'Vamanam timing "{timing.timing_name}" is now {status_str}.')
+    return redirect('slot_master_manage')
+
+
+@login_required
+@super_admin_required
+@require_http_methods(["GET", "POST"])
+def vamanam_timing_delete(request, pk):
+    """Delete a Vamanam timing indicator."""
+    from masters.models import VamanamTimingMaster
+    timing = get_object_or_404(VamanamTimingMaster, pk=pk)
+    name = timing.timing_name
+    time_str = timing.timing_time.strftime("%I:%M %p") if timing.timing_time else ""
+    timing.delete()
+    _log_master_audit(request, 'delete', 'VamanamTimingMaster', str(pk), f'Deleted VamanamTimingMaster: {name}')
+    messages.success(request, f'Vamanam timing "{name}" ({time_str}) deleted successfully.')
     return redirect('slot_master_manage')
 
 # -----------------------
@@ -2722,7 +2911,7 @@ class TreatmentRoomManagementView(ListView):
 class TreatmentRoomForm(forms.ModelForm):
     class Meta:
         model = TreatmentRoom
-        fields = ['room_no', 'room_name', 'floor_master', 'description', 'is_steam_room', 'is_vamanam_room', 'is_active']
+        fields = ['room_no', 'room_name', 'floor_master', 'description', 'is_steam_room', 'is_vamanam_room', 'vamanam_room_type', 'is_active']
         widgets = {
             'room_no': forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'e.g., TR-1, RM-101'}),
             'room_name': forms.Select(attrs={'class': 'form-select'}),
@@ -2730,6 +2919,7 @@ class TreatmentRoomForm(forms.ModelForm):
             'description': forms.Textarea(attrs={'class': 'form-control', 'rows': 3}),
             'is_steam_room': forms.CheckboxInput(attrs={'class': 'form-check-input'}),
             'is_vamanam_room': forms.CheckboxInput(attrs={'class': 'form-check-input'}),
+            'vamanam_room_type': forms.Select(attrs={'class': 'form-select'}),
             'is_active': forms.CheckboxInput(attrs={'class': 'form-check-input'}),
         }
         labels = {
@@ -2738,6 +2928,7 @@ class TreatmentRoomForm(forms.ModelForm):
             'floor_master': 'Floor',
             'is_steam_room': 'Steam Therapy Room',
             'is_vamanam_room': 'Vamanam Treatment Room',
+            'vamanam_room_type': 'Vamanam Classification (Primary / Secondary)',
             'is_active': 'Active',
         }
 
@@ -2748,6 +2939,7 @@ class TreatmentRoomForm(forms.ModelForm):
         self.fields['room_no'].required = True
         self.fields['room_name'].required = False
         self.fields['floor_master'].required = False
+        self.fields['vamanam_room_type'].required = False
 
 
 @method_decorator(login_required, name='dispatch')

@@ -143,7 +143,7 @@
                                        class="badge bg-danger text-white text-decoration-none" 
                                        title="Click to toggle Vamanam Room status"
                                        onclick="return confirm('Remove Vamanam designation from {{ room.room_no }}?');">
-                                        <i class="fas fa-heartbeat me-1"></i>Vamanam Room
+                                        <i class="fas fa-heartbeat me-1"></i>{% if room.vamanam_room_type == 'secondary' %}Secondary Vamanam{% else %}Primary Vamanam{% endif %}
                                     </a>
                                     {% else %}
                                     <a href="{% url 'treatment_room_master_toggle_vamanam' room.room_no %}" 

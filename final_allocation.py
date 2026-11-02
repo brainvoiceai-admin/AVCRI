@@ -655,20 +655,13 @@ def allocate_treatment_room(date, time_slot, last_room=None, therapy_name=None, 
     except Exception as _st_err:
         print(f"[ROOM RESTRICTION] Error checking steam therapy room: {_st_err}")
 
-    # VAMANAM THERAPY RESTRICTION: Always allocate strictly to designated Vamanam treatment rooms (dynamic from Room Master)
+    # VAMANAM THERAPY RESTRICTION: Dedicated Vamanam room allocation (Primary first: TR-11/TR-12, then Secondary: TR-9)
     try:
-        from reshedule import is_vamanam_treatment, get_vamanam_treatment_rooms
+        from reshedule import is_vamanam_treatment, allocate_vamanam_treatment_room
         if is_vamanam_treatment(therapy_name):
-            vamanam_rooms = get_vamanam_treatment_rooms()
-            if not vamanam_rooms:
-                print(f"[ROOM RESTRICTION] Vamanam therapy detected - no Vamanam rooms configured in Room Master.")
-                return None
-            for candidate_room_no in vamanam_rooms:
-                v_room = check_room_availability(candidate_room_no)
-                if v_room:
-                    print(f"[ROOM RESTRICTION] Vamanam therapy detected - assigned {candidate_room_no} room.")
-                    return v_room
-            print(f"[ROOM RESTRICTION] Vamanam therapy detected - all Vamanam rooms ({', '.join(vamanam_rooms)}) are unavailable on {date} at {time_slot}.")
+            v_room = allocate_vamanam_treatment_room(date, time_slot, check_room_availability)
+            if v_room:
+                return v_room
             return None
     except Exception as _vm_err:
         print(f"[ROOM RESTRICTION] Error checking Vamanam room: {_vm_err}")
@@ -2232,6 +2225,28 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                         print('[VASTHI GROUP] Final schedule: no active SlotMaster for Vasthi slot')
         except Exception as _gv_e:
             print(f'[SLOT RULE] Final schedule slot rule skipped: {_gv_e}')
+
+        # Vamanam therapy: schedule in dynamic Vamanam slot (defaults to 06:30)
+        try:
+            from reshedule import is_vamanam_treatment, get_vamanam_slots
+            if is_vamanam_treatment(therapy_name, getattr(allocation, 'therapy_code', None)):
+                is_current_slot_vamanam = bool(pref_slot and getattr(pref_slot, 'is_vamanam_slot', False) and getattr(pref_slot, 'is_active', True))
+                if not is_current_slot_vamanam:
+                    vamanam_slot_obj = SlotMaster.objects.filter(is_vamanam_slot=True, is_active=True).order_by('slot_time').first()
+                    if not vamanam_slot_obj:
+                        vamanam_slot_obj = SlotMaster.objects.filter(
+                            slot_time=datetime.strptime('06:30', '%H:%M').time(),
+                            is_active=True,
+                        ).first()
+                    if vamanam_slot_obj:
+                        pref_slot = vamanam_slot_obj
+                        if create_bookings and getattr(booking, 'timeslot_id', None) != vamanam_slot_obj.id:
+                            booking.timeslot = vamanam_slot_obj
+                            booking.save(update_fields=['timeslot', 'updated_at'])
+                    else:
+                        print('[VAMANAM GROUP] Final schedule: no active SlotMaster for Vamanam slot')
+        except Exception as _vm_slot_e:
+            print(f'[VAMANAM SLOT RULE] Final schedule slot rule skipped: {_vm_slot_e}')
         requested_slot_value = None
         if pref_slot:
             st = getattr(pref_slot, 'start_time', None)

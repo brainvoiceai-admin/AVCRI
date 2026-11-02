@@ -90,6 +90,13 @@ urlpatterns = [
     path('slots/<int:pk>/toggle-vamanam/', views.slot_master_toggle_vamanam, name='slot_master_toggle_vamanam'),
     path('slots/<int:pk>/toggle-vasthi/', views.slot_master_toggle_vasthi, name='slot_master_toggle_vasthi'),
 
+    # Vamanam Timing Configuration CRUD
+    path('vamanam-timings/add/', views.vamanam_timing_create, name='vamanam_timing_add'),
+    path('vamanam-timings/<int:pk>/update/', views.vamanam_timing_update, name='vamanam_timing_update'),
+    path('vamanam-timings/<int:pk>/delete/', views.vamanam_timing_delete, name='vamanam_timing_delete'),
+    path('vamanam-timings/<int:pk>/toggle/', views.vamanam_timing_toggle, name='vamanam_timing_toggle'),
+    path('vamanam-timings/<int:pk>/reorder/', views.vamanam_timing_reorder, name='vamanam_timing_reorder'),
+
     # Shift Master CRUD
     path('shifts/', views.ShiftMasterManagementView.as_view(), name='shift_master_manage'),
     path('shifts/add/', views.ShiftMasterCreateView.as_view(), name='shift_master_add'),

@@ -476,3 +476,315 @@ class TestVamanamTherapyAllocation(TestCase):
             assert mock_bulk.called
             assert mock_bulk.call_args[0][0] == target_date_str
 
+    def test_vamanam_therapy_code_theb126_automatic_recognition(self):
+        """Validates that therapy code THEB126 is automatically recognized as Vamanam without manual flag."""
+        from reshedule import VAMANAM_THERAPY_CODE
+        assert VAMANAM_THERAPY_CODE == "THEB126"
+
+        # Create a therapy with code THEB126 and is_vamanam=False
+        theb126_therapy, _ = TherapyMaster.objects.get_or_create(
+            therapy_code="THEB126",
+            defaults={
+                "therapy_name": "Vamanam ( 1 T)",
+                "therapy_category": "Major",
+                "therapy_duration": "60 mins",
+                "bathing_required": "No",
+                "treatment_room_required": "Yes",
+                "cost_of_therapy": 2500,
+                "patient_type": "IP",
+                "is_vamanam": False,
+                "is_active": True
+            }
+        )
+        # Even with is_vamanam=False, system recognizes code THEB126 as Vamanam
+        assert is_vamanam_treatment(therapy_code="THEB126") is True
+        assert is_vamanam_treatment(therapy_name="Vamanam ( 1 T)") is True
+
+    def test_primary_and_secondary_vamanam_room_allocation_priority(self):
+        """Validates that Primary Vamanam rooms (TR-11, TR-12) are chosen first, falling back to Secondary (TR-9)."""
+        from reshedule import allocate_vamanam_treatment_room
+
+        rn11, _ = RoomName.objects.get_or_create(name="Room TR-11", defaults={"is_active": True})
+        tr11, _ = TreatmentRoom.objects.get_or_create(
+            room_no="TR-11",
+            defaults={"room_name": rn11, "floor": "G", "is_active": True, "is_vamanam_room": True, "vamanam_room_type": "primary"}
+        )
+        tr11.is_vamanam_room = True
+        tr11.vamanam_room_type = "primary"
+        tr11.is_active = True
+        tr11.save()
+
+        rn12, _ = RoomName.objects.get_or_create(name="Room TR-12", defaults={"is_active": True})
+        tr12, _ = TreatmentRoom.objects.get_or_create(
+            room_no="TR-12",
+            defaults={"room_name": rn12, "floor": "G", "is_active": True, "is_vamanam_room": True, "vamanam_room_type": "primary"}
+        )
+        tr12.is_vamanam_room = True
+        tr12.vamanam_room_type = "primary"
+        tr12.is_active = True
+        tr12.save()
+
+        rn9, _ = RoomName.objects.get_or_create(name="Room TR-9", defaults={"is_active": True})
+        tr9, _ = TreatmentRoom.objects.get_or_create(
+            room_no="TR-9",
+            defaults={"room_name": rn9, "floor": "G", "is_active": True, "is_vamanam_room": True, "vamanam_room_type": "secondary"}
+        )
+        tr9.is_vamanam_room = True
+        tr9.vamanam_room_type = "secondary"
+        tr9.is_active = True
+        tr9.save()
+
+        # Step 1: When no rooms are booked, 1st allocation must be a Primary room (TR-11 or TR-12)
+        room1 = allocate_vamanam_treatment_room(date=self.target_date, time_slot="06:30")
+        assert room1 is not None
+        assert room1.room_no in ["TR-11", "TR-12", "TR-VAM1"]
+        assert room1.vamanam_room_type == "primary"
+
+        # Book room1
+        RoomBooking.objects.create(
+            room=room1,
+            date=self.target_date,
+            time_slot=self.slot_0500,
+            status="BOOKED"
+        )
+
+        # Step 2: 2nd allocation must be another Primary room
+        room2 = allocate_vamanam_treatment_room(date=self.target_date, time_slot="06:30")
+        assert room2 is not None
+        assert room2.vamanam_room_type == "primary"
+        assert room2.room_no != room1.room_no
+
+        # Book room2 and any other primary room (TR-VAM1)
+        RoomBooking.objects.create(
+            room=room2,
+            date=self.target_date,
+            time_slot=self.slot_0500,
+            status="BOOKED"
+        )
+        RoomBooking.objects.get_or_create(
+            room=self.tr_vam1,
+            date=self.target_date,
+            time_slot=self.slot_0500,
+            defaults={"status": "BOOKED"}
+        )
+        # Ensure TR-11 and TR-12 are both marked booked
+        RoomBooking.objects.get_or_create(
+            room=tr11,
+            date=self.target_date,
+            time_slot=self.slot_0500,
+            defaults={"status": "BOOKED"}
+        )
+        RoomBooking.objects.get_or_create(
+            room=tr12,
+            date=self.target_date,
+            time_slot=self.slot_0500,
+            defaults={"status": "BOOKED"}
+        )
+
+        # Step 3: When all Primary rooms are booked, allocation falls back to Secondary room (TR-9)
+        room3 = allocate_vamanam_treatment_room(date=self.target_date, time_slot="06:30")
+        assert room3 is not None
+        assert room3.room_no == "TR-9"
+        assert room3.vamanam_room_type == "secondary"
+
+        # Book Secondary room TR-9
+        RoomBooking.objects.create(
+            room=tr9,
+            date=self.target_date,
+            time_slot=self.slot_0500,
+            status="BOOKED"
+        )
+
+        # Step 4: When both Primary and Secondary are booked, allocation fails (returns None)
+        room4 = allocate_vamanam_treatment_room(date=self.target_date, time_slot="06:30")
+        assert room4 is None
+
+    def test_vamanam_timings_api_and_count(self):
+        """Validates vamanam_timings API returns configured timings and vamanam_count_for_date counts accurately."""
+        from masters.models import VamanamTimingMaster
+        VamanamTimingMaster.objects.get_or_create(
+            display_order=1,
+            defaults={"timing_name": "05:00 AM", "timing_time": time(5, 0), "is_active": True}
+        )
+        VamanamTimingMaster.objects.get_or_create(
+            display_order=2,
+            defaults={"timing_name": "05:30 AM", "timing_time": time(5, 30), "is_active": True}
+        )
+
+        client = Client()
+        # Test vamanam_timings
+        res_timings = client.get(reverse("patient_therapy") + "?action=vamanam_timings")
+        assert res_timings.status_code == 200
+        timings = res_timings.json().get("timings", [])
+        assert len(timings) >= 2
+        assert timings[0]["timing_name"] == "05:00 AM"
+        assert timings[1]["timing_name"] == "05:30 AM"
+
+        # Test vamanam_count_for_date
+        test_d_str = self.target_date.strftime("%Y-%m-%d")
+        res_count = client.get(reverse("patient_therapy") + f"?action=vamanam_count_for_date&date={test_d_str}")
+        assert res_count.status_code == 200
+        assert res_count.json().get("count") == 0
+
+        # Create a Vamanam allocation on that date
+        TherapyAllocation.objects.create(
+            patient=self.patient,
+            therapy_code="THEB126",
+            therapy_name="Vamanam ( 1 T)",
+            from_date=self.target_date,
+            to_date=self.target_date,
+            days=1,
+            vamanam_timing="05:00 AM",
+            status="draft"
+        )
+        res_count2 = client.get(reverse("patient_therapy") + f"?action=vamanam_count_for_date&date={test_d_str}")
+        assert res_count2.status_code == 200
+        assert res_count2.json().get("count") == 1
+
+    def test_vamanam_timing_crud_and_priority_management(self):
+        """Validates full CRUD, toggling, and priority reordering for VamanamTimingMaster."""
+        from masters.models import VamanamTimingMaster
+        User = get_user_model()
+        admin_user, _ = User.objects.get_or_create(
+            username="test_admin_vam_crud",
+            defaults={"is_superuser": True, "is_staff": True, "role": "super_admin"}
+        )
+        if getattr(admin_user, 'role', None) != 'super_admin':
+            admin_user.role = 'super_admin'
+            admin_user.save()
+
+        client = Client()
+        client.force_login(admin_user)
+
+        # Ensure base timings 1 and 2 exist
+        VamanamTimingMaster.objects.get_or_create(
+            display_order=1,
+            defaults={"timing_name": "05:00 AM", "timing_time": time(5, 0), "is_active": True}
+        )
+        VamanamTimingMaster.objects.get_or_create(
+            display_order=2,
+            defaults={"timing_name": "05:30 AM", "timing_time": time(5, 30), "is_active": True}
+        )
+
+        # 1. Create a 3rd Vamanam timing via POST
+        add_url = reverse("vamanam_timing_add")
+        res_add = client.post(add_url, {
+            "timing_name": "06:00 AM",
+            "timing_time": "06:00",
+            "display_order": "3",
+            "is_active": "on"
+        }, follow=True)
+        assert res_add.status_code == 200
+
+        timing_3 = VamanamTimingMaster.objects.get(timing_time=time(6, 0))
+        assert timing_3.timing_name == "06:00 AM"
+        assert timing_3.display_order == 3
+        assert timing_3.is_active is True
+
+        # 2. Update timing
+        update_url = reverse("vamanam_timing_update", kwargs={"pk": timing_3.pk})
+        res_update = client.post(update_url, {
+            "timing_name": "06:00 AM (3rd Person)",
+            "timing_time": "06:00",
+            "display_order": "3",
+            "is_active": "on"
+        }, follow=True)
+        assert res_update.status_code == 200
+        timing_3.refresh_from_db()
+        assert timing_3.timing_name == "06:00 AM (3rd Person)"
+
+        # 3. Reorder: Move UP (should swap with timing at priority 2)
+        reorder_url = reverse("vamanam_timing_reorder", kwargs={"pk": timing_3.pk})
+        res_up = client.get(f"{reorder_url}?dir=up", follow=True)
+        assert res_up.status_code == 200
+        timing_3.refresh_from_db()
+        assert timing_3.display_order == 2
+
+        # 4. Reorder: Move DOWN (should swap back to priority 3)
+        res_down = client.get(f"{reorder_url}?dir=down", follow=True)
+        assert res_down.status_code == 200
+        timing_3.refresh_from_db()
+        assert timing_3.display_order == 3
+
+        # 5. Toggle active status
+        toggle_url = reverse("vamanam_timing_toggle", kwargs={"pk": timing_3.pk})
+        res_toggle = client.get(toggle_url, follow=True)
+        assert res_toggle.status_code == 200
+        timing_3.refresh_from_db()
+        assert timing_3.is_active is False
+
+        # Toggle back to active
+        client.get(toggle_url, follow=True)
+        timing_3.refresh_from_db()
+        assert timing_3.is_active is True
+
+        # 6. Delete timing
+        delete_url = reverse("vamanam_timing_delete", kwargs={"pk": timing_3.pk})
+        res_del = client.get(delete_url, follow=True)
+        assert res_del.status_code == 200
+        assert not VamanamTimingMaster.objects.filter(pk=timing_3.pk).exists()
+
+    def test_dynamic_vamanam_priority_and_third_person_allocation(self):
+        """
+        Validates that:
+        - 3rd Vamanam timing is served to 3rd person.
+        - Changing priorities among timings immediately alters the auto-assignment sequence.
+        """
+        from masters.models import VamanamTimingMaster
+        from reshedule import get_vamanam_timings
+
+        # Clear and setup clean timings: 1 -> 05:00 AM, 2 -> 05:30 AM, 3 -> 06:00 AM
+        VamanamTimingMaster.objects.all().delete()
+        t1 = VamanamTimingMaster.objects.create(
+            timing_name="05:00 AM",
+            timing_time=time(5, 0),
+            display_order=1,
+            is_active=True
+        )
+        t2 = VamanamTimingMaster.objects.create(
+            timing_name="05:30 AM",
+            timing_time=time(5, 30),
+            display_order=2,
+            is_active=True
+        )
+        t3 = VamanamTimingMaster.objects.create(
+            timing_name="06:00 AM",
+            timing_time=time(6, 0),
+            display_order=3,
+            is_active=True
+        )
+
+        timings = get_vamanam_timings()
+        assert timings == ["05:00 AM", "05:30 AM", "06:00 AM"]
+
+        client = Client()
+        res_api = client.get(reverse("patient_therapy") + "?action=vamanam_timings")
+        assert res_api.status_code == 200
+        api_timings = res_api.json().get("timings", [])
+        assert len(api_timings) == 3
+        # 1st person -> index 0 (05:00 AM)
+        assert api_timings[0]["timing_name"] == "05:00 AM"
+        # 2nd person -> index 1 (05:30 AM)
+        assert api_timings[1]["timing_name"] == "05:30 AM"
+        # 3rd person -> index 2 (06:00 AM)
+        assert api_timings[2]["timing_name"] == "06:00 AM"
+
+        # Now change priority: swap Priority 1 and Priority 2
+        # (Make 05:30 AM Priority 1, and 05:00 AM Priority 2)
+        t1.display_order = 2
+        t1.save()
+        t2.display_order = 1
+        t2.save()
+
+        res_api2 = client.get(reverse("patient_therapy") + "?action=vamanam_timings")
+        assert res_api2.status_code == 200
+        api_timings2 = res_api2.json().get("timings", [])
+        # Now 1st person gets 05:30 AM!
+        assert api_timings2[0]["timing_name"] == "05:30 AM"
+        # 2nd person gets 05:00 AM!
+        assert api_timings2[1]["timing_name"] == "05:00 AM"
+        # 3rd person gets 06:00 AM!
+        assert api_timings2[2]["timing_name"] == "06:00 AM"
+
+
+
