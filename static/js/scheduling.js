@@ -506,7 +506,7 @@ function updateTable(status, data) {
                             <td>${escapeHtml(item.therapy_name)}</td>
                             <td>${fromVal}</td>
                             <td>${toVal}</td>
-                            <td>${format12Hour(item.timeslot) || '—'}</td>
+                            <td>${format12Hour(item.timeslot) || '—'}${item.vamanam_timing ? `<br><span class="badge bg-danger text-white" style="font-size:11px; font-weight:600; padding:2px 6px; border-radius:4px;"><i class="fas fa-stopwatch me-1"></i>Start: ${escapeHtml(item.vamanam_timing)}</span>` : ''}</td>
                             <td>${item.patient_room_no || '—'}</td>
                         `;
                 therapistTbody.appendChild(row);
@@ -641,9 +641,12 @@ function updateTable(status, data) {
                     ? (item.is_nurse_treatment === true || item.is_nurse_treatment === 'true')
                     : false;
                 const isNurseTreatment = nurseFlag || (hasNurses && !hasTherapists);
-                const slotDisplay = (isNurseTreatment && (!item.timeslot || item.timeslot === '00:00'))
+                let slotDisplay = (isNurseTreatment && (!item.timeslot || item.timeslot === '00:00'))
                     ? '—'
                     : format12Hour(item.timeslot);
+                if (item.vamanam_timing) {
+                    slotDisplay += `<br><span class="badge bg-danger text-white" style="font-size:11px; font-weight:600; padding:2px 6px; border-radius:4px;"><i class="fas fa-stopwatch me-1"></i>Start: ${escapeHtml(item.vamanam_timing)}</span>`;
+                }
                 const scheduleDate = item.date || item.from_date || '';
                 const therapistsHtml = item.therapists && item.therapists.length > 0
                     ? `<div class="therapist-list">${item.therapists.map(t => {
@@ -829,7 +832,7 @@ function updateTable(status, data) {
                             <div style="font-size: 12px; color: var(--gray);">${escapeHtml(item.patient_reg_no)}</div>
                         </td>
                         <td>${escapeHtml(item.therapy_name)}</td>
-                        <td>${format12Hour(item.timeslot) || '—'}</td>
+                        <td>${format12Hour(item.timeslot) || '—'}${item.vamanam_timing ? `<br><span class="badge bg-danger text-white" style="font-size:11px; font-weight:600; padding:2px 6px; border-radius:4px;"><i class="fas fa-stopwatch me-1"></i>Start: ${escapeHtml(item.vamanam_timing)}</span>` : ''}</td>
                         <td>${item.patient_room_no || '—'}</td>
                         <td>
                             <span class="status-badge status-failed" title="${escapeHtml(item.failure_reason || '')}">${failureReason}</span>
@@ -850,7 +853,7 @@ function updateTable(status, data) {
                             <div style="font-size: 12px; color: var(--gray);">${escapeHtml(item.patient_reg_no)}</div>
                         </td>
                         <td>${escapeHtml(item.therapy_name)}</td>
-                        <td>${format12Hour(item.timeslot) || '—'}</td>
+                        <td>${format12Hour(item.timeslot) || '—'}${item.vamanam_timing ? `<br><span class="badge bg-danger text-white" style="font-size:11px; font-weight:600; padding:2px 6px; border-radius:4px;"><i class="fas fa-stopwatch me-1"></i>Start: ${escapeHtml(item.vamanam_timing)}</span>` : ''}</td>
                         <td>${formatDateDMYForDraftPdf(displayDate)}</td>
                         <td>${item.room_no || '—'}</td>
                         <td>${item.patient_room_no || '—'}</td>
@@ -1106,7 +1109,7 @@ function openSingleRescheduleModal(id, targetDate) {
 
         // Set patient & therapy details
         document.getElementById('singleReschedulePatient').textContent = data.patient_name || 'Patient';
-        document.getElementById('singleRescheduleTherapy').textContent = `${data.therapy_name || 'Therapy'} | Registered Slot: ${data.registered_slot_time || '—'}`;
+        document.getElementById('singleRescheduleTherapy').textContent = `${data.therapy_name || 'Therapy'}${data.vamanam_timing ? ` (Start: ${data.vamanam_timing})` : ''} | Registered Slot: ${data.registered_slot_time || '—'}`;
         document.getElementById('singleRescheduleReason').textContent = `Reason: ${data.failure_reason || '—'}`;
         document.getElementById('registeredSlotLabel').textContent = data.registered_slot_time || 'Registered Slot';
 
@@ -1582,9 +1585,12 @@ function generateTherapyExcel(therapyData, date, patientFilter) {
             ? (item.is_nurse_treatment === true || item.is_nurse_treatment === 'true')
             : false;
         const isNurseTreatment = nurseFlag || (hasNurses && !hasTherapists);
-        const slotDisplay = (isNurseTreatment && (!item.timeslot || item.timeslot === '00:00'))
+        let slotDisplay = (isNurseTreatment && (!item.timeslot || item.timeslot === '00:00'))
             ? '—'
             : format12Hour(item.timeslot);
+        if (item.vamanam_timing) {
+            slotDisplay += ` (Start: ${item.vamanam_timing})`;
+        }
         const therapists = item.therapists && item.therapists.length > 0
             ? item.therapists.map(t => {
                 const rawName = t.name || t.code || t;
@@ -1942,8 +1948,9 @@ function generateDraftTherapyTimeslotPDF(therapyData, dateIso) {
                             it.therapists_required != null && it.therapists_required !== ''
                                 ? String(it.therapists_required)
                                 : '—';
+                        const vamanamDraftSuffix = it.vamanam_timing ? ` (Start: ${it.vamanam_timing})` : '';
                         return [
-                            it.therapy_name || '—',
+                            (it.therapy_name || '—') + vamanamDraftSuffix,
                             it.patient_name || '—',
                             it.patient_room_no || it.room_no || '—',
                             formatDateDMYForDraftPdf(it.from_date),
@@ -2303,11 +2310,12 @@ function generateTherapyPDF(therapyData, date) {
                         }).join(', ');
                     }
 
+                    const vamanamSuffix = item.vamanam_timing ? ` (Start: ${item.vamanam_timing})` : '';
                     return [
                         item.patient_room_no || '—',
                         item.patient_name || 'N/A',
                         item.room_no || '—',
-                        item.therapy_name || 'N/A',
+                        (item.therapy_name || 'N/A') + vamanamSuffix,
                         therapistStr
                     ];
                 });

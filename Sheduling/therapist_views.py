@@ -172,6 +172,7 @@ def get_therapist_data_api(request):
                     'is_bathing': bool(is_bathing),  # Ensure boolean value for frontend display
                     'room': room_no,
                     'status': display_status,
+                    'vamanam_timing': getattr(booking, 'vamanam_timing', '') or (getattr(allocation, 'vamanam_timing', '') if allocation else '') or '',
                     'notes': booking.therapist_note or ''  # Use therapist_note field
                 }
                 # Debug logging
@@ -351,6 +352,7 @@ def get_therapist_sessions_by_date_api(request):
                     'is_bathing': bool(is_bathing),  # Ensure boolean value for frontend display
                     'room': room_no,
                     'status': display_status,
+                    'vamanam_timing': getattr(booking, 'vamanam_timing', '') or (getattr(allocation, 'vamanam_timing', '') if allocation else '') or '',
                     'notes': booking.therapist_note or ''
                 }
                 # Debug logging

@@ -786,5 +786,117 @@ class TestVamanamTherapyAllocation(TestCase):
         # 3rd person gets 06:00 AM!
         assert api_timings2[2]["timing_name"] == "06:00 AM"
 
+    def test_vamanam_timing_in_scheduling_and_therapist_apis(self):
+        """Tests that vamanam_timing is included in get_therapy_data_api and therapist dashboard APIs."""
+        from authentication.models import Module
+        Module.objects.get_or_create(
+            name="therapy_scheduling",
+            defaults={"display_name": "Therapy Scheduling", "is_active": True},
+        )
+        User = get_user_model()
+        user, _ = User.objects.get_or_create(
+            username="test_api_vamanam_user",
+            defaults={"is_superuser": True, "is_staff": True, "role": "super_admin"}
+        )
+        user.role = "super_admin"
+        user.is_superuser = True
+        user.save()
+        client = Client()
+        client.force_login(user)
+
+        # Create allocation with vamanam_timing
+        alloc = TherapyAllocation.objects.create(
+            patient=self.patient,
+            therapy_name="Vamanam",
+            therapy_code="VAM01",
+            from_date=date(2026, 6, 20),
+            to_date=date(2026, 6, 20),
+            days=1,
+            timeslot=self.slot_0500,
+            vamanam_timing="05:00 AM",
+            status="draft"
+        )
+        # Create a draft booking so no-date filter finds the allocation
+        booking = Booking.objects.create(
+            allocation=alloc,
+            date=date(2026, 6, 20),
+            timeslot=self.slot_0500,
+            vamanam_timing="05:00 AM",
+            status="draft"
+        )
+
+        # Check get_therapy_data_api (draft / no date)
+        res_draft = client.get("/sheduling/scheduling/api/therapy-data/?status=draft")
+        assert res_draft.status_code == 200
+        draft_items = [d for d in res_draft.json().get("data", []) if d.get("id") == alloc.id]
+        assert len(draft_items) == 1
+        assert draft_items[0].get("vamanam_timing") == "05:00 AM"
+
+        # Check get_therapy_data_api with date
+        res_alloc = client.get("/sheduling/scheduling/api/therapy-data/?status=draft&date=2026-06-20")
+        assert res_alloc.status_code == 200
+        alloc_items = [d for d in res_alloc.json().get("data", []) if d.get("patient_reg_no") == self.patient.pat_reg_no]
+        assert len(alloc_items) >= 1
+        assert alloc_items[0].get("vamanam_timing") == "05:00 AM"
+
+        # Check reschedule_options_api
+        import json
+        res_resched = client.post(
+            "/sheduling/scheduling/api/reschedule-options/",
+            data=json.dumps({"allocation_id": alloc.id, "date": "2026-06-20"}),
+            content_type="application/json"
+        )
+        assert res_resched.status_code == 200
+        assert res_resched.json().get("vamanam_timing") == "05:00 AM"
+
+    def test_get_patient_details_api_returns_wheelchair_status(self):
+        """Tests that get_patient_details_api correctly includes is_wheelchair."""
+        from unittest.mock import patch, MagicMock
+        from MySql_Data_pull.models import Registration
+
+        User = get_user_model()
+        user, _ = User.objects.get_or_create(
+            username="test_wc_api_user",
+            defaults={"is_superuser": True, "is_staff": True, "role": "super_admin"}
+        )
+        client = Client()
+        client.force_login(user)
+
+        mock_reg = MagicMock()
+        mock_reg.pat_reg_no = self.patient.pat_reg_no
+        mock_reg.pat_name = self.patient.pat_name
+        mock_reg.pat_age = "35"
+        mock_reg.pat_sex = "Male"
+        mock_reg.pat_op_reg_no = ""
+        mock_reg.pat_room_no = "101"
+        mock_reg.pat_ref_id = ""
+        mock_reg.dct_team = ""
+        mock_reg.doctcode = ""
+        mock_reg.pat_reg_date = None
+
+        with patch.object(Registration.objects, "using") as mock_using:
+            mock_using.return_value.get.return_value = mock_reg
+
+            # Regular patient without wheelchair snapshot or allocation -> is_wheelchair False
+            res = client.get(f"/get-patient-details/?pat_reg_no={self.patient.pat_reg_no}")
+            assert res.status_code == 200
+            assert res.json().get("is_wheelchair") is False
+
+            # If patient has a wheelchair allocation -> is_wheelchair True
+            alloc_wc = TherapyAllocation.objects.create(
+                patient=self.patient,
+                therapy_name="Abhyangam",
+                therapy_code="ABH01",
+                from_date=date(2026, 6, 20),
+                to_date=date(2026, 6, 20),
+                days=1,
+                is_wheelchair=True,
+                status="draft"
+            )
+            res_wc = client.get(f"/get-patient-details/?pat_reg_no={self.patient.pat_reg_no}")
+            assert res_wc.status_code == 200
+            assert res_wc.json().get("is_wheelchair") is True
+
+
 
 

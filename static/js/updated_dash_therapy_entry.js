@@ -587,6 +587,10 @@ $(function () {
     bookings = [];
 
     selectedPatient = patient; // Store patient globally
+    // Set wheelchair patient select based on selected patient's status
+    const isWc = !!(patient && (patient.is_wheelchair === true || patient.is_wheelchair === 'Yes'));
+    $('#wheelchair-select').val(isWc ? 'Yes' : 'No');
+
     $('#header-patient-select').val(patient.pat_reg_no || patient.pat_op_reg_no);
     // Make patient name bold/highlighted
     $('#hdr-pat-name').html(`<strong style="font-weight: bold; color: var(--primary);">${patient.pat_name || 'Unknown'}</strong>`);
@@ -603,6 +607,10 @@ $(function () {
     ajax({ action: 'patient_therapies', patient_reg_no: patientRegNo }).then(list => {
       // Completely replace therapies list with new patient's data
       addedTherapies = decorateTherapyList(list);
+      // If any existing therapy is marked wheelchair, preserve Yes
+      if (addedTherapies.some(t => t.is_wheelchair)) {
+        $('#wheelchair-select').val('Yes');
+      }
       bookings = [];
       addedTherapies.forEach((t, idx) => {
         if (t.from_date && t.to_date) getDateRange(t.from_date, t.to_date).forEach(d => bookings.push({ id: Math.random().toString(36).slice(2, 9), allocation_id: t.allocation_id || t.allocation_id || t.allocation_id, therapyIndex: idx, date: d, slot: t.slot || '', room: t.room || '', therapist: t.therapist || '', status: 'scheduled' }));
@@ -620,6 +628,7 @@ $(function () {
   // Clear patient selection functionality
   function clearPatientSelection() {
     selectedPatient = null;
+    $('#wheelchair-select').val('No');
     $('#header-patient-select').val('');
     $('#hdr-pat-name').text('No patient selected');
     updatePatientAvatar(null);
@@ -1397,7 +1406,7 @@ $(function () {
           // Reset form
           itemGroups = []; renderItemGroups();
           const _defDateAfterSave = _defaultFromDate();
-          $therapySelect.val(null).trigger('change'); $('#ext-int-select').val(''); $slotSelect.val(''); $('#wheelchair-select').val('No'); $fromDate.val(_defDateAfterSave).prop('value', _defDateAfterSave); $toDate.val(''); $daysInput.val(''); $therapyUsageInput.val(''); $procuredSelect.val('');
+          $therapySelect.val(null).trigger('change'); $('#ext-int-select').val(''); $slotSelect.val(''); $fromDate.val(_defDateAfterSave).prop('value', _defDateAfterSave); $toDate.val(''); $daysInput.val(''); $therapyUsageInput.val(''); $procuredSelect.val('');
 
           renderAll();
 
@@ -2211,7 +2220,9 @@ $(function () {
     $('#vamanam-slot-badge').hide();
     $('#vasthi-slot-badge').hide();
     $('#ext-int-select').val('');
-    $('#wheelchair-select').val('No');
+    if (addedTherapies.some(t => t.is_wheelchair) || (selectedPatient && (selectedPatient.is_wheelchair === true || selectedPatient.is_wheelchair === 'Yes'))) {
+      $('#wheelchair-select').val('Yes');
+    }
 
     // Clear date fields - set from date: tomorrow after 5:30 PM, otherwise today
     var _defDate2 = _defaultFromDate();
