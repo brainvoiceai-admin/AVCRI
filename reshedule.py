@@ -1629,6 +1629,15 @@ def allocate_therapists(date, time_slot, therapy_requirements, last_therapists=N
         except Exception as e:
             print(f"[DEBUG TherapistPref] Error in reshedule.py for patient {patient_id}: {e}")
 
+    # Retrieve active preferred therapist roster (VIP & Repeated patients):
+    preferred_roster_info = None
+    if patient_id:
+        try:
+            from Sheduling.preferred_therapist_service import get_active_preferred_roster
+            preferred_roster_info = get_active_preferred_roster(patient_id)
+        except Exception as e:
+            print(f"[DEBUG PreferredRoster] Error checking roster for patient {patient_id}: {e}")
+
     exclusion_set = set(unpreferred_codes)
     if last_therapists and unpreferred_codes:
         last_therapists = [c for c in last_therapists if c not in unpreferred_codes]
@@ -1833,6 +1842,8 @@ def allocate_therapists(date, time_slot, therapy_requirements, last_therapists=N
                 is_active=True,
                 is_helping_therapist=is_helping_flag
             )
+            if preferred_roster_info:
+                candidates_qs = candidates_qs.filter(therapist_code__in=preferred_roster_info['therapist_codes_set'])
             if exclusion_set:
                 candidates_qs = candidates_qs.exclude(therapist_code__in=exclusion_set)
 
@@ -1907,6 +1918,8 @@ def allocate_therapists(date, time_slot, therapy_requirements, last_therapists=N
         return assigned_cnt
 
     def _pick_helping_therapist():
+        if preferred_roster_info:
+            return None
         """
         Find and allocate an eligible Helping Therapist (is_helping_therapist=True)
         that matches patient gender, not on leave, not booked at time_slot, sessions < 6.
@@ -2145,7 +2158,7 @@ def allocate_therapists(date, time_slot, therapy_requirements, last_therapists=N
 # Allows Senior/Super Senior to substitute for Junior/Trainee when they're unavailable
 # This is used as a fallback when normal allocation fails
 # -----------------------
-def allocate_therapists_with_grade_substitution(date, time_slot, therapy_requirements, last_therapists=None, needs_bathing=False, patient_gender=None, allow_helping_fallback=False, patient_age=None):
+def allocate_therapists_with_grade_substitution(date, time_slot, therapy_requirements, last_therapists=None, needs_bathing=False, patient_gender=None, allow_helping_fallback=False, patient_age=None, patient_id=None):
     """
     Fallback allocation function that allows aggressive grade substitution:
     - Senior/Super Senior can substitute for Junior/Trainee when they're unavailable
@@ -2398,6 +2411,14 @@ def allocate_therapists_with_grade_substitution(date, time_slot, therapy_require
                 break
             
             candidates_qs = TherapistMaster.objects.filter(therapist_grade__name=search_grade, is_active=True, is_helping_therapist=False)
+            if patient_id:
+                try:
+                    from Sheduling.preferred_therapist_service import get_active_preferred_roster
+                    _p_roster = get_active_preferred_roster(patient_id)
+                    if _p_roster:
+                        candidates_qs = candidates_qs.filter(therapist_code__in=_p_roster['therapist_codes_set'])
+                except Exception:
+                    pass
             if exclusion_set:
                 candidates_qs = candidates_qs.exclude(therapist_code__in=exclusion_set)
             
@@ -4193,6 +4214,28 @@ def assign_continuity_therapists_pass1(booking, allocation, target_date, locked_
             continuity_therapists = []
     
     # If no continuity plan, try to find previous day therapists from TherapistBooking
+    preferred_roster_info = None
+    if patient_id:
+        try:
+            from Sheduling.preferred_therapist_service import get_active_preferred_roster
+            preferred_roster_info = get_active_preferred_roster(patient_id)
+        except Exception as e:
+            print(f"[RESCHEDULE PASS1] Error fetching preferred roster for patient {patient_id}: {e}")
+
+    if preferred_roster_info:
+        roster_pool = preferred_roster_info['therapist_codes_set']
+        continuity_therapists = [t for t in continuity_therapists if getattr(t, 'therapist_code', None) in roster_pool]
+        if needs_bath_flag:
+            try:
+                from Sheduling.preferred_therapist_service import pick_bathing_therapist_from_roster
+                picked_bath, bath_role = pick_bathing_therapist_from_roster(preferred_roster_info, target_date, slot_master)
+                if picked_bath:
+                    previous_bathing_therapist = picked_bath
+                    if picked_bath not in continuity_therapists:
+                        continuity_therapists.insert(0, picked_bath)
+            except Exception as e:
+                print(f"[RESCHEDULE PASS1] Error resolving roster bathing therapist: {e}")
+
     if not continuity_therapists and patient_id:
         try:
             from django.db.models import Max

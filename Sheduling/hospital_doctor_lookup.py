@@ -35,11 +35,70 @@ def doctor_code_string_variants(doctor_id):
     if s.isdigit():
         n = int(s)
         variants.add(str(n))
+        variants.add(str(n).zfill(3))
         variants.add(str(n).zfill(4))
+        variants.add(str(n).zfill(6))
+    else:
+        # e.g. DOC000156 or DR1011 -> extract numeric component
+        import re
+        nums = re.findall(r'\d+', s)
+        for num in nums:
+            n = int(num)
+            variants.add(str(n))
+            variants.add(num)
+            variants.add(str(n).zfill(3))
+            variants.add(str(n).zfill(4))
+            variants.add(str(n).zfill(6))
     return [x for x in variants if x]
 
 
+def get_doctor_codes_for_user(user):
+    """
+    Get all possible doctor code variants for a given user.
+    Uses doctor_profile.doctor_id, username, and matches in hospital doctor_master by name.
+    """
+    if not user or not user.is_authenticated:
+        return []
+
+    codes = set()
+    # 1. From doctor_profile
+    if hasattr(user, 'doctor_profile') and user.doctor_profile and user.doctor_profile.doctor_id:
+        raw_id = user.doctor_profile.doctor_id.strip()
+        codes.update(doctor_code_string_variants(raw_id))
+
+    # 2. From username
+    if getattr(user, 'username', ''):
+        codes.update(doctor_code_string_variants(user.username.strip()))
+
+    # 3. From hospital doctor_master by doctor name
+    full_name = (user.get_full_name() or user.username or '').strip()
+    import re
+    core_name = re.sub(r'^(dr\.?|doctor)\s*', '', full_name, flags=re.IGNORECASE).strip()
+    if core_name and len(core_name) >= 3:
+        try:
+            from MySql_Data_pull.models import doctor_master
+            q = Q(Doct_Name__icontains=core_name) | Q(Doct_Code__iexact=core_name)
+            for w in core_name.split():
+                if len(w) >= 4:
+                    q |= Q(Doct_Name__icontains=w)
+            dms = doctor_master.objects.using(EXTERNAL_DB_ALIAS).filter(q)
+            for dm in dms:
+                if dm.Doct_Code:
+                    codes.update(doctor_code_string_variants(dm.Doct_Code))
+        except Exception:
+            pass
+
+    return [c for c in codes if c]
+
+
+import time
+
+_last_hosp_lookup_failure = 0
+
 def pat_reg_nos_for_hospital_doctor(doctor_id_str):
+    global _last_hosp_lookup_failure
+    if time.time() - _last_hosp_lookup_failure < 30:
+        return []
     variants = doctor_code_string_variants(doctor_id_str)
     if not variants:
         return []
@@ -107,7 +166,7 @@ def pat_reg_nos_for_hospital_doctor(doctor_id_str):
             cursor.execute(sql, variants)
         _add_rows(cursor.fetchall())
     except Exception:
-        pass
+        _last_hosp_lookup_failure = time.time()
 
     return sorted(reg_nos, key=lambda x: (len(x), x))
 

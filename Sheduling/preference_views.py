@@ -13,49 +13,65 @@ from .models import TherapistPreferenceRequest, TherapistPreferenceAuditLog
 from final_allocation import is_patient_active
 
 
+import time
+
+_last_hospital_db_failure = 0
+
 def get_patient_treating_doctor(patient_id):
     """
     Look up treating doctor code and name for a patient from Registration / Treatment.
+    Uses integer pat_reg_no for Registration (BigIntegerField) and variants for Treatment.
     """
     if not patient_id:
         return None, None
     patient_id_str = str(patient_id).strip()
+    digits = ''.join(ch for ch in patient_id_str if ch.isdigit())
 
-    try:
-        from MySql_Data_pull.models import Registration, doctor_master
-        reg = Registration.objects.using('therapy_db').filter(pat_reg_no=patient_id_str).first()
-        if reg and reg.doctcode:
-            doc_code_str = str(reg.doctcode).strip()
-            if '.' in doc_code_str:
-                doc_code_str = doc_code_str.split('.')[0]
-            
-            doc = doctor_master.objects.using('therapy_db').filter(Doct_Code=doc_code_str).first()
-            if not doc and doc_code_str.isdigit():
-                doc = doctor_master.objects.using('therapy_db').filter(Doct_Code=doc_code_str.zfill(4)).first()
-            
-            if doc and doc.Doct_Name:
-                name = doc.Doct_Name.strip()
-                if not name.lower().startswith('dr'):
-                    name = f"Dr. {name}"
-                return doc_code_str, name
-    except Exception as e:
-        print(f"Error resolving treating doctor: {e}")
+    # 1. Look up in Registration (therapy_db) using integer pat_reg_no
+    if digits:
+        try:
+            from MySql_Data_pull.models import Registration, doctor_master
+            reg_int = int(digits)
+            reg = Registration.objects.using('therapy_db').filter(pat_reg_no=reg_int).first()
+            if reg and reg.doctcode:
+                doc_code_str = str(reg.doctcode).split('.')[0].strip()
+                doc = doctor_master.objects.using('therapy_db').filter(Doct_Code=doc_code_str).first()
+                if not doc and doc_code_str.isdigit():
+                    doc = doctor_master.objects.using('therapy_db').filter(Doct_Code=doc_code_str.zfill(4)).first()
+                if doc and doc.Doct_Name:
+                    name = doc.Doct_Name.strip()
+                    if not name.lower().startswith('dr'):
+                        name = f"Dr. {name}"
+                    return doc_code_str, name
+        except Exception:
+            pass
 
-    try:
-        from MySql_Data_pull.models import Treatment, doctor_master
-        treat = Treatment.objects.using('therapy_db').filter(Pat_Reg_No=patient_id_str).exclude(Treat_Doc_Code__isnull=True).first()
-        if treat and treat.Treat_Doc_Code:
-            doc_code_str = str(treat.Treat_Doc_Code).strip()
-            if '.' in doc_code_str:
-                doc_code_str = doc_code_str.split('.')[0]
-            doc = doctor_master.objects.using('therapy_db').filter(Doct_Code=doc_code_str).first()
-            if doc and doc.Doct_Name:
-                name = doc.Doct_Name.strip()
-                if not name.lower().startswith('dr'):
-                    name = f"Dr. {name}"
-                return doc_code_str, name
-    except Exception:
-        pass
+    # 2. Look up in Treatment (iptherapy_db / therapy_db)
+    for db_alias in ['iptherapy_db', 'therapy_db']:
+        try:
+            from MySql_Data_pull.models import Treatment, doctor_master
+            variants = [patient_id_str]
+            if digits:
+                variants.append(digits)
+                for pad in [4, 5, 6]:
+                    variants.append(digits.zfill(pad))
+
+            treat = Treatment.objects.using(db_alias).filter(
+                Pat_Reg_No__in=variants
+            ).exclude(Treat_Doc_Code__isnull=True).order_by('-DOA').first()
+
+            if treat and treat.Treat_Doc_Code:
+                doc_code_str = str(treat.Treat_Doc_Code).split('.')[0].strip()
+                doc = doctor_master.objects.using('therapy_db').filter(Doct_Code=doc_code_str).first()
+                if not doc and doc_code_str.isdigit():
+                    doc = doctor_master.objects.using('therapy_db').filter(Doct_Code=doc_code_str.zfill(4)).first()
+                if doc and doc.Doct_Name:
+                    name = doc.Doct_Name.strip()
+                    if not name.lower().startswith('dr'):
+                        name = f"Dr. {name}"
+                    return doc_code_str, name
+        except Exception:
+            pass
 
     return None, None
 

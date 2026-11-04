@@ -968,6 +968,15 @@ def allocate_therapists(
         except Exception as e:
             print(f"[DEBUG TherapistPref] Error fetching preferences for patient {patient_id}: {e}")
 
+    # Retrieve active preferred therapist roster (VIP & Repeated patients):
+    preferred_roster_info = None
+    if patient_id:
+        try:
+            from Sheduling.preferred_therapist_service import get_active_preferred_roster
+            preferred_roster_info = get_active_preferred_roster(patient_id)
+        except Exception as e:
+            print(f"[DEBUG PreferredRoster] Error checking roster for patient {patient_id}: {e}")
+
     exclusion_set = set(avoid_therapists or [])
     if unpreferred_codes:
         exclusion_set.update(unpreferred_codes)
@@ -1232,6 +1241,10 @@ def allocate_therapists(
                 is_helping_therapist=is_helping_flag
             )
 
+            # Strict Preferred Therapist Pool enforcement
+            if preferred_roster_info:
+                candidates_qs = candidates_qs.filter(therapist_code__in=preferred_roster_info['therapist_codes_set'])
+
             if exclusion_set:
                 candidates_qs = candidates_qs.exclude(therapist_code__in=exclusion_set)
 
@@ -1409,7 +1422,7 @@ def allocate_therapists(
     allocated_primary_count = len(allocated)
     shortage = total_required - allocated_primary_count
 
-    if shortage > 0 and allow_helping_fallback:
+    if shortage > 0 and allow_helping_fallback and not preferred_roster_info:
         print(f"[DEBUG HelpingTherapist] Primary shortage detected ({shortage} remaining needed out of {total_required}). Triggering Helping Therapist fallback...")
 
         if last_therapists:
@@ -1671,6 +1684,30 @@ def assign_continuity_therapists_pass1(booking, allocation, target_date, locked_
             unpreferred_codes.update(pref_u)
         except Exception as e:
             print(f"[CONTINUITY PASS1] Error fetching active preferences for patient {pid}: {e}")
+
+    preferred_roster_info = None
+    for pid in filter(None, [patient_id, pat_reg_no]):
+        try:
+            from Sheduling.preferred_therapist_service import get_active_preferred_roster
+            preferred_roster_info = get_active_preferred_roster(pid)
+            if preferred_roster_info:
+                break
+        except Exception as e:
+            print(f"[CONTINUITY PASS1] Error fetching preferred roster for patient {pid}: {e}")
+
+    if preferred_roster_info:
+        roster_set = preferred_roster_info['therapist_codes_set']
+        continuity_therapists = [t for t in continuity_therapists if getattr(t, 'therapist_code', None) in roster_set]
+        if needs_bath_flag:
+            try:
+                from Sheduling.preferred_therapist_service import pick_bathing_therapist_from_roster
+                picked_bath, bath_role = pick_bathing_therapist_from_roster(preferred_roster_info, target_date, slot_master)
+                if picked_bath:
+                    previous_bathing_therapist = picked_bath
+                    if picked_bath not in continuity_therapists:
+                        continuity_therapists.insert(0, picked_bath)
+            except Exception as e:
+                print(f"[CONTINUITY PASS1] Error resolving roster bathing therapist: {e}")
 
     if unpreferred_codes:
         continuity_therapists = [t for t in continuity_therapists if getattr(t, 'therapist_code', None) not in unpreferred_codes]

@@ -1,0 +1,969 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ dashboard_title }} - AVCRI</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="{% static 'css/dashboards_nav.css' %}">
+    <style>
+        :root {
+            --primary: #2563eb;
+            --primary-soft: #eff6ff;
+            --success-soft: #ecfdf5;
+            --success-dark: #065f46;
+            --warning-soft: #fffbeb;
+            --warning-dark: #92400e;
+            --card-border: #e2e8f0;
+            --text-main: #0f172a;
+            --text-muted: #64748b;
+        }
+
+        body {
+            background-color: #f8fafc;
+            color: var(--text-main);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        }
+
+        .main-content {
+            margin-left: 280px;
+            padding: 24px 32px;
+            min-height: 100vh;
+            background-color: #f8fafc;
+            box-sizing: border-box;
+            transition: margin-left 0.3s ease;
+        }
+
+        @media (max-width: 992px) {
+            .main-content {
+                margin-left: 0;
+                padding: 16px;
+            }
+        }
+
+        /* Stat Cards */
+        .stat-card {
+            background: white;
+            border-radius: 14px;
+            border: 1px solid var(--card-border);
+            padding: 20px;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.04);
+            transition: transform 0.2s;
+        }
+
+        .stat-card:hover {
+            transform: translateY(-2px);
+        }
+
+        /* Filter Tabs */
+        .filter-pill {
+            border: 1px solid #cbd5e1;
+            background: white;
+            color: #475569;
+            padding: 7px 16px;
+            border-radius: 10px;
+            font-weight: 500;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .filter-pill.active {
+            background: var(--primary);
+            color: white;
+            border-color: var(--primary);
+        }
+
+        /* Table Card */
+        .table-card {
+            background: white;
+            border-radius: 16px;
+            border: 1px solid var(--card-border);
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+            overflow: hidden;
+        }
+
+        .table thead th {
+            background: #f8fafc;
+            color: #475569;
+            font-size: 13px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            border-bottom: 2px solid #e2e8f0;
+            padding: 14px 16px;
+        }
+
+        .table tbody td {
+            padding: 16px;
+            vertical-align: middle;
+            border-bottom: 1px solid #f1f5f9;
+        }
+
+        .therapist-chip {
+            display: inline-flex;
+            align-items: center;
+            background: #f1f5f9;
+            border: 1px solid #e2e8f0;
+            border-radius: 6px;
+            padding: 3px 8px;
+            font-size: 12px;
+            margin: 2px;
+        }
+
+        .therapist-chip.chip-primary-bath {
+            background: #dbeafe;
+            border-color: #bfdbfe;
+            color: #1e40af;
+            font-weight: 600;
+        }
+
+        .therapist-chip.chip-secondary-bath {
+            background: #e0e7ff;
+            border-color: #c7d2fe;
+            color: #3730a3;
+            font-weight: 600;
+        }
+
+        .week-off-badge {
+            background: #fee2e2;
+            color: #991b1b;
+            font-size: 11px;
+            font-weight: 600;
+            padding: 2px 6px;
+            border-radius: 4px;
+            margin-left: 4px;
+        }
+
+        /* Modal Therapist Selection Grid */
+        .therapist-select-list {
+            max-height: 380px;
+            overflow-y: auto;
+            border: 1px solid #e2e8f0;
+            border-radius: 10px;
+            padding: 10px;
+            background: #f8fafc;
+        }
+
+        .therapist-select-item {
+            background: white;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            padding: 10px 14px;
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            transition: all 0.15s;
+            cursor: pointer;
+        }
+
+        .therapist-select-item:hover {
+            border-color: var(--primary);
+            background: #faf5ff;
+        }
+
+        .therapist-select-item.selected {
+            border-color: var(--primary);
+            background: var(--primary-soft);
+        }
+
+        .comparison-card {
+            border-radius: 10px;
+            padding: 14px;
+            background: #f8fafc;
+            border: 1px dashed #cbd5e1;
+        }
+
+        .toast-container {
+            position: fixed;
+            top: 24px;
+            right: 24px;
+            z-index: 1090;
+        }
+    </style>
+</head>
+<body>
+    <!-- Sidebar Navigation -->
+    {% include 'dashboards/nav.html' %}
+
+    <!-- Content Area -->
+    <div class="main-content">
+            <!-- Header -->
+            <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+                <div>
+                    <h2 class="mb-1 fw-bold text-dark"><i class="fas fa-calendar-alt text-primary me-2"></i>Preferred Therapist Assignment</h2>
+                    <p class="text-muted mb-0">Showing <strong>ONLY patients allowed by their Treating Doctor</strong> for dedicated preferred therapist allocation.</p>
+                </div>
+                <div>
+                    <a href="{% url 'doctor_patients_vip_repeated' %}" class="btn btn-outline-secondary me-2">
+                        <i class="fas fa-user-md me-1"></i>Doctor's Patient Quota View
+                    </a>
+                    <a href="{% url 'scheduling_dashboard' %}" class="btn btn-outline-primary">
+                        <i class="fas fa-calendar-check me-1"></i>Therapy Scheduling Dashboard
+                    </a>
+                </div>
+            </div>
+
+            <!-- Stats Row -->
+            <div class="row g-3 mb-4">
+                <div class="col-12 col-md-4">
+                    <div class="stat-card d-flex align-items-center">
+                        <div class="rounded-circle p-3 bg-primary bg-opacity-10 text-primary me-3 fs-4">
+                            <i class="fas fa-user-check"></i>
+                        </div>
+                        <div>
+                            <div class="text-muted small text-uppercase fw-semibold">Total Allowed Patients</div>
+                            <div class="fs-3 fw-bold text-dark" id="stat-total-allowed">{{ allowed_count }}</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-12 col-md-4">
+                    <div class="stat-card d-flex align-items-center">
+                        <div class="rounded-circle p-3 bg-success bg-opacity-10 text-success me-3 fs-4">
+                            <i class="fas fa-users-cog"></i>
+                        </div>
+                        <div>
+                            <div class="text-muted small text-uppercase fw-semibold">Configured Rosters</div>
+                            <div class="fs-3 fw-bold text-success" id="stat-configured">{{ roster_count }}</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-12 col-md-4">
+                    <div class="stat-card d-flex align-items-center">
+                        <div class="rounded-circle p-3 bg-warning bg-opacity-10 text-warning me-3 fs-4">
+                            <i class="fas fa-clock"></i>
+                        </div>
+                        <div>
+                            <div class="text-muted small text-uppercase fw-semibold">Pending Assignment</div>
+                            <div class="fs-3 fw-bold text-warning" id="stat-pending">{{ pending_count }}</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Filter Controls & Search -->
+            <div class="card mb-4 border-0 shadow-sm p-3" style="border-radius: 14px;">
+                <div class="d-flex justify-content-between align-items-center flex-wrap gap-3">
+                    <div class="d-flex gap-2 flex-wrap" id="status-filters">
+                        <button class="filter-pill active" data-status="ALL">
+                            All Allowed Patients (<span id="pill-cnt-all">0</span>)
+                        </button>
+                        <button class="filter-pill" data-status="CONFIGURED">
+                            <i class="fas fa-check-circle text-success me-1"></i>Configured (<span id="pill-cnt-configured">0</span>)
+                        </button>
+                        <button class="filter-pill" data-status="PENDING">
+                            <i class="fas fa-exclamation-circle text-warning me-1"></i>Pending Assignment (<span id="pill-cnt-pending">0</span>)
+                        </button>
+                    </div>
+
+                    <div class="search-box position-relative" style="min-width: 280px;">
+                        <input type="text" id="allowed-search-input" class="form-control ps-4" placeholder="Search patient, Reg No, doctor..." style="border-radius: 10px;">
+                        <i class="fas fa-search position-absolute top-50 start-0 translate-middle-y ms-2 text-muted"></i>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Allowed Patients Table -->
+            <div class="table-card">
+                <div class="table-responsive">
+                    <table class="table mb-0 align-middle">
+                        <thead>
+                            <tr>
+                                <th>Patient Info</th>
+                                <th>Treating Doctor</th>
+                                <th>Room</th>
+                                <th>Roster Status</th>
+                                <th>Assigned Preferred Therapists (Up to 7)</th>
+                                <th class="text-end">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="allowed-patients-tbody">
+                            <tr>
+                                <td colspan="6" class="text-center py-5 text-muted">
+                                    <div class="spinner-border spinner-border-sm text-primary me-2"></div>Loading allowed patients...
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+    <!-- Configure / Edit Preferred Therapist Modal -->
+    <div class="modal fade" id="rosterModal" tabindex="-1" aria-labelledby="rosterModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+            <div class="modal-content" style="border-radius: 16px; border: 0;">
+                <div class="modal-header bg-light border-bottom">
+                    <div>
+                        <h5 class="modal-title fw-bold" id="rosterModalLabel">
+                            <i class="fas fa-user-tag text-primary me-2"></i>Configure Preferred Therapists
+                        </h5>
+                        <div class="text-muted small" id="modal-patient-subtitle">Patient: —</div>
+                    </div>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+
+                <div class="modal-body p-4">
+                    <!-- Rule Banner -->
+                    <div class="alert alert-info border-0 rounded-3 mb-3 d-flex align-items-center">
+                        <i class="fas fa-info-circle fs-4 text-primary me-3"></i>
+                        <div class="small">
+                            <strong>Scheduling Rule:</strong> Select <strong>up to 7 therapists</strong>. Only these therapists will be scheduled for treatments. Designate <strong>1 Primary</strong> and <strong>1 Secondary Bathing Therapist</strong>. Week offs are displayed to help you ensure continuous coverage!
+                        </div>
+                    </div>
+
+                    <!-- Step 1: Select up to 7 therapists -->
+                    <div class="mb-4">
+                        <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
+                            <label class="form-label fw-bold mb-0">
+                                1. Select Preferred Therapists (Maximum 7)
+                            </label>
+                            <div class="d-flex align-items-center gap-2">
+                                <span class="badge bg-light text-secondary border px-2 py-1" id="gender-info-badge">
+                                    <i class="fas fa-venus-mars me-1 text-primary"></i>Gender Filter Active
+                                </span>
+                                <span class="badge bg-primary px-3 py-2" id="selection-counter">
+                                    Selected: <strong id="selected-count">0</strong> / 7 Max
+                                </span>
+                            </div>
+                        </div>
+
+                        <!-- Therapist Search inside modal -->
+                        <div class="input-group input-group-sm mb-2">
+                            <span class="input-group-text bg-white"><i class="fas fa-search text-muted"></i></span>
+                            <input type="text" id="modal-therapist-search" class="form-control" placeholder="Search therapists by name, code, grade, or week off...">
+                        </div>
+
+                        <!-- Therapist List -->
+                        <div class="therapist-select-list" id="modal-therapist-list">
+                            <div class="text-center py-4 text-muted">Loading therapists...</div>
+                        </div>
+                    </div>
+
+                    <!-- Step 2: Designate Primary & Secondary Bathing Therapists -->
+                    <div class="card p-3 bg-light border-0 rounded-3 mb-3">
+                        <label class="form-label fw-bold mb-2">
+                            2. Designate Bathing Therapists (From Your Selected Pool)
+                        </label>
+                        <div class="row g-3">
+                            <div class="col-md-6">
+                                <label class="form-label small text-muted fw-semibold">Primary Bathing Therapist <span class="text-danger">*</span></label>
+                                <select class="form-select form-select-sm" id="primary-bathing-select">
+                                    <option value="">-- Select from chosen therapists --</option>
+                                </select>
+                                <div class="form-text small" id="primary-bathing-info">Select a bathing-qualified therapist</div>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label small text-muted fw-semibold">Secondary Bathing Therapist <span class="text-danger">*</span></label>
+                                <select class="form-select form-select-sm" id="secondary-bathing-select">
+                                    <option value="">-- Select from chosen therapists --</option>
+                                </select>
+                                <div class="form-text small" id="secondary-bathing-info">Acts as substitute when Primary is off</div>
+                            </div>
+                        </div>
+
+                        <!-- Dynamic Week-Off Comparison Banner -->
+                        <div class="comparison-card mt-3" id="weekoff-comparison-box" style="display: none;">
+                            <div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
+                                <div>
+                                    <span class="small fw-semibold text-dark">Primary Off:</span>
+                                    <span class="badge bg-danger bg-opacity-10 text-danger ms-1" id="comp-primary-off">—</span>
+                                </div>
+                                <div class="text-muted"><i class="fas fa-exchange-alt"></i></div>
+                                <div>
+                                    <span class="small fw-semibold text-dark">Secondary Off:</span>
+                                    <span class="badge bg-primary bg-opacity-10 text-primary ms-1" id="comp-secondary-off">—</span>
+                                </div>
+                            </div>
+                            <div class="mt-2 small fw-semibold" id="comp-analysis-text"></div>
+                        </div>
+                    </div>
+
+                    <!-- Optional Notes -->
+                    <div class="mb-2">
+                        <label class="form-label small text-muted">Notes / Instructions (Optional)</label>
+                        <input type="text" id="roster-notes-input" class="form-control form-control-sm" placeholder="e.g. Approved for VIP Room 102 Dhara & Pizichil">
+                    </div>
+                </div>
+
+                <div class="modal-footer bg-light border-top">
+                    <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-primary btn-sm px-4" id="btn-save-roster">
+                        <i class="fas fa-save me-1"></i>Save Preferred Roster
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notifications -->
+    <div class="toast-container" id="toast-container"></div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="{% static 'js/dashboards_nav.js' %}"></script>
+    <script>
+        let currentStatusFilter = 'ALL';
+        let allowedSearchQuery = '';
+        let allTherapists = [];
+        let currentPatientRegNo = '';
+        let currentPatientName = '';
+        let currentPatientGender = '';
+        let currentPatientAge = '';
+        let currentPatientDesiredGender = '';
+        let allowedPatientsMap = {};
+        let selectedTherapistCodes = new Set();
+        let rosterModalInstance = null;
+
+        function resolveDesiredTherapistGender(gender, age) {
+            if (!gender || gender === '—') return null;
+            const g = String(gender).trim().toLowerCase();
+            const ageNum = parseFloat(age);
+            if (!isNaN(ageNum) && ageNum < 5) {
+                return 'Female';
+            }
+            if (g.startsWith('f')) return 'Female';
+            if (g.startsWith('m')) return 'Male';
+            return null;
+        }
+
+        function getCookie(name) {
+            let cookieValue = null;
+            if (document.cookie && document.cookie !== '') {
+                const cookies = document.cookie.split(';');
+                for (let i = 0; i < cookies.length; i++) {
+                    const cookie = cookies[i].trim();
+                    if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                        cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                        break;
+                    }
+                }
+            }
+            return cookieValue;
+        }
+
+        function showToast(message, type = 'success') {
+            const container = document.getElementById('toast-container');
+            const toastEl = document.createElement('div');
+            const bgClass = type === 'success' ? 'bg-success text-white' : (type === 'danger' ? 'bg-danger text-white' : 'bg-warning text-dark');
+            const icon = type === 'success' ? 'check-circle' : (type === 'danger' ? 'exclamation-circle' : 'info-circle');
+            
+            toastEl.className = `toast align-items-center ${bgClass} border-0 show shadow-lg mb-2`;
+            toastEl.setAttribute('role', 'alert');
+            toastEl.innerHTML = `
+                <div class="d-flex">
+                    <div class="toast-body d-flex align-items-center">
+                        <i class="fas fa-${icon} me-2 fs-5"></i>
+                        <span>${message}</span>
+                    </div>
+                    <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+                </div>
+            `;
+            container.appendChild(toastEl);
+            setTimeout(() => {
+                toastEl.remove();
+            }, 4500);
+        }
+
+        async function preloadTherapists() {
+            try {
+                const res = await fetch("{% url 'get_therapists_with_leaves_api' %}");
+                const data = await res.json();
+                if (data.status === 'success') {
+                    allTherapists = data.therapists || [];
+                }
+            } catch (err) {
+                console.error('Error preloading therapists:', err);
+            }
+        }
+
+        async function loadAllowedPatients() {
+            const tbody = document.getElementById('allowed-patients-tbody');
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="6" class="text-center py-5 text-muted">
+                        <div class="spinner-border spinner-border-sm text-primary me-2"></div>Loading allowed patients...
+                    </td>
+                </tr>
+            `;
+
+            try {
+                const url = `{% url 'get_allowed_patients_preferred_therapists_api' %}?status=${currentStatusFilter}&search=${encodeURIComponent(allowedSearchQuery)}`;
+                const response = await fetch(url);
+                const data = await response.json();
+
+                if (data.status !== 'success') {
+                    tbody.innerHTML = `<tr><td colspan="6" class="text-center py-4 text-danger">${data.message || 'Error loading allowed patients.'}</td></tr>`;
+                    return;
+                }
+
+                if (data.counts) {
+                    document.getElementById('stat-total-allowed').textContent = data.counts.total_allowed || 0;
+                    document.getElementById('stat-configured').textContent = data.counts.configured || 0;
+                    document.getElementById('stat-pending').textContent = data.counts.pending || 0;
+
+                    document.getElementById('pill-cnt-all').textContent = data.counts.total_allowed || 0;
+                    document.getElementById('pill-cnt-configured').textContent = data.counts.configured || 0;
+                    document.getElementById('pill-cnt-pending').textContent = data.counts.pending || 0;
+                }
+
+                if (!data.patients || data.patients.length === 0) {
+                    tbody.innerHTML = `
+                        <tr>
+                            <td colspan="6" class="text-center py-5 text-muted">
+                                <i class="fas fa-user-clock fs-1 d-block mb-3 opacity-25"></i>
+                                No allowed patients found matching your search.
+                            </td>
+                        </tr>
+                    `;
+                    return;
+                }
+
+                tbody.innerHTML = '';
+                data.patients.forEach(pat => {
+                    const tr = document.createElement('tr');
+
+                    // VIP / Repeated Badges
+                    let catHtml = '';
+                    if (pat.is_vip) {
+                        catHtml += `<span class="badge bg-warning bg-opacity-25 text-warning-emphasis me-1"><i class="fas fa-crown me-1 text-warning"></i>VIP</span>`;
+                    }
+                    if (pat.is_cottage_repeated) {
+                        catHtml += `<span class="badge bg-success bg-opacity-25 text-success-emphasis me-1"><i class="fas fa-home me-1 text-success"></i>Cottage Repeated (${pat.total_visits})</span>`;
+                    } else if (pat.is_repeated) {
+                        catHtml += `<span class="badge bg-purple bg-opacity-25 text-primary me-1"><i class="fas fa-history me-1"></i>Repeated (${pat.total_visits})</span>`;
+                    }
+
+                    // Roster Status Pill
+                    let statusPill = '';
+                    let therapistsDisplay = '';
+                    if (pat.is_configured && pat.roster) {
+                        statusPill = `<span class="badge bg-success bg-opacity-10 text-success fw-bold px-2 py-1"><i class="fas fa-check-circle me-1"></i>Configured (${pat.roster.therapist_count}/7)</span>`;
+                        
+                        // Chips
+                        let chipsHtml = '';
+                        // Primary
+                        chipsHtml += `
+                            <span class="therapist-chip chip-primary-bath" title="Primary Bathing Therapist">
+                                <i class="fas fa-shower me-1"></i>Primary: ${escapeHtml(pat.roster.primary_bathing_name)}
+                                <span class="week-off-badge">Off: ${escapeHtml(pat.roster.primary_bathing_week_off)}</span>
+                            </span>
+                        `;
+                        // Secondary
+                        chipsHtml += `
+                            <span class="therapist-chip chip-secondary-bath" title="Secondary Bathing Therapist">
+                                <i class="fas fa-bath me-1"></i>Secondary: ${escapeHtml(pat.roster.secondary_bathing_name)}
+                                <span class="week-off-badge">Off: ${escapeHtml(pat.roster.secondary_bathing_week_off)}</span>
+                            </span>
+                        `;
+
+                        // Others
+                        if (pat.roster.therapists_detail) {
+                            pat.roster.therapists_detail.forEach(t => {
+                                if (t.code !== pat.roster.primary_bathing_code && t.code !== pat.roster.secondary_bathing_code) {
+                                    chipsHtml += `
+                                        <span class="therapist-chip">
+                                            ${escapeHtml(t.name)}
+                                            <span class="week-off-badge">Off: ${escapeHtml(t.week_off)}</span>
+                                        </span>
+                                    `;
+                                }
+                            });
+                        }
+                        therapistsDisplay = chipsHtml;
+                    } else {
+                        statusPill = `<span class="badge bg-warning bg-opacity-10 text-warning-emphasis fw-bold px-2 py-1"><i class="fas fa-clock me-1"></i>Pending Assignment</span>`;
+                        therapistsDisplay = `<span class="text-muted small fst-italic">No therapists assigned yet</span>`;
+                    }
+
+                    allowedPatientsMap[pat.patient_reg_no] = pat;
+                    const actionBtn = `
+                        <button class="btn btn-sm ${pat.is_configured ? 'btn-outline-primary' : 'btn-primary'}" onclick="openRosterModal('${escapeHtml(pat.patient_reg_no)}', '${escapeHtml(pat.patient_name)}', '${escapeHtml(pat.gender || '')}', '${escapeHtml(pat.age || '')}')">
+                            <i class="fas ${pat.is_configured ? 'fa-edit' : 'fa-plus'} me-1"></i>${pat.is_configured ? 'Edit Roster' : 'Assign Therapists'}
+                        </button>
+                    `;
+
+                    tr.innerHTML = `
+                        <td>
+                            <div class="fw-bold text-dark">${escapeHtml(pat.patient_name)}</div>
+                            <div class="text-muted small">Reg No: <strong>${escapeHtml(pat.patient_reg_no)}</strong></div>
+                            <div class="mt-1">${catHtml}</div>
+                        </td>
+                        <td>
+                            <div class="fw-semibold text-secondary">${escapeHtml(pat.doctor_name)}</div>
+                            <div class="text-muted small">Allowed: ${escapeHtml(pat.allowed_date)}</div>
+                        </td>
+                        <td>
+                            <span class="badge bg-light text-dark border px-2 py-1">
+                                <i class="fas fa-door-open me-1 text-primary"></i>${escapeHtml(pat.room_no)}
+                            </span>
+                        </td>
+                        <td>${statusPill}</td>
+                        <td style="max-width: 420px;">${therapistsDisplay}</td>
+                        <td class="text-end">${actionBtn}</td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+
+            } catch (err) {
+                console.error('Error fetching allowed patients:', err);
+                tbody.innerHTML = `<tr><td colspan="6" class="text-center py-4 text-danger">Network error loading allowed patients.</td></tr>`;
+            }
+        }
+
+        async function openRosterModal(regNo, patName, patGender, patAge) {
+            currentPatientRegNo = regNo;
+            currentPatientName = patName;
+
+            const patData = allowedPatientsMap[regNo] || {};
+            currentPatientGender = patGender || patData.gender || '';
+            currentPatientAge = patAge || patData.age || '';
+            currentPatientDesiredGender = resolveDesiredTherapistGender(currentPatientGender, currentPatientAge);
+
+            let genderBadge = '';
+            if (currentPatientDesiredGender === 'Female') {
+                genderBadge = `<span class="badge bg-danger bg-opacity-10 text-danger border border-danger-subtle ms-2"><i class="fas fa-venus me-1"></i>Female Patient (${escapeHtml(currentPatientGender)}) • Showing Female Therapists Only</span>`;
+            } else if (currentPatientDesiredGender === 'Male') {
+                genderBadge = `<span class="badge bg-primary bg-opacity-10 text-primary border border-primary-subtle ms-2"><i class="fas fa-mars me-1"></i>Male Patient (${escapeHtml(currentPatientGender)}) • Showing Male Therapists Only</span>`;
+            }
+
+            document.getElementById('modal-patient-subtitle').innerHTML = `Patient: <strong>${escapeHtml(patName)}</strong> (${escapeHtml(regNo)}) ${genderBadge}`;
+            selectedTherapistCodes.clear();
+
+            if (!allTherapists || allTherapists.length === 0) {
+                await preloadTherapists();
+            }
+
+            // Fetch existing roster if any
+            let existingRoster = null;
+            try {
+                const res = await fetch(`{% url 'get_allowed_patients_preferred_therapists_api' %}?search=${encodeURIComponent(regNo)}`);
+                const data = await res.json();
+                if (data.status === 'success' && data.patients) {
+                    const match = data.patients.find(p => p.patient_reg_no === regNo);
+                    if (match && match.roster) {
+                        existingRoster = match.roster;
+                    }
+                }
+            } catch (e) {
+                console.error('Error fetching current roster:', e);
+            }
+
+            if (existingRoster && existingRoster.therapist_codes) {
+                existingRoster.therapist_codes.forEach(c => selectedTherapistCodes.add(c));
+            }
+
+            renderModalTherapistList();
+            updateBathingDropdowns(existingRoster ? existingRoster.primary_bathing_code : null, existingRoster ? existingRoster.secondary_bathing_code : null);
+
+            if (!rosterModalInstance) {
+                rosterModalInstance = new bootstrap.Modal(document.getElementById('rosterModal'));
+            }
+            rosterModalInstance.show();
+        }
+
+        function renderModalTherapistList() {
+            const listEl = document.getElementById('modal-therapist-list');
+            const searchVal = (document.getElementById('modal-therapist-search').value || '').trim().toLowerCase();
+
+            listEl.innerHTML = '';
+            const filtered = allTherapists.filter(t => {
+                // Strictly filter therapists matching the patient's desired gender!
+                if (currentPatientDesiredGender) {
+                    const tGen = String(t.gender || '').trim().toLowerCase();
+                    const reqGen = currentPatientDesiredGender.toLowerCase();
+                    if (tGen !== reqGen) {
+                        return false;
+                    }
+                }
+
+                if (!searchVal) return true;
+                const matchName = t.therapist_name.toLowerCase().includes(searchVal);
+                const matchCode = t.therapist_code.toLowerCase().includes(searchVal);
+                const matchGrade = (t.grade || '').toLowerCase().includes(searchVal);
+                const matchWeek = (t.week_off_display || '').toLowerCase().includes(searchVal);
+                return matchName || matchCode || matchGrade || matchWeek;
+            });
+
+            // Update gender info badge and search placeholder
+            const genderBadgeEl = document.getElementById('gender-info-badge');
+            if (genderBadgeEl) {
+                if (currentPatientDesiredGender === 'Female') {
+                    genderBadgeEl.className = 'badge bg-danger bg-opacity-10 text-danger border border-danger-subtle px-2 py-1';
+                    genderBadgeEl.innerHTML = `<i class="fas fa-venus me-1"></i>${filtered.length} Female Therapists`;
+                } else if (currentPatientDesiredGender === 'Male') {
+                    genderBadgeEl.className = 'badge bg-primary bg-opacity-10 text-primary border border-primary-subtle px-2 py-1';
+                    genderBadgeEl.innerHTML = `<i class="fas fa-mars me-1"></i>${filtered.length} Male Therapists`;
+                } else {
+                    genderBadgeEl.className = 'badge bg-light text-secondary border px-2 py-1';
+                    genderBadgeEl.innerHTML = `<i class="fas fa-users me-1"></i>${filtered.length} Therapists`;
+                }
+            }
+
+            const searchInput = document.getElementById('modal-therapist-search');
+            if (searchInput) {
+                searchInput.placeholder = `Search ${currentPatientDesiredGender || ''} therapists by name, code, grade, week off...`;
+            }
+
+            if (filtered.length === 0) {
+                listEl.innerHTML = `<div class="text-center py-4 text-muted">No ${escapeHtml(currentPatientDesiredGender || '')} therapists match "${escapeHtml(searchVal)}"</div>`;
+                return;
+            }
+
+            filtered.forEach(t => {
+                const isSelected = selectedTherapistCodes.has(t.therapist_code);
+                const item = document.createElement('div');
+                item.className = `therapist-select-item ${isSelected ? 'selected' : ''}`;
+                
+                let bathTag = t.is_bathing_therapist 
+                    ? `<span class="badge bg-info bg-opacity-25 text-info-emphasis ms-1"><i class="fas fa-shower me-1"></i>Bathing Qualified</span>`
+                    : '';
+
+                item.innerHTML = `
+                    <div class="d-flex align-items-center">
+                        <input type="checkbox" class="form-check-input me-3" ${isSelected ? 'checked' : ''} style="cursor: pointer;">
+                        <div>
+                            <div class="fw-bold text-dark">${escapeHtml(t.therapist_name)} <span class="text-muted small">(${escapeHtml(t.therapist_code)})</span></div>
+                            <div class="small text-muted">
+                                <span>${escapeHtml(t.grade)}</span> • <span>${escapeHtml(t.gender)}</span>
+                                ${bathTag}
+                            </div>
+                        </div>
+                    </div>
+                    <div class="text-end">
+                        <span class="week-off-badge">
+                            <i class="fas fa-calendar-day me-1"></i>Off: ${escapeHtml(t.week_off_display)}
+                        </span>
+                    </div>
+                `;
+
+                // Toggle click
+                item.addEventListener('click', (e) => {
+                    if (e.target.tagName !== 'INPUT') {
+                        const cb = item.querySelector('input[type="checkbox"]');
+                        cb.checked = !cb.checked;
+                    }
+                    toggleTherapistSelection(t.therapist_code);
+                });
+
+                listEl.appendChild(item);
+            });
+
+            updateSelectedCounter();
+        }
+
+        function toggleTherapistSelection(code) {
+            if (selectedTherapistCodes.has(code)) {
+                selectedTherapistCodes.delete(code);
+            } else {
+                if (selectedTherapistCodes.size >= 7) {
+                    showToast('Maximum of 7 preferred therapists can be selected.', 'warning');
+                    renderModalTherapistList();
+                    return;
+                }
+                selectedTherapistCodes.add(code);
+            }
+
+            renderModalTherapistList();
+            updateBathingDropdowns();
+        }
+
+        function updateSelectedCounter() {
+            const count = selectedTherapistCodes.size;
+            document.getElementById('selected-count').textContent = count;
+            const counterBadge = document.getElementById('selection-counter');
+            if (count === 7) {
+                counterBadge.className = 'badge bg-success px-3 py-2';
+            } else if (count > 0) {
+                counterBadge.className = 'badge bg-primary px-3 py-2';
+            } else {
+                counterBadge.className = 'badge bg-secondary px-3 py-2';
+            }
+        }
+
+        function updateBathingDropdowns(preferredPrimary = null, preferredSecondary = null) {
+            const primarySel = document.getElementById('primary-bathing-select');
+            const secondarySel = document.getElementById('secondary-bathing-select');
+
+            const currentPrimary = preferredPrimary || primarySel.value;
+            const currentSecondary = preferredSecondary || secondarySel.value;
+
+            primarySel.innerHTML = '<option value="">-- Select Primary Bathing Therapist --</option>';
+            secondarySel.innerHTML = '<option value="">-- Select Secondary Bathing Therapist --</option>';
+
+            const selectedObjs = allTherapists.filter(t => selectedTherapistCodes.has(t.therapist_code));
+
+            selectedObjs.forEach(t => {
+                const optText = `${t.therapist_name} (${t.therapist_code}) - Off: ${t.week_off_display}`;
+                
+                const opt1 = document.createElement('option');
+                opt1.value = t.therapist_code;
+                opt1.textContent = optText;
+                if (t.therapist_code === currentPrimary) opt1.selected = true;
+                primarySel.appendChild(opt1);
+
+                const opt2 = document.createElement('option');
+                opt2.value = t.therapist_code;
+                opt2.textContent = optText;
+                if (t.therapist_code === currentSecondary) opt2.selected = true;
+                secondarySel.appendChild(opt2);
+            });
+
+            checkWeekOffComplementarity();
+        }
+
+        function checkWeekOffComplementarity() {
+            const primaryCode = document.getElementById('primary-bathing-select').value;
+            const secondaryCode = document.getElementById('secondary-bathing-select').value;
+            const compBox = document.getElementById('weekoff-comparison-box');
+
+            if (!primaryCode || !secondaryCode) {
+                compBox.style.display = 'none';
+                return;
+            }
+
+            const pObj = allTherapists.find(t => t.therapist_code === primaryCode);
+            const sObj = allTherapists.find(t => t.therapist_code === secondaryCode);
+
+            if (!pObj || !sObj) {
+                compBox.style.display = 'none';
+                return;
+            }
+
+            compBox.style.display = 'block';
+            document.getElementById('comp-primary-off').textContent = pObj.week_off_display || 'None';
+            document.getElementById('comp-secondary-off').textContent = sObj.week_off_display || 'None';
+
+            const pDays = new Set(pObj.week_off_ints || []);
+            const sDays = new Set(sObj.week_off_ints || []);
+            const overlap = [...pDays].filter(x => sDays.has(x));
+
+            const analysisEl = document.getElementById('comp-analysis-text');
+            if (primaryCode === secondaryCode) {
+                analysisEl.className = 'mt-2 small fw-semibold text-danger';
+                analysisEl.innerHTML = '<i class="fas fa-exclamation-triangle me-1"></i>Primary and Secondary cannot be the same therapist!';
+            } else if (overlap.length > 0) {
+                analysisEl.className = 'mt-2 small fw-semibold text-warning-emphasis';
+                analysisEl.innerHTML = '<i class="fas fa-exclamation-circle me-1"></i>Notice: Both therapists share week off day(s). If Primary is off, Secondary might also be off on those days.';
+            } else {
+                analysisEl.className = 'mt-2 small fw-semibold text-success';
+                analysisEl.innerHTML = `<i class="fas fa-check-circle me-1"></i>Complementary Coverage: When Primary (${pObj.therapist_name}) is off, Secondary (${sObj.therapist_name}) is available!`;
+            }
+        }
+
+        async function saveRoster() {
+            const primaryCode = document.getElementById('primary-bathing-select').value;
+            const secondaryCode = document.getElementById('secondary-bathing-select').value;
+            const notes = document.getElementById('roster-notes-input').value;
+            const therapistCodes = Array.from(selectedTherapistCodes);
+
+            if (therapistCodes.length === 0) {
+                showToast('Please select at least 1 preferred therapist.', 'warning');
+                return;
+            }
+            if (therapistCodes.length > 7) {
+                showToast('Maximum of 7 preferred therapists can be marked.', 'danger');
+                return;
+            }
+            if (!primaryCode) {
+                showToast('Please designate a Primary Bathing Therapist.', 'warning');
+                return;
+            }
+            if (!secondaryCode) {
+                showToast('Please designate a Secondary Bathing Therapist.', 'warning');
+                return;
+            }
+            if (primaryCode === secondaryCode) {
+                showToast('Primary and Secondary Bathing Therapists cannot be the same therapist.', 'danger');
+                return;
+            }
+
+            const btnSave = document.getElementById('btn-save-roster');
+            btnSave.disabled = true;
+            btnSave.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Saving...';
+
+            try {
+                const response = await fetch("{% url 'save_patient_preferred_roster_api' %}", {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': getCookie('csrftoken')
+                    },
+                    body: JSON.stringify({
+                        patient_reg_no: currentPatientRegNo,
+                        therapist_codes: therapistCodes,
+                        primary_bathing_code: primaryCode,
+                        secondary_bathing_code: secondaryCode,
+                        notes: notes
+                    })
+                });
+
+                const res = await response.json();
+                if (res.status === 'success') {
+                    showToast(res.message, 'success');
+                    if (rosterModalInstance) rosterModalInstance.hide();
+                    loadAllowedPatients();
+                } else {
+                    showToast(res.message || 'Failed to save roster.', 'danger');
+                }
+            } catch (err) {
+                console.error('Save roster error:', err);
+                showToast('Network error while saving roster.', 'danger');
+            } finally {
+                btnSave.disabled = false;
+                btnSave.innerHTML = '<i class="fas fa-save me-1"></i>Save Preferred Roster';
+            }
+        }
+
+        function escapeHtml(text) {
+            if (!text) return '';
+            return String(text)
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;")
+                .replace(/'/g, "&#039;");
+        }
+
+        // Event listeners
+        document.addEventListener('DOMContentLoaded', async () => {
+            await preloadTherapists();
+            await loadAllowedPatients();
+
+            // Status filter pills
+            document.querySelectorAll('#status-filters button').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    document.querySelectorAll('#status-filters button').forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    currentStatusFilter = btn.dataset.status;
+                    loadAllowedPatients();
+                });
+            });
+
+            // Live Search
+            let searchTimeout = null;
+            document.getElementById('allowed-search-input').addEventListener('input', (e) => {
+                clearTimeout(searchTimeout);
+                searchTimeout = setTimeout(() => {
+                    allowedSearchQuery = e.target.value;
+                    loadAllowedPatients();
+                }, 300);
+            });
+
+            // Modal Therapist Search
+            document.getElementById('modal-therapist-search').addEventListener('input', () => {
+                renderModalTherapistList();
+            });
+
+            // Bathing dropdown change listeners
+            document.getElementById('primary-bathing-select').addEventListener('change', checkWeekOffComplementarity);
+            document.getElementById('secondary-bathing-select').addEventListener('change', checkWeekOffComplementarity);
+
+            // Save button
+            document.getElementById('btn-save-roster').addEventListener('click', saveRoster);
+        });
+    </script>
+</body>
+</html>
