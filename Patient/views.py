@@ -256,6 +256,17 @@ def get_patient_details_api(request):
             print(f"Error searching OP patients: {e}")
     
     if patient_details:
+        is_wc = False
+        try:
+            from Sheduling.models import PatientSnapshot, TherapyAllocation
+            ps = PatientSnapshot.objects.filter(pat_reg_no=pat_reg_no).first()
+            if ps and ps.is_wheelchair:
+                is_wc = True
+            elif TherapyAllocation.objects.filter(patient__pat_reg_no=pat_reg_no, is_wheelchair=True).exists():
+                is_wc = True
+        except Exception:
+            pass
+        patient_details['is_wheelchair'] = is_wc
         return JsonResponse(patient_details)
     else:
         return JsonResponse({'error': 'Patient with this registration number does not exist.'}, status=404)

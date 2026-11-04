@@ -588,44 +588,24 @@ def get_treatment_rooms_for_staying_room(patient_staying_room):
     # No match found
     return []
 
-def allocate_treatment_room(date, time_slot, last_room=None, therapy_name=None, patient_id=None, patient_staying_room=None, patient=None):
+def allocate_treatment_room(date, time_slot, last_room=None, therapy_name=None, patient_id=None, patient_staying_room=None, patient=None, is_wheelchair=False):
     """
-    Allocate treatment room based on patient staying room rules.
-    
-    NEW LOGIC: Allocates treatment rooms based on patient staying room:
-    - DS-1 to DS-6: Check TR-1/TR-2 first, then TR-3/TR-4, then TR-7/TR-8
-    - NR-7 to NR-14: Assign TR-3/TR-4
-    - NR-15 to NR-21: Assign TR-5/TR-6
-    - NR-22 to NR-27: Assign TR-7/TR-8
-    - NR-28 to NR-33: Assign TR-15/TR-16
-    - MG-1 to MG-10, CB-1/CB-2, FG-1 to FG-12: Assign TR-9 to TR-14
-    - CT-1, CT-2, etc.: Assign TRC-1, TRC-2, etc. (same number)
-    
-    For OP patients (no staying room):
-    - First try TR-9 to TR-14
-    - If not available, try TR-5, TR-6, TR-7
-    - If still not available, return None (allocation fails)
-    
-    If no room available from the list, returns None (allocation will fail).
-    
-    Args:
-        date: Date for allocation
-        time_slot: Time slot for allocation
-        last_room: Preferred room number (string) or room object (legacy, kept for compatibility)
-        therapy_name: Name of the therapy (legacy, kept for compatibility)
-        patient_id: Patient ID (legacy, kept for compatibility)
-        patient_staying_room: Patient staying room number (e.g., 'DS-1', 'NR-7', 'CT-1')
-        patient: Patient object (PatientSnapshot) to check if OP (optional)
-    
-    Returns:
-        TreatmentRoom instance or None if no room available
+    Allocate treatment room based on patient staying room rules and wheelchair accessibility.
     """
     from Patient.models import RoomBooking, TreatmentRoom
     
+    if not is_wheelchair and patient:
+        if getattr(patient, 'is_wheelchair', False):
+            is_wheelchair = True
+
     # Helper function to check room availability
     def check_room_availability(room_no, exclude_trc=False):
         try:
             room = TreatmentRoom.objects.get(room_no=room_no)
+            if not room.is_active:
+                return None
+            if is_wheelchair and not getattr(room, 'is_wheelchair_accessible', False):
+                return None
             # Strictly exclude TRC rooms for OP patients
             if exclude_trc and room_no.upper().startswith('TRC'):
                 return None
@@ -655,20 +635,13 @@ def allocate_treatment_room(date, time_slot, last_room=None, therapy_name=None, 
     except Exception as _st_err:
         print(f"[ROOM RESTRICTION] Error checking steam therapy room: {_st_err}")
 
-    # VAMANAM THERAPY RESTRICTION: Always allocate strictly to designated Vamanam treatment rooms (dynamic from Room Master)
+    # VAMANAM THERAPY RESTRICTION: Dedicated Vamanam room allocation (Primary first: TR-11/TR-12, then Secondary: TR-9)
     try:
-        from reshedule import is_vamanam_treatment, get_vamanam_treatment_rooms
+        from reshedule import is_vamanam_treatment, allocate_vamanam_treatment_room
         if is_vamanam_treatment(therapy_name):
-            vamanam_rooms = get_vamanam_treatment_rooms()
-            if not vamanam_rooms:
-                print(f"[ROOM RESTRICTION] Vamanam therapy detected - no Vamanam rooms configured in Room Master.")
-                return None
-            for candidate_room_no in vamanam_rooms:
-                v_room = check_room_availability(candidate_room_no)
-                if v_room:
-                    print(f"[ROOM RESTRICTION] Vamanam therapy detected - assigned {candidate_room_no} room.")
-                    return v_room
-            print(f"[ROOM RESTRICTION] Vamanam therapy detected - all Vamanam rooms ({', '.join(vamanam_rooms)}) are unavailable on {date} at {time_slot}.")
+            v_room = allocate_vamanam_treatment_room(date, time_slot, check_room_availability)
+            if v_room:
+                return v_room
             return None
     except Exception as _vm_err:
         print(f"[ROOM RESTRICTION] Error checking Vamanam room: {_vm_err}")
@@ -706,6 +679,16 @@ def allocate_treatment_room(date, time_slot, last_room=None, therapy_name=None, 
                 room = check_room_availability(room_no)
                 if room:
                     return room
+            
+            # If wheelchair patient and staying room rooms didn't yield an accessible room,
+            # fallback to any available wheelchair accessible rooms in facility
+            if is_wheelchair:
+                from reshedule import get_wheelchair_accessible_rooms
+                for wc_room_no in get_wheelchair_accessible_rooms():
+                    room = check_room_availability(wc_room_no)
+                    if room:
+                        return room
+                return None
             
             # None of the assigned rooms are available
             return None
@@ -770,6 +753,16 @@ def allocate_treatment_room(date, time_slot, last_room=None, therapy_name=None, 
             if room:
                 return room
         
+        # If wheelchair patient, try all wheelchair accessible rooms (excluding TRC)
+        if is_wheelchair:
+            from reshedule import get_wheelchair_accessible_rooms
+            for wc_room_no in get_wheelchair_accessible_rooms():
+                if wc_room_no.upper().startswith('TRC'):
+                    continue
+                room = check_room_availability(wc_room_no, exclude_trc=True)
+                if room:
+                    return room
+
         # No room available for OP patient - DO NOT fall through to legacy logic
         return None
     
@@ -812,7 +805,9 @@ def allocate_treatment_room(date, time_slot, last_room=None, therapy_name=None, 
         else:
             try:
                 previous_room = TreatmentRoom.objects.get(room_no=previous_room_no)
-                if not RoomBooking.objects.filter(
+                if is_wheelchair and not getattr(previous_room, 'is_wheelchair_accessible', False):
+                    pass
+                elif not RoomBooking.objects.filter(
                     room=previous_room,
                     date=date,
                     time_slot=time_slot,
@@ -836,7 +831,9 @@ def allocate_treatment_room(date, time_slot, last_room=None, therapy_name=None, 
                     pass  # Skip TRC rooms
                 else:
                     room = TreatmentRoom.objects.get(room_no=room_no)
-                    if not RoomBooking.objects.filter(room=room, date=date, time_slot=time_slot, status='BOOKED').exists():
+                    if is_wheelchair and not getattr(room, 'is_wheelchair_accessible', False):
+                        pass
+                    elif not RoomBooking.objects.filter(room=room, date=date, time_slot=time_slot, status='BOOKED').exists():
                         return room
         except TreatmentRoom.DoesNotExist:
             pass
@@ -853,6 +850,8 @@ def allocate_treatment_room(date, time_slot, last_room=None, therapy_name=None, 
                 # Exclude TRC rooms
                 if r.room_no and r.room_no.upper().startswith('TRC'):
                     continue
+                if is_wheelchair and not getattr(r, 'is_wheelchair_accessible', False):
+                    continue
                 if not RoomBooking.objects.filter(room=r, date=date, time_slot=time_slot, status='BOOKED').exists():
                     return r
         except TreatmentRoom.DoesNotExist:
@@ -864,6 +863,8 @@ def allocate_treatment_room(date, time_slot, last_room=None, therapy_name=None, 
         for r in TreatmentRoom.objects.all():
             # Also exclude TRC rooms from legacy fallback
             if r.room_no and r.room_no.upper().startswith('TRC'):
+                continue
+            if is_wheelchair and not getattr(r, 'is_wheelchair_accessible', False):
                 continue
             if not RoomBooking.objects.filter(room=r, date=date, time_slot=time_slot, status='BOOKED').exists():
                 return r
@@ -2232,6 +2233,28 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                         print('[VASTHI GROUP] Final schedule: no active SlotMaster for Vasthi slot')
         except Exception as _gv_e:
             print(f'[SLOT RULE] Final schedule slot rule skipped: {_gv_e}')
+
+        # Vamanam therapy: schedule in dynamic Vamanam slot (defaults to 06:30)
+        try:
+            from reshedule import is_vamanam_treatment, get_vamanam_slots
+            if is_vamanam_treatment(therapy_name, getattr(allocation, 'therapy_code', None)):
+                is_current_slot_vamanam = bool(pref_slot and getattr(pref_slot, 'is_vamanam_slot', False) and getattr(pref_slot, 'is_active', True))
+                if not is_current_slot_vamanam:
+                    vamanam_slot_obj = SlotMaster.objects.filter(is_vamanam_slot=True, is_active=True).order_by('slot_time').first()
+                    if not vamanam_slot_obj:
+                        vamanam_slot_obj = SlotMaster.objects.filter(
+                            slot_time=datetime.strptime('06:30', '%H:%M').time(),
+                            is_active=True,
+                        ).first()
+                    if vamanam_slot_obj:
+                        pref_slot = vamanam_slot_obj
+                        if create_bookings and getattr(booking, 'timeslot_id', None) != vamanam_slot_obj.id:
+                            booking.timeslot = vamanam_slot_obj
+                            booking.save(update_fields=['timeslot', 'updated_at'])
+                    else:
+                        print('[VAMANAM GROUP] Final schedule: no active SlotMaster for Vamanam slot')
+        except Exception as _vm_slot_e:
+            print(f'[VAMANAM SLOT RULE] Final schedule slot rule skipped: {_vm_slot_e}')
         requested_slot_value = None
         if pref_slot:
             st = getattr(pref_slot, 'start_time', None)
@@ -3369,6 +3392,12 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
         allocate_slot_for_room = slot_master if slot_master else canonical_slot
         
         room_candidate = getattr(booking, 'room', None)
+        is_wc = False
+        if allocation and getattr(allocation, 'is_wheelchair', False):
+            is_wc = True
+        elif booking and getattr(booking, 'is_wheelchair', False):
+            is_wc = True
+
         if needs_room_flag and not room_candidate:
             try:
                 room_candidate = allocate_treatment_room(
@@ -3378,7 +3407,8 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                     therapy_name=therapy_name,
                     patient_id=patient_id,
                     patient_staying_room=patient_staying_room,
-                    patient=allocation.patient if allocation and hasattr(allocation, 'patient') else None
+                    patient=allocation.patient if allocation and hasattr(allocation, 'patient') else None,
+                    is_wheelchair=is_wc
                 )
             except Exception:
                 room_candidate = None
@@ -3386,7 +3416,9 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
             # Build detailed error message based on patient staying room or OP status
             reason = "no_room_available"
             from reshedule import is_steam_therapy_treatment, get_steam_therapy_rooms, is_vamanam_treatment, get_vamanam_treatment_rooms
-            if is_steam_therapy_treatment(therapy_name):
+            if is_wc:
+                reason = "no_room_available: No wheelchair accessible treatment room available"
+            elif is_steam_therapy_treatment(therapy_name):
                 steam_rooms = get_steam_therapy_rooms()
                 reason = f"no_room_available: All steam therapy rooms ({', '.join(steam_rooms)}) are not available"
             elif is_vamanam_treatment(therapy_name):
@@ -3586,7 +3618,8 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                                 therapy_name=therapy_name,
                                 patient_id=patient_id,
                                 patient_staying_room=patient_staying_room,
-                                patient=allocation.patient if allocation and hasattr(allocation, 'patient') else None
+                                patient=allocation.patient if allocation and hasattr(allocation, 'patient') else None,
+                                is_wheelchair=is_wc
                             )
                             if alternative_room and alternative_room != room_candidate:
                                 # Check if alternative room is also booked
@@ -3605,6 +3638,8 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                                     found_room = None
                                     for room in all_rooms:
                                         if room == room_candidate or room == alternative_room:
+                                            continue
+                                        if is_wc and not getattr(room, 'is_wheelchair_accessible', False):
                                             continue
                                         room_conflict = BookingModel.objects.filter(
                                             room=room,
@@ -3662,7 +3697,8 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                                 therapy_name=therapy_name,
                                 patient_id=patient_id,
                                 patient_staying_room=patient_staying_room,
-                                patient=allocation.patient if allocation and hasattr(allocation, 'patient') else None
+                                patient=allocation.patient if allocation and hasattr(allocation, 'patient') else None,
+                                is_wheelchair=is_wc
                             )
                             if alternative_room and alternative_room != room_candidate:
                                 # Update booking room first

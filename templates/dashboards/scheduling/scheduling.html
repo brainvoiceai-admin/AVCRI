@@ -632,7 +632,7 @@
                                             </div>
                                         </td>
                                         <td>{{ booking.allocation.therapy_name }}</td>
-                                        <td>{% if booking.timeslot %}{{ booking.timeslot.slot_time|format_12hour }}{% else %}—{% endif %}</td>
+                                        <td>{% if booking.timeslot %}{{ booking.timeslot.slot_time|format_12hour }}{% else %}—{% endif %}{% if booking.vamanam_timing or booking.allocation.vamanam_timing %}<br><span class="badge bg-danger text-white" style="font-size:11px; font-weight:600; padding:2px 6px; border-radius:4px;"><i class="fas fa-stopwatch me-1"></i>Start: {{ booking.vamanam_timing|default:booking.allocation.vamanam_timing }}</span>{% endif %}</td>
                                         <td>
                                             {% if booking.allocation.patient.pat_room_no %}
                                             {% with room_no=booking.allocation.patient.pat_room_no|get_staying_room_display %}
@@ -663,7 +663,7 @@
                                             </div>
                                         </td>
                                         <td>{{ allocation.therapy_name }}</td>
-                                        <td>{% if allocation.timeslot %}{{ allocation.timeslot.slot_time|format_12hour }}{% else %}—{% endif %}</td>
+                                        <td>{% if allocation.timeslot %}{{ allocation.timeslot.slot_time|format_12hour }}{% else %}—{% endif %}{% if allocation.vamanam_timing %}<br><span class="badge bg-danger text-white" style="font-size:11px; font-weight:600; padding:2px 6px; border-radius:4px;"><i class="fas fa-stopwatch me-1"></i>Start: {{ allocation.vamanam_timing }}</span>{% endif %}</td>
                                         <td>
                                             {% if allocation.patient.pat_room_no %}
                                             {% with room_no=allocation.patient.pat_room_no|get_staying_room_display %}
@@ -774,7 +774,7 @@
                                                 </button>
                                             </td>
                                             <td>{{ booking.allocation.therapy_name }}</td>
-                                            <td>{% if booking.timeslot %}{{ booking.timeslot.slot_time|format_12hour }}{% else %}—{% endif %}</td>
+                                            <td>{% if booking.timeslot %}{{ booking.timeslot.slot_time|format_12hour }}{% else %}—{% endif %}{% if booking.vamanam_timing or booking.allocation.vamanam_timing %}<br><span class="badge bg-danger text-white" style="font-size:11px; font-weight:600; padding:2px 6px; border-radius:4px;"><i class="fas fa-stopwatch me-1"></i>Start: {{ booking.vamanam_timing|default:booking.allocation.vamanam_timing }}</span>{% endif %}</td>
                                             <td>{{ booking.date|date:"d/m/Y" }}</td>
                                             <td>
                                                 {% if booking.room %}

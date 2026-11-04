@@ -269,7 +269,7 @@
               <label for="slot-select">
                 Slot
                 <span id="vamanam-slot-badge" class="badge bg-danger ms-1" style="display:none; font-size:11px; font-weight:600; padding:2px 6px;">
-                  <i class="fas fa-heartbeat me-1"></i>Vamanam Only
+                  <i class="fas fa-heartbeat me-1"></i>Vamanam (6:30 AM)
                 </span>
                 <span id="vasthi-slot-badge" class="badge bg-success ms-1" style="display:none; font-size:11px; font-weight:600; padding:2px 6px;">
                   <i class="fas fa-prescription-bottle-alt me-1"></i>Vasthi Only
@@ -277,6 +277,26 @@
               </label>
               <select id="slot-select">
                 <option value="">-- Select --</option>
+              </select>
+            </div>
+
+            <div class="form-group small" id="vamanam-timing-group" style="display: none;">
+              <label for="vamanam-timing-select">
+                <i class="fas fa-stopwatch text-danger me-1"></i>Vamanam Timing
+              </label>
+              <select id="vamanam-timing-select">
+                <option value="05:00 AM">05:00 AM (1st Person)</option>
+                <option value="05:30 AM">05:30 AM (2nd Person)</option>
+              </select>
+            </div>
+
+            <div class="form-group small" id="wheelchair-group">
+              <label for="wheelchair-select">
+                <i class="fas fa-wheelchair text-primary me-1"></i>Wheelchair Patient?
+              </label>
+              <select id="wheelchair-select">
+                <option value="No" selected>No</option>
+                <option value="Yes">Yes</option>
               </select>
             </div>
           </div>

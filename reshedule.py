@@ -458,9 +458,22 @@ def get_treatment_rooms_for_staying_room(patient_staying_room):
     # No match found
     return []
 
-def allocate_treatment_room(date, time_slot, last_room=None, therapy_name=None, patient_id=None, patient_staying_room=None, patient=None, booking_id=None):
+def get_wheelchair_accessible_rooms():
     """
-    Allocate treatment room based on patient staying room rules.
+    Returns list of active wheelchair accessible treatment room numbers.
+    Dynamically fetched from TreatmentRoom where is_wheelchair_accessible=True.
+    """
+    try:
+        from Patient.models import TreatmentRoom
+        return list(TreatmentRoom.objects.filter(is_active=True, is_wheelchair_accessible=True).order_by('room_no').values_list('room_no', flat=True))
+    except Exception as e:
+        print(f"[WHEELCHAIR ROOMS] Error querying wheelchair accessible rooms: {e}")
+        return []
+
+
+def allocate_treatment_room(date, time_slot, last_room=None, therapy_name=None, patient_id=None, patient_staying_room=None, patient=None, booking_id=None, is_wheelchair=False):
+    """
+    Allocate treatment room based on patient staying room rules and accessibility requirements.
     
     NEW LOGIC: Allocates treatment rooms based on patient staying room:
     - DS-1 to DS-6: Check TR-1/TR-2 first, then TR-3/TR-4, then TR-7/TR-8
@@ -471,6 +484,9 @@ def allocate_treatment_room(date, time_slot, last_room=None, therapy_name=None, 
     - MG-1 to MG-10, CB-1/CB-2, FG-1 to FG-12: Assign TR-9 to TR-14
     - CT-1, CT-2, etc.: Assign TRC-1, TRC-2, etc. (same number)
     
+    WHEELCHAIR REQUIREMENT:
+    - If is_wheelchair is True: ONLY treatment rooms with is_wheelchair_accessible=True can be allocated.
+    
     For OP patients (no staying room):
     - First try TR-9 to TR-14
     - If not available, try TR-5, TR-6, TR-7
@@ -479,26 +495,32 @@ def allocate_treatment_room(date, time_slot, last_room=None, therapy_name=None, 
     SPECIAL: For 'Dhara & Pizichil' therapies, tries to use previous room assignment first.
     
     If no room available from the list, returns None (allocation will fail).
-    
-    Args:
-        date: Date for allocation
-        time_slot: Time slot for allocation
-        last_room: Preferred room number (string) or room object (legacy, kept for compatibility)
-        therapy_name: Name of the therapy (for Dhara & Pizichil special handling)
-        patient_id: Patient ID (for Dhara & Pizichil special handling)
-        patient_staying_room: Patient staying room number (e.g., 'DS-1', 'NR-7', 'CT-1')
-        patient: Patient object (PatientSnapshot) to check if OP (optional)
-        booking_id: Current booking ID being scheduled (optional, to exclude from conflicts)
-    
-    Returns:
-        TreatmentRoom instance or None if no room available
     """
     from Patient.models import RoomBooking, TreatmentRoom
     
+    # Auto-detect wheelchair requirement from booking or patient if not explicitly passed
+    if not is_wheelchair:
+        if booking_id:
+            try:
+                from Sheduling.models import Booking
+                b = Booking.objects.filter(pk=booking_id).first()
+                if b and (getattr(b, 'is_wheelchair', False) or (b.allocation and getattr(b.allocation, 'is_wheelchair', False))):
+                    is_wheelchair = True
+            except Exception:
+                pass
+        if not is_wheelchair and patient:
+            if getattr(patient, 'is_wheelchair', False):
+                is_wheelchair = True
+
     # Helper function to check room availability
     def check_room_availability(room_no, exclude_trc=False):
         try:
             room = TreatmentRoom.objects.get(room_no=room_no)
+            if not room.is_active:
+                return None
+            # Wheelchair requirement: Wheelchair patients require accessible rooms.
+            if is_wheelchair and not getattr(room, 'is_wheelchair_accessible', False):
+                return None
             # Strictly exclude TRC rooms for OP patients
             if exclude_trc and room_no.upper().startswith('TRC'):
                 return None
@@ -539,19 +561,12 @@ def allocate_treatment_room(date, time_slot, last_room=None, therapy_name=None, 
     except Exception as _st_err:
         print(f"[ROOM RESTRICTION] Error checking steam therapy room: {_st_err}")
 
-    # VAMANAM THERAPY RESTRICTION: Always allocate strictly to designated Vamanam treatment rooms (dynamic from Room Master)
+    # VAMANAM THERAPY RESTRICTION: Dedicated Vamanam room allocation (Primary first: TR-11/TR-12, then Secondary: TR-9)
     try:
         if is_vamanam_treatment(therapy_name):
-            vamanam_rooms = get_vamanam_treatment_rooms()
-            if not vamanam_rooms:
-                print(f"[ROOM RESTRICTION] Vamanam therapy detected - no Vamanam rooms configured in Room Master.")
-                return None
-            for candidate_room_no in vamanam_rooms:
-                v_room = check_room_availability(candidate_room_no)
-                if v_room:
-                    print(f"[ROOM RESTRICTION] Vamanam therapy detected - assigned {candidate_room_no} room.")
-                    return v_room
-            print(f"[ROOM RESTRICTION] Vamanam therapy detected - all Vamanam rooms ({', '.join(vamanam_rooms)}) are unavailable on {date} at {time_slot}.")
+            v_room = allocate_vamanam_treatment_room(date, time_slot, check_room_availability, booking_id=booking_id)
+            if v_room:
+                return v_room
             return None
     except Exception as _vm_err:
         print(f"[ROOM RESTRICTION] Error checking Vamanam room: {_vm_err}")
@@ -585,6 +600,15 @@ def allocate_treatment_room(date, time_slot, last_room=None, therapy_name=None, 
                 room = check_room_availability(room_no)
                 if room:
                     return room
+            
+            # If wheelchair patient and staying room rooms didn't yield an accessible room,
+            # fallback to any available wheelchair accessible rooms in facility
+            if is_wheelchair:
+                for wc_room_no in get_wheelchair_accessible_rooms():
+                    room = check_room_availability(wc_room_no)
+                    if room:
+                        return room
+                return None
             
             # None of the assigned rooms are available
             return None
@@ -649,7 +673,22 @@ def allocate_treatment_room(date, time_slot, last_room=None, therapy_name=None, 
             if room:
                 return room
         
+        # If wheelchair patient, check all wheelchair accessible rooms
+        if is_wheelchair:
+            for wc_room_no in get_wheelchair_accessible_rooms():
+                room = check_room_availability(wc_room_no, exclude_trc=True)
+                if room:
+                    return room
+
         # No room available for OP patient - DO NOT fall through to legacy logic
+        return None
+
+    # If wheelchair patient has no staying room, try any accessible room
+    if is_wheelchair:
+        for wc_room_no in get_wheelchair_accessible_rooms():
+            room = check_room_availability(wc_room_no)
+            if room:
+                return room
         return None
     
     # SPECIAL: Check if this is a 'Dhara & Pizichil' therapy - try to use previous room first
@@ -983,20 +1022,28 @@ def get_steam_therapy_rooms():
     return ['TR-12', 'TR-9']
 
 
+VAMANAM_THERAPY_CODE = 'THEB126'
+
+
 def is_vamanam_treatment(therapy_name=None, therapy_code=None):
     """
-    True when therapy is marked as Vamanam in TherapyMaster (is_vamanam=True).
-    Matches by therapy_code first, then therapy_name (case-insensitive strip).
+    True when therapy is Vamanam treatment (recognized by therapy_code THEB126,
+    or TherapyMaster lookup, or name containing 'vamanam').
     """
     try:
+        if therapy_code and str(therapy_code).strip().upper() == VAMANAM_THERAPY_CODE:
+            return True
         from masters.models import TherapyMaster
         tm = None
         if therapy_code:
             tm = TherapyMaster.objects.filter(therapy_code=str(therapy_code).strip()).first()
         if not tm and therapy_name:
             tm = TherapyMaster.objects.filter(therapy_name__iexact=str(therapy_name).strip()).first()
-        if tm and getattr(tm, 'is_vamanam', False):
-            return True
+        if tm:
+            if getattr(tm, 'therapy_code', None) == VAMANAM_THERAPY_CODE:
+                return True
+            if getattr(tm, 'is_vamanam', False):
+                return True
         if therapy_name and 'vamanam' in str(therapy_name).strip().lower():
             return True
     except Exception as e:
@@ -1008,7 +1055,7 @@ def get_vamanam_slots():
     """
     Returns ordered list of slot time strings "HH:MM" designated as Vamanam slots.
     Dynamically fetched from SlotMaster where is_vamanam_slot=True and is_active=True.
-    Falls back to ['05:00', '05:30'] if none are configured.
+    Falls back to ['06:30'] if none are configured.
     """
     try:
         from masters.models import SlotMaster
@@ -1027,26 +1074,149 @@ def get_vamanam_slots():
             return slot_strs
     except Exception as e:
         print(f"[VAMANAM SLOTS] Error querying Vamanam slots: {e}")
-    return ['05:00', '05:30']
+    return ['06:30']
+
+
+def get_vamanam_timings():
+    """
+    Returns ordered list of active Vamanam timing strings, e.g. ['05:00 AM', '05:30 AM'].
+    Dynamically fetched from VamanamTimingMaster ordered by display_order.
+    """
+    try:
+        from masters.models import VamanamTimingMaster
+        timings = list(
+            VamanamTimingMaster.objects.filter(is_active=True)
+            .order_by('display_order', 'timing_time')
+        )
+        if timings:
+            result = []
+            for t in timings:
+                if t.timing_name:
+                    result.append(t.timing_name.strip())
+                elif t.timing_time:
+                    result.append(t.timing_time.strftime('%I:%M %p'))
+            return result
+    except Exception as e:
+        print(f"[VAMANAM TIMINGS] Error querying Vamanam timings: {e}")
+    return ['05:00 AM', '05:30 AM']
+
+
+def get_vamanam_rooms_by_tier():
+    """
+    Returns tuple of (primary_rooms, secondary_rooms) room numbers (str).
+    Primary Vamanam rooms: TR-11, TR-12 (vamanam_room_type='primary').
+    Secondary Vamanam room: TR-9 (vamanam_room_type='secondary').
+    """
+    try:
+        from Patient.models import TreatmentRoom
+        primary = list(
+            TreatmentRoom.objects.filter(is_vamanam_room=True, vamanam_room_type='primary', is_active=True)
+            .order_by('room_no')
+            .values_list('room_no', flat=True)
+        )
+        secondary = list(
+            TreatmentRoom.objects.filter(is_vamanam_room=True, vamanam_room_type='secondary', is_active=True)
+            .order_by('room_no')
+            .values_list('room_no', flat=True)
+        )
+        untyped = list(
+            TreatmentRoom.objects.filter(is_vamanam_room=True, is_active=True)
+            .exclude(vamanam_room_type__in=['primary', 'secondary'])
+            .order_by('room_no')
+            .values_list('room_no', flat=True)
+        )
+        primary.extend(untyped)
+        if not primary and not secondary:
+            return ['TR-11', 'TR-12'], ['TR-9']
+        return primary, secondary
+    except Exception as e:
+        print(f"[VAMANAM ROOMS BY TIER] Error: {e}")
+        return ['TR-11', 'TR-12'], ['TR-9']
 
 
 def get_vamanam_treatment_rooms():
     """
-    Returns an ordered list of room numbers (str) designated as Vamanam treatment rooms.
-    Dynamically fetched from TreatmentRoom where is_vamanam_room=True and is_active=True.
+    Returns an ordered list of all Vamanam treatment room numbers.
+    Primary rooms come first, followed by Secondary rooms.
     """
-    try:
-        from Patient.models import TreatmentRoom
-        rooms = list(
-            TreatmentRoom.objects.filter(is_vamanam_room=True, is_active=True)
-            .order_by('room_no')
-            .values_list('room_no', flat=True)
-        )
-        if rooms:
-            return rooms
-    except Exception as e:
-        print(f"[VAMANAM ROOMS] Error querying dynamic Vamanam rooms: {e}")
-    return []
+    p, s = get_vamanam_rooms_by_tier()
+    return p + s
+
+
+def get_primary_vamanam_treatment_rooms():
+    p, _ = get_vamanam_rooms_by_tier()
+    return p
+
+
+def get_secondary_vamanam_treatment_rooms():
+    _, s = get_vamanam_rooms_by_tier()
+    return s
+
+
+def allocate_vamanam_treatment_room(date, time_slot, check_room_availability_func=None, booking_id=None):
+    """
+    Dedicated room allocation function for Vamanam treatments.
+    Rules:
+    1. During allocation, the system will first consider available Primary Vamanam rooms (e.g. TR-11 & TR-12).
+    2. The Secondary room (e.g. TR-9) will be considered only when none of the Primary Vamanam rooms are available.
+    3. Returns TreatmentRoom instance or None if no room is available.
+    """
+    from Patient.models import TreatmentRoom, RoomBooking
+
+    def _default_check(room_no):
+        try:
+            room = TreatmentRoom.objects.get(room_no=room_no)
+            if not room.is_active:
+                return None
+
+            filter_kwargs = {
+                'room': room,
+                'date': date,
+                'status': "BOOKED",
+            }
+            if time_slot is not None:
+                if isinstance(time_slot, str):
+                    from masters.models import SlotMaster
+                    from datetime import datetime as dt_cls
+                    try:
+                        slot_t = dt_cls.strptime(time_slot, "%H:%M").time()
+                        s_obj = SlotMaster.objects.filter(slot_time=slot_t).first()
+                    except Exception:
+                        s_obj = SlotMaster.objects.filter(slot_name__icontains=time_slot).first()
+                    if s_obj:
+                        filter_kwargs['time_slot'] = s_obj
+                else:
+                    filter_kwargs['time_slot'] = time_slot
+
+            rb_qs = RoomBooking.objects.filter(**filter_kwargs)
+            if booking_id:
+                rb_qs = rb_qs.exclude(visit_id=booking_id)
+            if not rb_qs.exists():
+                return room
+        except TreatmentRoom.DoesNotExist:
+            pass
+        return None
+
+    check_func = check_room_availability_func or _default_check
+
+    primary_rooms, secondary_rooms = get_vamanam_rooms_by_tier()
+
+    # 1. First try available Primary Vamanam rooms
+    for r_no in primary_rooms:
+        r_obj = check_func(r_no)
+        if r_obj:
+            print(f"[VAMANAM ROOM ALLOCATION] Assigned Primary Vamanam room: {r_no}")
+            return r_obj
+
+    # 2. If no Primary room is available, try Secondary Vamanam rooms
+    for r_no in secondary_rooms:
+        r_obj = check_func(r_no)
+        if r_obj:
+            print(f"[VAMANAM ROOM ALLOCATION] Primary rooms busy, assigned Secondary Vamanam room: {r_no}")
+            return r_obj
+
+    print(f"[VAMANAM ROOM ALLOCATION] All Primary ({primary_rooms}) and Secondary ({secondary_rooms}) Vamanam rooms are unavailable on {date} at {time_slot}.")
+    return None
 
 
 def is_hard_treatment(therapy_obj=None, therapy_name=None, therapy_code=None, category=None):
@@ -1363,10 +1533,12 @@ def get_allowed_slot_values(patient_type, therapy_category, used_slots=None, the
     else:
         allowed_slots = general_slots
 
-    # Exclude any Vamanam slots from regular therapy allocations
+    # Exclude early-morning dedicated slots (like 05:00, 05:30) from regular therapy allocations.
+    # Note: 06:30 AM is a standard treatment slot and is NOT excluded from regular treatments.
     try:
-        v_slots = set(get_vamanam_slots())
-        allowed_slots = [s for s in allowed_slots if s not in v_slots]
+        early_slots = set(s for s in get_vamanam_slots() if s in ['05:00', '05:30'])
+        if early_slots:
+            allowed_slots = [s for s in allowed_slots if s not in early_slots]
     except Exception:
         pass
 
@@ -3457,6 +3629,9 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
             # Get patient staying room from allocation
             patient_staying_room = getattr(allocation.patient, 'pat_room_no', None) if allocation and hasattr(allocation, 'patient') else None
             patient_obj = allocation.patient if allocation and hasattr(allocation, 'patient') else None
+            is_wc = getattr(allocation, 'is_wheelchair', False) if allocation else False
+            if not is_wc and booking:
+                is_wc = getattr(booking, 'is_wheelchair', False)
             # Pass therapy_name and patient_id for Dhara & Pizichil special handling
             room_candidate = allocate_treatment_room(
                 date, 
@@ -3466,7 +3641,8 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
                 patient_id=patient_id,
                 patient_staying_room=patient_staying_room,
                 patient=patient_obj,
-                booking_id=booking_id
+                booking_id=booking_id,
+                is_wheelchair=is_wc
             )
         except Exception:
             room_candidate = None
@@ -3474,7 +3650,9 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
     if needs_room_flag and not room_candidate:
         # Build detailed error message based on patient staying room or OP status
         reason = "no_room_available"
-        if is_steam_therapy_treatment(therapy_name):
+        if getattr(allocation, 'is_wheelchair', False) or (booking and getattr(booking, 'is_wheelchair', False)):
+            reason = "no_room_available: No wheelchair accessible treatment room available"
+        elif is_steam_therapy_treatment(therapy_name):
             steam_rooms = get_steam_therapy_rooms()
             reason = f"no_room_available: All steam therapy rooms ({', '.join(steam_rooms)}) are not available"
         elif is_vamanam_treatment(therapy_name):

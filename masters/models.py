@@ -331,6 +331,30 @@ class SlotMaster(models.Model):
         verbose_name_plural = "Slot Masters"
         ordering = ["slot_number"]
 
+# Vamanam Timing Master
+class VamanamTimingMaster(models.Model):
+    """
+    Configurable Vamanam timings (e.g., 5:00 AM, 5:30 AM).
+    Automatically assigned in order:
+    1st person -> 5:00 AM (display_order 1)
+    2nd person -> 5:30 AM (display_order 2)
+    """
+    timing_name = models.CharField(max_length=50, verbose_name="Timing Name")
+    timing_time = models.TimeField(verbose_name="Timing Time")
+    display_order = models.IntegerField(default=1, verbose_name="Priority / Order")
+    is_active = models.BooleanField(default=True, verbose_name="Active")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Created At")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="Updated At")
+
+    def __str__(self):
+        time_str = self.timing_time.strftime('%I:%M %p') if hasattr(self.timing_time, 'strftime') else str(self.timing_time)
+        return f"{self.timing_name or time_str} (Order {self.display_order})"
+
+    class Meta:
+        verbose_name = "Vamanam Timing"
+        verbose_name_plural = "Vamanam Timings"
+        ordering = ["display_order", "timing_time"]
+
 # Shift Master
 class ShiftMaster(models.Model):
     """

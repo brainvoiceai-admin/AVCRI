@@ -149,7 +149,7 @@
         slotElement.className = 'timeline-slot';
         
         slotElement.innerHTML = `
-          <div class="timeline-time">${slot.time}</div>
+          <div class="timeline-time">${slot.time}${session && session.vamanam_timing ? `<br><span class="badge bg-danger text-white mt-1 d-inline-block" style="font-size:10px;"><i class="bi bi-stopwatch me-1"></i>Start: ${session.vamanam_timing}</span>` : ''}</div>
           <div class="timeline-content">
             ${session ? `
               <div class="slot-session slot-${slot.value}">
@@ -161,6 +161,7 @@
                     </div>
                     <div class="small text-muted mb-1">
                       ${session.therapy}${session.is_bathing === true ? '<span class="bathing-flag">(bathing)</span>' : ''}
+                      ${session.vamanam_timing ? `<span class="badge bg-danger text-white ms-1" style="font-size:10px;"><i class="bi bi-stopwatch me-1"></i>Start: ${session.vamanam_timing}</span>` : ''}
                     </div>
                     <div class="small">
                       <span><i class="bi bi-geo-alt me-1"></i> ${session.room}</span>
@@ -216,10 +217,11 @@
               <h6 class="mb-1 fw-semibold">${session.patient_name}</h6>
                     <div class="small text-muted mb-1">
                       ${session.therapy}${session.is_bathing === true ? '<span class="bathing-flag">(bathing)</span>' : ''}
+                      ${session.vamanam_timing ? `<span class="badge bg-danger text-white ms-1" style="font-size:10px;"><i class="bi bi-stopwatch me-1"></i>Start: ${session.vamanam_timing}</span>` : ''}
                     </div>
               <div class="small">
                 <span class="me-3"><i class="bi bi-calendar me-1"></i> ${formatDate(session.date)}</span>
-                <span class="me-3"><i class="bi bi-clock me-1"></i> ${session.slot}</span>
+                <span class="me-3"><i class="bi bi-clock me-1"></i> ${session.slot}${session.vamanam_timing ? ` (Start: ${session.vamanam_timing})` : ''}</span>
                 <span><i class="bi bi-geo-alt me-1"></i> ${session.room}</span>
               </div>
             </div>
@@ -257,7 +259,7 @@
         const tr = document.createElement('tr');
         tr.innerHTML = `
           <td>${formatDate(session.date)}</td>
-          <td>${session.slot}</td>
+          <td>${session.slot}${session.vamanam_timing ? `<br><span class="badge bg-danger text-white" style="font-size:10px;"><i class="bi bi-stopwatch me-1"></i>Start: ${session.vamanam_timing}</span>` : ''}</td>
           <td>${session.patient_name} (${session.patient_id})</td>
           <td>
             ${session.therapy}${session.is_bathing === true ? '<span class="bathing-flag">(bathing)</span>' : ''}
@@ -365,9 +367,10 @@
                 <div class="fw-bold">${session.patient_name} (${session.patient_id})</div>
                 <div class="text-muted">
                   ${session.therapy}${session.is_bathing === true ? '<span class="bathing-flag">(bathing)</span>' : ''}
+                  ${session.vamanam_timing ? `<span class="badge bg-danger text-white ms-1" style="font-size:10px;"><i class="bi bi-stopwatch me-1"></i>Start: ${session.vamanam_timing}</span>` : ''}
                 </div>
                 <div class="text-muted mt-1">
-                  <span class="me-3"><i class="bi bi-clock me-1"></i> ${session.slot}</span>
+                  <span class="me-3"><i class="bi bi-clock me-1"></i> ${session.slot}${session.vamanam_timing ? ` (Start: ${session.vamanam_timing})` : ''}</span>
                   <span><i class="bi bi-geo-alt me-1"></i> ${session.room}</span>
                 </div>
               </div>

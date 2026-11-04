@@ -5,9 +5,7 @@ $(function () {
   const FALLBACK_PROCURED = [{ name: 'IP Pharmacy' }, { name: 'Kashaya room' }];
   const FALLBACK_OIL = [{ name: 'Dhara' }, { name: 'Pizichil' }, { name: 'Head' }];
   const FALLBACK_SLOTS = [
-    { start_time: '05:00', is_vamanam_slot: true, is_vasthi_slot: false },
-    { start_time: '05:30', is_vamanam_slot: true, is_vasthi_slot: false },
-    { start_time: '06:30', is_vamanam_slot: false, is_vasthi_slot: false },
+    { start_time: '06:30', is_vamanam_slot: true, is_vasthi_slot: false },
     { start_time: '08:30', is_vamanam_slot: false, is_vasthi_slot: true },
     { start_time: '10:00', is_vamanam_slot: false, is_vasthi_slot: false },
     { start_time: '11:30', is_vamanam_slot: false, is_vasthi_slot: false },
@@ -72,6 +70,75 @@ $(function () {
   // --- DOM refs ---
   const $patientSelect = $('#header-patient-select');
   const $therapySelect = $('#therapy-select'), $slotSelect = $('#slot-select'), $fromDate = $('#from-date-input'), $toDate = $('#to-date-input'), $daysInput = $('#days-input');
+  const $vamanamTimingGroup = $('#vamanam-timing-group'), $vamanamTimingSelect = $('#vamanam-timing-select');
+
+  let cachedVamanamTimings = [];
+
+  function getOrdinal(n) {
+    const s = ["th", "st", "nd", "rd"], v = n % 100;
+    return n + (s[(v - 20) % 10] || s[v] || s[0]);
+  }
+
+  // Load Vamanam Timings options from master table
+  function loadVamanamTimings() {
+    return ajax({ action: 'vamanam_timings' })
+      .then(resp => {
+        if (resp && resp.timings && resp.timings.length > 0) {
+          cachedVamanamTimings = resp.timings;
+          $vamanamTimingSelect.empty();
+          resp.timings.forEach((item, index) => {
+            const name = item.timing_name;
+            const priority = item.display_order || (index + 1);
+            const personLabel = getOrdinal(priority) + ' Person';
+            $vamanamTimingSelect.append(`<option value="${name}" data-order="${priority}">${name} (Priority #${priority} - ${personLabel})</option>`);
+          });
+        }
+      })
+      .catch(error => {
+        console.error('Error loading vamanam timings:', error);
+      });
+  }
+
+  // Check and auto-assign Vamanam timing based on existing allocations for the date and timing priorities
+  function checkAndAutoAssignVamanamTiming(dateStr) {
+    if (!dateStr) dateStr = _todayStr();
+    ajax({ action: 'vamanam_count_for_date', date: dateStr })
+      .then(resp => {
+        const count = (resp && typeof resp.count === 'number') ? resp.count : 0;
+        let localCount = 0;
+        if (Array.isArray(addedTherapies)) {
+          addedTherapies.forEach(t => {
+            const isVam = (t.therapy_code === 'THEB126') || !!t.is_vamanam || /vamanam|vamana/i.test(t.therapy_name || '');
+            if (isVam && t.from_date && t.to_date && dateStr >= t.from_date && dateStr <= t.to_date && t.status !== 'cancelled') {
+              localCount++;
+            }
+          });
+        }
+        const effectiveCount = Math.max(count, localCount);
+
+        // effectiveCount is 0 for 1st person, 1 for 2nd person, 2 for 3rd person, etc.
+        if (cachedVamanamTimings && cachedVamanamTimings.length > 0) {
+          const timingObj = (effectiveCount < cachedVamanamTimings.length)
+            ? cachedVamanamTimings[effectiveCount]
+            : cachedVamanamTimings[cachedVamanamTimings.length - 1];
+          if (timingObj && timingObj.timing_name) {
+            $vamanamTimingSelect.val(timingObj.timing_name);
+            return;
+          }
+        }
+
+        // Fallback default if timings haven't loaded yet
+        if ($vamanamTimingSelect.find('option').length > 0) {
+          const optIndex = Math.min(effectiveCount, $vamanamTimingSelect.find('option').length - 1);
+          $vamanamTimingSelect.val($vamanamTimingSelect.find('option').eq(optIndex).val());
+        }
+      })
+      .catch(() => {
+        if ($vamanamTimingSelect.find('option').length > 0) {
+          $vamanamTimingSelect.val($vamanamTimingSelect.find('option').eq(0).val());
+        }
+      });
+  }
 
   // From date: allow only today or future (no past dates)
   // After 5:30 PM, default to tomorrow but still allow today
@@ -520,6 +587,10 @@ $(function () {
     bookings = [];
 
     selectedPatient = patient; // Store patient globally
+    // Set wheelchair patient select based on selected patient's status
+    const isWc = !!(patient && (patient.is_wheelchair === true || patient.is_wheelchair === 'Yes'));
+    $('#wheelchair-select').val(isWc ? 'Yes' : 'No');
+
     $('#header-patient-select').val(patient.pat_reg_no || patient.pat_op_reg_no);
     // Make patient name bold/highlighted
     $('#hdr-pat-name').html(`<strong style="font-weight: bold; color: var(--primary);">${patient.pat_name || 'Unknown'}</strong>`);
@@ -536,6 +607,10 @@ $(function () {
     ajax({ action: 'patient_therapies', patient_reg_no: patientRegNo }).then(list => {
       // Completely replace therapies list with new patient's data
       addedTherapies = decorateTherapyList(list);
+      // If any existing therapy is marked wheelchair, preserve Yes
+      if (addedTherapies.some(t => t.is_wheelchair)) {
+        $('#wheelchair-select').val('Yes');
+      }
       bookings = [];
       addedTherapies.forEach((t, idx) => {
         if (t.from_date && t.to_date) getDateRange(t.from_date, t.to_date).forEach(d => bookings.push({ id: Math.random().toString(36).slice(2, 9), allocation_id: t.allocation_id || t.allocation_id || t.allocation_id, therapyIndex: idx, date: d, slot: t.slot || '', room: t.room || '', therapist: t.therapist || '', status: 'scheduled' }));
@@ -553,6 +628,7 @@ $(function () {
   // Clear patient selection functionality
   function clearPatientSelection() {
     selectedPatient = null;
+    $('#wheelchair-select').val('No');
     $('#header-patient-select').val('');
     $('#hdr-pat-name').text('No patient selected');
     updatePatientAvatar(null);
@@ -765,7 +841,8 @@ $(function () {
     if (!selectedTherapy || selectedTherapy.length === 0) {
       $('#vamanam-slot-badge').hide();
       $('#vasthi-slot-badge').hide();
-      // No therapy selected, show normal slots (exclude Vamanam slots)
+      $vamanamTimingGroup.hide();
+      // No therapy selected, show normal slots
       return populateSlots([], 'regular');
     }
 
@@ -774,8 +851,9 @@ $(function () {
     const therapyName = therapy.therapy_name || therapy.text || '';
     const therapyCode = therapy.therapy_code || therapy.id || '';
 
-    // Check if Vamanam treatment (by is_vamanam flag, name, or code)
-    const isVamanam = !!therapy.is_vamanam || 
+    // Check if Vamanam treatment (recognized by code THEB126, name, or code)
+    const isVamanam = (therapyCode === 'THEB126') ||
+                      !!therapy.is_vamanam || 
                       /vamanam|vamana/i.test(therapyName) || 
                       /vamanam|vamana/i.test(therapyCode);
 
@@ -790,18 +868,36 @@ $(function () {
     if (isVamanam) {
       $('#vamanam-slot-badge').show();
       $('#vasthi-slot-badge').hide();
-      // Vamanam treatment: show ONLY Vamanam slots (e.g. 5:00 AM, 5:30 AM)
-      return populateSlots([], 'vamanam_only');
+      $vamanamTimingGroup.show();
+      checkAndAutoAssignVamanamTiming($fromDate.val() || _todayStr());
+
+      // Vamanam treatment: show 6:30 AM slot and automatically fill it
+      return populateSlots([], 'vamanam_only').then(() => {
+        let targetSlot = null;
+        $slotSelect.find('option').each(function () {
+          const val = $(this).val();
+          if (normalizeSlotTime(val) === '06:30' || normalizeSlotTime(val) === '6:30') {
+            targetSlot = val;
+            return false;
+          }
+        });
+        if (targetSlot) {
+          $slotSelect.val(targetSlot);
+        } else if ($slotSelect.find('option').length > 1) {
+          $slotSelect.val($slotSelect.find('option').eq(1).val());
+        }
+      });
     } else if (isVasthi) {
       $('#vamanam-slot-badge').hide();
       $('#vasthi-slot-badge').show();
+      $vamanamTimingGroup.hide();
       // Vasthi treatment: show ONLY Vasthi slots (e.g. 8:30 AM)
       return populateSlots([], 'vasthi_only');
     } else {
       $('#vamanam-slot-badge').hide();
       $('#vasthi-slot-badge').hide();
-      // Normal treatment: show other slots EXCEPT Vamanam slots
-      // If therapy difficulty is "Hard", also filter out 5:30 PM (17:30) and 11:30 AM (11:30)
+      $vamanamTimingGroup.hide();
+      // Normal treatment: show slots (06:30 AM is available for regular therapies too)
       if (therapyCategory === 'hard') {
         return populateSlots(['17:30', '11:30'], 'regular');
       } else {
@@ -843,24 +939,23 @@ $(function () {
         // Normalize slot time to HH:MM format for comparison
         let normalizedSlotTime = normalizeSlotTime(slotTime);
 
-        // Check if slot is a Vamanam slot
+        // Check if slot is a Vamanam slot (6:30 AM)
         const isVamSlot = (s.is_vamanam_slot === true || s.is_vamanam_slot === 'true' || s.is_vamanam_slot === 1 || 
-                           normalizedSlotTime === '05:00' || normalizedSlotTime === '05:30' ||
-                           normalizedSlotTime === '5:00' || normalizedSlotTime === '5:30');
+                           normalizedSlotTime === '06:30' || normalizedSlotTime === '6:30');
 
         // Check if slot is a Vasthi slot
         const isVasthiSlot = (s.is_vasthi_slot === true || s.is_vasthi_slot === 'true' || s.is_vasthi_slot === 1 ||
                               normalizedSlotTime === '08:30' || normalizedSlotTime === '8:30');
 
         if (slotMode === 'vamanam_only') {
-          // Show ONLY Vamanam slots
+          // Show ONLY Vamanam slots (6:30 AM)
           if (!isVamSlot) return;
         } else if (slotMode === 'vasthi_only') {
           // Show ONLY Vasthi slots
           if (!isVasthiSlot) return;
         } else {
-          // Normal treatment: show other slots EXCEPT Vamanam slots
-          if (isVamSlot) return;
+          // Normal treatment: do not exclude 06:30; exclude 05:00 / 05:30 if present
+          if (normalizedSlotTime === '05:00' || normalizedSlotTime === '05:30' || normalizedSlotTime === '5:00' || normalizedSlotTime === '5:30') return;
         }
 
         // Check if this slot should be excluded
@@ -882,7 +977,7 @@ $(function () {
         const slotTime = typeof st === 'string' ? st : (st.strftime ? st.strftime('%H:%M') : String(st));
         let normalizedSlotTime = normalizeSlotTime(slotTime);
 
-        const isVamSlot = (s.is_vamanam_slot === true || normalizedSlotTime === '05:00' || normalizedSlotTime === '05:30');
+        const isVamSlot = (s.is_vamanam_slot === true || normalizedSlotTime === '06:30' || normalizedSlotTime === '6:30');
         const isVasthiSlot = (s.is_vasthi_slot === true || normalizedSlotTime === '08:30' || normalizedSlotTime === '8:30');
 
         if (slotMode === 'vamanam_only') {
@@ -890,7 +985,7 @@ $(function () {
         } else if (slotMode === 'vasthi_only') {
           if (!isVasthiSlot) return;
         } else {
-          if (isVamSlot) return;
+          if (normalizedSlotTime === '05:00' || normalizedSlotTime === '05:30' || normalizedSlotTime === '5:00' || normalizedSlotTime === '5:30') return;
         }
 
         const shouldExclude = excludeSlots.some(exclude => {
@@ -1195,6 +1290,16 @@ $(function () {
     if ($daysInput.val()) {
       calcToDate(); // Auto-calculate To Date if Days is set
     }
+    const selectedTherapy = $therapySelect.select2('data');
+    if (selectedTherapy && selectedTherapy.length > 0) {
+      const therapy = selectedTherapy[0];
+      const isVam = (therapy.id === 'THEB126' || therapy.therapy_code === 'THEB126') ||
+                    !!therapy.is_vamanam ||
+                    /vamanam|vamana/i.test(therapy.therapy_name || therapy.text || '');
+      if (isVam) {
+        checkAndAutoAssignVamanamTiming($fromDate.val());
+      }
+    }
   });
 
   $daysInput.on('input change', function () {
@@ -1219,6 +1324,10 @@ $(function () {
     if (!from || !to) { alert('Please set From and To dates'); return; }
     if (from > to) { alert('From must be <= To'); return; }
 
+    const isVamanam = (therapy.id === 'THEB126' || therapy.therapy_code === 'THEB126') ||
+                      !!therapy.is_vamanam ||
+                      /vamanam|vamana/i.test(therapy.text || therapy.therapy_name || '');
+
     // Prepare therapy data for server
     // Use pat_reg_no consistently for IP patients (or pat_op_reg_no if pat_reg_no doesn't exist)
     const patientRegNo = selectedPatient.pat_reg_no || selectedPatient.pat_op_reg_no;
@@ -1240,6 +1349,8 @@ $(function () {
       usage_text: therapyUsageText,
       ext_int: $('#ext-int-select').val(),
       slot: $slotSelect.val() || '',
+      vamanam_timing: isVamanam ? ($vamanamTimingSelect.val() || '') : '',
+      is_wheelchair: ($('#wheelchair-select').val() === 'Yes'),
       from_date: from,
       to_date: to,
       days: Math.ceil((new Date(to).getTime() - new Date(from).getTime()) / (1000 * 60 * 60 * 24)) + 1,
@@ -1465,10 +1576,10 @@ $(function () {
       const rowActionClass = getTodayTherapyColorClass(t);
       const row = `<tr class="${rowActionClass}">
         <td>${i + 1}</td>
-        <td>${esc(t.therapy_name)}</td>
+        <td>${esc(t.therapy_name)}${t.is_wheelchair ? `<br><span class="badge bg-primary text-white" style="font-size:11px; font-weight:600;"><i class="fas fa-wheelchair me-1"></i>Wheelchair</span>` : ''}</td>
         <td>${therapyUsageDisplay !== '—' ? esc(therapyUsageDisplay) : '—'}</td>
         <td>${esc(t.ext_int || '')}</td>
-        <td>${esc(format12Hour(t.slot || ''))}</td>
+        <td>${esc(format12Hour(t.slot || ''))}${t.vamanam_timing ? `<br><span class="badge bg-danger text-white" style="font-size:11px; font-weight:600;"><i class="fas fa-stopwatch me-1"></i>${esc(t.vamanam_timing)}</span>` : ''}</td>
         <td>${groupsHtml}</td>
         <td>${esc(t.procured || '—')}</td>
         <td>${formatDate(t.from_date)}</td>
@@ -1625,7 +1736,7 @@ $(function () {
             <div class="status-date-row" data-id="${b.booking_id}">
               <div style="display:flex;gap:8px;align-items:center;min-width:1110px;">
                 <div style="width:140px"><strong>${formatDate(b.date)}</strong></div>
-                <div style="width:120px">${esc(format12Hour(b.slot || ''))}</div>
+                <div style="width:120px">${esc(format12Hour(b.slot || ''))}${b.vamanam_timing ? `<br><small class="text-danger" style="font-weight:600;"><i class="fas fa-stopwatch me-1"></i>${esc(b.vamanam_timing)}</small>` : (data.vamanam_timing ? `<br><small class="text-danger" style="font-weight:600;"><i class="fas fa-stopwatch me-1"></i>${esc(data.vamanam_timing)}</small>` : '')}</div>
                 <div style="width:200px">${esc(treatmentName)}</div>
                 <div style="width:200px">${esc(b.room || '—')}</div>
                 <div style="width:150px">${esc(b.patient_room_no || '—')}</div>
@@ -1928,6 +2039,18 @@ $(function () {
       oil_class: g.oil_class || '' // Load Oil Class from item group
     }));
     renderItemGroups();
+
+    const isVam = (t.therapy_code === 'THEB126') || !!t.is_vamanam || /vamanam|vamana/i.test(t.therapy_name || '');
+    if (isVam) {
+      $vamanamTimingGroup.show();
+      if (t.vamanam_timing) {
+        $vamanamTimingSelect.val(t.vamanam_timing);
+      }
+    } else {
+      $vamanamTimingGroup.hide();
+    }
+    $('#wheelchair-select').val(t.is_wheelchair ? 'Yes' : 'No');
+
     $allocateBtn.hide(); $updateBtn.show(); window.scrollTo({ top: 0, behavior: 'smooth' });
   }
   $updateBtn.on('click', function () {
@@ -1936,6 +2059,7 @@ $(function () {
 
     // Update local data
     t.ext_int = $('#ext-int-select').val();
+    t.is_wheelchair = ($('#wheelchair-select').val() === 'Yes');
     // reflect potential edits
     const selTherapy = $therapySelect.select2('data')[0];
     if (selTherapy && selTherapy.id) {
@@ -1943,6 +2067,8 @@ $(function () {
       t.therapy_name = selTherapy.text;
     }
     t.slot = $slotSelect.val() || '';
+    const isVam = (t.therapy_code === 'THEB126') || !!t.is_vamanam || /vamanam|vamana/i.test(t.therapy_name || '');
+    t.vamanam_timing = isVam ? ($vamanamTimingSelect.val() || '') : '';
     const oldFromDate = t.from_date;
     const oldToDate = t.to_date;
     t.from_date = $fromDate.val() || t.from_date;
@@ -2003,6 +2129,8 @@ $(function () {
         allocation_id: t.allocation_id,
         therapy_name: t.therapy_name,
         slot: t.slot,
+        vamanam_timing: t.vamanam_timing || '',
+        is_wheelchair: !!t.is_wheelchair,
         from_date: t.from_date,
         to_date: t.to_date,
         days: t.days, // Include updated days in payload
@@ -2087,7 +2215,14 @@ $(function () {
     // Clear all form fields completely
     $therapySelect.val(null).trigger('change').prop('disabled', false);
     $slotSelect.val('').prop('disabled', false);
+    $vamanamTimingGroup.hide();
+    $vamanamTimingSelect.val('05:00 AM');
+    $('#vamanam-slot-badge').hide();
+    $('#vasthi-slot-badge').hide();
     $('#ext-int-select').val('');
+    if (addedTherapies.some(t => t.is_wheelchair) || (selectedPatient && (selectedPatient.is_wheelchair === true || selectedPatient.is_wheelchair === 'Yes'))) {
+      $('#wheelchair-select').val('Yes');
+    }
 
     // Clear date fields - set from date: tomorrow after 5:30 PM, otherwise today
     var _defDate2 = _defaultFromDate();
@@ -2502,6 +2637,9 @@ $(function () {
 
   // Initialize UnitNo dropdown
   loadUnitNumbers();
+
+  // Initialize Vamanam Timings
+  loadVamanamTimings();
 
   // Set from date: tomorrow after 5:30 PM, otherwise today
   $fromDate.val(_defaultFromDate());

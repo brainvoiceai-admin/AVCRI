@@ -1086,6 +1086,12 @@ def therapy_entry(request):
                     allocation.notes = payload['notes']
                 if 'ext_int' in payload:
                     allocation.ext_int = payload['ext_int'] or ''
+                if 'vamanam_timing' in payload:
+                    allocation.vamanam_timing = payload.get('vamanam_timing') or None
+                if 'is_wheelchair' in payload:
+                    wc_bool = bool(payload['is_wheelchair'])
+                    allocation.is_wheelchair = wc_bool
+                    Booking.objects.filter(allocation=allocation, status='draft').update(is_wheelchair=wc_bool)
                 if new_timeslot is not None:
                     allocation.timeslot = new_timeslot
                 
@@ -1801,6 +1807,11 @@ def therapy_entry(request):
                         if TherapyAllocation is None or Booking is None or BookingItem is None:
                             return JsonResponse({'error': 'required models missing (TherapyAllocation/Booking/BookingItem)'}, status=500)
 
+                    is_wheelchair_val = bool(payload.get('is_wheelchair', False))
+                    if is_wheelchair_val and not getattr(ps, 'is_wheelchair', False):
+                        ps.is_wheelchair = True
+                        ps.save(update_fields=['is_wheelchair', 'updated_at'])
+
                     alloc = TherapyAllocation.objects.create(
                         patient=ps,
                         therapy_code=payload.get('therapy_code'),
@@ -1808,6 +1819,8 @@ def therapy_entry(request):
                         ext_int=payload.get('ext_int') or '',
                         timeslot=timeslot_obj,
                         room=room_obj,
+                        vamanam_timing=payload.get('vamanam_timing') or None,
+                        is_wheelchair=is_wheelchair_val,
                         items_groups=items_groups,
                         oil_class=payload.get('oil_class') or payload.get('oil_class_id') or '',
                         usage=payload.get('usage') or '',
@@ -1839,7 +1852,7 @@ def therapy_entry(request):
                             any_auto_cancelled = True
                         else:
                             booking_status = 'draft'
-                        b = Booking.objects.create(allocation=alloc, date=single_date, timeslot=timeslot_obj, room=room_obj, status=booking_status, snapshot_therapy_name=(alloc.therapy_name or '')[:255])
+                        b = Booking.objects.create(allocation=alloc, date=single_date, timeslot=timeslot_obj, room=room_obj, vamanam_timing=payload.get('vamanam_timing') or None, is_wheelchair=is_wheelchair_val, status=booking_status, snapshot_therapy_name=(alloc.therapy_name or '')[:255])
                         created_items = []
                         for grp in payload.get('items_groups', []):
                             grp_dosage = grp.get('dosage','')
@@ -2245,7 +2258,9 @@ def therapy_entry(request):
                 elif is_vsth or filter_type == 'vasthi_only':
                     qs = qs.filter(is_vasthi_slot=True)
                 elif filter_type == 'regular_only' or request.GET.get('exclude_vamanam', '').lower() in ('1', 'true', 'yes'):
-                    qs = qs.filter(is_vamanam_slot=False)
+                    # Regular treatments can use 06:30 AM (marked as is_vamanam_slot).
+                    # Only exclude exclusive early morning slots if any (05:00, 05:30)
+                    qs = qs.exclude(slot_time__in=[datetime.strptime('05:00', '%H:%M').time(), datetime.strptime('05:30', '%H:%M').time()])
 
                 for s in qs:
                     start = getattr(s, 'slot_time', '')
@@ -2263,6 +2278,48 @@ def therapy_entry(request):
                 print(f"Error loading slots: {e}")
                 results = []
         return JsonResponse({'slots': results})
+
+    # vamanam_timings
+    if action == 'vamanam_timings':
+        from masters.models import VamanamTimingMaster
+        timings = []
+        try:
+            qs = VamanamTimingMaster.objects.filter(is_active=True).order_by('display_order', 'timing_time')
+            for t in qs:
+                name_str = t.timing_name or (t.timing_time.strftime('%I:%M %p') if t.timing_time else '')
+                timings.append({
+                    'id': t.id,
+                    'timing_name': name_str,
+                    'display_order': t.display_order,
+                    'timing_time': t.timing_time.strftime('%H:%M') if t.timing_time else ''
+                })
+        except Exception as e:
+            print(f"Error fetching vamanam timings: {e}")
+        if not timings:
+            timings = [
+                {'id': 1, 'timing_name': '05:00 AM', 'display_order': 1, 'timing_time': '05:00'},
+                {'id': 2, 'timing_name': '05:30 AM', 'display_order': 2, 'timing_time': '05:30'}
+            ]
+        return JsonResponse({'timings': timings})
+
+    # vamanam_count_for_date
+    if action == 'vamanam_count_for_date':
+        target_d = parse_date(request.GET.get('date') or '')
+        count = 0
+        if target_d and TherapyAllocation is not None:
+            try:
+                from reshedule import VAMANAM_THERAPY_CODE
+                count = TherapyAllocation.objects.filter(
+                    from_date__lte=target_d,
+                    to_date__gte=target_d
+                ).exclude(
+                    status='cancelled'
+                ).filter(
+                    Q(therapy_code=VAMANAM_THERAPY_CODE) | Q(therapy_name__icontains='vamanam')
+                ).values('patient_id').distinct().count()
+            except Exception as e:
+                print(f"Error calculating vamanam count: {e}")
+        return JsonResponse({'count': count})
 
     # allocation_status (per-allocation bookings)
     if action == 'allocation_status':
@@ -2287,6 +2344,7 @@ def therapy_entry(request):
             'allocation_id': alloc.pk,
             'therapy_name': alloc.therapy_name,
             'ext_int': getattr(alloc, 'ext_int', '') or '',
+            'vamanam_timing': getattr(alloc, 'vamanam_timing', '') or '',
             'usage': getattr(alloc, 'usage', '') or '',
             'procured_from': getattr(alloc, 'procured_from', '') or '',
             'from_date': alloc.from_date.isoformat(),
@@ -2536,6 +2594,8 @@ def therapy_entry(request):
                     'therapy_name': a.therapy_name,
                     'ext_int': a.ext_int,
                     'slot': slot_value,
+                    'vamanam_timing': getattr(a, 'vamanam_timing', '') or '',
+                    'is_wheelchair': bool(getattr(a, 'is_wheelchair', False)),
                     'oil_class': a.oil_class,
                     'usage': a.usage,
                     'procured': a.procured_from,
@@ -5829,6 +5889,7 @@ def get_therapy_data_api(request):
                         'room_no': room_no,
                         'patient_room_no': patient_room_no,
                         'timeslot': booking.timeslot.slot_time.strftime('%H:%M') if booking.timeslot else None,
+                        'vamanam_timing': getattr(booking, 'vamanam_timing', '') or (getattr(booking.allocation, 'vamanam_timing', '') if booking.allocation else '') or '',
                         'therapists': therapists,
                         'nurses': nurses,
                         'is_nurse_treatment': is_nurse_treatment_flag,
@@ -6027,6 +6088,7 @@ def get_therapy_data_api(request):
                     'room_no': allocation.room.room_no if allocation.room else None,
                     'patient_room_no': patient_room_no,
                     'timeslot': allocation.timeslot.slot_time.strftime('%H:%M') if allocation.timeslot else None,
+                    'vamanam_timing': getattr(allocation, 'vamanam_timing', '') or '',
                     'therapists': therapists,
                     'nurses': nurses,
                     'is_nurse_treatment': is_nurse_treatment_flag,
@@ -6315,6 +6377,7 @@ def reschedule_options_api(request):
             "allocation_id": allocation.id,
             "patient_name": f"{patient_name} ({patient_reg_no})" if patient_reg_no else patient_name,
             "therapy_name": allocation.therapy_name,
+            "vamanam_timing": getattr(booking, 'vamanam_timing', '') or (getattr(allocation, 'vamanam_timing', '') if allocation else '') or '',
             "registered_slot_id": registered_slot_id,
             "registered_slot_time": registered_slot_time_str,
             "failure_reason": failure_reason or "—",
