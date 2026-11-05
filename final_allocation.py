@@ -249,6 +249,11 @@ def therapy_needs_room(allocation_or_booking):
     return bool(details and str(getattr(details, 'treatment_room_required', '')).lower() == 'yes')
 
 def therapy_needs_bath(allocation_or_booking):
+    if getattr(allocation_or_booking, 'bathing_therapists_count', 0) > 0:
+        return True
+    booking_alloc = getattr(allocation_or_booking, 'allocation', None)
+    if booking_alloc and getattr(booking_alloc, 'bathing_therapists_count', 0) > 0:
+        return True
     th_name = getattr(allocation_or_booking, 'therapy_name', None) or getattr(allocation_or_booking, 'therapy', None)
     details = get_therapy_details(th_name) if th_name else None
     return bool(details and str(getattr(details, 'bathing_required', '')).lower() == 'yes')
@@ -265,22 +270,35 @@ def get_therapist_grade_name(therapist):
 def therapist_requirements(allocation_or_therapy_obj):
     name = getattr(allocation_or_therapy_obj, 'therapy_name', None)
     details = get_therapy_details(name) if name else None
+    bathing_therapists_count = getattr(allocation_or_therapy_obj, 'bathing_therapists_count', 0) or 0
+    if not bathing_therapists_count:
+        booking_alloc = getattr(allocation_or_therapy_obj, 'allocation', None)
+        if booking_alloc:
+            bathing_therapists_count = getattr(booking_alloc, 'bathing_therapists_count', 0) or 0
     # When therapy is NOT found in TherapyMaster, default total=1 (require at least 1 therapist).
     # Previously total=0 caused therapies with unknown names to be auto-scheduled without running
     # the allocation algorithm, resulting in "allocated" status but no therapist assigned.
     if not details:
+        base_total = 1
+        req_total = max(base_total, bathing_therapists_count)
         return {
-            "super_senior": 0, "senior": 0, "junior": 0, "trainee": 0, "total": 1,
+            "super_senior": 0, "senior": 0, "junior": 0, "trainee": 0, "total": req_total,
+            "normal_total": base_total,
+            "bathing_therapists_count": bathing_therapists_count,
             "therapy_code": getattr(allocation_or_therapy_obj, 'therapy_code', None),
             "therapy_category": None,
             "therapy_name": name
         }
+    base_total = int(getattr(details, 'total_no_of_therapist', 0) or 0)
+    req_total = max(base_total, bathing_therapists_count)
     return {
         "super_senior": int(getattr(details, 'no_of_super_senior_therapist', 0) or 0),
         "senior": int(getattr(details, 'no_of_senior_therapist', 0) or 0),
         "junior": int(getattr(details, 'no_of_junior_therapist', 0) or 0),
         "trainee": int(getattr(details, 'no_of_trainee_therapist', 0) or 0),
-        "total": int(getattr(details, 'total_no_of_therapist', 0) or 0),
+        "total": req_total,
+        "normal_total": base_total,
+        "bathing_therapists_count": bathing_therapists_count,
         "therapy_code": getattr(details, 'therapy_code', getattr(allocation_or_therapy_obj, 'therapy_code', None)),
         "therapy_category": getattr(details, 'therapy_category', None),
         "therapy_name": getattr(details, 'therapy_name', name)
@@ -454,9 +472,9 @@ def create_therapist_booking_safe(therapist, date, time_slot, therapy_name, pati
         try:
             if is_bathing and hasattr(tb, 'is_bathing'):
                 # CRITICAL: Before setting this therapist as bathing, ensure NO OTHER therapist
-                # for the SAME visit, SAME date and SAME time_slot is marked as bathing.
-                # We must NOT clear flags from other days.
-                if visit and time_slot:
+                # for the SAME visit, SAME date and SAME time_slot is marked as bathing (unless bathing_therapists_count > 1).
+                b_count = getattr(visit, 'bathing_therapists_count', 0) if visit else 0
+                if b_count <= 1 and visit and time_slot:
                     TherapistBooking.objects.filter(
                         visit=visit,
                         date=date,
@@ -1205,7 +1223,9 @@ def allocate_therapists(
         return available_count
 
     # Calculate total required count before allocation
-    total_required = sum(v for v in grade_map.values() if v > 0)
+    bathing_therapists_count = (therapy_requirements or {}).get("bathing_therapists_count", 0) or 0
+    total_required = (therapy_requirements or {}).get("total") or sum(v for v in grade_map.values() if v > 0)
+    num_bathing_needed = bathing_therapists_count if bathing_therapists_count > 0 else (1 if needs_bathing else 0)
 
     # Helper function to find and allocate candidate therapists per grade requirement
     def _find_and_allocate_candidates(target_grade, needed_original, is_helping_flag=False):
@@ -1251,8 +1271,9 @@ def allocate_therapists(
             if desired_gender:
                 candidates_qs = candidates_qs.filter(therapist_gender__istartswith=desired_gender[0])
 
-            has_bath_allocated = any(getattr(a, 'is_bathing_therapist', False) for a in allocated)
-            if needs_bathing and not has_bath_allocated and (total_required - len(allocated) <= 1):
+            current_bath_allocated = sum(1 for a in allocated if getattr(a, 'is_bathing_therapist', False))
+            bathing_still_needed = max(0, num_bathing_needed - current_bath_allocated)
+            if bathing_still_needed > 0 and (total_required - len(allocated) <= bathing_still_needed):
                 candidates_qs = candidates_qs.filter(is_bathing_therapist=True)
 
             candidates_list = list(candidates_qs)
@@ -1281,7 +1302,7 @@ def allocate_therapists(
 
             available_candidates.sort(
                 key=lambda x: (
-                    0 if (needs_bathing and not has_bath_allocated and getattr(x[0], 'is_bathing_therapist', False)) else 1,
+                    0 if (bathing_still_needed > 0 and getattr(x[0], 'is_bathing_therapist', False)) else 1,
                     x[1],
                     x[2],
                     getattr(x[0], "id", 0) or 0,
@@ -1304,7 +1325,7 @@ def allocate_therapists(
                         secondary.append(cand)
                     else:
                         primary.append(cand)
-                ordered_candidates = primary + secondary
+                    ordered_candidates = primary + secondary
 
             all_at_limit = all(total_count >= 5 for _, _, total_count in ordered_candidates) if ordered_candidates else False
             allow_extra = all_at_limit
@@ -1317,7 +1338,7 @@ def allocate_therapists(
                 if allow_extra and session_count >= 6:
                     continue
 
-                if needs_bathing and (total_required - len(allocated) <= 1) and not any(getattr(a, 'is_bathing_therapist', False) for a in allocated):
+                if bathing_still_needed > 0 and (total_required - len(allocated) <= bathing_still_needed):
                     if not getattr(t, 'is_bathing_therapist', False):
                         continue
 
@@ -1415,6 +1436,25 @@ def allocate_therapists(
             continue
         assigned_cnt = _find_and_allocate_candidates(grade, needed_original, is_helping_flag=False)
         grade_map[grade] -= assigned_cnt
+
+    # If additional bathing therapists are required (total_required > len(allocated))
+    if len(allocated) < total_required:
+        needed_additional = total_required - len(allocated)
+        # Check grade availability to decide which grades to allocate from
+        candidate_grades = ["Trainee Therapist", "Junior Therapist", "Senior Therapist", "Super Senior Therapist"]
+        grade_availabilities = []
+        for g in candidate_grades:
+            avail = check_grade_availability(g, desired_gender, is_helping=False)
+            grade_availabilities.append((g, avail))
+        # Sort grades by highest availability first
+        grade_availabilities.sort(key=lambda x: x[1], reverse=True)
+
+        for g, avail in grade_availabilities:
+            if needed_additional <= 0:
+                break
+            if avail > 0:
+                assigned = _find_and_allocate_candidates(g, needed_additional, is_helping_flag=False)
+                needed_additional -= assigned
 
     # -----------------------
     # STEP 2 & 3 – Check for Shortage and Helping Therapist Fallback (Second Attempt)
@@ -3409,10 +3449,27 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
             else:
                 print(f"[FINAL_ALLOC] ⚠ SAFETY: No bathing therapist in assigned list - bath_assigned remains None")
 
+        # Determine number of bathing therapists required
+        req_bathing_count = getattr(booking, 'bathing_therapists_count', 0) or getattr(allocation, 'bathing_therapists_count', 0) or 0
+        num_bathing_required = req_bathing_count if req_bathing_count > 0 else (1 if needs_bath_flag else 0)
+        bath_assigned_set = set()
+        if num_bathing_required > 0:
+            if bath_assigned and bath_assigned in assigned_therapists:
+                bath_assigned_set.add(bath_assigned)
+            for t in assigned_therapists:
+                if len(bath_assigned_set) >= num_bathing_required:
+                    break
+                if getattr(t, 'is_bathing_therapist', False):
+                    bath_assigned_set.add(t)
+            for t in assigned_therapists:
+                if len(bath_assigned_set) >= num_bathing_required:
+                    break
+                bath_assigned_set.add(t)
+
         # build therapist audit list - mark senior therapist for special treatments
         therapists_for_audit = []
         for t in assigned_therapists:
-            is_bath = (t == bath_assigned)
+            is_bath = (t in bath_assigned_set)
             # Only mark senior therapist if it's a special treatment AND the therapist is not bathing
             is_senior = (requires_senior_tag and t == senior_therapist and not is_bath)
             therapist_dict = therapist_entry(t, is_bath=is_bath)
@@ -3761,7 +3818,7 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                         continuity_therapist_ids = {getattr(t, 'id', None) for t in continuity_therapists if hasattr(t, 'id')}
                     
                     for t in assigned_therapists:
-                        is_bath_for_t = (t == bath_assigned)
+                        is_bath_for_t = (t in bath_assigned_set)
                         therapist_id = getattr(t, 'id', None)
                         is_continuity_therapist = therapist_id in continuity_therapist_ids
                         

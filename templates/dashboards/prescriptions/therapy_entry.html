@@ -22,6 +22,7 @@
       position: relative;
       width: 100%;
     }
+
     .custom-multiselect-trigger {
       min-height: 46px;
       border: 1px solid #cbd5e1;
@@ -36,19 +37,23 @@
       transition: all 0.2s ease-in-out;
       outline: none;
     }
+
     .custom-multiselect-trigger:hover {
       border-color: #ef4444;
     }
+
     .custom-multiselect-trigger.active {
       border-color: #ef4444;
       box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.15);
     }
+
     .custom-multiselect-trigger.disabled {
       background: #f8fafc;
       cursor: not-allowed;
       opacity: 0.7;
       border-color: #e2e8f0;
     }
+
     .selected-tag-pill {
       background-color: #fef2f2;
       border: 1px solid #fca5a5;
@@ -60,8 +65,9 @@
       display: inline-flex;
       align-items: center;
       gap: 6px;
-      box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
     }
+
     .selected-tag-pill .remove-tag-btn {
       color: #ef4444;
       cursor: pointer;
@@ -70,10 +76,12 @@
       border-radius: 50%;
       transition: background 0.15s;
     }
+
     .selected-tag-pill .remove-tag-btn:hover {
       background: #fee2e2;
       color: #7f1d1d;
     }
+
     .custom-multiselect-dropdown {
       display: none;
       position: absolute;
@@ -89,9 +97,11 @@
       overflow: hidden;
       flex-direction: column;
     }
+
     .custom-multiselect-dropdown.open {
       display: flex !important;
     }
+
     .multiselect-item-row {
       padding: 10px 14px;
       display: flex;
@@ -103,13 +113,16 @@
       transition: background 0.15s ease;
       font-size: 13.5px;
     }
+
     .multiselect-item-row:hover {
       background-color: #fef2f2;
     }
+
     .multiselect-item-row.selected {
       background-color: #fff1f2;
       font-weight: 600;
     }
+
     .multiselect-item-row input[type="checkbox"] {
       accent-color: #dc2626;
       width: 17px;
@@ -268,10 +281,12 @@
             <div class="form-group small">
               <label for="slot-select">
                 Slot
-                <span id="vamanam-slot-badge" class="badge bg-danger ms-1" style="display:none; font-size:11px; font-weight:600; padding:2px 6px;">
+                <span id="vamanam-slot-badge" class="badge bg-danger ms-1"
+                  style="display:none; font-size:11px; font-weight:600; padding:2px 6px;">
                   <i class="fas fa-heartbeat me-1"></i>Vamanam (6:30 AM)
                 </span>
-                <span id="vasthi-slot-badge" class="badge bg-success ms-1" style="display:none; font-size:11px; font-weight:600; padding:2px 6px;">
+                <span id="vasthi-slot-badge" class="badge bg-success ms-1"
+                  style="display:none; font-size:11px; font-weight:600; padding:2px 6px;">
                   <i class="fas fa-prescription-bottle-alt me-1"></i>Vasthi Only
                 </span>
               </label>
@@ -292,30 +307,44 @@
 
             <div class="form-group small" id="wheelchair-group">
               <label for="wheelchair-select">
-                <i class="fas fa-wheelchair text-primary me-1"></i>Wheelchair Patient?
+                <i class="fas fa-wheelchair text-primary me-1"></i>Wheelchair / Disabled Patient?
               </label>
               <select id="wheelchair-select">
                 <option value="No" selected>No</option>
                 <option value="Yes">Yes</option>
               </select>
             </div>
+
+            <div class="form-group small" id="bathing-therapists-group" style="display: none;">
+              <label for="bathing-therapists-count">
+                <i class="fas fa-bath text-primary me-1"></i>Number of Bathing Therapists Required
+              </label>
+              <input type="number" id="bathing-therapists-count" min="1" max="10" value="1" class="form-control" placeholder="e.g. 2">
+            </div>
           </div>
 
           <!-- Therapist Preferences Section -->
-          <h4 style="margin: 24px 0 12px; color: var(--text-dark); display: flex; align-items: center; justify-content: space-between;">
+          <h4
+            style="margin: 24px 0 12px; color: var(--text-dark); display: flex; align-items: center; justify-content: space-between;">
             <span><i class="fas fa-user-md" style="color: var(--primary);"></i> Unpreferred Therapist Preference</span>
-            <span id="therapist-pref-status-badge" style="background: #f1f5f9; color: #64748b; font-size: 0.85rem; padding: 4px 12px; border-radius: 6px; font-weight: 600; border: 1px solid #cbd5e1;">
+            <span id="therapist-pref-status-badge"
+              style="background: #f1f5f9; color: #64748b; font-size: 0.85rem; padding: 4px 12px; border-radius: 6px; font-weight: 600; border: 1px solid #cbd5e1;">
               Not Requested
             </span>
           </h4>
 
-          <div class="form-row" id="therapist-preference-section" style="background: #f8fafc; padding: 16px; border-radius: 8px; border: 1px solid var(--border-light); margin-bottom: 8px; align-items: flex-end;">
+          <div class="form-row" id="therapist-preference-section"
+            style="background: #f8fafc; padding: 16px; border-radius: 8px; border: 1px solid var(--border-light); margin-bottom: 8px; align-items: flex-end;">
             <select id="preferred-therapist-select" style="display: none;"></select>
 
             <div class="form-group" style="flex: 2; position: relative;">
-              <label for="custom-multiselect-trigger" style="font-weight: 600; color: #1e293b; display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
-                <span><i class="fas fa-user-slash" style="color: #dc2626; margin-right: 6px;"></i> Unpreferred Therapist(s) (Exclude Completely)</span>
-                <span id="custom-unpref-count-badge" style="background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 12px; display: none;">0 Selected</span>
+              <label for="custom-multiselect-trigger"
+                style="font-weight: 600; color: #1e293b; display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
+                <span><i class="fas fa-user-slash" style="color: #dc2626; margin-right: 6px;"></i> Unpreferred
+                  Therapist(s) (Exclude Completely)</span>
+                <span id="custom-unpref-count-badge"
+                  style="background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 12px; display: none;">0
+                  Selected</span>
               </label>
 
               <!-- Hidden select for form value binding -->
@@ -325,29 +354,41 @@
               <div class="custom-multiselect-container" id="custom-multiselect-container">
                 <!-- Trigger Box -->
                 <div id="custom-multiselect-trigger" class="custom-multiselect-trigger" tabindex="0">
-                  <div id="selected-badges-wrapper" style="display: flex; flex-wrap: wrap; gap: 6px; align-items: center; flex: 1;">
+                  <div id="selected-badges-wrapper"
+                    style="display: flex; flex-wrap: wrap; gap: 6px; align-items: center; flex: 1;">
                     <span id="multiselect-placeholder" style="color: #94a3b8; font-size: 13.5px; font-style: italic;">
-                      <i class="fas fa-search me-1" style="color: #cbd5e1;"></i> Search and select 1 or more therapists to exclude...
+                      <i class="fas fa-search me-1" style="color: #cbd5e1;"></i> Search and select 1 or more therapists
+                      to exclude...
                     </span>
                   </div>
                   <div style="display: flex; align-items: center; gap: 8px; color: #64748b; flex-shrink: 0;">
-                    <span id="trigger-clear-all" title="Clear All" style="display: none; cursor: pointer; color: #ef4444; font-size: 12px; font-weight: 600; background: #fee2e2; padding: 2px 8px; border-radius: 4px; border: 1px solid #fca5a5;">Clear All</span>
-                    <i id="trigger-chevron" class="fas fa-chevron-down" style="font-size: 12px; transition: transform 0.2s;"></i>
+                    <span id="trigger-clear-all" title="Clear All"
+                      style="display: none; cursor: pointer; color: #ef4444; font-size: 12px; font-weight: 600; background: #fee2e2; padding: 2px 8px; border-radius: 4px; border: 1px solid #fca5a5;">Clear
+                      All</span>
+                    <i id="trigger-chevron" class="fas fa-chevron-down"
+                      style="font-size: 12px; transition: transform 0.2s;"></i>
                   </div>
                 </div>
 
                 <!-- Dropdown Panel -->
                 <div id="custom-multiselect-dropdown" class="custom-multiselect-dropdown">
                   <!-- Search Header -->
-                  <div style="padding: 10px; background: #f8fafc; border-bottom: 1px solid #e2e8f0; display: flex; flex-direction: column; gap: 8px;">
+                  <div
+                    style="padding: 10px; background: #f8fafc; border-bottom: 1px solid #e2e8f0; display: flex; flex-direction: column; gap: 8px;">
                     <div style="position: relative;">
-                      <i class="fas fa-search" style="position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: #94a3b8; font-size: 13px;"></i>
-                      <input type="text" id="multiselect-search-input" placeholder="Type name or code to filter (e.g., Bindu, THP1282)..." style="width: 100%; padding: 8px 12px 8px 34px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 13px; outline: none; background: #ffffff;" autocomplete="off">
+                      <i class="fas fa-search"
+                        style="position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: #94a3b8; font-size: 13px;"></i>
+                      <input type="text" id="multiselect-search-input"
+                        placeholder="Type name or code to filter (e.g., Bindu, THP1282)..."
+                        style="width: 100%; padding: 8px 12px 8px 34px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 13px; outline: none; background: #ffffff;"
+                        autocomplete="off">
                     </div>
                     <div style="display: flex; justify-content: space-between; align-items: center; font-size: 12px;">
                       <span id="multiselect-stats" style="color: #64748b; font-weight: 500;">Showing 0 therapists</span>
                       <div style="display: flex; gap: 10px;">
-                        <button type="button" id="btn-deselect-all" style="background: none; border: none; color: #ef4444; font-weight: 600; cursor: pointer; padding: 0; font-size: 12px;">Clear Selection</button>
+                        <button type="button" id="btn-deselect-all"
+                          style="background: none; border: none; color: #ef4444; font-weight: 600; cursor: pointer; padding: 0; font-size: 12px;">Clear
+                          Selection</button>
                       </div>
                     </div>
                   </div>
@@ -361,15 +402,18 @@
             </div>
 
             <div style="display:flex; align-items:flex-end; gap: 8px;">
-              <button id="save-therapist-pref-btn" type="button" class="btn btn-primary" style="white-space: nowrap; padding: 8px 16px;">
+              <button id="save-therapist-pref-btn" type="button" class="btn btn-primary"
+                style="white-space: nowrap; padding: 8px 16px;">
                 <i class="fas fa-paper-plane me-1"></i> Submit Exclusion Request
               </button>
-              <button id="change-therapist-pref-btn" type="button" class="btn btn-outline" style="white-space: nowrap; padding: 8px 16px; display: none;">
+              <button id="change-therapist-pref-btn" type="button" class="btn btn-outline"
+                style="white-space: nowrap; padding: 8px 16px; display: none;">
                 <i class="fas fa-edit me-1"></i> Request Preference Change
               </button>
             </div>
           </div>
-          <div id="pref-status-notes" class="small-muted" style="margin-bottom: 20px; font-style: italic; font-size: 0.85rem; min-height: 18px;"></div>
+          <div id="pref-status-notes" class="small-muted"
+            style="margin-bottom: 20px; font-style: italic; font-size: 0.85rem; min-height: 18px;"></div>
 
           <h4 style="margin: 20px 0 12px; color: var(--text-dark);">
             <i class="fas fa-pills"></i> Therapy Items
@@ -619,7 +663,7 @@
       }
 
       if (triggerEl) {
-        triggerEl.addEventListener('click', function(e) {
+        triggerEl.addEventListener('click', function (e) {
           if (isMultiselectDisabled) return;
           if (e.target.closest('#trigger-clear-all') || e.target.closest('.remove-tag-btn')) return;
           const isOpen = dropdownEl.classList.contains('open');
@@ -647,7 +691,7 @@
         if (chevronEl) chevronEl.style.transform = 'rotate(0deg)';
       }
 
-      document.addEventListener('click', function(e) {
+      document.addEventListener('click', function (e) {
         const path = (e.composedPath && e.composedPath()) || [];
         const container = document.getElementById('custom-multiselect-container');
         if (container) {
@@ -660,13 +704,13 @@
       });
 
       if (searchInputEl) {
-        searchInputEl.addEventListener('input', function() {
+        searchInputEl.addEventListener('input', function () {
           renderMultiselectOptions(this.value.trim());
         });
       }
 
       if (clearAllTriggerEl) {
-        clearAllTriggerEl.addEventListener('click', function(e) {
+        clearAllTriggerEl.addEventListener('click', function (e) {
           e.stopPropagation();
           if (isMultiselectDisabled) return;
           selectedTherapistCodes.clear();
@@ -676,7 +720,7 @@
       }
 
       if (btnSelectAll) {
-        btnSelectAll.addEventListener('click', function() {
+        btnSelectAll.addEventListener('click', function () {
           if (isMultiselectDisabled) return;
           const search = searchInputEl ? searchInputEl.value.trim().toLowerCase() : '';
           masterTherapistsList.forEach(t => {
@@ -692,7 +736,7 @@
       }
 
       if (btnDeselectAll) {
-        btnDeselectAll.addEventListener('click', function() {
+        btnDeselectAll.addEventListener('click', function () {
           if (isMultiselectDisabled) return;
           selectedTherapistCodes.clear();
           updateMultiselectUI();
@@ -738,7 +782,7 @@
         optionsListEl.innerHTML = html;
       }
 
-      window.toggleTherapistSelection = function(code, ev) {
+      window.toggleTherapistSelection = function (code, ev) {
         if (ev) ev.stopPropagation();
         if (isMultiselectDisabled) return;
 
@@ -763,7 +807,7 @@
         updateMultiselectUI();
       };
 
-      window.removeUnpreferredCode = function(code) {
+      window.removeUnpreferredCode = function (code) {
         if (isMultiselectDisabled) return;
         selectedTherapistCodes.delete(code);
         updateMultiselectUI();
@@ -808,8 +852,8 @@
                 name = code;
               }
               const displayName = (name && name !== code) ? `${name} (${code})` : code;
-              const removeBtn = !isMultiselectDisabled 
-                ? `<i class="fas fa-times remove-tag-btn" onclick="event.stopPropagation(); removeUnpreferredCode('${escapeAttr(code)}')"></i>` 
+              const removeBtn = !isMultiselectDisabled
+                ? `<i class="fas fa-times remove-tag-btn" onclick="event.stopPropagation(); removeUnpreferredCode('${escapeAttr(code)}')"></i>`
                 : '';
               tagsHtml += `
                 <span class="selected-tag-pill">
@@ -839,7 +883,7 @@
       }
 
       // Populate therapist dropdowns with gender filtering
-      window.loadTherapistsMaster = function(gender) {
+      window.loadTherapistsMaster = function (gender) {
         if (!gender || gender === '—') {
           const genderEl = document.getElementById('hdr-pat-gender');
           if (genderEl && genderEl.innerText && genderEl.innerText !== '—') {
