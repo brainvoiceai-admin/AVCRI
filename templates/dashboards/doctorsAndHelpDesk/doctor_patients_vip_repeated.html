@@ -1,0 +1,647 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ dashboard_title }} - AVCRI</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="{% static 'css/dashboards_nav.css' %}">
+    <style>
+        :root {
+            --primary-accent: #2563eb;
+            --primary-soft: #eff6ff;
+            --success-soft: #ecfdf5;
+            --success-dark: #065f46;
+            --warning-soft: #fffbeb;
+            --warning-dark: #92400e;
+            --danger-soft: #fef2f2;
+            --card-border: #e2e8f0;
+            --text-main: #0f172a;
+            --text-muted: #64748b;
+        }
+
+        body {
+            background-color: #f8fafc;
+            color: var(--text-main);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        }
+
+        .main-content {
+            margin-left: 280px;
+            padding: 24px 32px;
+            min-height: 100vh;
+            background-color: #f8fafc;
+            box-sizing: border-box;
+            transition: margin-left 0.3s ease;
+        }
+
+        @media (max-width: 992px) {
+            .main-content {
+                margin-left: 0;
+                padding: 16px;
+            }
+        }
+
+        /* Quota Card */
+        .quota-banner {
+            background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%);
+            color: white;
+            border-radius: 16px;
+            padding: 24px;
+            box-shadow: 0 10px 25px -5px rgba(37, 99, 235, 0.25);
+            margin-bottom: 24px;
+        }
+
+        .quota-stat-box {
+            background: rgba(255, 255, 255, 0.15);
+            backdrop-filter: blur(10px);
+            border-radius: 12px;
+            padding: 16px 20px;
+            text-align: center;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .quota-progress {
+            height: 10px;
+            border-radius: 6px;
+            background-color: rgba(255, 255, 255, 0.25);
+            overflow: hidden;
+            margin-top: 12px;
+        }
+
+        .quota-progress-bar {
+            height: 100%;
+            background-color: #38bdf8;
+            transition: width 0.4s ease;
+        }
+
+        /* Filter Tabs */
+        .filter-tab-btn {
+            border: 1px solid #cbd5e1;
+            background: white;
+            color: #475569;
+            padding: 8px 18px;
+            border-radius: 10px;
+            font-weight: 500;
+            font-size: 14px;
+            transition: all 0.2s;
+            cursor: pointer;
+        }
+
+        .filter-tab-btn:hover {
+            background: #f1f5f9;
+            color: #1e293b;
+        }
+
+        .filter-tab-btn.active {
+            background: var(--primary-accent);
+            color: white;
+            border-color: var(--primary-accent);
+            box-shadow: 0 4px 12px rgba(37, 99, 235, 0.2);
+        }
+
+        /* Table Card */
+        .table-card {
+            background: white;
+            border-radius: 16px;
+            border: 1px solid var(--card-border);
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+            overflow: hidden;
+        }
+
+        .table thead th {
+            background: #f8fafc;
+            color: #475569;
+            font-size: 13px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            border-bottom: 2px solid #e2e8f0;
+            padding: 14px 16px;
+        }
+
+        .table tbody td {
+            padding: 16px;
+            vertical-align: middle;
+            border-bottom: 1px solid #f1f5f9;
+            font-size: 14px;
+        }
+
+        .badge-vip {
+            background-color: #fef3c7;
+            color: #92400e;
+            font-weight: 600;
+            border: 1px solid #fde68a;
+            padding: 5px 10px;
+            border-radius: 8px;
+            font-size: 12px;
+        }
+
+        .badge-cottage-rep {
+            background-color: #ecfdf5;
+            color: #065f46;
+            font-weight: 600;
+            border: 1px solid #a7f3d0;
+            padding: 5px 10px;
+            border-radius: 8px;
+            font-size: 12px;
+        }
+
+        .badge-repeated-non-cottage {
+            background-color: #f1f5f9;
+            color: #64748b;
+            font-weight: 500;
+            border: 1px solid #cbd5e1;
+            padding: 5px 10px;
+            border-radius: 8px;
+            font-size: 12px;
+        }
+
+        .badge-repeated {
+            background-color: #ede9fe;
+            color: #5b21b6;
+            font-weight: 600;
+            border: 1px solid #ddd6fe;
+            padding: 5px 10px;
+            border-radius: 8px;
+            font-size: 12px;
+        }
+
+        .badge-allowed {
+            background-color: #dcfce7;
+            color: #166534;
+            font-weight: 600;
+            border: 1px solid #bbf7d0;
+            padding: 6px 12px;
+            border-radius: 8px;
+            font-size: 13px;
+        }
+
+        .badge-not-allowed {
+            background-color: #f1f5f9;
+            color: #64748b;
+            font-weight: 500;
+            padding: 6px 12px;
+            border-radius: 8px;
+            font-size: 13px;
+        }
+
+        .btn-allow-toggle {
+            font-weight: 500;
+            font-size: 13px;
+            padding: 6px 14px;
+            border-radius: 8px;
+            transition: all 0.2s;
+        }
+
+        .toast-container {
+            position: fixed;
+            top: 24px;
+            right: 24px;
+            z-index: 1090;
+        }
+    </style>
+</head>
+<body>
+    <!-- Sidebar Navigation -->
+    {% include 'dashboards/nav.html' %}
+
+    <!-- Main Content -->
+    <div class="main-content">
+            <!-- Header -->
+            <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+                <div>
+                    <h2 class="mb-1 fw-bold text-dark"><i class="fas fa-crown text-warning me-2"></i>My Patients (VIP & Repeated)</h2>
+                    <p class="text-muted mb-0">Allow dedicated preferred therapist allocation for your patients & manage monthly quota.</p>
+                </div>
+                <div>
+                    <a href="{% url 'scheduling_preferred_therapists' %}" class="btn btn-outline-primary me-2">
+                        <i class="fas fa-calendar-check me-1"></i>View Scheduling Pool
+                    </a>
+                    <a href="{% url 'user_therapy_entry_dashboard' %}" class="btn btn-outline-secondary">
+                        <i class="fas fa-calendar-alt me-1"></i>Therapy Dashboard
+                    </a>
+                </div>
+            </div>
+
+            <!-- Doctor Monthly Quota Showcase Banner -->
+            <div class="quota-banner">
+                <div class="row align-items-center g-3">
+                    <div class="col-12 col-md-6">
+                        <div class="d-flex align-items-center mb-2">
+                            <span class="badge bg-white text-primary px-3 py-1 rounded-pill fw-bold me-2">
+                                <i class="fas fa-calendar-alt me-1"></i>{{ current_month_name }}
+                            </span>
+                            <span class="text-white-50 small">Doctor Monthly Allowance</span>
+                        </div>
+                        <h4 class="fw-bold mb-1">Preferred Therapist Monthly Quota</h4>
+                        <p class="mb-0 text-white-50 small" id="quota-summary-text">
+                            You can mark a maximum of <strong>5 patients</strong> per month. Allowed <strong>VIP</strong> and <strong>Cottage Repeated</strong> patients will appear in the scheduling dashboard for preferred therapist configuration.
+                        </p>
+                    </div>
+                    <div class="col-12 col-md-6">
+                        <div class="row g-2 justify-content-end">
+                            <div class="col-4">
+                                <div class="quota-stat-box">
+                                    <div class="text-white-50 small text-uppercase">Monthly Limit</div>
+                                    <div class="fs-3 fw-bold text-white" id="quota-limit-val">{{ quota.limit }}</div>
+                                </div>
+                            </div>
+                            <div class="col-4">
+                                <div class="quota-stat-box">
+                                    <div class="text-white-50 small text-uppercase">Marked / Used</div>
+                                    <div class="fs-3 fw-bold text-warning" id="quota-used-val">{{ quota.used }}</div>
+                                </div>
+                            </div>
+                            <div class="col-4">
+                                <div class="quota-stat-box" style="background: rgba(16, 185, 129, 0.25); border-color: rgba(52, 211, 153, 0.4);">
+                                    <div class="text-white-50 small text-uppercase">Quota Left</div>
+                                    <div class="fs-3 fw-bold text-success-light" id="quota-remaining-val" style="color: #6ee7b7;">{{ quota.remaining }}</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="quota-progress">
+                            <div class="quota-progress-bar" id="quota-progress-bar" style="width: {% widthratio quota.used quota.limit 100 %}%;"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Filter Tabs & Search Bar -->
+            <div class="card mb-4 border-0 shadow-sm p-3" style="border-radius: 14px;">
+                <div class="d-flex justify-content-between align-items-center flex-wrap gap-3">
+                    <div class="d-flex gap-2 flex-wrap" id="filter-tabs">
+                        <button class="filter-tab-btn active" data-filter="ALL">
+                            <i class="fas fa-list me-1"></i>All Patients (<span id="cnt-all">0</span>)
+                        </button>
+                        <button class="filter-tab-btn" data-filter="VIP">
+                            <i class="fas fa-crown text-warning me-1"></i>VIP Patients (<span id="cnt-vip">0</span>)
+                        </button>
+                        <button class="filter-tab-btn" data-filter="REPEATED">
+                            <i class="fas fa-home text-success me-1"></i>Cottage Repeated (<span id="cnt-repeated">0</span>)
+                        </button>
+                        <button class="filter-tab-btn" data-filter="ALLOWED">
+                            <i class="fas fa-check-circle text-primary me-1"></i>Allowed for Preferred (<span id="cnt-allowed">0</span>)
+                        </button>
+                    </div>
+
+                    <div class="search-box position-relative" style="min-width: 280px;">
+                        <input type="text" id="search-input" class="form-control ps-4" placeholder="Search patient name, Reg No, room..." style="border-radius: 10px;">
+                        <i class="fas fa-search position-absolute top-50 start-0 translate-middle-y ms-2 text-muted"></i>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Patients Table -->
+            <div class="table-card">
+                <div class="table-responsive">
+                    <table class="table mb-0 align-middle">
+                        <thead>
+                            <tr>
+                                <th>Patient Details</th>
+                                <th>Category / Badges</th>
+                                <th>Staying Room</th>
+                                <th>Treating Doctor</th>
+                                <th>Preferred Therapist Status</th>
+                                <th class="text-end">Allowance Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="patients-table-body">
+                            <tr>
+                                <td colspan="6" class="text-center py-5 text-muted">
+                                    <div class="spinner-border spinner-border-sm text-primary me-2"></div>Loading patients...
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Pagination footer -->
+                <div class="d-flex justify-content-between align-items-center p-3 border-top bg-light" id="pagination-wrapper" style="display: none;">
+                    <div class="text-muted small">
+                        Showing <span id="page-start">1</span> to <span id="page-end">25</span> of <span id="page-total">0</span> patients
+                    </div>
+                    <div class="d-flex gap-2">
+                        <button class="btn btn-sm btn-outline-secondary" id="btn-prev-page" disabled>Previous</button>
+                        <button class="btn btn-sm btn-outline-secondary" id="btn-next-page">Next</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    <!-- Toast Notifications -->
+    <div class="toast-container" id="toast-container"></div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="{% static 'js/dashboards_nav.js' %}"></script>
+    <script>
+        let currentFilter = 'ALL';
+        let searchQuery = '';
+        let currentPage = 1;
+        let quotaData = { limit: 5, used: 0, remaining: 5 };
+
+        function getCookie(name) {
+            let cookieValue = null;
+            if (document.cookie && document.cookie !== '') {
+                const cookies = document.cookie.split(';');
+                for (let i = 0; i < cookies.length; i++) {
+                    const cookie = cookies[i].trim();
+                    if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                        cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                        break;
+                    }
+                }
+            }
+            return cookieValue;
+        }
+
+        function showToast(message, type = 'success') {
+            const container = document.getElementById('toast-container');
+            const toastEl = document.createElement('div');
+            const bgClass = type === 'success' ? 'bg-success text-white' : (type === 'danger' ? 'bg-danger text-white' : 'bg-warning text-dark');
+            const icon = type === 'success' ? 'check-circle' : (type === 'danger' ? 'exclamation-circle' : 'info-circle');
+            
+            toastEl.className = `toast align-items-center ${bgClass} border-0 show shadow-lg mb-2`;
+            toastEl.setAttribute('role', 'alert');
+            toastEl.innerHTML = `
+                <div class="d-flex">
+                    <div class="toast-body d-flex align-items-center">
+                        <i class="fas fa-${icon} me-2 fs-5"></i>
+                        <span>${message}</span>
+                    </div>
+                    <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+                </div>
+            `;
+            container.appendChild(toastEl);
+            setTimeout(() => {
+                toastEl.remove();
+            }, 4500);
+        }
+
+        function updateQuotaUI(quota) {
+            if (!quota) return;
+            quotaData = quota;
+            document.getElementById('quota-limit-val').textContent = quota.limit;
+            document.getElementById('quota-used-val').textContent = quota.used;
+            document.getElementById('quota-remaining-val').textContent = quota.remaining;
+
+            const percent = Math.min(100, Math.round((quota.used / quota.limit) * 100));
+            document.getElementById('quota-progress-bar').style.width = `${percent}%`;
+
+            if (quota.remaining === 0) {
+                document.getElementById('quota-summary-text').innerHTML = `
+                    <span class="text-warning fw-bold"><i class="fas fa-exclamation-triangle me-1"></i>Monthly quota reached (5/5 used).</span>
+                    You cannot mark any more patients for preferred therapists this month unless an existing allowance is revoked.
+                `;
+            } else {
+                document.getElementById('quota-summary-text').innerHTML = `
+                    You can mark up to <strong>5 patients</strong> per month. <strong>${quota.remaining} slots left</strong> for this month.
+                `;
+            }
+        }
+
+        async function loadPatients() {
+            const tbody = document.getElementById('patients-table-body');
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="6" class="text-center py-5 text-muted">
+                        <div class="spinner-border spinner-border-sm text-primary me-2"></div>Loading patients...
+                    </td>
+                </tr>
+            `;
+
+            try {
+                const url = `{% url 'doctor_patients_vip_repeated_api' %}?filter=${currentFilter}&search=${encodeURIComponent(searchQuery)}&page=${currentPage}&page_size=25`;
+                const response = await fetch(url);
+                const data = await response.json();
+
+                if (data.status !== 'success') {
+                    tbody.innerHTML = `<tr><td colspan="6" class="text-center py-4 text-danger">${data.message || 'Error loading patients.'}</td></tr>`;
+                    return;
+                }
+
+                updateQuotaUI(data.quota);
+
+                // Update badge counts
+                if (data.counts) {
+                    document.getElementById('cnt-all').textContent = data.counts.all || 0;
+                    document.getElementById('cnt-vip').textContent = data.counts.vip || 0;
+                    document.getElementById('cnt-repeated').textContent = data.counts.repeated || 0;
+                    document.getElementById('cnt-allowed').textContent = data.counts.allowed || 0;
+                }
+
+                if (!data.patients || data.patients.length === 0) {
+                    tbody.innerHTML = `
+                        <tr>
+                            <td colspan="6" class="text-center py-5 text-muted">
+                                <i class="fas fa-user-slash fs-1 d-block mb-3 opacity-25"></i>
+                                No patients found matching your current filter.
+                            </td>
+                        </tr>
+                    `;
+                    document.getElementById('pagination-wrapper').style.display = 'none';
+                    return;
+                }
+
+                tbody.innerHTML = '';
+                data.patients.forEach(pat => {
+                    const tr = document.createElement('tr');
+                    
+                    // Status Badges
+                    let badgesHtml = '';
+                    if (pat.is_vip) {
+                        badgesHtml += `<span class="badge-vip me-1"><i class="fas fa-crown me-1 text-warning"></i>VIP</span>`;
+                    }
+                    if (pat.is_cottage_repeated) {
+                        badgesHtml += `<span class="badge-cottage-rep me-1"><i class="fas fa-home me-1"></i>Cottage Repeated (${pat.total_visits} visits)</span>`;
+                    } else if (pat.is_repeated) {
+                        badgesHtml += `<span class="badge-repeated-non-cottage me-1" title="Only Cottage Repeated patients are eligible for preferred therapist assignment"><i class="fas fa-history me-1"></i>Repeated (${pat.total_visits} visits)</span>`;
+                    }
+                    if (!pat.is_vip && !pat.is_repeated) {
+                        badgesHtml = `<span class="text-muted small">Standard Patient</span>`;
+                    }
+
+                    // Allowed Pill
+                    let allowBadge = '';
+                    if (pat.is_allowed) {
+                        allowBadge = `<span class="badge-allowed"><i class="fas fa-check-circle me-1"></i>Allowed (Active)</span>`;
+                        if (pat.has_roster) {
+                            allowBadge += `<div class="small text-muted mt-1"><i class="fas fa-users-cog me-1"></i>${pat.roster_therapist_count} Therapists Assigned</div>`;
+                        } else {
+                            allowBadge += `<div class="small text-warning mt-1"><i class="fas fa-clock me-1"></i>Pending Roster in Scheduling</div>`;
+                        }
+                    } else {
+                        allowBadge = `<span class="badge-not-allowed">Not Allowed</span>`;
+                    }
+
+                    // Action Button
+                    let actionBtn = '';
+                    if (pat.is_allowed) {
+                        if (pat.is_treating_doctor) {
+                            actionBtn = `
+                                <button class="btn btn-sm btn-outline-danger btn-allow-toggle" onclick="toggleAllowance('${pat.patient_reg_no}', '${escapeHtml(pat.patient_name)}', '${escapeHtml(pat.room_no || '')}')">
+                                    <i class="fas fa-times me-1"></i>Revoke Allowance
+                                </button>
+                            `;
+                        } else {
+                            actionBtn = `
+                                <button class="btn btn-sm btn-light border text-success btn-allow-toggle" disabled title="Allowed by treating doctor ${escapeHtml(pat.treating_doctor_name)}">
+                                    <i class="fas fa-check-circle me-1"></i>Allowed (${escapeHtml(pat.treating_doctor_name || 'Treating Dr')})
+                                </button>
+                            `;
+                        }
+                    } else {
+                        if (!pat.is_treating_doctor) {
+                            actionBtn = `
+                                <button class="btn btn-sm btn-light border text-muted btn-allow-toggle" disabled title="Only the particular treating doctor (${escapeHtml(pat.treating_doctor_name || 'Assigned Doctor')}) can give access to allow preferred therapist for this patient.">
+                                    <i class="fas fa-user-lock me-1"></i>Treating Dr Only
+                                </button>
+                            `;
+                        } else if (!pat.is_eligible) {
+                            actionBtn = `
+                                <button class="btn btn-sm btn-light border text-muted btn-allow-toggle" disabled title="Only VIP patients and Cottage Repeated patients are eligible for preferred therapist assignment.">
+                                    <i class="fas fa-lock me-1"></i>Ineligible (Cottage/VIP Only)
+                                </button>
+                            `;
+                        } else if (quotaData.remaining > 0) {
+                            actionBtn = `
+                                <button class="btn btn-sm btn-primary btn-allow-toggle" onclick="toggleAllowance('${pat.patient_reg_no}', '${escapeHtml(pat.patient_name)}', '${escapeHtml(pat.room_no || '')}')">
+                                    <i class="fas fa-user-check me-1"></i>Allow Preferred Therapist
+                                </button>
+                            `;
+                        } else {
+                            actionBtn = `
+                                <button class="btn btn-sm btn-secondary btn-allow-toggle" disabled title="Monthly Quota Limit of 5 Reached">
+                                    <i class="fas fa-ban me-1"></i>Quota Reached (5/5)
+                                </button>
+                            `;
+                        }
+                    }
+
+                    tr.innerHTML = `
+                        <td>
+                            <div class="fw-bold text-dark">${escapeHtml(pat.patient_name)}</div>
+                            <div class="text-muted small">Reg No: <strong>${escapeHtml(pat.patient_reg_no)}</strong></div>
+                        </td>
+                        <td>${badgesHtml}</td>
+                        <td>
+                            <span class="badge bg-light text-dark border px-2 py-1">
+                                <i class="fas fa-door-open me-1 text-primary"></i>${escapeHtml(pat.room_no || 'N/A')}
+                            </span>
+                        </td>
+                        <td>
+                            <div class="fw-semibold text-secondary">
+                                <i class="fas fa-user-md me-1 text-primary"></i>${escapeHtml(pat.treating_doctor_name || 'Not Assigned')}
+                            </div>
+                            <div class="text-muted small">Age: ${escapeHtml(pat.patient_age || '—')}, Sex: ${escapeHtml(pat.patient_gender || '—')}</div>
+                        </td>
+                        <td>${allowBadge}</td>
+                        <td class="text-end">${actionBtn}</td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+
+                // Update pagination
+                document.getElementById('pagination-wrapper').style.display = 'flex';
+                document.getElementById('page-start').textContent = (data.page - 1) * data.page_size + 1;
+                document.getElementById('page-end').textContent = Math.min(data.page * data.page_size, data.total);
+                document.getElementById('page-total').textContent = data.total;
+                document.getElementById('btn-prev-page').disabled = data.page <= 1;
+                document.getElementById('btn-next-page').disabled = data.page >= data.total_pages;
+
+            } catch (err) {
+                console.error('Error fetching patients:', err);
+                tbody.innerHTML = `<tr><td colspan="6" class="text-center py-4 text-danger">Network error loading patients.</td></tr>`;
+            }
+        }
+
+        async function toggleAllowance(regNo, patName, roomNo) {
+            try {
+                const response = await fetch("{% url 'toggle_doctor_patient_allowance_api' %}", {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': getCookie('csrftoken')
+                    },
+                    body: JSON.stringify({
+                        patient_reg_no: regNo,
+                        patient_name: patName,
+                        room_no: roomNo
+                    })
+                });
+
+                const res = await response.json();
+                if (res.status === 'success') {
+                    showToast(res.message, res.is_allowed ? 'success' : 'warning');
+                    loadPatients();
+                } else if (res.error_type === 'not_treating_doctor') {
+                    showToast(res.message, 'danger');
+                } else if (res.error_type === 'quota_exceeded') {
+                    showToast(res.message, 'danger');
+                    if (res.quota) updateQuotaUI(res.quota);
+                } else if (res.error_type === 'ineligible') {
+                    showToast(res.message, 'warning');
+                } else {
+                    showToast(res.message || 'Operation failed', 'danger');
+                }
+            } catch (err) {
+                console.error('Toggle error:', err);
+                showToast('Failed to toggle allowance due to network error.', 'danger');
+            }
+        }
+
+        function escapeHtml(text) {
+            if (!text) return '';
+            return String(text)
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;")
+                .replace(/'/g, "&#039;");
+        }
+
+        // Event Listeners
+        document.addEventListener('DOMContentLoaded', () => {
+            // Tab filtering
+            document.querySelectorAll('#filter-tabs button').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    document.querySelectorAll('#filter-tabs button').forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    currentFilter = btn.dataset.filter;
+                    currentPage = 1;
+                    loadPatients();
+                });
+            });
+
+            // Live Search
+            let searchTimeout = null;
+            document.getElementById('search-input').addEventListener('input', (e) => {
+                clearTimeout(searchTimeout);
+                searchTimeout = setTimeout(() => {
+                    searchQuery = e.target.value;
+                    currentPage = 1;
+                    loadPatients();
+                }, 300);
+            });
+
+            // Pagination
+            document.getElementById('btn-prev-page').addEventListener('click', () => {
+                if (currentPage > 1) {
+                    currentPage--;
+                    loadPatients();
+                }
+            });
+
+            document.getElementById('btn-next-page').addEventListener('click', () => {
+                currentPage++;
+                loadPatients();
+            });
+
+            // Initial load
+            loadPatients();
+        });
+    </script>
+</body>
+</html>

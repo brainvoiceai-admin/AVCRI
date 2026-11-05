@@ -1,5 +1,5 @@
 from django.urls import path
-from . import views, prescription_views, procurement_views, patient_views, therapist_views, availability_views, matrix_views, preference_views
+from . import views, prescription_views, procurement_views, patient_views, therapist_views, availability_views, matrix_views, preference_views, doctor_preferred_views
 
 urlpatterns = [
    
@@ -33,6 +33,15 @@ urlpatterns = [
     path('api/therapist-preference/<int:request_id>/approve/', preference_views.doctor_approve_therapist_preference_api, name='doctor_approve_therapist_preference_api'),
     path('api/therapist-preference/<int:request_id>/reject/', preference_views.doctor_reject_therapist_preference_api, name='doctor_reject_therapist_preference_api'),
     path('api/therapist-preference/<str:patient_id>/history/', preference_views.therapist_preference_history_api, name='therapist_preference_history_api'),
+
+    # VIP & Repeated Patients Preferred Therapist URLs (Doctor Quota & Scheduling Assignment)
+    path('doctor-patients-vip-repeated/', doctor_preferred_views.doctor_patients_vip_repeated_view, name='doctor_patients_vip_repeated'),
+    path('api/doctor-patients-vip-repeated/', doctor_preferred_views.get_doctor_patients_vip_repeated_api, name='doctor_patients_vip_repeated_api'),
+    path('api/doctor/toggle-patient-allowance/', doctor_preferred_views.toggle_doctor_patient_allowance_api, name='toggle_doctor_patient_allowance_api'),
+    path('scheduling/preferred-therapists/', doctor_preferred_views.scheduling_preferred_therapists_view, name='scheduling_preferred_therapists'),
+    path('scheduling/api/allowed-patients-preferred-therapists/', doctor_preferred_views.get_allowed_patients_preferred_therapists_api, name='get_allowed_patients_preferred_therapists_api'),
+    path('scheduling/api/therapists-with-leaves/', doctor_preferred_views.get_therapists_with_leaves_api, name='get_therapists_with_leaves_api'),
+    path('scheduling/api/save-preferred-therapist-roster/', doctor_preferred_views.save_patient_preferred_roster_api, name='save_patient_preferred_roster_api'),
 
 
 

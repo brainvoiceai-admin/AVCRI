@@ -208,7 +208,7 @@ def allocate_treatment_slot(patient_type, therapy_category, used_slots=None):
 # -----------------------
 # Therapist allocation
 # -----------------------
-def allocate_therapists(date, time_slot, therapy_requirements, last_therapists=None, needs_bathing=False):
+def allocate_therapists(date, time_slot, therapy_requirements, last_therapists=None, needs_bathing=False, patient_gender=None, avoid_therapists=None, patient_id=None, allow_helping_fallback=False, patient_age=None, **kwargs):
     """
     Return list of TherapistMaster instances fulfilling therapy_requirements for given date+time_slot.
 
@@ -224,6 +224,14 @@ def allocate_therapists(date, time_slot, therapy_requirements, last_therapists=N
 
     day_of_week = date.weekday()
     allocated = []
+
+    preferred_roster_info = None
+    if patient_id:
+        try:
+            from Sheduling.preferred_therapist_service import get_active_preferred_roster
+            preferred_roster_info = get_active_preferred_roster(patient_id)
+        except Exception:
+            pass
 
     # Shift eligibility (additive): only enforced when shift masters/mappings are configured.
     shift_filter_enabled = False
@@ -318,6 +326,8 @@ def allocate_therapists(date, time_slot, therapy_requirements, last_therapists=N
                 is_active=True,
                 is_helping_therapist=is_helping_flag
             )
+            if preferred_roster_info:
+                candidates_qs = candidates_qs.filter(therapist_code__in=preferred_roster_info['therapist_codes_set'])
             if needs_bathing:
                 candidates_qs = candidates_qs.filter(is_bathing_therapist=True)
 

@@ -58,12 +58,20 @@
         <div class="menu-section">
             <div class="menu-section-header" onclick="toggleSection('section-therapist-pref')">
                 <span class="section-icon">👨‍⚕️</span>
-                <span class="section-title">Doctor Approvals</span>
+                <span class="section-title">Doctor & Scheduling Preferences</span>
                 <span class="section-arrow" id="section-therapist-pref-arrow">▼</span>
             </div>
             <div class="menu-subsection" id="section-therapist-pref">
+                {% if request.user.role in "doctor admin super_admin" %}
+                <a href="{% url 'doctor_patients_vip_repeated' %}" class="menu-item" data-url="{% url 'doctor_patients_vip_repeated' %}">
+                    <span>👑</span> My Patients (VIP & Quota)
+                </a>
                 <a href="{% url 'therapist_preference_approvals' %}" class="menu-item" data-url="{% url 'therapist_preference_approvals' %}">
                     <span>👨‍⚕️</span> Therapist Preference Approvals
+                </a>
+                {% endif %}
+                <a href="{% url 'scheduling_preferred_therapists' %}" class="menu-item" data-url="{% url 'scheduling_preferred_therapists' %}">
+                    <span>✨</span> Preferred Therapist Assignment
                 </a>
             </div>
         </div>

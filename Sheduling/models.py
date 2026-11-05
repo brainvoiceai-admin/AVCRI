@@ -886,3 +886,109 @@ class SchedulingAuditLog(models.Model):
     def __str__(self):
         return f"[{self.get_change_type_display()}] {self.therapy_name} for {self.patient_name} on {self.schedule_date}"
 
+
+
+# -----------------------------------------------------------------------------
+# Doctor Patient Preference Allowance & Scheduling Preferred Therapist Roster
+# -----------------------------------------------------------------------------
+class DoctorPatientPreferenceAllowance(models.Model):
+    """
+    Tracks patients marked/allowed by a doctor to receive preferred therapist assignment.
+    Quota rule: A doctor can only mark/allow up to 5 patients per calendar month.
+    """
+    doctor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='doctor_patient_preference_allowances'
+    )
+    doctor_code = models.CharField(max_length=50, blank=True, null=True, db_index=True)
+    doctor_name = models.CharField(max_length=200, blank=True, null=True)
+    patient_reg_no = models.CharField(max_length=50, db_index=True)
+    patient_name = models.CharField(max_length=255, blank=True, null=True)
+    year = models.PositiveSmallIntegerField(db_index=True)
+    month = models.PositiveSmallIntegerField(db_index=True)
+    is_active = models.BooleanField(default=True, db_index=True)
+    notes = models.TextField(blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-year', '-month', '-created_at']
+        unique_together = ('doctor', 'patient_reg_no', 'year', 'month')
+        verbose_name = "Doctor Patient Preference Allowance"
+        verbose_name_plural = "Doctor Patient Preference Allowances"
+
+    def __str__(self):
+        status = "Active" if self.is_active else "Revoked"
+        return f"{self.doctor_name or self.doctor.username} -> {self.patient_name or self.patient_reg_no} ({self.month}/{self.year}) [{status}]"
+
+    @classmethod
+    def get_monthly_quota(cls, doctor_user, year=None, month=None):
+        from django.utils import timezone
+        now = timezone.now()
+        y = year or now.year
+        m = month or now.month
+        used = cls.objects.filter(doctor=doctor_user, year=y, month=m, is_active=True).count()
+        limit = 5
+        remaining = max(0, limit - used)
+        return {
+            'used': used,
+            'limit': limit,
+            'remaining': remaining,
+            'year': y,
+            'month': m
+        }
+
+
+class PatientPreferredTherapistRoster(models.Model):
+    """
+    Roster of up to 7 preferred therapists configured by the scheduling team for an allowed patient,
+    designating 1 Primary Bathing Therapist and 1 Secondary Bathing Therapist.
+    """
+    patient_reg_no = models.CharField(max_length=50, unique=True, db_index=True)
+    patient_name = models.CharField(max_length=255, blank=True, null=True)
+    allowance = models.ForeignKey(
+        DoctorPatientPreferenceAllowance,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='rosters'
+    )
+    
+    # Therapists in pool (up to 7)
+    therapists = models.ManyToManyField('masters.TherapistMaster', related_name='preferred_rosters', blank=True)
+    therapist_codes = models.JSONField(default=list, blank=True, help_text="List of up to 7 therapist codes")
+    
+    # 1 Primary Bathing Therapist
+    primary_bathing_therapist = models.ForeignKey(
+        'masters.TherapistMaster',
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='primary_bathing_rosters'
+    )
+    primary_bathing_code = models.CharField(max_length=50, blank=True, null=True)
+    
+    # 1 Secondary Bathing Therapist
+    secondary_bathing_therapist = models.ForeignKey(
+        'masters.TherapistMaster',
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='secondary_bathing_rosters'
+    )
+    secondary_bathing_code = models.CharField(max_length=50, blank=True, null=True)
+
+    is_active = models.BooleanField(default=True, db_index=True)
+    configured_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name='configured_rosters')
+    notes = models.TextField(blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-updated_at']
+        verbose_name = "Patient Preferred Therapist Roster"
+        verbose_name_plural = "Patient Preferred Therapist Rosters"
+
+    def __str__(self):
+        return f"Roster for {self.patient_name or self.patient_reg_no} ({len(self.therapist_codes)} therapists)"
