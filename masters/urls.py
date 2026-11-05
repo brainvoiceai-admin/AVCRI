@@ -133,6 +133,11 @@ urlpatterns = [
     path('therapists/<int:pk>/disable/', views.therapist_master_disable, name='therapist_master_disable'),
     path('therapists/<int:pk>/toggle-helping/', views.toggle_helping_therapist_status, name='therapist_master_toggle_helping'),
     path('therapists/export-excel/', views.therapist_master_export_excel, name='therapist_master_export_excel'),
+    # On-Call Therapist URLs
+    path('therapists/<int:pk>/toggle-on-call/', views.toggle_on_call_status_view, name='therapist_master_toggle_on_call'),
+    path('therapists/<int:pk>/on-call-dates/', views.therapist_on_call_dates_api, name='therapist_on_call_dates_api'),
+    path('therapists/<int:pk>/on-call-history/', views.therapist_on_call_history_view, name='therapist_on_call_history'),
+    path('therapists/<int:pk>/on-call-history/export/', views.therapist_on_call_history_export_excel, name='therapist_on_call_history_export_excel'),
     # Therapist Deputation URLs
     path('therapists/deputation/create/', views.mark_therapist_deputed_api, name='therapist_deputation_create'),
     path('therapists/deputation/<int:pk>/approve/', views.approve_therapist_deputation_api, name='therapist_deputation_approve'),

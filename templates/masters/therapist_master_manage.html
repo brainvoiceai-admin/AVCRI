@@ -43,6 +43,9 @@
                     {% if pending_omissions_count %}<span class="badge bg-danger ms-1">{{ pending_omissions_count }}</span>{% endif %}
                 </a>
                 {% endif %}
+                <a href="{% url 'therapist_master_add' %}?on_call=1" class="btn text-white me-2" style="background-color: #6f42c1;">
+                    <i class="fas fa-phone-volume me-2"></i>Add On-Call Therapist
+                </a>
                 <a href="{% url 'therapist_master_add' %}" class="btn btn-success me-2">
                     <i class="fas fa-plus me-2"></i>Add New Therapist
                 </a>
@@ -79,6 +82,10 @@
                                 <option value="helping" {% if status_filter == 'helping' %}selected{% endif %}>Helping Therapists</option>
                                 <option value="deputed" {% if status_filter == 'deputed' %}selected{% endif %}>Deputed (Approved)</option>
                                 <option value="deputed_pending" {% if status_filter == 'deputed_pending' %}selected{% endif %}>Deputed (Pending Approval)</option>
+                                <option value="on_call" {% if status_filter == 'on_call' %}selected{% endif %}>On-Call Therapists (All)</option>
+                                <option value="on_call_on" {% if status_filter == 'on_call_on' %}selected{% endif %}>On-Call: Turned ON (Available)</option>
+                                <option value="on_call_off" {% if status_filter == 'on_call_off' %}selected{% endif %}>On-Call: Turned OFF (Standby)</option>
+                                <option value="regular" {% if status_filter == 'regular' %}selected{% endif %}>Regular Therapists Only</option>
                             </select>
                         </div>
                         <div class="col-md-2">
@@ -137,6 +144,7 @@
                                 <th>Gender</th>
                                 <th>Bathing</th>
                                 <th>Helping</th>
+                                <th>On-Call</th>
                                 <th>Leave Days</th>
                                 <th>Deputation</th>
                                 <th>Omitted Treatments</th>
@@ -156,7 +164,7 @@
                                     <span class="badge bg-info">{{ therapist.therapist_grade.name|default:"N/A" }}</span>
                                 </td>
                                 <td>
-                                    <code>{{ therapist.employee_code }}</code>
+                                    {% if therapist.employee_code %}<code>{{ therapist.employee_code }}</code>{% else %}<span class="text-muted">-</span>{% endif %}
                                 </td>
                                 <td>
                                     <span class="badge bg-primary">{{ therapist.therapist_gender|default:"N/A" }}</span>
@@ -183,6 +191,40 @@
                                             <i class="fas fa-times"></i> No
                                         {% endif %}
                                     </a>
+                                </td>
+                                <td>
+                                    {% if therapist.is_on_call %}
+                                        <div class="d-flex flex-column align-items-start gap-1">
+                                            {% if therapist.on_call_status %}
+                                            <button type="button" class="btn btn-sm btn-success py-0 px-2 on-call-btn"
+                                                    onclick="openOnCallModal('{{ therapist.pk }}', '{{ therapist.therapist_name|escapejs }}', true, '{{ therapist.on_call_start_date|date:"Y-m-d"|default:"" }}', '{{ therapist.on_call_end_date|date:"Y-m-d"|default:"" }}')"
+                                                    title="Currently Turned ON (Available for scheduling) - Click to turn OFF">
+                                                <i class="fas fa-toggle-on me-1"></i>ON
+                                            </button>
+                                            {% if therapist.on_call_start_date and therapist.on_call_end_date %}
+                                                <span class="badge bg-light text-dark border" style="font-size: 0.7rem;" title="Active from {{ therapist.on_call_start_date|date:'d M' }} to {{ therapist.on_call_end_date|date:'d M Y' }}">
+                                                    {{ therapist.on_call_start_date|date:"d M" }} - {{ therapist.on_call_end_date|date:"d M" }}
+                                                </span>
+                                            {% elif therapist.on_call_start_date %}
+                                                <span class="badge bg-light text-dark border" style="font-size: 0.7rem;">
+                                                    From {{ therapist.on_call_start_date|date:"d M" }}
+                                                </span>
+                                            {% endif %}
+                                            {% else %}
+                                            <button type="button" class="btn btn-sm btn-secondary py-0 px-2 on-call-btn"
+                                                    onclick="openOnCallModal('{{ therapist.pk }}', '{{ therapist.therapist_name|escapejs }}', false, '', '')"
+                                                    title="Currently Turned OFF (Standby) - Click to turn ON">
+                                                <i class="fas fa-toggle-off me-1"></i>OFF
+                                            </button>
+                                            {% endif %}
+                                            <a href="javascript:void(0)" onclick="openOnCallDatesModal('{{ therapist.pk }}', '{{ therapist.therapist_name|escapejs }}', '{{ therapist.therapist_code }}')" 
+                                               class="small text-decoration-none" style="color: #6f42c1; font-size: 0.72rem;">
+                                                <i class="fas fa-calendar-check me-1"></i>Dates History
+                                            </a>
+                                        </div>
+                                    {% else %}
+                                        <span class="text-muted small">-</span>
+                                    {% endif %}
                                 </td>
                                 <td>
                                     {% with therapist.leaves.all as leave_days %}
@@ -252,6 +294,15 @@
                                 </td>
                                 <td>
                                     <div class="btn-group" role="group">
+                                        {% if therapist.is_on_call %}
+                                        <button type="button" 
+                                                class="btn btn-sm text-white" 
+                                                style="background-color: #6f42c1;"
+                                                title="View On-Call Active Dates & Scheduling"
+                                                onclick="openOnCallDatesModal('{{ therapist.pk }}', '{{ therapist.therapist_name|escapejs }}', '{{ therapist.therapist_code }}')">
+                                            <i class="fas fa-calendar-alt"></i>
+                                        </button>
+                                        {% endif %}
                                         {% if can_request_deputation %}
                                         <button type="button" class="btn btn-sm btn-outline-warning" 
                                                 title="Mark as Deputed Therapist"
@@ -467,6 +518,263 @@
         previewSpan.textContent = '-';
     }
     </script>
-</body>
 
+    <!-- Toggle On-Call Modal -->
+    <div class="modal fade" id="onCallModal" tabindex="-1" aria-labelledby="onCallModalLabel" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <form id="onCallToggleForm" method="post" action="">
+                    {% csrf_token %}
+                    <input type="hidden" name="status" id="oncall_target_status">
+                    <div class="modal-header">
+                        <h5 class="modal-title" id="onCallModalLabel">
+                            <i class="fas fa-phone-volume text-purple me-2" style="color: #6f42c1;"></i>Manage On-Call Status
+                        </h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="alert mb-3" id="oncall_alert_box">
+                            <div class="fw-bold mb-1" id="oncall_therapist_display"></div>
+                            <div id="oncall_action_explanation" class="small"></div>
+                        </div>
+
+                        <!-- Date range when turning ON (e.g. October 10 to 25) -->
+                        <div id="oncall_dates_row" class="row mb-3" style="display: none;">
+                            <div class="col-md-6">
+                                <label class="form-label fw-bold">From Date</label>
+                                <input type="date" name="start_date" id="oncall_modal_start_date" class="form-control" value="{{ today_date }}">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label fw-bold">To Date <span class="text-muted fw-normal">(Optional)</span></label>
+                                <input type="date" name="end_date" id="oncall_modal_end_date" class="form-control">
+                            </div>
+                            <div class="col-12 mt-1">
+                                <small class="text-muted">Specify the active dates (e.g. October 10 to October 25). The therapist will be available for scheduling during these dates.</small>
+                            </div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">Remarks / Reason (Optional)</label>
+                            <input type="text" class="form-control" name="remarks" id="oncall_remarks"
+                                   placeholder="e.g. Called in for emergency coverage, Standby for shift, Relief duty...">
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                        <button type="submit" class="btn text-white" id="oncall_submit_btn">
+                            Confirm Change
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- On-Call Dates & Scheduling History Modal (Replaces separate page) -->
+    <div class="modal fade" id="onCallDatesModal" tabindex="-1" aria-labelledby="onCallDatesModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header" style="background-color: #f7f3fd; border-bottom: 2px solid #6f42c1;">
+                    <h5 class="modal-title fw-bold" id="onCallDatesModalLabel">
+                        <i class="fas fa-calendar-alt text-purple me-2" style="color: #6f42c1;"></i>
+                        On-Call Scheduling Dates: <span id="oncall_dates_therapist_name" class="text-dark"></span>
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body p-4">
+                    <div id="oncall_dates_loading" class="text-center py-4">
+                        <div class="spinner-border text-primary" role="status"></div>
+                        <p class="text-muted mt-2">Loading on-call dates...</p>
+                    </div>
+
+                    <div id="oncall_dates_content" style="display: none;">
+                        <!-- Period & Status Summary Banner -->
+                        <div class="card border-0 mb-3" style="background: #fdfcfe; border-left: 4px solid #6f42c1 !important; box-shadow: 0 1px 4px rgba(0,0,0,0.05);">
+                            <div class="card-body p-3">
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <div>
+                                        <small class="text-muted d-block text-uppercase fw-semibold" style="font-size: 0.75rem;">Current On-Call Period</small>
+                                        <h5 class="mb-0 fw-bold" id="oncall_period_display" style="color: #6f42c1;">-</h5>
+                                    </div>
+                                    <div class="text-end">
+                                        <span id="oncall_status_pill" class="badge px-3 py-2" style="font-size: 0.85rem;">-</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Days in Scheduling (The dates alone) -->
+                        <div class="mb-4">
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <h6 class="fw-bold mb-0 text-dark">
+                                    <i class="fas fa-calendar-check me-2 text-success"></i>Dates in Scheduling / Treatments Done
+                                </h6>
+                                <span class="badge bg-primary rounded-pill px-3 py-2" id="oncall_total_days_badge">0 Days</span>
+                            </div>
+                            <p class="text-muted small mb-2">These are the specific dates on which this on-call therapist was scheduled and performed therapies:</p>
+                            
+                            <div id="oncall_dates_list" class="d-flex flex-wrap gap-2 p-3 bg-light rounded border">
+                                <!-- Populated dynamically with dates -->
+                            </div>
+                        </div>
+
+                        <!-- Past On-Call Periods Log -->
+                        <div class="mt-4 pt-3 border-top">
+                            <h6 class="fw-bold mb-2 text-dark">
+                                <i class="fas fa-history me-2 text-muted"></i>On-Call Turn ON / OFF Period History
+                            </h6>
+                            <div class="table-responsive">
+                                <table class="table table-sm table-bordered align-middle mb-0" style="font-size: 0.85rem;">
+                                    <thead class="table-light">
+                                        <tr>
+                                            <th>Action</th>
+                                            <th>Turned ON Period (Dates)</th>
+                                            <th>Changed By</th>
+                                            <th>Date & Time</th>
+                                            <th>Remarks</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="oncall_logs_tbody">
+                                        <!-- Populated dynamically -->
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    function openOnCallModal(therapistId, therapistName, currentlyOn, startDate, endDate) {
+        const form = document.getElementById('onCallToggleForm');
+        form.action = `/Masters/therapists/${therapistId}/toggle-on-call/`;
+        
+        const targetStatusInput = document.getElementById('oncall_target_status');
+        const alertBox = document.getElementById('oncall_alert_box');
+        const nameDisplay = document.getElementById('oncall_therapist_display');
+        const explanation = document.getElementById('oncall_action_explanation');
+        const submitBtn = document.getElementById('oncall_submit_btn');
+        const datesRow = document.getElementById('oncall_dates_row');
+        const startDateInput = document.getElementById('oncall_modal_start_date');
+        const endDateInput = document.getElementById('oncall_modal_end_date');
+        document.getElementById('oncall_remarks').value = '';
+
+        nameDisplay.textContent = `Therapist: ${therapistName}`;
+
+        if (currentlyOn) {
+            // Turning OFF
+            targetStatusInput.value = 'off';
+            datesRow.style.display = 'none';
+            alertBox.className = 'alert alert-warning mb-3';
+            explanation.innerHTML = 'You are about to <strong>Turn OFF</strong> this on-call therapist. When turned OFF, this therapist will be on standby and <strong>excluded from scheduling</strong> until turned back ON.';
+            submitBtn.className = 'btn btn-warning';
+            submitBtn.innerHTML = '<i class="fas fa-toggle-off me-1"></i> Turn OFF (Standby)';
+        } else {
+            // Turning ON
+            targetStatusInput.value = 'on';
+            datesRow.style.display = 'flex';
+            if (startDate) startDateInput.value = startDate;
+            if (endDate) endDateInput.value = endDate;
+            alertBox.className = 'alert alert-success mb-3';
+            explanation.innerHTML = 'You are about to <strong>Turn ON</strong> this on-call therapist. Enter the active date range (e.g. October 10 to October 25). The therapist will be <strong>available for scheduling</strong> during these dates.';
+            submitBtn.className = 'btn btn-success';
+            submitBtn.innerHTML = '<i class="fas fa-toggle-on me-1"></i> Turn ON (Available)';
+        }
+
+        const modal = new bootstrap.Modal(document.getElementById('onCallModal'));
+        modal.show();
+    }
+
+    function openOnCallDatesModal(therapistId, therapistName, therapistCode) {
+        document.getElementById('oncall_dates_therapist_name').textContent = `${therapistName} (${therapistCode || ''})`;
+        document.getElementById('oncall_dates_loading').style.display = 'block';
+        document.getElementById('oncall_dates_content').style.display = 'none';
+
+        const modal = new bootstrap.Modal(document.getElementById('onCallDatesModal'));
+        modal.show();
+
+        fetch(`/Masters/therapists/${therapistId}/on-call-dates/`)
+            .then(res => res.json())
+            .then(data => {
+                document.getElementById('oncall_dates_loading').style.display = 'none';
+                document.getElementById('oncall_dates_content').style.display = 'block';
+
+                if (!data.success) {
+                    alert(data.message || 'Error loading dates.');
+                    modal.hide();
+                    return;
+                }
+
+                document.getElementById('oncall_period_display').textContent = data.current_period || 'Turned OFF (Standby)';
+                const statusPill = document.getElementById('oncall_status_pill');
+                if (data.on_call_status) {
+                    statusPill.className = 'badge bg-success px-3 py-2';
+                    statusPill.innerHTML = '<i class="fas fa-check-circle me-1"></i>Turned ON (Available)';
+                } else {
+                    statusPill.className = 'badge bg-secondary px-3 py-2';
+                    statusPill.innerHTML = '<i class="fas fa-pause-circle me-1"></i>Turned OFF (Standby)';
+                }
+
+                document.getElementById('oncall_total_days_badge').textContent = `${data.total_days_worked} Day${data.total_days_worked === 1 ? '' : 's'} (${data.total_sessions} session${data.total_sessions === 1 ? '' : 's'})`;
+
+                const datesList = document.getElementById('oncall_dates_list');
+                datesList.innerHTML = '';
+                if (data.dates && data.dates.length > 0) {
+                    data.dates.forEach(item => {
+                        const tag = document.createElement('div');
+                        tag.className = 'p-2 bg-white rounded border shadow-sm d-flex align-items-center gap-2';
+                        tag.style.fontSize = '0.85rem';
+                        const therapyStr = item.therapies && item.therapies.length > 0 ? ': ' + item.therapies.join(', ') : '';
+                        tag.innerHTML = `
+                            <i class="fas fa-calendar-day text-purple" style="color: #6f42c1;"></i>
+                            <div>
+                                <strong>${item.date_formatted}</strong> <span class="text-muted">(${item.day_name})</span>
+                                <div class="small text-muted">${item.session_count} session${item.session_count > 1 ? 's' : ''}${therapyStr}</div>
+                            </div>
+                        `;
+                        datesList.appendChild(tag);
+                    });
+                } else {
+                    datesList.innerHTML = '<span class="text-muted p-2"><i class="fas fa-info-circle me-1"></i>No treatments scheduled for this on-call therapist yet.</span>';
+                }
+
+                const logsTbody = document.getElementById('oncall_logs_tbody');
+                logsTbody.innerHTML = '';
+                if (data.logs && data.logs.length > 0) {
+                    data.logs.forEach(log => {
+                        const tr = document.createElement('tr');
+                        const badgeClass = log.status === 'turned_on' ? 'bg-success' : 'bg-secondary';
+                        tr.innerHTML = `
+                            <td><span class="badge ${badgeClass}">${log.status_label}</span></td>
+                            <td><strong>${log.date_range}</strong></td>
+                            <td>${log.changed_by}</td>
+                            <td class="text-muted">${log.created_at}</td>
+                            <td>${log.remarks}</td>
+                        `;
+                        logsTbody.appendChild(tr);
+                    });
+                } else {
+                    logsTbody.innerHTML = '<tr><td colspan="5" class="text-center py-2 text-muted">No logs recorded yet.</td></tr>';
+                }
+            })
+            .catch(err => {
+                document.getElementById('oncall_dates_loading').innerHTML = '<div class="alert alert-danger">Failed to load on-call dates.</div>';
+            });
+    }
+
+    document.addEventListener('DOMContentLoaded', function() {
+        const urlParams = new URLSearchParams(window.location.search);
+        const openId = urlParams.get('open_oncall_history');
+        if (openId) {
+            openOnCallDatesModal(openId, 'Therapist', '');
+        }
+    });
+    </script>
+
+</body>
 </html>

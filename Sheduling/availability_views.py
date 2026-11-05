@@ -135,6 +135,12 @@ def get_available_therapists_api(request):
             if deputed_ids:
                 available_therapists = available_therapists.exclude(pk__in=deputed_ids)
 
+            # On-call check: exclude on-call therapists who are turned OFF or outside date range
+            from masters.models import get_inactive_on_call_therapist_ids
+            inactive_on_call_ids = get_inactive_on_call_therapist_ids(target_date)
+            if inactive_on_call_ids:
+                available_therapists = available_therapists.exclude(pk__in=inactive_on_call_ids)
+
             # Treatment Omission check: exclude therapists with approved omission for specified treatment
             treatment_param = (
                 request.GET.get('treatment') or 

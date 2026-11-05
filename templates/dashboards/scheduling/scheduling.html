@@ -411,7 +411,117 @@
             margin-bottom: 0 !important;
         }
 
-        #emergencyRescheduleModal .modal-footer {
+                /* Clean Searchable Replacement Dropdown Styles */
+        .em-select-box {
+            position: relative;
+            width: 100%;
+        }
+        .em-select-trigger {
+            min-height: 42px;
+            border: 1.5px solid #cbd5e1;
+            border-radius: 8px;
+            background: #ffffff;
+            padding: 6px 14px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            user-select: none;
+        }
+        .em-select-trigger:hover {
+            border-color: #94a3b8;
+        }
+        .em-select-trigger.active {
+            border-color: #2563eb;
+            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+        }
+        .em-select-menu {
+            display: none;
+            position: absolute;
+            top: calc(100% + 4px);
+            left: 0;
+            right: 0;
+            background: #ffffff;
+            border: 1px solid #cbd5e1;
+            border-radius: 8px;
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.15), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+            z-index: 1050;
+            overflow: hidden;
+        }
+        .em-opt-item {
+            padding: 9px 14px;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+            transition: background 0.1s ease;
+            border-bottom: 1px solid #f8fafc;
+        }
+        .em-opt-item:last-child {
+            border-bottom: none;
+        }
+        .em-opt-item:hover {
+            background: #f1f5f9;
+        }
+        .em-opt-item.selected {
+            background: #f0fdf4;
+            color: #166534;
+        }
+        .em-opt-grade-senior {
+            background: #eff6ff;
+            color: #1d4ed8;
+            border: 1px solid #bfdbfe;
+            font-size: 11px;
+            padding: 2px 7px;
+            border-radius: 4px;
+            font-weight: 600;
+        }
+        .em-opt-grade-junior {
+            background: #ecfdf5;
+            color: #047857;
+            border: 1px solid #a7f3d0;
+            font-size: 11px;
+            padding: 2px 7px;
+            border-radius: 4px;
+            font-weight: 600;
+        }
+        .em-opt-grade-trainee {
+            background: #faf5ff;
+            color: #7e22ce;
+            border: 1px solid #e9d5ff;
+            font-size: 11px;
+            padding: 2px 7px;
+            border-radius: 4px;
+            font-weight: 600;
+        }
+        .em-opt-grade-gen {
+            background: #f1f5f9;
+            color: #475569;
+            border: 1px solid #cbd5e1;
+            font-size: 11px;
+            padding: 2px 7px;
+            border-radius: 4px;
+            font-weight: 600;
+        }
+        .em-opt-bathing {
+            background: #fef3c7;
+            color: #b45309;
+            border: 1px solid #fde68a;
+            font-size: 11px;
+            padding: 2px 7px;
+            border-radius: 4px;
+            font-weight: 700;
+        }
+        #emDropdownList::-webkit-scrollbar {
+            width: 6px;
+        }
+        #emDropdownList::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 3px;
+        }
+#emergencyRescheduleModal .modal-footer {
             padding: 16px 28px !important;
             border-top: 1px solid #e2e8f0 !important;
             background: #f8fafc !important;
@@ -1210,17 +1320,51 @@
                             </div>
                         </div>
 
-                        <!-- 2. Select Replacement Therapist -->
+                        <!-- 2. Select Replacement Therapist (Searchable Clean Dropdown) -->
                         <div style="margin-bottom: 20px;">
-                            <label style="font-size: 13px; font-weight: 700; color: #1e293b; display: block; margin-bottom: 4px;">
-                                2. Select Replacement Therapist (Available in Slot):
-                            </label>
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                                <label style="font-size: 13px; font-weight: 700; color: #1e293b; margin: 0;">
+                                    2. Select Replacement Therapist (Available in Slot):
+                                </label>
+                                <span id="emReplacementCountBadge" style="font-size: 11.5px; font-weight: 600; color: #64748b;">
+                                    0 available
+                                </span>
+                            </div>
+
                             <div style="font-size: 12px; color: #64748b; margin-bottom: 8px;" id="emGenderRequirementLabel">
                                 Filtered by required gender. Only showing available therapists with &lt; 6 sessions.
                             </div>
-                            <select id="emReplacementDropdown" class="form-control" style="font-size: 14px; padding: 10px 12px; border: 1px solid #cbd5e1; border-radius: 8px; width: 100%;" onchange="onReplacementTherapistSelected()">
-                                <option value="">-- Choose Replacement Therapist --</option>
-                            </select>
+
+                            <!-- Custom Searchable Select Dropdown -->
+                            <div class="em-select-box" id="emSelectBox">
+                                <div id="emSelectTrigger" class="em-select-trigger" onclick="toggleReplacementMenu(event)">
+                                    <div id="emSelectedDisplay" style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                                        <span style="color: #94a3b8; font-size: 13.5px;">-- Choose Replacement Therapist --</span>
+                                    </div>
+                                    <div style="display: flex; align-items: center; gap: 8px;">
+                                        <button type="button" id="emClearBtn" onclick="clearReplacementChoice(event)" title="Clear selection"
+                                                style="display: none; background: none; border: none; color: #94a3b8; font-size: 14px; cursor: pointer; padding: 2px 6px;">
+                                            <i class="fas fa-times"></i>
+                                        </button>
+                                        <i id="emChevron" class="fas fa-chevron-down" style="color: #64748b; font-size: 12px; transition: transform 0.2s ease;"></i>
+                                    </div>
+                                </div>
+
+                                <div id="emDropdownMenu" class="em-select-menu">
+                                    <div style="padding: 8px 10px; border-bottom: 1px solid #f1f5f9; background: #f8fafc; position: relative;">
+                                        <i class="fas fa-search" style="position: absolute; left: 20px; top: 18px; color: #94a3b8; font-size: 12px;"></i>
+                                        <input type="text" id="emDropdownSearch" placeholder="Type name, code, or grade to search..." onclick="event.stopPropagation()" oninput="filterDropdownOptions()"
+                                               style="width: 100%; height: 34px; padding: 4px 10px 4px 28px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 13px; box-sizing: border-box; outline: none; background: #ffffff;">
+                                    </div>
+                                    <div id="emDropdownList" style="max-height: 230px; overflow-y: auto; padding: 4px;">
+                                        <!-- Options populated in JS -->
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Hidden field to preserve compatibility with existing submit & bathing logic -->
+                            <input type="hidden" id="emReplacementDropdown" value="">
+
                             <div id="emNoTherapistsMsg" style="display: none; color: #b91c1c; font-size: 12px; margin-top: 6px; font-weight: 500;">
                                 ⚠️ No available therapists found matching the required gender and time slot.
                             </div>
@@ -1805,6 +1949,7 @@
     <script>
         let currentEmergencyTreatments = [];
         let selectedEmergencyBooking = null;
+            clearReplacementChoice();
         let availableReplacementTherapists = [];
 
         function getCsrfToken() {
@@ -1946,6 +2091,7 @@
             const booking = currentEmergencyTreatments.find(t => t.booking_id === bookingId);
             if (!booking) return;
             selectedEmergencyBooking = booking;
+            clearReplacementChoice();
 
             // Populate Step 2 banner
             document.getElementById('emSelPatient').textContent = booking.patient_name;
@@ -2046,29 +2192,192 @@
             loadAvailableTherapistsForBooking(selectedEmergencyBooking.booking_id, code);
         }
 
+        function escapeHtml(text) {
+            if (!text) return '';
+            const map = {
+                '&': '&amp;',
+                '<': '&lt;',
+                '>': '&gt;',
+                '"': '&quot;',
+                "'": '&#039;'
+            };
+            return String(text).replace(/[&<>"']/g, m => map[m]);
+        }
+
         function renderReplacementDropdown(therapists) {
-            const select = document.getElementById('emReplacementDropdown');
+            const listContainer = document.getElementById('emDropdownList');
             const noMsg = document.getElementById('emNoTherapistsMsg');
-            select.innerHTML = '<option value="">-- Choose Replacement Therapist --</option>';
+            const countBadge = document.getElementById('emReplacementCountBadge');
+
+            if (countBadge) {
+                countBadge.textContent = `${therapists ? therapists.length : 0} available`;
+            }
+
+            // Reset search input
+            const searchInput = document.getElementById('emDropdownSearch');
+            if (searchInput) searchInput.value = '';
+
+            // Reset selection display
+            clearReplacementChoice();
 
             if (!therapists || therapists.length === 0) {
-                noMsg.style.display = 'block';
+                if (noMsg) noMsg.style.display = 'block';
+                if (listContainer) listContainer.innerHTML = '<div style="padding: 16px; text-align: center; color: #94a3b8; font-size: 12px;">No available therapists found.</div>';
                 return;
             }
-            noMsg.style.display = 'none';
+            if (noMsg) noMsg.style.display = 'none';
 
-            therapists.forEach(t => {
-                const opt = document.createElement('option');
-                opt.value = t.therapist_code;
-                const bathCapable = t.is_bathing_therapist ? ' [Bathing Capable]' : '';
-                opt.textContent = `${t.therapist_name} (${t.therapist_code}) — Grade: ${t.grade} — Gender: ${t.gender}${bathCapable}`;
-                select.appendChild(opt);
-            });
+            renderDropdownOptions(therapists);
         }
 
-        function onReplacementTherapistSelected() {
+        function renderDropdownOptions(therapists) {
+            const listContainer = document.getElementById('emDropdownList');
+            if (!listContainer) return;
+
+            const searchInput = document.getElementById('emDropdownSearch');
+            const query = searchInput ? searchInput.value.trim().toLowerCase() : '';
+            const currentSelected = document.getElementById('emReplacementDropdown')?.value || '';
+
+            const filtered = (therapists || []).filter(t => {
+                if (!query) return true;
+                const name = (t.therapist_name || '').toLowerCase();
+                const code = (t.therapist_code || '').toLowerCase();
+                const grade = (t.grade || '').toLowerCase();
+                return name.includes(query) || code.includes(query) || grade.includes(query);
+            });
+
+            if (filtered.length === 0) {
+                listContainer.innerHTML = '<div style="padding: 16px; text-align: center; color: #94a3b8; font-size: 12px;">No matching therapists found.</div>';
+                return;
+            }
+
+            listContainer.innerHTML = filtered.map(t => {
+                const isSelected = (t.therapist_code === currentSelected);
+                const isBathing = !!t.is_bathing_therapist;
+                const gradeName = t.grade || 'General';
+
+                let gradeClass = 'em-opt-grade-gen';
+                if (gradeName.toLowerCase().includes('senior')) {
+                    gradeClass = 'em-opt-grade-senior';
+                } else if (gradeName.toLowerCase().includes('junior')) {
+                    gradeClass = 'em-opt-grade-junior';
+                } else if (gradeName.toLowerCase().includes('trainee')) {
+                    gradeClass = 'em-opt-grade-trainee';
+                }
+
+                const bathBadge = isBathing ? '<span class="em-opt-bathing">★ Bathing</span>' : '';
+                const selectedClass = isSelected ? 'selected' : '';
+
+                return `
+                    <div class="em-opt-item ${selectedClass}" onclick="chooseReplacement('${t.therapist_code}')">
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            ${isSelected ? '<i class="fas fa-check" style="color: #10b981; font-size: 11px;"></i>' : ''}
+                            <span style="font-weight: 600; color: #1e293b; font-size: 13.5px;">${escapeHtml(t.therapist_name)}</span>
+                            <span style="font-size: 11px; background: #f1f5f9; color: #475569; padding: 1px 6px; border-radius: 4px; font-weight: 600;">
+                                ${escapeHtml(t.therapist_code)}
+                            </span>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 6px;">
+                            <span class="${gradeClass}">${escapeHtml(gradeName)}</span>
+                            ${bathBadge}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function filterDropdownOptions() {
+            renderDropdownOptions(availableReplacementTherapists || []);
+        }
+
+        function toggleReplacementMenu(e) {
+            e.stopPropagation();
+            const menu = document.getElementById('emDropdownMenu');
+            const trigger = document.getElementById('emSelectTrigger');
+            const chevron = document.getElementById('emChevron');
+            if (!menu) return;
+
+            const isOpen = (menu.style.display === 'block');
+            if (isOpen) {
+                closeReplacementMenu();
+            } else {
+                menu.style.display = 'block';
+                if (trigger) trigger.classList.add('active');
+                if (chevron) chevron.style.transform = 'rotate(180deg)';
+                const search = document.getElementById('emDropdownSearch');
+                if (search) {
+                    search.focus();
+                }
+            }
+        }
+
+        function closeReplacementMenu() {
+            const menu = document.getElementById('emDropdownMenu');
+            const trigger = document.getElementById('emSelectTrigger');
+            const chevron = document.getElementById('emChevron');
+            if (menu) menu.style.display = 'none';
+            if (trigger) trigger.classList.remove('active');
+            if (chevron) chevron.style.transform = 'rotate(0deg)';
+        }
+
+        function chooseReplacement(code) {
+            document.getElementById('emReplacementDropdown').value = code;
+            const t = (availableReplacementTherapists || []).find(th => th.therapist_code === code);
+
+            const display = document.getElementById('emSelectedDisplay');
+            const clearBtn = document.getElementById('emClearBtn');
+
+            if (t && display) {
+                const isBathing = !!t.is_bathing_therapist;
+                const gradeName = t.grade || 'General';
+                let gradeClass = 'em-opt-grade-gen';
+                if (gradeName.toLowerCase().includes('senior')) {
+                    gradeClass = 'em-opt-grade-senior';
+                } else if (gradeName.toLowerCase().includes('junior')) {
+                    gradeClass = 'em-opt-grade-junior';
+                } else if (gradeName.toLowerCase().includes('trainee')) {
+                    gradeClass = 'em-opt-grade-trainee';
+                }
+
+                const bathBadge = isBathing ? '<span class="em-opt-bathing">★ Bathing Capable</span>' : '';
+
+                display.innerHTML = `
+                    <span style="font-weight: 700; color: #1e293b; font-size: 13.5px;">${escapeHtml(t.therapist_name)}</span>
+                    <span style="font-size: 11px; background: #e2e8f0; color: #334155; padding: 1px 6px; border-radius: 4px; font-weight: 600;">${escapeHtml(t.therapist_code)}</span>
+                    <span class="${gradeClass}">${escapeHtml(gradeName)}</span>
+                    ${bathBadge}
+                `;
+            }
+
+            if (clearBtn) clearBtn.style.display = 'inline-block';
+            closeReplacementMenu();
             updateBathingOptions();
         }
+
+        function clearReplacementChoice(e) {
+            if (e) e.stopPropagation();
+            const input = document.getElementById('emReplacementDropdown');
+            if (input) input.value = '';
+
+            const display = document.getElementById('emSelectedDisplay');
+            if (display) {
+                display.innerHTML = '<span style="color: #94a3b8; font-size: 13.5px;">-- Choose Replacement Therapist --</span>';
+            }
+
+            const clearBtn = document.getElementById('emClearBtn');
+            if (clearBtn) clearBtn.style.display = 'none';
+
+            closeReplacementMenu();
+            updateBathingOptions();
+        }
+
+        // Close dropdown when clicking anywhere outside
+        document.addEventListener('click', function(e) {
+            const selectBox = document.getElementById('emSelectBox');
+            if (selectBox && !selectBox.contains(e.target)) {
+                closeReplacementMenu();
+            }
+        });
 
         function updateBathingOptions() {
             const container = document.getElementById('emBathingRadioGroup');

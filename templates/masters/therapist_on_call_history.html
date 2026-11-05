@@ -1,0 +1,711 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ therapist.therapist_name }} - Treatment & Scheduling History - AVCRI</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="{% static 'css/dashboards_nav.css' %}">
+    <style>
+        .main-content {
+            margin-left: 280px;
+            padding: 24px 30px;
+            min-height: 100vh;
+            background-color: #f8f9fa;
+            transition: margin-left 0.3s ease;
+        }
+        @media (max-width: 768px) {
+            .main-content {
+                margin-left: 0;
+                padding: 16px;
+            }
+        }
+        .stat-card {
+            border-radius: 12px;
+            border: none;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.06);
+            transition: transform 0.2s, box-shadow 0.2s;
+            background: #fff;
+        }
+        .stat-card:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+        }
+        .stat-icon {
+            width: 48px;
+            height: 48px;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.4rem;
+        }
+        .day-group-card {
+            border-radius: 10px;
+            border: 1px solid #e9ecef;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.04);
+            margin-bottom: 20px;
+            background: #fff;
+            overflow: hidden;
+        }
+        .day-group-header {
+            background: #f8f9fa;
+            border-bottom: 1px solid #e9ecef;
+            padding: 12px 20px;
+        }
+        .nav-tabs .nav-link {
+            font-weight: 500;
+            color: #495057;
+            padding: 10px 18px;
+        }
+        .nav-tabs .nav-link.active {
+            font-weight: 700;
+            color: #6f42c1;
+            border-bottom: 3px solid #6f42c1;
+        }
+        .badge-purple {
+            background-color: #6f42c1;
+            color: #fff;
+        }
+    </style>
+</head>
+<body>
+    {% include 'dashboards/nav.html' %}
+
+    <div class="main-content">
+        <div class="container-fluid px-0">
+
+            <!-- Breadcrumb & Top Bar -->
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <div>
+                    <nav aria-label="breadcrumb">
+                        <ol class="breadcrumb mb-1">
+                            <li class="breadcrumb-item"><a href="{% url 'master_management_dashboard' %}">Masters</a></li>
+                            <li class="breadcrumb-item"><a href="{% url 'therapist_master_manage' %}">Therapist Master</a></li>
+                            <li class="breadcrumb-item active" aria-current="page">History</li>
+                        </ol>
+                    </nav>
+                    <h2 class="mb-0">
+                        <i class="fas fa-history text-purple me-2" style="color: #6f42c1;"></i>
+                        {{ therapist.therapist_name }}
+                        <span class="badge bg-secondary ms-2" style="font-size: 0.9rem;">{{ therapist.therapist_code }}</span>
+                        {% if therapist.is_on_call %}
+                            <span class="badge badge-purple ms-1" style="font-size: 0.85rem;">
+                                <i class="fas fa-phone-volume me-1"></i>On-Call Therapist
+                            </span>
+                        {% else %}
+                            <span class="badge bg-light text-dark border ms-1" style="font-size: 0.85rem;">Regular Therapist</span>
+                        {% endif %}
+                    </h2>
+                </div>
+                <div class="d-flex gap-2">
+                    <a href="{% url 'therapist_on_call_history_export_excel' therapist.pk %}" class="btn btn-success">
+                        <i class="fas fa-file-excel me-1"></i>Export to Excel
+                    </a>
+                    <a href="{% url 'therapist_master_update' therapist.pk %}" class="btn btn-outline-primary">
+                        <i class="fas fa-edit me-1"></i>Edit Therapist
+                    </a>
+                    <a href="{% url 'therapist_master_manage' %}" class="btn btn-outline-secondary">
+                        <i class="fas fa-arrow-left me-1"></i>Back to List
+                    </a>
+                </div>
+            </div>
+
+            {% if messages %}
+            {% for message in messages %}
+            <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
+                {{ message }}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+            {% endfor %}
+            {% endif %}
+
+            <!-- Therapist Summary Header Card -->
+            <div class="card mb-4 border-0 shadow-sm" style="border-radius: 12px; background: linear-gradient(135deg, #ffffff 0%, #f9f7fd 100%); border-left: 5px solid #6f42c1 !important;">
+                <div class="card-body p-3">
+                    <div class="row align-items-center">
+                        <div class="col-md-8">
+                            <div class="d-flex flex-wrap align-items-center gap-3">
+                                <div>
+                                    <small class="text-muted d-block">Employee Code</small>
+                                    <strong><code>{{ therapist.employee_code|default:"-" }}</code></strong>
+                                </div>
+                                <div class="border-start ps-3">
+                                    <small class="text-muted d-block">Grade</small>
+                                    <span class="badge bg-info text-dark">{{ therapist.therapist_grade.name|default:"Not Assigned" }}</span>
+                                </div>
+                                <div class="border-start ps-3">
+                                    <small class="text-muted d-block">Gender</small>
+                                    <span class="badge bg-primary">{{ therapist.therapist_gender|default:"-" }}</span>
+                                </div>
+                                <div class="border-start ps-3">
+                                    <small class="text-muted d-block">Capabilities</small>
+                                    {% if therapist.is_bathing_therapist %}<span class="badge bg-success me-1"><i class="fas fa-shower me-1"></i>Bathing</span>{% endif %}
+                                    {% if therapist.is_helping_therapist %}<span class="badge bg-warning text-dark"><i class="fas fa-user-shield me-1"></i>Helping</span>{% endif %}
+                                </div>
+                                <div class="border-start ps-3">
+                                    <small class="text-muted d-block">System Status</small>
+                                    {% if therapist.is_active %}
+                                        <span class="badge bg-success">Active</span>
+                                    {% else %}
+                                        <span class="badge bg-danger">Disabled</span>
+                                    {% endif %}
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- On-Call Status & Toggle -->
+                        <div class="col-md-4 text-md-end mt-2 mt-md-0">
+                            <div class="d-inline-flex flex-column align-items-md-end">
+                                <small class="text-muted d-block mb-1">On-Call Scheduling Status</small>
+                                {% if therapist.is_on_call %}
+                                    {% if therapist.on_call_status %}
+                                        <div class="d-flex align-items-center gap-2">
+                                            <span class="badge bg-success px-3 py-2" style="font-size: 0.95rem;">
+                                                <i class="fas fa-check-circle me-1"></i>TURNED ON (Available)
+                                            </span>
+                                            <button type="button" class="btn btn-sm btn-outline-warning"
+                                                    onclick="openOnCallModal('{{ therapist.pk }}', '{{ therapist.therapist_name|escapejs }}', true)">
+                                                <i class="fas fa-toggle-off me-1"></i>Turn OFF
+                                            </button>
+                                        </div>
+                                        <small class="text-success mt-1 d-block"><i class="fas fa-circle me-1" style="font-size: 0.5rem;"></i>Currently eligible for scheduling</small>
+                                    {% else %}
+                                        <div class="d-flex align-items-center gap-2">
+                                            <span class="badge bg-secondary px-3 py-2" style="font-size: 0.95rem;">
+                                                <i class="fas fa-pause-circle me-1"></i>TURNED OFF (Standby)
+                                            </span>
+                                            <button type="button" class="btn btn-sm btn-success"
+                                                    onclick="openOnCallModal('{{ therapist.pk }}', '{{ therapist.therapist_name|escapejs }}', false)">
+                                                <i class="fas fa-toggle-on me-1"></i>Turn ON
+                                            </button>
+                                        </div>
+                                        <small class="text-muted mt-1 d-block"><i class="fas fa-circle me-1" style="font-size: 0.5rem;"></i>Standby (Excluded from scheduling)</small>
+                                    {% endif %}
+                                {% else %}
+                                    <div class="d-flex align-items-center gap-2">
+                                        <span class="badge bg-light text-dark border px-3 py-2">Regular Therapist</span>
+                                        <button type="button" class="btn btn-sm text-white" style="background-color: #6f42c1;"
+                                                onclick="openOnCallModal('{{ therapist.pk }}', '{{ therapist.therapist_name|escapejs }}', false)">
+                                            <i class="fas fa-phone-volume me-1"></i>Designate On-Call
+                                        </button>
+                                    </div>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Metric KPI Cards -->
+            <div class="row g-3 mb-4">
+                <div class="col-md-2 col-sm-4 col-6">
+                    <div class="stat-card p-3">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div>
+                                <small class="text-muted d-block fw-semibold">Days Scheduled</small>
+                                <h3 class="mb-0 text-dark fw-bold">{{ total_days_count }}</h3>
+                                <small class="text-muted">Distinct dates</small>
+                            </div>
+                            <div class="stat-icon bg-primary bg-opacity-10 text-primary">
+                                <i class="fas fa-calendar-day"></i>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-md-2 col-sm-4 col-6">
+                    <div class="stat-card p-3">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div>
+                                <small class="text-muted d-block fw-semibold">Total Sessions</small>
+                                <h3 class="mb-0 text-dark fw-bold">{{ total_sessions_count }}</h3>
+                                <small class="text-muted">All bookings</small>
+                            </div>
+                            <div class="stat-icon bg-purple bg-opacity-10 text-purple" style="color: #6f42c1;">
+                                <i class="fas fa-spa"></i>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-md-3 col-sm-4 col-6">
+                    <div class="stat-card p-3">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div>
+                                <small class="text-muted d-block fw-semibold">Completed Treatments</small>
+                                <h3 class="mb-0 text-success fw-bold">{{ completed_sessions_count }}</h3>
+                                <small class="text-muted">Across {{ completed_days_count }} working days</small>
+                            </div>
+                            <div class="stat-icon bg-success bg-opacity-10 text-success">
+                                <i class="fas fa-check-double"></i>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-md-2 col-sm-4 col-6">
+                    <div class="stat-card p-3">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div>
+                                <small class="text-muted d-block fw-semibold">Upcoming / Booked</small>
+                                <h3 class="mb-0 text-info fw-bold">{{ booked_sessions_count }}</h3>
+                                <small class="text-muted">Scheduled slots</small>
+                            </div>
+                            <div class="stat-icon bg-info bg-opacity-10 text-info">
+                                <i class="fas fa-clock"></i>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-md-3 col-sm-4 col-6">
+                    <div class="stat-card p-3">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div>
+                                <small class="text-muted d-block fw-semibold">Canceled Sessions</small>
+                                <h3 class="mb-0 text-danger fw-bold">{{ canceled_sessions_count }}</h3>
+                                <small class="text-muted">Canceled / Released</small>
+                            </div>
+                            <div class="stat-icon bg-danger bg-opacity-10 text-danger">
+                                <i class="fas fa-ban"></i>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Date and Status Filter Section -->
+            <div class="card mb-4 border-0 shadow-sm" style="border-radius: 12px;">
+                <div class="card-body p-3">
+                    <form method="get" class="row g-2 align-items-end">
+                        <div class="col-md-3">
+                            <label class="form-label small fw-bold text-muted mb-1">From Date</label>
+                            <input type="date" name="start_date" class="form-control form-control-sm" value="{{ start_date }}">
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label small fw-bold text-muted mb-1">To Date</label>
+                            <input type="date" name="end_date" class="form-control form-control-sm" value="{{ end_date }}">
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label small fw-bold text-muted mb-1">Booking Status</label>
+                            <select name="status" class="form-select form-select-sm">
+                                <option value="ALL" {% if status_filter == 'ALL' or not status_filter %}selected{% endif %}>All Statuses</option>
+                                <option value="COMPLETED" {% if status_filter == 'COMPLETED' %}selected{% endif %}>Completed Only</option>
+                                <option value="BOOKED" {% if status_filter == 'BOOKED' %}selected{% endif %}>Booked / Upcoming Only</option>
+                                <option value="CANCELED" {% if status_filter == 'CANCELED' %}selected{% endif %}>Canceled Only</option>
+                            </select>
+                        </div>
+                        <div class="col-md-3 d-flex gap-2">
+                            <button type="submit" class="btn btn-sm btn-primary flex-grow-1">
+                                <i class="fas fa-filter me-1"></i>Filter
+                            </button>
+                            <a href="{% url 'therapist_on_call_history' therapist.pk %}" class="btn btn-sm btn-outline-secondary">
+                                Reset
+                            </a>
+                        </div>
+                    </form>
+                </div>
+            </div>
+
+            <!-- Main Tabs: Daily Breakdown, Flat Table, Audit Logs, Deputations -->
+            <ul class="nav nav-tabs mb-4" id="historyTab" role="tablist">
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link active" id="daily-tab" data-bs-toggle="tab" data-bs-target="#daily-content" type="button" role="tab">
+                        <i class="fas fa-calendar-alt me-2"></i>Daily Schedule Breakdown ({{ total_days_count }} Days)
+                    </button>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="flat-tab" data-bs-toggle="tab" data-bs-target="#flat-content" type="button" role="tab">
+                        <i class="fas fa-list me-2"></i>All Treatment Sessions ({{ total_sessions_count }})
+                    </button>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="oncall-logs-tab" data-bs-toggle="tab" data-bs-target="#oncall-logs-content" type="button" role="tab">
+                        <i class="fas fa-phone-volume me-2"></i>On-Call Turn ON/OFF Logs ({{ on_call_logs|length }})
+                    </button>
+                </li>
+                {% if deputations %}
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="deputations-tab" data-bs-toggle="tab" data-bs-target="#deputations-content" type="button" role="tab">
+                        <i class="fas fa-plane-departure me-2"></i>Deputations ({{ deputations|length }})
+                    </button>
+                </li>
+                {% endif %}
+            </ul>
+
+            <div class="tab-content" id="historyTabContent">
+
+                <!-- TAB 1: DAILY BREAKDOWN -->
+                <div class="tab-pane fade show active" id="daily-content" role="tabpanel">
+                    {% if daily_breakdown %}
+                        {% for day in daily_breakdown %}
+                        <div class="day-group-card">
+                            <div class="day-group-header d-flex justify-content-between align-items-center">
+                                <div class="d-flex align-items-center gap-3">
+                                    <div class="stat-icon bg-purple bg-opacity-10 text-purple" style="width: 40px; height: 40px; color: #6f42c1;">
+                                        <i class="fas fa-calendar-day"></i>
+                                    </div>
+                                    <div>
+                                        <h5 class="mb-0 fw-bold">{{ day.formatted_date }} <span class="text-muted fw-normal">({{ day.day_name }})</span></h5>
+                                        <small class="text-muted">
+                                            {{ day.session_count }} session{% if day.session_count > 1 %}s{% endif %}
+                                            {% if day.completed_count %} &bull; <span class="text-success fw-bold">{{ day.completed_count }} completed</span>{% endif %}
+                                            {% if day.booked_count %} &bull; <span class="text-info fw-bold">{{ day.booked_count }} booked</span>{% endif %}
+                                            {% if day.canceled_count %} &bull; <span class="text-danger fw-bold">{{ day.canceled_count }} canceled</span>{% endif %}
+                                        </small>
+                                    </div>
+                                </div>
+                                <span class="badge bg-secondary rounded-pill px-3 py-2">
+                                    {{ day.session_count }} Treatment{% if day.session_count > 1 %}s{% endif %}
+                                </span>
+                            </div>
+
+                            <div class="table-responsive">
+                                <table class="table table-hover align-middle mb-0">
+                                    <thead class="table-light">
+                                        <tr>
+                                            <th style="width: 140px;">Time Slot</th>
+                                            <th>Therapy / Treatment</th>
+                                            <th>Patient Name & Reg No</th>
+                                            <th>Room</th>
+                                            <th>Assignment Type</th>
+                                            <th>Status</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for item in day.items %}
+                                        <tr>
+                                            <td>
+                                                <span class="badge bg-light text-dark border">
+                                                    <i class="fas fa-clock me-1 text-primary"></i>{{ item.slot_name }}
+                                                </span>
+                                            </td>
+                                            <td>
+                                                <strong>{{ item.therapy_name }}</strong>
+                                            </td>
+                                            <td>
+                                                <div class="fw-bold">{{ item.patient_name }}</div>
+                                                <small class="text-muted">
+                                                    Reg: <code>{{ item.patient_reg_no }}</code>
+                                                    {% if item.patient and item.patient.pat_room_no %} &bull; Room: {{ item.patient.pat_room_no }}{% endif %}
+                                                </small>
+                                            </td>
+                                            <td>
+                                                {% if item.room and item.room != '-' %}
+                                                    <span class="badge bg-info bg-opacity-25 text-dark border">
+                                                        <i class="fas fa-door-open me-1"></i>{{ item.room }}
+                                                    </span>
+                                                {% else %}
+                                                    <span class="text-muted">-</span>
+                                                {% endif %}
+                                            </td>
+                                            <td>
+                                                {% if item.is_bathing %}
+                                                    <span class="badge bg-success"><i class="fas fa-shower me-1"></i>Bathing</span>
+                                                {% elif item.is_helping %}
+                                                    <span class="badge bg-warning text-dark"><i class="fas fa-user-shield me-1"></i>Helping</span>
+                                                {% else %}
+                                                    <span class="badge bg-light text-secondary border">Primary</span>
+                                                {% endif %}
+                                            </td>
+                                            <td>
+                                                {% if item.status == 'COMPLETED' %}
+                                                    <span class="badge bg-success"><i class="fas fa-check-circle me-1"></i>Completed</span>
+                                                {% elif item.status == 'BOOKED' %}
+                                                    <span class="badge bg-primary"><i class="fas fa-calendar-check me-1"></i>Booked</span>
+                                                {% elif item.status == 'CANCELED' %}
+                                                    <span class="badge bg-danger"><i class="fas fa-times-circle me-1"></i>Canceled</span>
+                                                {% else %}
+                                                    <span class="badge bg-secondary">{{ item.status }}</span>
+                                                {% endif %}
+                                            </td>
+                                        </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    {% else %}
+                        <div class="card p-5 text-center text-muted border-0 shadow-sm" style="border-radius: 12px;">
+                            <i class="fas fa-calendar-times fa-3x mb-3 text-secondary"></i>
+                            <h5>No Scheduling or Treatment Records Found</h5>
+                            <p class="mb-0">This therapist does not have any recorded treatments for the selected filter criteria.</p>
+                        </div>
+                    {% endif %}
+                </div>
+
+                <!-- TAB 2: FLAT TABLE VIEW -->
+                <div class="tab-pane fade" id="flat-content" role="tabpanel">
+                    <div class="card border-0 shadow-sm" style="border-radius: 12px;">
+                        <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center">
+                            <h5 class="mb-0 fw-bold">All Treatment Bookings</h5>
+                            <span class="badge bg-primary">{{ total_sessions_count }} Sessions</span>
+                        </div>
+                        <div class="card-body p-0">
+                            <div class="table-responsive">
+                                <table class="table table-hover align-middle mb-0">
+                                    <thead class="table-dark">
+                                        <tr>
+                                            <th>#</th>
+                                            <th>Date</th>
+                                            <th>Day</th>
+                                            <th>Time Slot</th>
+                                            <th>Therapy</th>
+                                            <th>Patient Reg No</th>
+                                            <th>Patient Name</th>
+                                            <th>Room</th>
+                                            <th>Type</th>
+                                            <th>Status</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for day in daily_breakdown %}
+                                            {% for item in day.items %}
+                                            <tr>
+                                                <td class="text-muted">{{ forloop.parentloop.counter }}.{{ forloop.counter }}</td>
+                                                <td><strong>{{ item.booking.date|date:"d/m/Y" }}</strong></td>
+                                                <td><span class="text-muted">{{ day.day_name|slice:":3" }}</span></td>
+                                                <td><code>{{ item.slot_name }}</code></td>
+                                                <td>{{ item.therapy_name }}</td>
+                                                <td><code>{{ item.patient_reg_no }}</code></td>
+                                                <td>{{ item.patient_name }}</td>
+                                                <td>{{ item.room }}</td>
+                                                <td>
+                                                    {% if item.is_bathing %}<span class="badge bg-success">Bathing</span>
+                                                    {% elif item.is_helping %}<span class="badge bg-warning text-dark">Helping</span>
+                                                    {% else %}<span class="badge bg-light text-secondary border">Primary</span>{% endif %}
+                                                </td>
+                                                <td>
+                                                    {% if item.status == 'COMPLETED' %}
+                                                        <span class="badge bg-success">Completed</span>
+                                                    {% elif item.status == 'BOOKED' %}
+                                                        <span class="badge bg-primary">Booked</span>
+                                                    {% elif item.status == 'CANCELED' %}
+                                                        <span class="badge bg-danger">Canceled</span>
+                                                    {% else %}
+                                                        <span class="badge bg-secondary">{{ item.status }}</span>
+                                                    {% endif %}
+                                                </td>
+                                            </tr>
+                                            {% endfor %}
+                                        {% empty %}
+                                            <tr>
+                                                <td colspan="10" class="text-center py-4 text-muted">
+                                                    No bookings found.
+                                                </td>
+                                            </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- TAB 3: ON-CALL STATUS AUDIT LOG -->
+                <div class="tab-pane fade" id="oncall-logs-content" role="tabpanel">
+                    <div class="card border-0 shadow-sm" style="border-radius: 12px;">
+                        <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center">
+                            <div>
+                                <h5 class="mb-0 fw-bold">
+                                    <i class="fas fa-phone-volume text-purple me-2" style="color: #6f42c1;"></i>On-Call Activation & Standby Audit History
+                                </h5>
+                                <small class="text-muted">History of when this therapist was turned ON (available for scheduling) or turned OFF (standby).</small>
+                            </div>
+                            <button type="button" class="btn btn-sm text-white" style="background-color: #6f42c1;"
+                                    onclick="openOnCallModal('{{ therapist.pk }}', '{{ therapist.therapist_name|escapejs }}', {% if therapist.on_call_status %}true{% else %}false{% endif %})">
+                                <i class="fas fa-toggle-on me-1"></i>Toggle Current Status
+                            </button>
+                        </div>
+                        <div class="card-body p-0">
+                            <div class="table-responsive">
+                                <table class="table table-hover align-middle mb-0">
+                                    <thead class="table-light">
+                                        <tr>
+                                            <th>Timestamp</th>
+                                            <th>Action / Status</th>
+                                            <th>Changed By</th>
+                                            <th>Remarks / Reason</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for log in on_call_logs %}
+                                        <tr>
+                                            <td>
+                                                <strong>{{ log.created_at|date:"d M Y, H:i" }}</strong>
+                                                <small class="text-muted d-block">{{ log.created_at|timesince }} ago</small>
+                                            </td>
+                                            <td>
+                                                {% if log.status == 'turned_on' %}
+                                                    <span class="badge bg-success px-2 py-1">
+                                                        <i class="fas fa-toggle-on me-1"></i>Turned ON (Available)
+                                                    </span>
+                                                {% else %}
+                                                    <span class="badge bg-secondary px-2 py-1">
+                                                        <i class="fas fa-toggle-off me-1"></i>Turned OFF (Standby)
+                                                    </span>
+                                                {% endif %}
+                                            </td>
+                                            <td>
+                                                {% if log.changed_by %}
+                                                    <strong>{{ log.changed_by.get_full_name|default:log.changed_by.username }}</strong>
+                                                    <small class="text-muted d-block">Role: {{ log.changed_by.role }}</small>
+                                                {% else %}
+                                                    <span class="text-muted">System</span>
+                                                {% endif %}
+                                            </td>
+                                            <td>
+                                                {{ log.remarks|default:"-" }}
+                                            </td>
+                                        </tr>
+                                        {% empty %}
+                                        <tr>
+                                            <td colspan="4" class="text-center py-4 text-muted">
+                                                No on-call status change logs recorded yet.
+                                            </td>
+                                        </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- TAB 4: DEPUTATIONS (IF ANY) -->
+                {% if deputations %}
+                <div class="tab-pane fade" id="deputations-content" role="tabpanel">
+                    <div class="card border-0 shadow-sm" style="border-radius: 12px;">
+                        <div class="card-header bg-white py-3">
+                            <h5 class="mb-0 fw-bold">
+                                <i class="fas fa-plane-departure text-warning me-2"></i>Deputation History
+                            </h5>
+                        </div>
+                        <div class="card-body p-0">
+                            <div class="table-responsive">
+                                <table class="table table-hover align-middle mb-0">
+                                    <thead class="table-light">
+                                        <tr>
+                                            <th>Destination</th>
+                                            <th>Period</th>
+                                            <th>Duration</th>
+                                            <th>Assigned Doctor</th>
+                                            <th>Approval Status</th>
+                                            <th>Approved By</th>
+                                            <th>Remarks</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for dep in deputations %}
+                                        <tr>
+                                            <td><strong>{{ dep.destination }}</strong></td>
+                                            <td>{{ dep.start_date|date:"d/m/Y" }} &rarr; {{ dep.end_date|date:"d/m/Y" }}</td>
+                                            <td><span class="badge bg-light text-dark border">{{ dep.duration_days }} days</span></td>
+                                            <td>{{ dep.assigned_doctor_name|default:"-" }}</td>
+                                            <td>
+                                                {% if dep.status == 'approved' %}
+                                                    <span class="badge bg-success">Approved</span>
+                                                {% elif dep.status == 'pending' %}
+                                                    <span class="badge bg-warning text-dark">Pending</span>
+                                                {% else %}
+                                                    <span class="badge bg-danger">Rejected</span>
+                                                {% endif %}
+                                            </td>
+                                            <td>
+                                                {% if dep.approved_by %}
+                                                    {{ dep.approved_by.get_full_name|default:dep.approved_by.username }}
+                                                {% else %}
+                                                    -
+                                                {% endif %}
+                                            </td>
+                                            <td>{{ dep.remarks|default:"-" }}</td>
+                                        </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+
+            </div>
+        </div>
+    </div>
+
+    <!-- Toggle On-Call Modal -->
+    <div class="modal fade" id="onCallModal" tabindex="-1" aria-labelledby="onCallModalLabel" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <form id="onCallToggleForm" method="post" action="">
+                    {% csrf_token %}
+                    <input type="hidden" name="status" id="oncall_target_status">
+                    <div class="modal-header">
+                        <h5 class="modal-title" id="onCallModalLabel">
+                            <i class="fas fa-phone-volume text-purple me-2" style="color: #6f42c1;"></i>Manage On-Call Status
+                        </h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="alert mb-3" id="oncall_alert_box">
+                            <div class="fw-bold mb-1" id="oncall_therapist_display"></div>
+                            <div id="oncall_action_explanation" class="small"></div>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">Remarks / Reason (Optional)</label>
+                            <input type="text" class="form-control" name="remarks" id="oncall_remarks"
+                                   placeholder="e.g. Called in for emergency coverage, Standby for shift, Relief duty...">
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                        <button type="submit" class="btn text-white" id="oncall_submit_btn">
+                            Confirm Change
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="{% static 'js/dashboards_nav.js' %}"></script>
+
+    <script>
+    function openOnCallModal(therapistId, therapistName, currentlyOn) {
+        const form = document.getElementById('onCallToggleForm');
+        form.action = `/Masters/therapists/${therapistId}/toggle-on-call/`;
+        
+        const targetStatusInput = document.getElementById('oncall_target_status');
+        const alertBox = document.getElementById('oncall_alert_box');
+        const nameDisplay = document.getElementById('oncall_therapist_display');
+        const explanation = document.getElementById('oncall_action_explanation');
+        const submitBtn = document.getElementById('oncall_submit_btn');
+        document.getElementById('oncall_remarks').value = '';
+
+        nameDisplay.textContent = `Therapist: ${therapistName}`;
+
+        if (currentlyOn) {
+            targetStatusInput.value = 'off';
+            alertBox.className = 'alert alert-warning mb-3';
+            explanation.innerHTML = 'You are about to <strong>Turn OFF</strong> this on-call therapist. When turned OFF, this therapist will be on standby and <strong>excluded from scheduling</strong> until turned back ON.';
+            submitBtn.className = 'btn btn-warning';
+            submitBtn.innerHTML = '<i class="fas fa-toggle-off me-1"></i> Turn OFF (Standby)';
+        } else {
+            targetStatusInput.value = 'on';
+            alertBox.className = 'alert alert-success mb-3';
+            explanation.innerHTML = 'You are about to <strong>Turn ON</strong> this on-call therapist. When turned ON, this therapist will be <strong>available for scheduling</strong> and therapy allocations.';
+            submitBtn.className = 'btn btn-success';
+            submitBtn.innerHTML = '<i class="fas fa-toggle-on me-1"></i> Turn ON (Available)';
+        }
+
+        const modal = new bootstrap.Modal(document.getElementById('onCallModal'));
+        modal.show();
+    }
+    </script>
+</body>
+</html>

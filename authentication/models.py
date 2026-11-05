@@ -282,7 +282,7 @@ class TherapistProfile(models.Model):
     """Profile model for Therapist users"""
     user = models.OneToOneField(CustomUser, on_delete=models.CASCADE, related_name='therapist_profile')
     therapist_code = models.CharField(max_length=20, unique=True, verbose_name="Therapist Code")
-    employee_code = models.CharField(max_length=50, unique=True, verbose_name="Employee Code")
+    employee_code = models.CharField(max_length=50, unique=True, null=True, blank=True, verbose_name="Employee Code")
     therapist_grade = models.CharField(max_length=100, verbose_name="Therapist Grade")
     department = models.CharField(max_length=100, null=True, blank=True, verbose_name="Department")
     specialization = models.CharField(max_length=200, null=True, blank=True, verbose_name="Specialization")
@@ -297,6 +297,11 @@ class TherapistProfile(models.Model):
         verbose_name = "Therapist Profile"
         verbose_name_plural = "Therapist Profiles"
         ordering = ['therapist_code']
+
+    def save(self, *args, **kwargs):
+        if not self.employee_code:
+            self.employee_code = None
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f"{self.user.get_full_name()} ({self.therapist_code})"

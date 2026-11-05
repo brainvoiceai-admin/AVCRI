@@ -1764,6 +1764,10 @@ def allocate_therapists(date, time_slot, therapy_requirements, last_therapists=N
         t_code = getattr(t, 'therapist_code', None)
         if t_code and t_code in omitted_codes:
             return True
+        # On-call check: exclude on-call therapists who are turned OFF or outside date range
+        from masters.models import is_therapist_on_call_active
+        if not is_therapist_on_call_active(t, date):
+            return True
         return False
 
     def get_therapist_gender(t):
@@ -2276,6 +2280,10 @@ def allocate_therapists_with_grade_substitution(date, time_slot, therapy_require
             return True
         t_code = getattr(t, 'therapist_code', None)
         if t_code and t_code in omitted_codes:
+            return True
+        # On-call check: exclude on-call therapists who are turned OFF or outside date range
+        from masters.models import is_therapist_on_call_active
+        if not is_therapist_on_call_active(t, date):
             return True
         return False
 

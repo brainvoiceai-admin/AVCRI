@@ -1103,6 +1103,10 @@ def allocate_therapists(
         # Treatment omission check: exclude therapists who omitted this treatment
         if (t_id and t_id in omitted_ids) or (getattr(t, 'therapist_code', None) in omitted_codes):
             return True
+        # On-call check: exclude on-call therapists who are turned OFF or outside date range
+        from masters.models import is_therapist_on_call_active
+        if not is_therapist_on_call_active(t, date):
+            return True
         return False
 
     def get_therapist_gender(t):
@@ -1767,6 +1771,10 @@ def assign_continuity_therapists_pass1(booking, allocation, target_date, locked_
         if is_therapist_deputed(t, target_date):
             return True
         if is_therapist_omitted_for_treatment(t, current_therapy_name or therapy_code):
+            return True
+        # On-call check: exclude on-call therapists who are turned OFF or outside date range
+        from masters.models import is_therapist_on_call_active
+        if not is_therapist_on_call_active(t, target_date):
             return True
         return False
     
