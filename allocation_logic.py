@@ -312,6 +312,10 @@ def allocate_therapists(date, time_slot, therapy_requirements, last_therapists=N
         from masters.models import is_therapist_deputed
         if is_therapist_deputed(t, date):
             return True
+        # On-call check: if therapist is on-call and turned OFF or outside date range (e.g. Oct 10 to Oct 25)
+        from masters.models import is_therapist_on_call_active
+        if not is_therapist_on_call_active(t, date):
+            return True
         return False
 
     total_required = sum(v for v in grade_map.values() if v > 0)

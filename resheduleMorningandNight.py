@@ -271,6 +271,12 @@ def get_emergency_leave_sets_for_date(target_date, slot=None):
             em_ids.update(deputed_ids)
         except Exception as dep_err:
             logger.debug("Error adding deputed therapists to leave sets: %s", dep_err)
+        # Include on-call therapists who are currently turned OFF
+        try:
+            from masters.models import get_inactive_on_call_therapist_ids
+            em_ids.update(get_inactive_on_call_therapist_ids(target_date))
+        except Exception as oncall_err:
+            logger.debug("Error adding inactive on-call therapists to leave sets: %s", oncall_err)
         return em_ids, em_codes
     except Exception as e:
         logger.exception("Error fetching EmergencyLeave: %s", e)

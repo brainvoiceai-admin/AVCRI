@@ -17,6 +17,7 @@ from .models import (
     NurseMaster, IngredientMaster,
     ShiftMaster, ShiftSlotMapping, TherapistShiftMapping,
     TherapistDeputation, is_therapist_deputed, get_deputed_therapist_ids_for_date,
+    TherapistOnCallLog, get_inactive_on_call_therapist_ids,
     can_request_deputation, can_approve_deputation,
     TherapistTreatmentOmission, is_therapist_omitted_for_treatment,
     get_omitted_therapist_ids_for_treatment, get_omitted_therapist_codes_for_treatment,
@@ -3095,6 +3096,14 @@ class TherapistMasterManagementView(ListView):
             ).distinct()
         elif status == 'deputed_pending':
             queryset = TherapistMaster.objects.filter(deputations__status='pending').distinct()
+        elif status == 'on_call':
+            queryset = TherapistMaster.objects.filter(is_on_call=True)
+        elif status in ['on_call_on', 'on_call_active']:
+            queryset = TherapistMaster.objects.filter(is_on_call=True, on_call_status=True)
+        elif status in ['on_call_off', 'on_call_inactive']:
+            queryset = TherapistMaster.objects.filter(is_on_call=True, on_call_status=False)
+        elif status == 'regular':
+            queryset = TherapistMaster.objects.filter(is_on_call=False)
         else:
             # No status filter - show all
             queryset = TherapistMaster.objects.all()
@@ -3141,6 +3150,9 @@ class TherapistMasterManagementView(ListView):
         ))
         context['can_approve_omissions'] = can_approve_treatment_omission(self.request.user)
         context['today_date'] = datetime.date.today().strftime('%Y-%m-%d')
+        context['on_call_count'] = TherapistMaster.objects.filter(is_on_call=True).count()
+        context['on_call_on_count'] = TherapistMaster.objects.filter(is_on_call=True, on_call_status=True).count()
+        context['on_call_off_count'] = TherapistMaster.objects.filter(is_on_call=True, on_call_status=False).count()
         # Bulk upload context
         # Note: Therapist master has complex relationships, basic bulk upload support
         context['master_type'] = 'therapist'
@@ -3149,9 +3161,72 @@ class TherapistMasterManagementView(ListView):
         context['optional_fields'] = ['employee_code', 'therapist_gender', 'is_bathing_therapist', 'is_helping_therapist', 'is_active']
         return context
 
+class TherapistMasterForm(forms.ModelForm):
+    class Meta:
+        model = TherapistMaster
+        fields = [
+            'therapist_name', 'therapist_grade', 'employee_code', 'therapist_gender',
+            'is_bathing_therapist', 'is_helping_therapist', 'is_on_call', 'on_call_status',
+            'on_call_start_date', 'on_call_end_date', 'is_active'
+        ]
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if 'therapist_code' in self.fields:
+            self.fields['therapist_code'].widget.attrs['readonly'] = True
+        if 'therapist_grade' in self.fields:
+            self.fields['therapist_grade'].queryset = TherapistGrade.objects.filter(is_active=True).order_by('display_order', 'name')
+        if 'therapist_gender' in self.fields:
+            self.fields['therapist_gender'].widget = forms.Select(choices=[('', 'Select Gender'), ('Male', 'Male'), ('Female', 'Female')])
+            self.fields['therapist_gender'].widget.attrs['class'] = 'form-select'
+            if not self.instance or not self.instance.pk:
+                self.fields['therapist_gender'].initial = 'Male'
+        if 'employee_code' in self.fields:
+            self.fields['employee_code'].required = False  # Enforced dynamically for regular therapists
+
+    def clean(self):
+        cleaned_data = super().clean()
+        is_on_call = cleaned_data.get('is_on_call', False)
+        employee_code = (cleaned_data.get('employee_code') or '').strip()
+
+        # Regular therapist must provide employee code
+        if not is_on_call and not employee_code:
+            self.add_error('employee_code', 'Employee code is required for regular therapists.')
+
+        if employee_code:
+            cleaned_data['employee_code'] = employee_code
+
+            # Check uniqueness against TherapistMaster
+            master_qs = TherapistMaster.objects.filter(employee_code__iexact=employee_code)
+            if self.instance and self.instance.pk:
+                master_qs = master_qs.exclude(pk=self.instance.pk)
+            if master_qs.exists():
+                self.add_error('employee_code', f'Employee code "{employee_code}" is already in use by another therapist.')
+
+            # Check uniqueness against TherapistProfile
+            from authentication.models import TherapistProfile
+            profile_qs = TherapistProfile.objects.filter(employee_code__iexact=employee_code)
+            if self.instance and self.instance.pk and self.instance.therapist_profile_id:
+                profile_qs = profile_qs.exclude(pk=self.instance.therapist_profile_id)
+            elif self.instance and self.instance.pk and self.instance.therapist_code:
+                profile_qs = profile_qs.exclude(therapist_code=self.instance.therapist_code)
+            if profile_qs.exists():
+                self.add_error('employee_code', f'Employee code "{employee_code}" is already in use by an existing therapist profile.')
+        else:
+            cleaned_data['employee_code'] = None
+
+        return cleaned_data
+
 class TherapistMasterCreateView(CreateView):
     model = TherapistMaster
-    fields = ['therapist_name', 'therapist_grade', 'employee_code', 'therapist_gender', 'is_bathing_therapist', 'is_helping_therapist', 'is_active']
+    form_class = TherapistMasterForm
+
+    def get_initial(self):
+        initial = super().get_initial()
+        if self.request.GET.get('on_call') == '1':
+            initial['is_on_call'] = True
+            initial['on_call_status'] = True
+        return initial
     template_name = 'masters/therapist_master_form.html'
     success_url = reverse_lazy('therapist_master_manage')
     
@@ -3191,6 +3266,8 @@ class TherapistMasterCreateView(CreateView):
         context['deputation_doctor_name'] = ''
         context['deputation_remarks'] = ''
         context['selected_shift_ids'] = []
+        context['is_on_call_mode'] = self.request.GET.get('on_call') == '1'
+        context['object'] = None
         return context
     
     def form_valid(self, form):
@@ -3258,7 +3335,7 @@ class TherapistMasterCreateView(CreateView):
         last_name = name_parts[1] if len(name_parts) > 1 else ''
         
         # Create user account
-        default_password = f"{therapist_code}@{employee_code}"
+        default_password = f"{therapist_code}@{employee_code}" if employee_code else f"{therapist_code}@123"
         user = CustomUser.objects.create_user(
             username=username,
             email=email,
@@ -3275,7 +3352,7 @@ class TherapistMasterCreateView(CreateView):
         therapist_profile = TherapistProfile.objects.create(
             user=user,
             therapist_code=therapist_code,
-            employee_code=employee_code,
+            employee_code=employee_code or None,
             therapist_grade=grade_name,
             is_bathing_therapist=is_bathing_therapist
         )
@@ -3283,7 +3360,20 @@ class TherapistMasterCreateView(CreateView):
         # Link user and profile to the therapist master instance
         instance.user = user
         instance.therapist_profile = therapist_profile
+        instance.employee_code = employee_code or None
+        instance.is_on_call = form.cleaned_data.get('is_on_call', False)
+        instance.on_call_status = form.cleaned_data.get('on_call_status', True)
+        instance.on_call_start_date = form.cleaned_data.get('on_call_start_date')
+        instance.on_call_end_date = form.cleaned_data.get('on_call_end_date')
         instance.save()
+
+        if instance.is_on_call:
+            TherapistOnCallLog.objects.create(
+                therapist=instance,
+                status='turned_on' if instance.on_call_status else 'turned_off',
+                changed_by=self.request.user,
+                remarks="Initial therapist profile setup as On-Call"
+            )
 
         # Handle therapist -> shift mapping
         selected_shift_ids = set()
@@ -3342,7 +3432,7 @@ class TherapistMasterCreateView(CreateView):
 
 class TherapistMasterUpdateView(UpdateView):
     model = TherapistMaster
-    fields = ['therapist_name', 'therapist_grade', 'employee_code', 'therapist_gender', 'is_bathing_therapist', 'is_helping_therapist', 'is_active']
+    form_class = TherapistMasterForm
     template_name = 'masters/therapist_master_form.html'
     success_url = reverse_lazy('therapist_master_manage')
     
@@ -3417,8 +3507,28 @@ class TherapistMasterUpdateView(UpdateView):
         return context
     
     def form_valid(self, form):
+        old_therapist = TherapistMaster.objects.filter(pk=self.object.pk).first()
+        old_on_call = getattr(old_therapist, 'is_on_call', False)
+        old_on_call_status = getattr(old_therapist, 'on_call_status', True)
+
         # Save the therapist first
         response = super().form_valid(form)
+        self.object.refresh_from_db()
+
+        # Sync employee_code and is_bathing_therapist to therapist_profile if exists
+        if self.object.therapist_profile:
+            self.object.therapist_profile.employee_code = self.object.employee_code
+            self.object.therapist_profile.is_bathing_therapist = self.object.is_bathing_therapist
+            self.object.therapist_profile.save()
+
+        # Log on-call status change if modified
+        if self.object.is_on_call and (not old_on_call or old_on_call_status != self.object.on_call_status):
+            TherapistOnCallLog.objects.create(
+                therapist=self.object,
+                status='turned_on' if self.object.on_call_status else 'turned_off',
+                changed_by=self.request.user,
+                remarks="Updated via therapist master edit form"
+            )
         _log_master_audit(self.request, 'update', 'TherapistMaster', str(self.object.pk), f'Updated TherapistMaster: {self.object.therapist_name} ({self.object.therapist_code})')
 
         # Handle therapist -> shift mapping
@@ -5916,3 +6026,274 @@ def floor_disable(request, pk):
     _log_master_audit(request, 'update', 'Floor', str(pk), f'Disabled Floor: {obj.name}')
     messages.success(request, f'Floor "{obj.name}" disabled successfully.')
     return redirect('floor_manage')
+
+@login_required
+@require_http_methods(["GET", "POST"])
+@csrf_exempt
+def toggle_on_call_status_view(request, pk):
+    """
+    API and web view to turn ON (available for scheduling) or turn OFF (standby)
+    an on-call therapist whenever required.
+    """
+    from django.http import HttpResponseRedirect
+    try:
+        therapist = get_object_or_404(TherapistMaster, pk=pk)
+        import datetime
+
+        # Parse desired status or toggle
+        req_status = request.POST.get('status') or request.GET.get('status')
+        if req_status is not None:
+            new_status = str(req_status).strip().lower() in ['on', '1', 'true', 'active', 'turn_on']
+        else:
+            new_status = not therapist.on_call_status
+
+        # If not already on-call, mark as on-call
+        if not therapist.is_on_call:
+            therapist.is_on_call = True
+
+        start_date = None
+        end_date = None
+        if new_status:
+            st_str = (request.POST.get('start_date') or request.GET.get('start_date') or '').strip()
+            if st_str:
+                try:
+                    start_date = datetime.datetime.strptime(st_str[:10], '%Y-%m-%d').date()
+                except ValueError:
+                    start_date = datetime.date.today()
+            else:
+                start_date = datetime.date.today()
+
+            en_str = (request.POST.get('end_date') or request.GET.get('end_date') or '').strip()
+            if en_str:
+                try:
+                    end_date = datetime.datetime.strptime(en_str[:10], '%Y-%m-%d').date()
+                except ValueError:
+                    end_date = None
+
+            therapist.on_call_start_date = start_date
+            therapist.on_call_end_date = end_date
+        else:
+            therapist.on_call_start_date = None
+            therapist.on_call_end_date = None
+
+        therapist.on_call_status = new_status
+        therapist.save(update_fields=['is_on_call', 'on_call_status', 'on_call_start_date', 'on_call_end_date', 'updated_at'])
+
+        remarks = (request.POST.get('remarks') or request.GET.get('remarks') or '').strip()
+        if not remarks:
+            if new_status:
+                if start_date and end_date:
+                    remarks = f"Turned ON from {start_date.strftime('%d %b %Y')} to {end_date.strftime('%d %b %Y')}"
+                elif start_date:
+                    remarks = f"Turned ON from {start_date.strftime('%d %b %Y')}"
+                else:
+                    remarks = "Turned ON (Available for scheduling)"
+            else:
+                remarks = "Turned OFF (Standby)"
+
+        TherapistOnCallLog.objects.create(
+            therapist=therapist,
+            status='turned_on' if new_status else 'turned_off',
+            start_date=start_date,
+            end_date=end_date,
+            changed_by=request.user,
+            remarks=remarks
+        )
+
+        action_label = "Turned ON (Available for scheduling)" if new_status else "Turned OFF (Standby)"
+        msg = f"Therapist {therapist.therapist_name} has been {action_label}."
+        _log_master_audit(request, 'update', 'TherapistMaster', str(pk), f'On-Call status of {therapist.therapist_name} changed to {action_label}')
+
+        if request.headers.get('x-requested-with') == 'XMLHttpRequest' or request.GET.get('ajax') == '1':
+            return JsonResponse({
+                'success': True,
+                'is_on_call': therapist.is_on_call,
+                'on_call_status': therapist.on_call_status,
+                'status_display': 'ON (Available)' if new_status else 'OFF (Standby)',
+                'message': msg
+            })
+
+        messages.success(request, msg)
+        referer = request.META.get('HTTP_REFERER')
+        if referer:
+            return HttpResponseRedirect(referer)
+        return redirect('therapist_master_manage')
+    except Exception as e:
+        if request.headers.get('x-requested-with') == 'XMLHttpRequest' or request.GET.get('ajax') == '1':
+            return JsonResponse({'success': False, 'error': str(e)}, status=500)
+        messages.error(request, f"Error toggling on-call status: {str(e)}")
+        return redirect('therapist_master_manage')
+
+
+
+@login_required
+def therapist_on_call_dates_api(request, pk):
+    """
+    Returns dates-only history for an on-call therapist.
+    Shows the date range they were turned on (e.g. October 10 to 25)
+    and the exact dates they did treatments / were in scheduling.
+    """
+    from Patient.models import TherapistBooking
+
+    therapist = get_object_or_404(TherapistMaster, pk=pk)
+
+    if not therapist.is_on_call:
+        return JsonResponse({
+            'success': False,
+            'is_on_call': False,
+            'message': f"'{therapist.therapist_name}' is a regular therapist. On-call history is only for on-call therapists."
+        }, status=400)
+
+    # All bookings for this on-call therapist
+    bookings_qs = TherapistBooking.objects.filter(
+        therapist=therapist
+    ).exclude(status='CANCELED').select_related('time_slot').order_by('-date')
+
+    # Distinct dates worked
+    distinct_dates = list(bookings_qs.values_list('date', flat=True).distinct().order_by('-date'))
+
+    dates_details = []
+    for d in distinct_dates:
+        day_bookings = bookings_qs.filter(date=d)
+        therapy_names = list(day_bookings.values_list('therapy_name', flat=True).distinct())
+        clean_therapies = [t for t in therapy_names if t]
+        dates_details.append({
+            'date': d.strftime('%Y-%m-%d'),
+            'date_formatted': d.strftime('%d %b %Y'),
+            'day_name': d.strftime('%A'),
+            'session_count': day_bookings.count(),
+            'therapies': clean_therapies
+        })
+
+    logs_data = []
+    for log in therapist.on_call_logs.select_related('changed_by').order_by('-created_at'):
+        date_range_str = '-'
+        if log.start_date and log.end_date:
+            date_range_str = f"{log.start_date.strftime('%d %b %Y')} to {log.end_date.strftime('%d %b %Y')}"
+        elif log.start_date:
+            date_range_str = f"From {log.start_date.strftime('%d %b %Y')}"
+
+        logs_data.append({
+            'status': log.status,
+            'status_label': 'Turned ON (Available)' if log.status == 'turned_on' else 'Turned OFF (Standby)',
+            'date_range': date_range_str,
+            'changed_by': log.changed_by.get_full_name() or log.changed_by.username if log.changed_by else 'System',
+            'created_at': log.created_at.strftime('%d %b %Y, %I:%M %p'),
+            'remarks': log.remarks or '-'
+        })
+
+    current_period = None
+    if therapist.on_call_status:
+        if therapist.on_call_start_date and therapist.on_call_end_date:
+            current_period = f"{therapist.on_call_start_date.strftime('%d %b %Y')} to {therapist.on_call_end_date.strftime('%d %b %Y')}"
+        elif therapist.on_call_start_date:
+            current_period = f"From {therapist.on_call_start_date.strftime('%d %b %Y')} (Ongoing)"
+        else:
+            current_period = "Turned ON (Active)"
+    else:
+        current_period = "Turned OFF (Standby)"
+
+    return JsonResponse({
+        'success': True,
+        'therapist_name': therapist.therapist_name,
+        'therapist_code': therapist.therapist_code,
+        'is_on_call': therapist.is_on_call,
+        'on_call_status': therapist.on_call_status,
+        'current_period': current_period,
+        'on_call_start_date': therapist.on_call_start_date.strftime('%Y-%m-%d') if therapist.on_call_start_date else '',
+        'on_call_end_date': therapist.on_call_end_date.strftime('%Y-%m-%d') if therapist.on_call_end_date else '',
+        'total_days_worked': len(distinct_dates),
+        'total_sessions': bookings_qs.count(),
+        'dates': dates_details,
+        'logs': logs_data
+    })
+
+
+@login_required
+def therapist_on_call_history_view(request, pk):
+    """
+    History is ONLY for on-call therapists. If accessed, redirects to therapist master list
+    and opens the on-call dates modal directly on the page ('dont want this page').
+    """
+    from django.urls import reverse
+    therapist = get_object_or_404(TherapistMaster, pk=pk)
+
+    if not therapist.is_on_call:
+        messages.warning(request, f"'{therapist.therapist_name}' is a regular therapist. Scheduling and on-call date tracking is only available for on-call therapists.")
+        return redirect('therapist_master_manage')
+
+    return redirect(f"{reverse('therapist_master_manage')}?open_oncall_history={pk}")
+
+@login_required
+def therapist_on_call_history_export_excel(request, pk):
+    """Export therapist's treatment and scheduling history to Excel."""
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from Patient.models import TherapistBooking
+    from Sheduling.models import PatientSnapshot
+
+    therapist = get_object_or_404(TherapistMaster, pk=pk)
+    bookings_qs = TherapistBooking.objects.filter(
+        therapist=therapist
+    ).select_related('time_slot', 'visit', 'therapy').order_by('-date', 'time_slot__slot_time')
+
+    patient_ids = set(b.patient_id for b in bookings_qs if b.patient_id)
+    patients_map = {p.id: p for p in PatientSnapshot.objects.filter(id__in=patient_ids)}
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Treatment History"
+
+    # Header styling
+    header_font = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
+    header_fill = PatternFill(start_color="1F497D", end_color="1F497D", fill_type="solid")
+    center_align = Alignment(horizontal="center", vertical="center")
+
+    headers = [
+        "Date", "Day", "Time Slot", "Therapy Name",
+        "Patient Reg No", "Patient Name", "Room", "Status",
+        "Bathing", "Helping", "Created At"
+    ]
+    ws.append(headers)
+    for col_num in range(1, len(headers) + 1):
+        cell = ws.cell(row=1, column=col_num)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = center_align
+
+    for b in bookings_qs:
+        p = patients_map.get(b.patient_id)
+        if not p and b.visit and getattr(b.visit, 'patient', None):
+            p = b.visit.patient
+        reg_no = p.pat_reg_no if p else '-'
+        pat_name = p.pat_name if p else '-'
+        room_no = b.visit.room.room_no if (b.visit and getattr(b.visit, 'room', None)) else '-'
+        slot_str = str(getattr(b.time_slot, 'slot_name', '') or b.time_slot)
+        therapy_str = b.therapy_name or (b.therapy.therapy_name if b.therapy else '-')
+
+        ws.append([
+            b.date.strftime('%Y-%m-%d'),
+            b.date.strftime('%A'),
+            slot_str,
+            therapy_str,
+            reg_no,
+            pat_name,
+            room_no,
+            b.status,
+            "Yes" if b.is_bathing else "No",
+            "Yes" if b.is_helping_therapist_assignment else "No",
+            b.created_at.strftime('%Y-%m-%d %H:%M') if b.created_at else '-'
+        ])
+
+    for col in ws.columns:
+        max_len = max(len(str(cell.value or '')) for cell in col)
+        col_letter = openpyxl.utils.get_column_letter(col[0].column)
+        ws.column_dimensions[col_letter].width = max(max_len + 3, 12)
+
+    response = HttpResponse(
+        content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    )
+    safe_name = therapist.therapist_name.replace(' ', '_')
+    response['Content-Disposition'] = f'attachment; filename="treatment_history_{safe_name}_{therapist.therapist_code}.xlsx"'
+    wb.save(response)
+    return response

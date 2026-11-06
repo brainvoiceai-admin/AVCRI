@@ -18,8 +18,15 @@
     <div class="main-content container mt-4">
         <div class="d-flex justify-content-between align-items-center mb-4">
             <h2>
-                <i class="fas fa-user-md text-primary"></i>
-                {% if object %}Edit Therapist{% else %}Add New Therapist{% endif %}
+                <i class="fas {% if is_on_call_mode or object and object.is_on_call %}fa-phone-volume{% else %}fa-user-md text-primary{% endif %}" {% if is_on_call_mode or object and object.is_on_call %}style="color: #6f42c1;"{% endif %}></i>
+                {% if object %}
+                    Edit Therapist: {{ object.therapist_name }}
+                    {% if object.is_on_call %}<span class="badge ms-2" style="background-color: #6f42c1; font-size: 0.9rem;">On-Call</span>{% endif %}
+                {% elif is_on_call_mode %}
+                    Add New On-Call Therapist
+                {% else %}
+                    Add New Therapist
+                {% endif %}
             </h2>
             <div>
                 <a href="{% url 'therapist_master_manage' %}" class="btn btn-secondary">
@@ -89,12 +96,23 @@
                             </div>
                             
                             <div class="col-md-6 mb-3">
-                                <label for="id_employee_code" class="form-label required-field">Employee Code</label>
-                                <input type="text" class="form-control" id="id_employee_code" name="employee_code" 
-                                       value="{{ form.employee_code.value|default:'' }}" required>
-                                <div class="invalid-feedback">
-                                    Please provide an employee code.
-                                </div>
+                                <label for="id_employee_code" class="form-label {% if not form.is_on_call.value and not is_on_call_mode and not object or not object.is_on_call %}required-field{% endif %}" id="label_employee_code">
+                                    Employee Code <span id="on_call_emp_hint" class="text-muted fw-normal" style="{% if form.is_on_call.value or is_on_call_mode or object and object.is_on_call %}{% else %}display: none;{% endif %}">(Optional for On-Call)</span>
+                                </label>
+                                <input type="text" class="form-control {% if form.employee_code.errors %}is-invalid{% endif %}" id="id_employee_code" name="employee_code" 
+                                       value="{{ form.employee_code.value|default:'' }}" 
+                                       {% if not form.is_on_call.value and not is_on_call_mode and not object or not object.is_on_call %}required{% endif %}>
+                                {% if form.employee_code.errors %}
+                                    <div class="invalid-feedback d-block">
+                                        {% for error in form.employee_code.errors %}
+                                            {{ error }}
+                                        {% endfor %}
+                                    </div>
+                                {% else %}
+                                    <div class="invalid-feedback">
+                                        Please provide an employee code.
+                                    </div>
+                                {% endif %}
                                 <small class="form-text text-muted">Used for emergency leave API mapping</small>
                             </div>
                         </div>
@@ -178,6 +196,56 @@
                                         <i class="fas fa-check-circle me-1"></i>Active
                                     </label>
                                     <small class="form-text text-muted d-block">Therapist is currently active</small>
+                                </div>
+                            </div>
+
+                            <!-- On-Call Therapist Configuration -->
+                            <div class="col-md-12 mb-3">
+                                <hr class="my-2">
+                                <div class="p-3 rounded border" style="background-color: #faf5ff; border-color: #d8c5f6 !important;">
+                                    <div class="d-flex justify-content-between align-items-center mb-1">
+                                        <div class="form-check form-switch fs-6 mb-0">
+                                            <input class="form-check-input" type="checkbox" id="id_is_on_call" 
+                                                   name="is_on_call" {% if form.is_on_call.value or is_on_call_mode or object and object.is_on_call %}checked{% endif %}
+                                                   onchange="toggleOnCallFormFields(this.checked)">
+                                            <label class="form-check-label fw-bold text-dark" for="id_is_on_call">
+                                                <i class="fas fa-phone-volume me-1" style="color: #6f42c1;"></i>Mark as On-Call Therapist
+                                            </label>
+                                        </div>
+                                        <span class="badge text-white px-2 py-1" style="background-color: #6f42c1;">On-Demand Standby</span>
+                                    </div>
+                                    <small class="form-text text-muted d-block mb-2">
+                                        Designates this therapist as On-Call. They have the same details (grade, shifts, gender, capabilities) as a normal therapist. When turned ON, they can be used for scheduling. When turned OFF, they are on standby and excluded from scheduling.
+                                    </small>
+
+                                    <div id="onCallFormControls" style="{% if form.is_on_call.value or is_on_call_mode or object and object.is_on_call %}{% else %}display: none;{% endif %}" class="mt-2 pt-2 border-top">
+                                        <div class="form-check form-switch">
+                                            <input class="form-check-input" type="checkbox" id="id_on_call_status" 
+                                                   name="on_call_status" {% if object %}{% if object.on_call_status %}checked{% endif %}{% else %}{% if form.on_call_status.value != False %}checked{% endif %}{% endif %}>
+                                            <label class="form-check-label fw-bold text-dark" for="id_on_call_status">
+                                                Turn On (Available for Scheduling)
+                                            </label>
+                                            <small class="form-text text-muted d-block">
+                                                Switch ON to make this therapist available for scheduling allocations, or switch OFF to keep on standby. You can also toggle this anytime directly from the Therapist Master list.
+                                            </small>
+                                        </div>
+
+                                        <div class="row mt-2" id="onCallFormDates">
+                                            <div class="col-md-6 mb-2">
+                                                <label class="form-label small fw-bold">Active From Date</label>
+                                                <input type="date" name="on_call_start_date" id="id_on_call_start_date" class="form-control form-control-sm"
+                                                       value="{% if form.on_call_start_date.value %}{{ form.on_call_start_date.value|date:'Y-m-d'|default:form.on_call_start_date.value }}{% elif object and object.on_call_start_date %}{{ object.on_call_start_date|date:'Y-m-d' }}{% else %}{{ today_date }}{% endif %}">
+                                            </div>
+                                            <div class="col-md-6 mb-2">
+                                                <label class="form-label small fw-bold">Active To Date <span class="text-muted fw-normal">(Optional)</span></label>
+                                                <input type="date" name="on_call_end_date" id="id_on_call_end_date" class="form-control form-control-sm"
+                                                       value="{% if form.on_call_end_date.value %}{{ form.on_call_end_date.value|date:'Y-m-d'|default:form.on_call_end_date.value }}{% elif object and object.on_call_end_date %}{{ object.on_call_end_date|date:'Y-m-d' }}{% endif %}">
+                                            </div>
+                                            <div class="col-12">
+                                                <small class="text-muted">e.g. October 10 to October 25. Outside these dates, the therapist is kept on standby.</small>
+                                            </div>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
 
@@ -895,6 +963,44 @@
     <script src="{% static 'js/dashboards_nav.js' %}"></script>
 
     <script>
+    function updateEmployeeCodeRequirement(isOnCall) {
+        const empInput = document.getElementById('id_employee_code');
+        const empLabel = document.getElementById('label_employee_code');
+        const empHint = document.getElementById('on_call_emp_hint');
+        if (empInput) {
+            if (isOnCall) {
+                empInput.removeAttribute('required');
+                if (empLabel) empLabel.classList.remove('required-field');
+                if (empHint) empHint.style.display = 'inline';
+            } else {
+                empInput.setAttribute('required', 'required');
+                if (empLabel) empLabel.classList.add('required-field');
+                if (empHint) empHint.style.display = 'none';
+            }
+        }
+    }
+
+    function toggleOnCallFormFields(isChecked) {
+        const controls = document.getElementById('onCallFormControls');
+        if (controls) {
+            controls.style.display = isChecked ? 'block' : 'none';
+            if (isChecked) {
+                const statusCheckbox = document.getElementById('id_on_call_status');
+                if (statusCheckbox && !statusCheckbox.checked) {
+                    statusCheckbox.checked = true;
+                }
+            }
+        }
+        updateEmployeeCodeRequirement(isChecked);
+    }
+
+    document.addEventListener('DOMContentLoaded', function() {
+        const onCallCheck = document.getElementById('id_is_on_call');
+        if (onCallCheck) {
+            updateEmployeeCodeRequirement(onCallCheck.checked);
+        }
+    });
+
     function toggleDeputationFields(checked) {
         const sec = document.getElementById('deputation_section');
         if (sec) {

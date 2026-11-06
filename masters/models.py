@@ -474,13 +474,32 @@ class TherapistMaster(models.Model):
     therapist_code = models.CharField(max_length=20, unique=True, verbose_name="Therapist Code")
     therapist_name = models.CharField(max_length=255, verbose_name="Therapist Name")
     therapist_grade = models.ForeignKey(TherapistGrade, on_delete=models.PROTECT, related_name='therapists', verbose_name="Therapist Grade", null=True, blank=True)
-    employee_code = models.CharField(max_length=50, unique=True, verbose_name="Employee Code", help_text="Used for emergency leave API mapping")
+    employee_code = models.CharField(max_length=50, unique=True, null=True, blank=True, verbose_name="Employee Code", help_text="Used for emergency leave API mapping")
     is_bathing_therapist = models.BooleanField(default=True, verbose_name="Bathing Therapist")
     is_helping_therapist = models.BooleanField(default=False, verbose_name="Mark as Helping Therapist", help_text="Designates whether this therapist is a backup/supporting Helping Therapist")
     is_deputed = models.BooleanField(default=False, verbose_name="Deputed Therapist", help_text="Designates whether this therapist is marked as deputed")
+    is_on_call = models.BooleanField(default=False, verbose_name="On-Call Therapist", help_text="Designates whether this therapist is an on-call therapist")
+    on_call_status = models.BooleanField(default=True, verbose_name="On-Call Status (Active/Available)", help_text="Whether this on-call therapist is currently turned on (available for scheduling)")
+    on_call_start_date = models.DateField(null=True, blank=True, verbose_name="On-Call From Date")
+    on_call_end_date = models.DateField(null=True, blank=True, verbose_name="On-Call To Date")
     is_active = models.BooleanField(default=True, verbose_name="Active")
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="Created At")
     updated_at = models.DateTimeField(auto_now=True, verbose_name="Updated At")
+
+    def save(self, *args, **kwargs):
+        if not self.employee_code:
+            self.employee_code = None
+        super().save(*args, **kwargs)
+
+    @property
+    def is_on_call_available(self):
+        """Returns True if therapist is on-call and currently turned ON and active."""
+        return bool(self.is_on_call and self.on_call_status and self.is_active)
+
+    @property
+    def latest_on_call_log(self):
+        """Returns the most recent on-call status change log."""
+        return self.on_call_logs.order_by('-created_at').first()
 
     @property
     def current_deputation(self):
@@ -803,6 +822,44 @@ def is_therapist_on_emergency_leave(therapist, target_date, slot=None) -> bool:
     return False
 
 
+class TherapistOnCallLog(models.Model):
+    """
+    Audit log tracking when an on-call therapist is turned ON (available) or OFF (standby).
+    """
+    STATUS_CHOICES = [
+        ('turned_on', 'Turned ON (Available)'),
+        ('turned_off', 'Turned OFF (Standby)'),
+    ]
+
+    therapist = models.ForeignKey(
+        TherapistMaster,
+        on_delete=models.CASCADE,
+        related_name='on_call_logs',
+        verbose_name="Therapist"
+    )
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, verbose_name="Action / Status")
+    changed_by = models.ForeignKey(
+        'authentication.CustomUser',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='therapist_on_call_logs',
+        verbose_name="Changed By"
+    )
+    start_date = models.DateField(null=True, blank=True, verbose_name="On-Call From Date")
+    end_date = models.DateField(null=True, blank=True, verbose_name="On-Call To Date")
+    remarks = models.TextField(blank=True, null=True, verbose_name="Remarks / Reason")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Timestamp")
+
+    class Meta:
+        verbose_name = "Therapist On-Call Log"
+        verbose_name_plural = "Therapist On-Call Logs"
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.therapist.therapist_name} - {self.get_status_display()} ({self.created_at.strftime('%Y-%m-%d %H:%M')})"
+
+
 class TherapistDeputation(models.Model):
     """
     Model to track therapist deputations.
@@ -956,6 +1013,72 @@ def get_deputed_therapist_ids_for_date(target_date=None):
         start_date__lte=target_date,
         end_date__gte=target_date
     ).values_list('therapist_id', flat=True))
+
+
+def is_therapist_on_call_active(therapist, target_date=None):
+    """
+    Checks if an on-call therapist is active on target_date.
+    If on-call therapist has start_date and end_date (e.g. Oct 10 to Oct 25),
+    they will be active only during that date window.
+    """
+    if not getattr(therapist, 'is_on_call', False):
+        return True
+    if not getattr(therapist, 'on_call_status', True) or not getattr(therapist, 'is_active', True):
+        return False
+    if target_date:
+        import datetime
+        if isinstance(target_date, str):
+            try:
+                target_date = datetime.datetime.strptime(target_date[:10], "%Y-%m-%d").date()
+            except Exception:
+                target_date = datetime.date.today()
+        elif hasattr(target_date, 'date') and callable(target_date.date):
+            target_date = target_date.date()
+
+        st = getattr(therapist, 'on_call_start_date', None)
+        en = getattr(therapist, 'on_call_end_date', None)
+        if st and target_date < st:
+            return False
+        if en and target_date > en:
+            return False
+    return True
+
+
+def get_inactive_on_call_therapist_ids(target_date=None):
+    """
+    Return set of therapist IDs that are on-call and not active for target_date.
+    If an on-call therapist is turned ON from start_date to end_date (e.g. Oct 10 to Oct 25),
+    they are excluded outside that date window.
+    """
+    import datetime
+    from django.db.models import Q
+    if target_date is None:
+        target_date = datetime.date.today()
+    elif isinstance(target_date, str):
+        try:
+            target_date = datetime.datetime.strptime(target_date[:10], "%Y-%m-%d").date()
+        except Exception:
+            target_date = datetime.date.today()
+    elif hasattr(target_date, 'date') and callable(target_date.date):
+        target_date = target_date.date()
+
+    # All with on_call_status=False
+    inactive_ids = set(TherapistMaster.objects.filter(
+        is_on_call=True,
+        on_call_status=False
+    ).values_list('id', flat=True))
+
+    # Also those where target_date is outside [on_call_start_date, on_call_end_date]
+    date_inactive = set(TherapistMaster.objects.filter(
+        is_on_call=True,
+        on_call_status=True
+    ).filter(
+        Q(on_call_start_date__isnull=False, on_call_start_date__gt=target_date) |
+        Q(on_call_end_date__isnull=False, on_call_end_date__lt=target_date)
+    ).values_list('id', flat=True))
+
+    inactive_ids.update(date_inactive)
+    return inactive_ids
 
 
 def can_request_deputation(user) -> bool:
