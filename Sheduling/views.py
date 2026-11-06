@@ -1091,7 +1091,18 @@ def therapy_entry(request):
                 if 'is_wheelchair' in payload:
                     wc_bool = bool(payload['is_wheelchair'])
                     allocation.is_wheelchair = wc_bool
-                    Booking.objects.filter(allocation=allocation, status='draft').update(is_wheelchair=wc_bool)
+                    b_count = int(payload.get('bathing_therapists_count', 0) or 0) if wc_bool else 0
+                    allocation.bathing_therapists_count = b_count
+                    Booking.objects.filter(allocation=allocation, status='draft').update(
+                        is_wheelchair=wc_bool,
+                        bathing_therapists_count=b_count
+                    )
+                elif 'bathing_therapists_count' in payload:
+                    b_count = int(payload.get('bathing_therapists_count', 0) or 0) if allocation.is_wheelchair else 0
+                    allocation.bathing_therapists_count = b_count
+                    Booking.objects.filter(allocation=allocation, status='draft').update(
+                        bathing_therapists_count=b_count
+                    )
                 if new_timeslot is not None:
                     allocation.timeslot = new_timeslot
                 
@@ -1356,6 +1367,8 @@ def therapy_entry(request):
                                 date=d,
                                 timeslot=allocation.timeslot,
                                 room=None,
+                                is_wheelchair=allocation.is_wheelchair,
+                                bathing_therapists_count=getattr(allocation, 'bathing_therapists_count', 0),
                                 status='draft',
                                 snapshot_therapy_name=(allocation.therapy_name or '')[:255]
                             )
@@ -1808,6 +1821,9 @@ def therapy_entry(request):
                             return JsonResponse({'error': 'required models missing (TherapyAllocation/Booking/BookingItem)'}, status=500)
 
                     is_wheelchair_val = bool(payload.get('is_wheelchair', False))
+                    bathing_therapists_count_val = int(payload.get('bathing_therapists_count', 0) or 0)
+                    if not is_wheelchair_val:
+                        bathing_therapists_count_val = 0
                     if is_wheelchair_val and not getattr(ps, 'is_wheelchair', False):
                         ps.is_wheelchair = True
                         ps.save(update_fields=['is_wheelchair', 'updated_at'])
@@ -1821,6 +1837,7 @@ def therapy_entry(request):
                         room=room_obj,
                         vamanam_timing=payload.get('vamanam_timing') or None,
                         is_wheelchair=is_wheelchair_val,
+                        bathing_therapists_count=bathing_therapists_count_val,
                         items_groups=items_groups,
                         oil_class=payload.get('oil_class') or payload.get('oil_class_id') or '',
                         usage=payload.get('usage') or '',
@@ -1852,7 +1869,17 @@ def therapy_entry(request):
                             any_auto_cancelled = True
                         else:
                             booking_status = 'draft'
-                        b = Booking.objects.create(allocation=alloc, date=single_date, timeslot=timeslot_obj, room=room_obj, vamanam_timing=payload.get('vamanam_timing') or None, is_wheelchair=is_wheelchair_val, status=booking_status, snapshot_therapy_name=(alloc.therapy_name or '')[:255])
+                        b = Booking.objects.create(
+                            allocation=alloc,
+                            date=single_date,
+                            timeslot=timeslot_obj,
+                            room=room_obj,
+                            vamanam_timing=payload.get('vamanam_timing') or None,
+                            is_wheelchair=is_wheelchair_val,
+                            bathing_therapists_count=bathing_therapists_count_val,
+                            status=booking_status,
+                            snapshot_therapy_name=(alloc.therapy_name or '')[:255]
+                        )
                         created_items = []
                         for grp in payload.get('items_groups', []):
                             grp_dosage = grp.get('dosage','')
@@ -2376,7 +2403,7 @@ def therapy_entry(request):
                     from Patient.models import TherapistBooking
                     from masters.models import TherapistMaster
                     # Get allocation (visit) for this booking
-                    allocation = b.allocation
+                    allocation = getattr(b, 'allocation', None) or alloc
                     # Get all therapist codes for this booking
                     therapist_codes = [a.therapist.therapist_code for a in b.assignments.all()]
                     # Get all TherapistMaster records
@@ -2385,28 +2412,34 @@ def therapy_entry(request):
                     )}
                     # Get all TherapistBooking records for this visit and therapists
                     if therapist_masters and allocation:
+                        filter_kwargs = {
+                            'visit': allocation,
+                            'therapist__in': therapist_masters.values(),
+                            'status': 'BOOKED'
+                        }
+                        if getattr(b, 'date', None):
+                            filter_kwargs['date'] = b.date
+                        if getattr(b, 'timeslot', None):
+                            filter_kwargs['time_slot'] = b.timeslot
+
                         tb_list = TherapistBooking.objects.filter(
-                            visit=allocation,
-                            therapist__in=therapist_masters.values(),
-                            status='BOOKED'
-                        ).select_related('therapist', 'visit')
+                            **filter_kwargs
+                        ).select_related('therapist', 'visit', 'time_slot')
                         # Create a map: therapist_code -> is_bathing
                         # ONLY use TherapistBooking.is_bathing field from Patient module
-                        # IMPORTANT: For Dhara & Pizichil and all therapies, ensure only ONE therapist is marked as bathing
-                        bathing_found = False
+                        # Respect bathing_therapists_count if specified, otherwise at most 1
+                        req_bathing_count = getattr(b, 'bathing_therapists_count', 0) or getattr(allocation, 'bathing_therapists_count', 0) or 0
+                        max_bathing_allowed = max(1, req_bathing_count)
+                        bathing_count_found = 0
                         for tb in tb_list:
                             if tb.therapist:
                                 therapist_code = tb.therapist.therapist_code
-                                # Only mark as bathing if is_bathing=True AND we haven't already found a bathing therapist
-                                if tb.is_bathing and not bathing_found:
+                                if tb.is_bathing and bathing_count_found < max_bathing_allowed:
                                     therapist_bookings[therapist_code] = True
-                                    bathing_found = True
+                                    bathing_count_found += 1
                                 else:
-                                    # If this therapist has is_bathing=True but we already found one, set it to False
-                                    # This ensures only ONE bathing therapist per visit
                                     therapist_bookings[therapist_code] = False
-                                # If is_bathing is False, explicitly set it
-                                if not tb.is_bathing and therapist_code not in therapist_bookings:
+                                if not tb.is_bathing:
                                     therapist_bookings[therapist_code] = False
                 except Exception as e:
                     print(f"Error pre-fetching TherapistBooking records: {e}")
@@ -2596,6 +2629,7 @@ def therapy_entry(request):
                     'slot': slot_value,
                     'vamanam_timing': getattr(a, 'vamanam_timing', '') or '',
                     'is_wheelchair': bool(getattr(a, 'is_wheelchair', False)),
+                    'bathing_therapists_count': getattr(a, 'bathing_therapists_count', 0) or 0,
                     'oil_class': a.oil_class,
                     'usage': a.usage,
                     'procured': a.procured_from,
@@ -5725,20 +5759,18 @@ def get_therapy_data_api(request):
                             ).select_related('therapist', 'visit', 'time_slot')
                             # Create a map: therapist_code -> is_bathing
                             # ONLY use TherapistBooking.is_bathing field from Patient module
-                            # IMPORTANT: For Dhara & Pizichil, ensure only ONE therapist is marked as bathing
-                            bathing_found = False
+                            # IMPORTANT: Respect bathing_therapists_count if specified, otherwise at most 1
+                            req_bathing_count = getattr(booking, 'bathing_therapists_count', 0) or getattr(allocation, 'bathing_therapists_count', 0)
+                            max_bathing_allowed = max(1, req_bathing_count)
+                            bathing_count_found = 0
                             for tb in tb_list:
                                 if tb.therapist:
                                     therapist_code = tb.therapist.therapist_code
-                                    # Only mark as bathing if is_bathing=True AND we haven't already found a bathing therapist
-                                    if tb.is_bathing and not bathing_found:
+                                    if tb.is_bathing and bathing_count_found < max_bathing_allowed:
                                         therapist_bookings[therapist_code] = True
-                                        bathing_found = True
+                                        bathing_count_found += 1
                                     else:
-                                        # If this therapist has is_bathing=True but we already found one, set it to False
-                                        # This ensures only ONE bathing therapist per visit
                                         therapist_bookings[therapist_code] = False
-                                    # If is_bathing is False, explicitly set it
                                     if not tb.is_bathing:
                                         therapist_bookings[therapist_code] = False
                     except Exception as e:
@@ -5889,7 +5921,6 @@ def get_therapy_data_api(request):
                         'room_no': room_no,
                         'patient_room_no': patient_room_no,
                         'timeslot': booking.timeslot.slot_time.strftime('%H:%M') if booking.timeslot else None,
-                        'vamanam_timing': getattr(booking, 'vamanam_timing', '') or (getattr(booking.allocation, 'vamanam_timing', '') if booking.allocation else '') or '',
                         'therapists': therapists,
                         'nurses': nurses,
                         'is_nurse_treatment': is_nurse_treatment_flag,
@@ -5902,6 +5933,9 @@ def get_therapy_data_api(request):
                         'dosage': booking.allocation.dosage if hasattr(booking.allocation, 'dosage') else '',
                         'uno': booking.allocation.uno if hasattr(booking.allocation, 'uno') else '',
                         'oil_class': booking.allocation.oil_class or '',
+                        'vamanam_timing': getattr(booking, 'vamanam_timing', None) or getattr(booking.allocation, 'vamanam_timing', None) or '',
+                        'is_wheelchair': bool(getattr(booking, 'is_wheelchair', False) or getattr(booking.allocation, 'is_wheelchair', False)),
+                        'bathing_therapists_count': getattr(booking, 'bathing_therapists_count', 0) or getattr(booking.allocation, 'bathing_therapists_count', 0),
                         'therapists_required': therapy_req.get('total', 0),
                     }
                     if status_filter == 'failed':
@@ -6088,7 +6122,6 @@ def get_therapy_data_api(request):
                     'room_no': allocation.room.room_no if allocation.room else None,
                     'patient_room_no': patient_room_no,
                     'timeslot': allocation.timeslot.slot_time.strftime('%H:%M') if allocation.timeslot else None,
-                    'vamanam_timing': getattr(allocation, 'vamanam_timing', '') or '',
                     'therapists': therapists,
                     'nurses': nurses,
                     'is_nurse_treatment': is_nurse_treatment_flag,
@@ -6101,6 +6134,9 @@ def get_therapy_data_api(request):
                     'dosage': allocation.dosage if hasattr(allocation, 'dosage') else '',
                     'uno': allocation.uno if hasattr(allocation, 'uno') else '',
                     'oil_class': allocation.oil_class or '',
+                    'vamanam_timing': getattr(allocation, 'vamanam_timing', None) or '',
+                    'is_wheelchair': bool(getattr(allocation, 'is_wheelchair', False)),
+                    'bathing_therapists_count': getattr(allocation, 'bathing_therapists_count', 0) or 0,
                     'therapists_required': therapy_req_no_date.get('total', 0),
                 })
         
@@ -6377,7 +6413,7 @@ def reschedule_options_api(request):
             "allocation_id": allocation.id,
             "patient_name": f"{patient_name} ({patient_reg_no})" if patient_reg_no else patient_name,
             "therapy_name": allocation.therapy_name,
-            "vamanam_timing": getattr(booking, 'vamanam_timing', '') or (getattr(allocation, 'vamanam_timing', '') if allocation else '') or '',
+            "vamanam_timing": getattr(allocation, 'vamanam_timing', None) or (getattr(booking, 'vamanam_timing', None) if booking else None),
             "registered_slot_id": registered_slot_id,
             "registered_slot_time": registered_slot_time_str,
             "failure_reason": failure_reason or "—",

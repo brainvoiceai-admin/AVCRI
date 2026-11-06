@@ -54,6 +54,11 @@ class TherapyAllocation(models.Model):
     locked = models.BooleanField(default=False)
     vamanam_timing = models.CharField(max_length=30, blank=True, null=True, verbose_name="Vamanam Timing", help_text="Configured Vamanam timing (e.g. 05:00 AM, 05:30 AM)")
     is_wheelchair = models.BooleanField(default=False, verbose_name="Wheelchair Patient", help_text="True if patient requires a wheelchair accessible treatment room")
+    bathing_therapists_count = models.PositiveIntegerField(
+        default=0,
+        verbose_name="Bathing Therapists Required",
+        help_text="Number of bathing therapists required for wheelchair/disabled patient"
+    )
     notes = models.TextField(blank=True)
     
     # Status and cancellation fields
@@ -97,6 +102,11 @@ class Booking(models.Model):
     room = models.ForeignKey(TreatmentRoom, null=True, blank=True, on_delete=models.SET_NULL)
     vamanam_timing = models.CharField(max_length=30, blank=True, null=True, verbose_name="Vamanam Timing")
     is_wheelchair = models.BooleanField(default=False, verbose_name="Wheelchair Patient")
+    bathing_therapists_count = models.PositiveIntegerField(
+        default=0,
+        verbose_name="Bathing Therapists Required",
+        help_text="Number of bathing therapists required for wheelchair/disabled patient"
+    )
     status = models.CharField(max_length=30, default='draft')  # draft / scheduled / partially_cancelled / cancelled / completed
     therapist_note = models.TextField(blank=True)
     failure_reason = models.CharField(max_length=512, blank=True, help_text="Exact reason when status is 'failed' (e.g. no_preferred_slot, insufficient_therapists)")

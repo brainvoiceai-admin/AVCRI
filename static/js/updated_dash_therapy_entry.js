@@ -71,6 +71,21 @@ $(function () {
   const $patientSelect = $('#header-patient-select');
   const $therapySelect = $('#therapy-select'), $slotSelect = $('#slot-select'), $fromDate = $('#from-date-input'), $toDate = $('#to-date-input'), $daysInput = $('#days-input');
   const $vamanamTimingGroup = $('#vamanam-timing-group'), $vamanamTimingSelect = $('#vamanam-timing-select');
+  const $wheelchairSelect = $('#wheelchair-select');
+  const $bathingTherapistsGroup = $('#bathing-therapists-group');
+  const $bathingTherapistsCount = $('#bathing-therapists-count');
+
+  $wheelchairSelect.on('change', function () {
+    if ($(this).val() === 'Yes') {
+      $bathingTherapistsGroup.slideDown(150);
+      if (!$bathingTherapistsCount.val() || parseInt($bathingTherapistsCount.val(), 10) < 1) {
+        $bathingTherapistsCount.val(1);
+      }
+    } else {
+      $bathingTherapistsGroup.slideUp(150);
+      $bathingTherapistsCount.val(1);
+    }
+  });
 
   let cachedVamanamTimings = [];
 
@@ -589,7 +604,7 @@ $(function () {
     selectedPatient = patient; // Store patient globally
     // Set wheelchair patient select based on selected patient's status
     const isWc = !!(patient && (patient.is_wheelchair === true || patient.is_wheelchair === 'Yes'));
-    $('#wheelchair-select').val(isWc ? 'Yes' : 'No');
+    $wheelchairSelect.val(isWc ? 'Yes' : 'No').trigger('change');
 
     $('#header-patient-select').val(patient.pat_reg_no || patient.pat_op_reg_no);
     // Make patient name bold/highlighted
@@ -609,7 +624,7 @@ $(function () {
       addedTherapies = decorateTherapyList(list);
       // If any existing therapy is marked wheelchair, preserve Yes
       if (addedTherapies.some(t => t.is_wheelchair)) {
-        $('#wheelchair-select').val('Yes');
+        $wheelchairSelect.val('Yes').trigger('change');
       }
       bookings = [];
       addedTherapies.forEach((t, idx) => {
@@ -628,7 +643,8 @@ $(function () {
   // Clear patient selection functionality
   function clearPatientSelection() {
     selectedPatient = null;
-    $('#wheelchair-select').val('No');
+    $wheelchairSelect.val('No').trigger('change');
+    $bathingTherapistsCount.val(1);
     $('#header-patient-select').val('');
     $('#hdr-pat-name').text('No patient selected');
     updatePatientAvatar(null);
@@ -853,9 +869,9 @@ $(function () {
 
     // Check if Vamanam treatment (recognized by code THEB126, name, or code)
     const isVamanam = (therapyCode === 'THEB126') ||
-                      !!therapy.is_vamanam || 
-                      /vamanam|vamana/i.test(therapyName) || 
-                      /vamanam|vamana/i.test(therapyCode);
+      !!therapy.is_vamanam ||
+      /vamanam|vamana/i.test(therapyName) ||
+      /vamanam|vamana/i.test(therapyCode);
 
     // Check if Vasthi treatment (exempt Mathra Vasthi THEB037)
     const isMathraVasthi = (therapyCode === 'THEB037') || /mathra\s*vasthi/i.test(therapyName);
@@ -940,12 +956,12 @@ $(function () {
         let normalizedSlotTime = normalizeSlotTime(slotTime);
 
         // Check if slot is a Vamanam slot (6:30 AM)
-        const isVamSlot = (s.is_vamanam_slot === true || s.is_vamanam_slot === 'true' || s.is_vamanam_slot === 1 || 
-                           normalizedSlotTime === '06:30' || normalizedSlotTime === '6:30');
+        const isVamSlot = (s.is_vamanam_slot === true || s.is_vamanam_slot === 'true' || s.is_vamanam_slot === 1 ||
+          normalizedSlotTime === '06:30' || normalizedSlotTime === '6:30');
 
         // Check if slot is a Vasthi slot
         const isVasthiSlot = (s.is_vasthi_slot === true || s.is_vasthi_slot === 'true' || s.is_vasthi_slot === 1 ||
-                              normalizedSlotTime === '08:30' || normalizedSlotTime === '8:30');
+          normalizedSlotTime === '08:30' || normalizedSlotTime === '8:30');
 
         if (slotMode === 'vamanam_only') {
           // Show ONLY Vamanam slots (6:30 AM)
@@ -1294,8 +1310,8 @@ $(function () {
     if (selectedTherapy && selectedTherapy.length > 0) {
       const therapy = selectedTherapy[0];
       const isVam = (therapy.id === 'THEB126' || therapy.therapy_code === 'THEB126') ||
-                    !!therapy.is_vamanam ||
-                    /vamanam|vamana/i.test(therapy.therapy_name || therapy.text || '');
+        !!therapy.is_vamanam ||
+        /vamanam|vamana/i.test(therapy.therapy_name || therapy.text || '');
       if (isVam) {
         checkAndAutoAssignVamanamTiming($fromDate.val());
       }
@@ -1325,8 +1341,8 @@ $(function () {
     if (from > to) { alert('From must be <= To'); return; }
 
     const isVamanam = (therapy.id === 'THEB126' || therapy.therapy_code === 'THEB126') ||
-                      !!therapy.is_vamanam ||
-                      /vamanam|vamana/i.test(therapy.text || therapy.therapy_name || '');
+      !!therapy.is_vamanam ||
+      /vamanam|vamana/i.test(therapy.text || therapy.therapy_name || '');
 
     // Prepare therapy data for server
     // Use pat_reg_no consistently for IP patients (or pat_op_reg_no if pat_reg_no doesn't exist)
@@ -1350,7 +1366,8 @@ $(function () {
       ext_int: $('#ext-int-select').val(),
       slot: $slotSelect.val() || '',
       vamanam_timing: isVamanam ? ($vamanamTimingSelect.val() || '') : '',
-      is_wheelchair: ($('#wheelchair-select').val() === 'Yes'),
+      is_wheelchair: ($wheelchairSelect.val() === 'Yes'),
+      bathing_therapists_count: ($wheelchairSelect.val() === 'Yes') ? (parseInt($bathingTherapistsCount.val(), 10) || 1) : 0,
       from_date: from,
       to_date: to,
       days: Math.ceil((new Date(to).getTime() - new Date(from).getTime()) / (1000 * 60 * 60 * 24)) + 1,
@@ -1576,7 +1593,7 @@ $(function () {
       const rowActionClass = getTodayTherapyColorClass(t);
       const row = `<tr class="${rowActionClass}">
         <td>${i + 1}</td>
-        <td>${esc(t.therapy_name)}${t.is_wheelchair ? `<br><span class="badge bg-primary text-white" style="font-size:11px; font-weight:600;"><i class="fas fa-wheelchair me-1"></i>Wheelchair</span>` : ''}</td>
+        <td>${esc(t.therapy_name)}${t.is_wheelchair ? `<br><span class="badge bg-primary text-white" style="font-size:11px; font-weight:600;"><i class="fas fa-wheelchair me-1"></i>Wheelchair</span>` : ''}${t.bathing_therapists_count ? `<br><span class="badge bg-info text-white" style="font-size:11px; font-weight:600;"><i class="fas fa-bath me-1"></i>Bathing Therapists: ${t.bathing_therapists_count}</span>` : ''}</td>
         <td>${therapyUsageDisplay !== '—' ? esc(therapyUsageDisplay) : '—'}</td>
         <td>${esc(t.ext_int || '')}</td>
         <td>${esc(format12Hour(t.slot || ''))}${t.vamanam_timing ? `<br><span class="badge bg-danger text-white" style="font-size:11px; font-weight:600;"><i class="fas fa-stopwatch me-1"></i>${esc(t.vamanam_timing)}</span>` : ''}</td>
@@ -2049,7 +2066,12 @@ $(function () {
     } else {
       $vamanamTimingGroup.hide();
     }
-    $('#wheelchair-select').val(t.is_wheelchair ? 'Yes' : 'No');
+    $wheelchairSelect.val(t.is_wheelchair ? 'Yes' : 'No').trigger('change');
+    if (t.bathing_therapists_count) {
+      $bathingTherapistsCount.val(t.bathing_therapists_count);
+    } else {
+      $bathingTherapistsCount.val(1);
+    }
 
     $allocateBtn.hide(); $updateBtn.show(); window.scrollTo({ top: 0, behavior: 'smooth' });
   }
@@ -2059,7 +2081,9 @@ $(function () {
 
     // Update local data
     t.ext_int = $('#ext-int-select').val();
-    t.is_wheelchair = ($('#wheelchair-select').val() === 'Yes');
+    const isWc = ($wheelchairSelect.val() === 'Yes');
+    t.is_wheelchair = isWc;
+    t.bathing_therapists_count = isWc ? (parseInt($bathingTherapistsCount.val(), 10) || 1) : 0;
     // reflect potential edits
     const selTherapy = $therapySelect.select2('data')[0];
     if (selTherapy && selTherapy.id) {
@@ -2131,6 +2155,7 @@ $(function () {
         slot: t.slot,
         vamanam_timing: t.vamanam_timing || '',
         is_wheelchair: !!t.is_wheelchair,
+        bathing_therapists_count: t.bathing_therapists_count || 0,
         from_date: t.from_date,
         to_date: t.to_date,
         days: t.days, // Include updated days in payload
@@ -2221,8 +2246,11 @@ $(function () {
     $('#vasthi-slot-badge').hide();
     $('#ext-int-select').val('');
     if (addedTherapies.some(t => t.is_wheelchair) || (selectedPatient && (selectedPatient.is_wheelchair === true || selectedPatient.is_wheelchair === 'Yes'))) {
-      $('#wheelchair-select').val('Yes');
+      $wheelchairSelect.val('Yes').trigger('change');
+    } else {
+      $wheelchairSelect.val('No').trigger('change');
     }
+    $bathingTherapistsCount.val(1);
 
     // Clear date fields - set from date: tomorrow after 5:30 PM, otherwise today
     var _defDate2 = _defaultFromDate();
