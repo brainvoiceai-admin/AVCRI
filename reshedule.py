@@ -2114,6 +2114,34 @@ def allocate_therapists(date, time_slot, therapy_requirements, last_therapists=N
 
     # If additional bathing therapists are required (total_required > len(allocated))
     if len(allocated) < total_required:
+        def check_grade_availability(grade, gender_filter, is_helping=False):
+            """Check how many therapists of a specific grade and gender are available"""
+            candidates_qs = TherapistMaster.objects.filter(
+                therapist_grade__name__iexact=grade,
+                is_active=True,
+                is_helping_therapist=is_helping
+            )
+            if exclusion_set:
+                candidates_qs = candidates_qs.exclude(therapist_code__in=exclusion_set)
+            if gender_filter:
+                candidates_qs = candidates_qs.filter(therapist_gender__istartswith=gender_filter[0])
+
+            available_count = 0
+            for t in candidates_qs:
+                if t in allocated:
+                    continue
+                if shift_filter_enabled and t.id in mapped_ids and t.id not in eligible_ids:
+                    continue
+                if therapist_on_leave(t):
+                    continue
+                if TherapistBooking.objects.filter(therapist=t, date=date, time_slot=time_slot, status='BOOKED').exists():
+                    continue
+                if get_therapist_daily_session_count(t) >= 6:
+                    continue
+                available_count += 1
+
+            return available_count
+
         needed_additional = total_required - len(allocated)
         candidate_grades = ["Trainee Therapist", "Junior Therapist", "Senior Therapist", "Super Senior Therapist"]
         grade_availabilities = []
