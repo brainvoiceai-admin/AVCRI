@@ -102,6 +102,9 @@ DATABASES = {
     'default': {  # Django app DB (SQLite)
         'ENGINE': 'django.db.backends.sqlite3',
         'NAME': BASE_DIR / 'db.sqlite3',
+        'OPTIONS': {
+            'timeout': 30,  # 30-second busy timeout to prevent database is locked errors
+        },
     },
     'hospital_db': {  # OPTherapy SQL Server
         'ENGINE': 'mssql',

@@ -412,6 +412,36 @@
         }
 
                 /* Clean Searchable Replacement Dropdown Styles */
+        .em-mode-pill {
+            padding: 7px 15px;
+            font-size: 12.5px;
+            font-weight: 600;
+            border-radius: 7px;
+            border: 1.5px solid #cbd5e1;
+            background: #ffffff;
+            color: #475569;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 7px;
+            transition: all 0.15s ease;
+        }
+        .em-mode-pill:hover {
+            background: #f1f5f9;
+            border-color: #94a3b8;
+        }
+        .em-mode-pill.active {
+            background: #1e40af;
+            color: #ffffff;
+            border-color: #1e40af;
+            box-shadow: 0 1px 3px rgba(30, 64, 175, 0.2);
+        }
+        .em-mode-pill.em-mode-bathing.active {
+            background: #d97706;
+            border-color: #b45309;
+            color: #ffffff;
+            box-shadow: 0 1px 3px rgba(217, 119, 6, 0.25);
+        }
         .em-select-box {
             position: relative;
             width: 100%;
@@ -1025,15 +1055,20 @@
                     <div id="continuity" class="tab-content">
                         <div class="card-header">
                             <div>
-                                <div class="card-title">Therapist Continuity Matrix</div>
-                                <div class="card-subtitle">Analyze therapist continuity across dates. <span
-                                        style="color:#10b981">Green</span>=Continued, <span
-                                        style="color:#7c3aed">Violet</span>=Busy Elsewhere, <span
-                                        style="color:#ef4444">Red</span>=Changed, <span
-                                        style="color:#6b7280">Gray</span>=Excused (Leave). (*) indicates Bathing
-                                    Therapist.</div>
+                                <div class="card-title" style="display:flex; align-items:center; gap:8px;">
+                                    <span>👨‍⚕️</span> Therapist Continuity Matrix
+                                </div>
+                                <div class="card-subtitle" style="margin-bottom: 4px;">
+                                    Analyze therapist continuity across dates. Click or touch any therapist to view detailed continuity breakdown and sub-reasons. (*) indicates Bathing Therapist.
+                                </div>
                             </div>
                             <div style="display: flex; gap: 12px; align-items: center; margin-left: auto;">
+                                <button class="btn btn-primary" id="download-continuity-report-btn" type="button"
+                                    onclick="downloadContinuityReportPDF()"
+                                    title="Download Continuity Analysis & Performance Report (PDF)"
+                                    style="background: #4f46e5; color: white; font-weight: 600; padding: 8px 18px; display: flex; align-items: center; gap: 6px; border-radius: 8px; border: none; cursor: pointer; box-shadow: 0 2px 4px rgba(79, 70, 229, 0.2);">
+                                    <span style="font-size: 16px;">📄</span> Continuity Report
+                                </button>
                                 <button class="btn btn-primary" id="export-continuity-excel"
                                     title="Export Continuity Matrix to Excel"
                                     style="background: #10b981; color: white; font-weight: 600; padding: 8px 18px; display: flex; align-items: center; gap: 6px;">
@@ -1045,6 +1080,31 @@
                                     <span style="font-size: 16px;">🖨️</span> Export PDF
                                 </button>
                             </div>
+                        </div>
+
+                        <!-- Interactive Continuity Legend Bar -->
+                        <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:10px; padding:10px 16px; margin-bottom:16px; display:flex; flex-wrap:wrap; gap:10px; align-items:center;">
+                            <span style="font-weight:700; color:#334155; font-size:12px; margin-right:4px;">Continuity Legend:</span>
+                            <span class="cont-legend-chip" title="Continuity Maintained: Correctly assigned to ongoing therapist."
+                                style="display:inline-flex; align-items:center; gap:6px; padding:4px 12px; border-radius:20px; font-size:12px; font-weight:600; background:#ecfdf5; color:#059669; border:1px solid #a7f3d0;">
+                                🟢 Continuity Maintained
+                            </span>
+                            <span class="cont-legend-chip" title="Conflict / Assigned Elsewhere: Previous therapist is on duty, but occupied with another patient."
+                                style="display:inline-flex; align-items:center; gap:6px; padding:4px 12px; border-radius:20px; font-size:12px; font-weight:600; background:#f5f3ff; color:#7c3aed; border:1px solid #ddd6fe;">
+                                🟣 Conflict / Assigned Elsewhere
+                            </span>
+                            <span class="cont-legend-chip" title="Avoidable Break / Unassigned: Previous therapist is free and available, but was not assigned."
+                                style="display:inline-flex; align-items:center; gap:6px; padding:4px 12px; border-radius:20px; font-size:12px; font-weight:700; background:#fef2f2; color:#dc2626; border:1px solid #fecaca;">
+                                🔴 Avoidable Break / Unassigned
+                            </span>
+                            <span class="cont-legend-chip" title="Unavailable / On Leave: Previous therapist is legitimately not in the active pool (Weekly Off, Emergency Leave, Deputed, Treatment Omission)."
+                                style="display:inline-flex; align-items:center; gap:6px; padding:4px 12px; border-radius:20px; font-size:12px; font-style:italic; font-weight:500; background:#f3f4f6; color:#4b5563; border:1px solid #e5e7eb;">
+                                ⚪ Unavailable / On Leave
+                            </span>
+                            <span class="cont-legend-chip" title="Preference Allocation: Assigned specifically due to a registered preference (Patient/VIP, Doctor order, Language)."
+                                style="display:inline-flex; align-items:center; gap:6px; padding:4px 12px; border-radius:20px; font-size:12px; font-weight:600; background:#eff6ff; color:#2563eb; border:1px solid #bfdbfe;">
+                                🔵 Preference Allocation
+                            </span>
                         </div>
 
                         <div class="filters">
@@ -1293,7 +1353,7 @@
                     <!-- STEP 2: Therapist Replacement & Bathing Selection -->
                     <div id="emStep2Container" style="display: none;">
                         <!-- Selected Treatment Info Banner -->
-                        <div style="background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 14px 16px; margin-bottom: 18px; display: flex; justify-content: space-between; align-items: center;">
+                        <div style="background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 14px 16px; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center;">
                             <div>
                                 <div style="font-size: 14px; font-weight: 700; color: #1e40af;">
                                     <span id="emSelPatient">Patient</span> (<span id="emSelReg">Reg</span>) • Room: <span id="emSelPatientRoom">—</span>
@@ -1310,18 +1370,46 @@
                             </button>
                         </div>
 
-                        <!-- 1. Select Therapist to Replace -->
+                        <!-- Action Mode Selector -->
+                        <div style="margin-bottom: 18px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 10px 14px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
+                            <div style="font-size: 12px; font-weight: 700; color: #475569; text-transform: uppercase; letter-spacing: 0.5px;">
+                                <i class="fas fa-sliders-h" style="color: #64748b;"></i> Action Type:
+                            </div>
+                            <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                                <button type="button" id="emModeTabReplace" onclick="setEmergencyMode('replace')" class="em-mode-pill active">
+                                    <i class="fas fa-user-friends"></i> Replace Therapist (Outer Swap)
+                                </button>
+                                <button type="button" id="emModeTabBathing" onclick="setEmergencyMode('bathing_only')" class="em-mode-pill em-mode-bathing">
+                                    <i class="fas fa-star" style="color: #f59e0b;"></i> Change Bathing Therapist Only (Within Group)
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Bathing Only Notice (Shown when in bathing_only mode) -->
+                        <div id="emBathingOnlyBanner" style="display: none; background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; padding: 12px 14px; margin-bottom: 16px; font-size: 12.5px; color: #92400e;">
+                            <div style="font-weight: 700; display: flex; align-items: center; gap: 6px; margin-bottom: 2px;">
+                                <i class="fas fa-star" style="color: #f59e0b;"></i> Reassign Bathing Role Within Group
+                            </div>
+                            <div>
+                                Select which therapist from this group should perform the bathing role (*). All currently assigned therapists will remain assigned &mdash; no external therapist will be swapped in.
+                            </div>
+                        </div>
+
+                        <!-- 1. Select Therapist to Replace / Select Bathing Therapist -->
                         <div style="margin-bottom: 20px;">
-                            <label style="font-size: 13px; font-weight: 700; color: #1e293b; display: block; margin-bottom: 8px;">
+                            <label id="emStep1Label" style="font-size: 13px; font-weight: 700; color: #1e293b; display: block; margin-bottom: 8px;">
                                 1. Select the Therapist to Replace:
                             </label>
                             <div id="emTargetTherapistsList" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px;">
                                 <!-- Radio cards for current therapists -->
                             </div>
+                            <div id="emSameTherapistNotice" style="font-size: 11.5px; color: #64748b; margin-top: 8px;">
+                                💡 Need to keep this therapist and only change who does bathing? <a href="javascript:void(0)" onclick="setEmergencyMode('bathing_only')" style="color: #2563eb; font-weight: 600; text-decoration: underline;">Switch to Bathing Reassignment mode</a>
+                            </div>
                         </div>
 
                         <!-- 2. Select Replacement Therapist (Searchable Clean Dropdown) -->
-                        <div style="margin-bottom: 20px;">
+                        <div id="emStep2OuterTherapistSec" style="margin-bottom: 20px;">
                             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
                                 <label style="font-size: 13px; font-weight: 700; color: #1e293b; margin: 0;">
                                     2. Select Replacement Therapist (Available in Slot):
@@ -1371,7 +1459,7 @@
                         </div>
 
                         <!-- 3. Designate Bathing Therapist -->
-                        <div style="background: #fffbeb; border: 1px solid #fef3c7; border-radius: 10px; padding: 16px; margin-bottom: 20px;">
+                        <div id="emStep3BathingSec" style="background: #fffbeb; border: 1px solid #fef3c7; border-radius: 10px; padding: 16px; margin-bottom: 20px;">
                             <label style="font-size: 13px; font-weight: 700; color: #92400e; display: flex; align-items: center; gap: 6px; margin-bottom: 4px;">
                                 <i class="fas fa-star" style="color: #f59e0b;"></i> 3. Designate Bathing Therapist (*):
                             </label>
@@ -1385,19 +1473,26 @@
 
                         <!-- 4. Mandatory Reason -->
                         <div style="margin-bottom: 16px;">
-                            <label style="font-size: 13px; font-weight: 700; color: #1e293b; display: flex; align-items: center; gap: 4px; margin-bottom: 6px;">
-                                4. Mandatory Reason for Emergency Replacement <span style="color: #ef4444;">*</span>
+                            <label id="emReasonLabel" style="font-size: 13px; font-weight: 700; color: #1e293b; display: flex; align-items: center; gap: 4px; margin-bottom: 6px;">
+                                <span id="emReasonStepNum">4</span>. Mandatory Reason for Emergency Replacement <span style="color: #ef4444;">*</span>
                             </label>
-                            <div style="display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px;">
+                            <div id="emQuickReasonsReplace" style="display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px;">
                                 <button type="button" class="btn btn-outline" style="padding: 4px 10px; font-size: 11px;" onclick="setQuickReason('Medical emergency / sudden sickness')">🤒 Medical emergency</button>
                                 <button type="button" class="btn btn-outline" style="padding: 4px 10px; font-size: 11px;" onclick="setQuickReason('Therapist absent on emergency leave')">🚨 Emergency leave</button>
                                 <button type="button" class="btn btn-outline" style="padding: 4px 10px; font-size: 11px;" onclick="setQuickReason('Sudden unannounced absence')">❌ Sudden absence</button>
                                 <button type="button" class="btn btn-outline" style="padding: 4px 10px; font-size: 11px;" onclick="setQuickReason('Patient requested therapist change')">👤 Patient request</button>
                                 <button type="button" class="btn btn-outline" style="padding: 4px 10px; font-size: 11px;" onclick="setQuickReason('Clinical / operational reassignment')">🏥 Operational reassign</button>
                             </div>
+                            <div id="emQuickReasonsBathing" style="display: none; flex-wrap: wrap; gap: 6px; margin-bottom: 8px;">
+                                <button type="button" class="btn btn-outline" style="padding: 4px 10px; font-size: 11px;" onclick="setQuickReason('Patient requested specific bathing therapist')">👤 Patient request</button>
+                                <button type="button" class="btn btn-outline" style="padding: 4px 10px; font-size: 11px;" onclick="setQuickReason('Specialized bathing technique required')">🛁 Specialized technique</button>
+                                <button type="button" class="btn btn-outline" style="padding: 4px 10px; font-size: 11px;" onclick="setQuickReason('Clinical / operational role adjustment')">🏥 Operational adjustment</button>
+                                <button type="button" class="btn btn-outline" style="padding: 4px 10px; font-size: 11px;" onclick="setQuickReason('Therapist mutual role swap')">🔄 Mutual role swap</button>
+                                <button type="button" class="btn btn-outline" style="padding: 4px 10px; font-size: 11px;" onclick="setQuickReason('Physical fatigue / therapist relief')">🩺 Therapist relief</button>
+                            </div>
                             <textarea id="emReasonInput" class="form-control" rows="3" placeholder="Enter specific mandatory reason for replacing the therapist (required for audit logging)..." style="width: 100%; border: 1px solid #cbd5e1; border-radius: 8px; padding: 10px 12px; font-size: 13px;" required></textarea>
                             <div id="emReasonError" style="display: none; color: #ef4444; font-size: 12px; margin-top: 4px; font-weight: 500;">
-                                Please provide a reason for the replacement.
+                                Please provide a reason.
                             </div>
                         </div>
                     </div>
@@ -1410,7 +1505,7 @@
                     <div style="display: flex; gap: 10px;">
                         <button type="button" class="btn btn-outline" onclick="closeEmergencyRescheduleModal()">Cancel</button>
                         <button type="button" class="btn btn-warning" id="emConfirmSubmitBtn" onclick="submitEmergencyReplacement()" style="background: #f59e0b; color: white; font-weight: 700; padding: 10px 22px; display: none;">
-                            <i class="fas fa-check"></i> Confirm Therapist Replacement
+                            <i class="fas fa-check"></i> <span id="emSubmitBtnText">Confirm Therapist Replacement</span>
                         </button>
                     </div>
                 </div>
@@ -1598,13 +1693,19 @@
 
                             cell.therapists.forEach((t, index) => {
                                 const span = document.createElement('div');
+                                span.className = 'cont-therapist-pill';
+                                span.style.padding = '2px 4px';
+                                span.style.borderRadius = '4px';
+                                span.style.cursor = 'pointer';
+                                span.style.display = 'inline-block';
+                                span.style.transition = 'all 0.15s ease';
 
                                 // Apply text color based on status (NO background)
                                 if (t.status === 'green') {
                                     span.style.color = '#059669';  // Green text
                                     span.style.fontWeight = '500';
-                                } else if (t.status === 'violet') {
-                                    span.style.color = '#7c3aed';  // Violet text
+                                } else if (t.status === 'purple' || t.status === 'violet') {
+                                    span.style.color = '#7c3aed';  // Purple text
                                     span.style.fontWeight = '600';
                                 } else if (t.status === 'red') {
                                     span.style.color = '#dc2626';  // Red text  
@@ -1612,6 +1713,9 @@
                                 } else if (t.status === 'gray') {
                                     span.style.color = '#6b7280';  // Gray text
                                     span.style.fontStyle = 'italic';
+                                } else if (t.status === 'blue') {
+                                    span.style.color = '#2563eb';  // Blue text
+                                    span.style.fontWeight = '600';
                                 }
 
                                 // Add bathing indicator
@@ -1621,7 +1725,36 @@
                                 }
 
                                 span.innerText = displayName;
+
+                                // Rich hover tooltip
+                                const reasonText = t.sub_reason_title ? ` (${t.sub_reason_title})` : '';
+                                span.title = `${t.status_label || ''}${reasonText}\n${t.core_meaning || ''}\n👉 Click or touch for full continuity analysis`;
+
+                                // Interactive hover effects
+                                span.addEventListener('mouseenter', () => {
+                                    span.style.background = '#f1f5f9';
+                                    span.style.textDecoration = 'underline';
+                                });
+                                span.addEventListener('mouseleave', () => {
+                                    span.style.background = 'transparent';
+                                    span.style.textDecoration = 'none';
+                                });
+
+                                // Touch & Click handler
+                                span.addEventListener('click', (e) => {
+                                    e.stopPropagation();
+                                    openContinuityDetailModal(row.patient, row.therapy_name, cell.slot || row.slot, dateStr, t, cell.therapists);
+                                });
+
                                 div.appendChild(span);
+                            });
+
+                            // Make the cell itself clickable to view details for all session therapists
+                            td.style.cursor = 'pointer';
+                            td.addEventListener('click', () => {
+                                if (cell.therapists && cell.therapists.length > 0) {
+                                    openContinuityDetailModal(row.patient, row.therapy_name, cell.slot || row.slot, dateStr, cell.therapists[0], cell.therapists);
+                                }
                             });
 
                             td.appendChild(div);
@@ -1755,8 +1888,10 @@
                     const textColorByStatus = {
                         green: [5, 150, 105],    // #059669
                         violet: [124, 58, 237],  // #7c3aed
+                        purple: [124, 58, 237],  // #7c3aed
                         red: [220, 38, 38],       // #dc2626
                         gray: [107, 114, 128],   // #6b7280
+                        blue: [37, 99, 235],     // #2563eb
                     };
 
                     const doc = new window.jspdf.jsPDF('l', 'pt', 'a4');
@@ -1949,8 +2084,9 @@
     <script>
         let currentEmergencyTreatments = [];
         let selectedEmergencyBooking = null;
-            clearReplacementChoice();
         let availableReplacementTherapists = [];
+        let currentEmergencyMode = 'replace'; // 'replace' or 'bathing_only'
+        let selectedBathingOnlyCode = null;
 
         function getCsrfToken() {
             let cookieValue = '';
@@ -2087,10 +2223,119 @@
             }).join('');
         }
 
+        function setEmergencyMode(mode) {
+            currentEmergencyMode = mode;
+            const tabReplace = document.getElementById('emModeTabReplace');
+            const tabBathing = document.getElementById('emModeTabBathing');
+            const bathingBanner = document.getElementById('emBathingOnlyBanner');
+            const step1Label = document.getElementById('emStep1Label');
+            const sameTherapistNotice = document.getElementById('emSameTherapistNotice');
+            const step2Sec = document.getElementById('emStep2OuterTherapistSec');
+            const step3Sec = document.getElementById('emStep3BathingSec');
+            const reasonStepNum = document.getElementById('emReasonStepNum');
+            const reasonLabel = document.getElementById('emReasonLabel');
+            const quickReplace = document.getElementById('emQuickReasonsReplace');
+            const quickBathing = document.getElementById('emQuickReasonsBathing');
+            const reasonInput = document.getElementById('emReasonInput');
+            const submitBtnText = document.getElementById('emSubmitBtnText');
+
+            if (mode === 'bathing_only') {
+                if (tabReplace) tabReplace.classList.remove('active');
+                if (tabBathing) tabBathing.classList.add('active');
+                if (bathingBanner) bathingBanner.style.display = 'block';
+                if (step1Label) step1Label.textContent = '1. Select the New Bathing Therapist (*):';
+                if (sameTherapistNotice) sameTherapistNotice.style.display = 'none';
+                if (step2Sec) step2Sec.style.display = 'none';
+                if (step3Sec) step3Sec.style.display = 'none';
+                if (reasonStepNum) reasonStepNum.textContent = '2';
+                if (reasonLabel) reasonLabel.innerHTML = '<span id="emReasonStepNum">2</span>. Mandatory Reason for Changing Bathing Therapist <span style="color: #ef4444;">*</span>';
+                if (quickReplace) quickReplace.style.display = 'none';
+                if (quickBathing) quickBathing.style.display = 'flex';
+                if (reasonInput) reasonInput.placeholder = 'Enter specific mandatory reason for reassigning the bathing therapist role (required for audit logging)...';
+                if (submitBtnText) submitBtnText.textContent = 'Confirm Bathing Role Change';
+
+                renderBathingOnlyTherapists();
+            } else {
+                if (tabReplace) tabReplace.classList.add('active');
+                if (tabBathing) tabBathing.classList.remove('active');
+                if (bathingBanner) bathingBanner.style.display = 'none';
+                if (step1Label) step1Label.textContent = '1. Select the Therapist to Replace:';
+                if (sameTherapistNotice) sameTherapistNotice.style.display = 'block';
+                if (step2Sec) step2Sec.style.display = 'block';
+                if (step3Sec) step3Sec.style.display = 'block';
+                if (reasonStepNum) reasonStepNum.textContent = '4';
+                if (reasonLabel) reasonLabel.innerHTML = '<span id="emReasonStepNum">4</span>. Mandatory Reason for Emergency Replacement <span style="color: #ef4444;">*</span>';
+                if (quickReplace) quickReplace.style.display = 'flex';
+                if (quickBathing) quickBathing.style.display = 'none';
+                if (reasonInput) reasonInput.placeholder = 'Enter specific mandatory reason for replacing the therapist (required for audit logging)...';
+                if (submitBtnText) submitBtnText.textContent = 'Confirm Therapist Replacement';
+
+                if (selectedEmergencyBooking && selectedEmergencyBooking.assignedTherapists) {
+                    renderCurrentTherapistsToReplace(selectedEmergencyBooking.assignedTherapists);
+                    updateBathingOptions();
+                }
+            }
+        }
+
+        function renderBathingOnlyTherapists() {
+            const container = document.getElementById('emTargetTherapistsList');
+            if (!selectedEmergencyBooking || !selectedEmergencyBooking.assignedTherapists || selectedEmergencyBooking.assignedTherapists.length === 0) {
+                container.innerHTML = '<span style="color:#ef4444;">No assigned therapists found for this booking.</span>';
+                return;
+            }
+
+            const therapists = selectedEmergencyBooking.assignedTherapists;
+            const currentBath = therapists.find(t => t.is_bathing);
+            // Default: keep current bathing or first therapist
+            if (selectedBathingOnlyCode === null || selectedBathingOnlyCode === undefined) {
+                selectedBathingOnlyCode = currentBath ? currentBath.code : therapists[0].code;
+            }
+
+            let html = therapists.map(t => {
+                const isCurrentBath = t.is_bathing;
+                const isCapable = !!t.is_bathing_therapist;
+                const isChecked = (t.code === selectedBathingOnlyCode);
+
+                return `
+                    <label style="border: 2px solid ${isChecked ? '#f59e0b' : '#e2e8f0'}; background: ${isChecked ? '#fffbeb' : '#fff'}; border-radius: 8px; padding: 12px; cursor: pointer; display: flex; align-items: flex-start; gap: 10px; transition: all 0.15s ease;">
+                        <input type="radio" name="emBathingOnlyRadio" value="${t.code}" ${isChecked ? 'checked' : ''} onchange="onBathingOnlyChoiceChanged('${t.code}')" style="margin-top: 3px;">
+                        <div style="flex: 1;">
+                            <div style="font-weight: 700; color: #1e293b; font-size: 13px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+                                ${escapeHtml(t.name)}
+                                ${isCurrentBath ? '<span style="background: #fef3c7; color: #b45309; padding: 2px 7px; border-radius: 4px; font-size: 11px; font-weight: 700;">★ Current Bathing</span>' : ''}
+                                ${isCapable ? '<span style="color: #059669; font-size: 11px; font-weight: 600;">[Bathing Capable]</span>' : ''}
+                            </div>
+                            <div style="font-size: 11px; color: #64748b; margin-top: 3px;">
+                                Code: <strong>${escapeHtml(t.code)}</strong> • Grade: <strong>${escapeHtml(t.grade || 'General')}</strong> • Gender: <strong>${escapeHtml(t.gender || '—')}</strong>
+                            </div>
+                        </div>
+                    </label>
+                `;
+            }).join('');
+
+            const isNoneChecked = (selectedBathingOnlyCode === '');
+            html += `
+                <label style="border: 2px solid ${isNoneChecked ? '#f59e0b' : '#e2e8f0'}; background: ${isNoneChecked ? '#fffbeb' : '#f8fafc'}; border-radius: 8px; padding: 10px 14px; cursor: pointer; display: flex; align-items: center; gap: 10px; grid-column: 1 / -1;">
+                    <input type="radio" name="emBathingOnlyRadio" value="" ${isNoneChecked ? 'checked' : ''} onchange="onBathingOnlyChoiceChanged('')">
+                    <span style="font-size: 12.5px; color: #475569; font-weight: 500;">
+                        🚫 No Bathing Therapist / Standard Treatment (Remove Bathing Role)
+                    </span>
+                </label>
+            `;
+
+            container.innerHTML = html;
+        }
+
+        function onBathingOnlyChoiceChanged(code) {
+            selectedBathingOnlyCode = code;
+            renderBathingOnlyTherapists();
+        }
+
         function selectEmergencyBookingById(bookingId) {
             const booking = currentEmergencyTreatments.find(t => t.booking_id === bookingId);
             if (!booking) return;
             selectedEmergencyBooking = booking;
+            selectedBathingOnlyCode = null;
             clearReplacementChoice();
 
             // Populate Step 2 banner
@@ -2108,6 +2353,9 @@
             document.getElementById('emReasonInput').value = '';
             document.getElementById('emReasonError').style.display = 'none';
             document.getElementById('emStatusMsg').textContent = '';
+
+            // Reset to replace mode initially
+            setEmergencyMode('replace');
 
             // Fetch available therapists and current assignments
             loadAvailableTherapistsForBooking(bookingId);
@@ -2141,9 +2389,17 @@
                     document.getElementById('emGenderRequirementLabel').textContent = 
                         `Filtered by required gender (${desiredGender.toUpperCase()}). Showing active therapists available in this timeslot.`;
 
-                    renderCurrentTherapistsToReplace(currentTherapists, targetReplacedCode);
-                    renderReplacementDropdown(availableReplacementTherapists);
-                    updateBathingOptions();
+                    if (selectedEmergencyBooking) {
+                        selectedEmergencyBooking.assignedTherapists = currentTherapists;
+                    }
+
+                    if (currentEmergencyMode === 'bathing_only') {
+                        renderBathingOnlyTherapists();
+                    } else {
+                        renderCurrentTherapistsToReplace(currentTherapists, targetReplacedCode);
+                        renderReplacementDropdown(availableReplacementTherapists);
+                        updateBathingOptions();
+                    }
                 })
                 .catch(err => {
                     console.error('Error fetching available therapists:', err);
@@ -2171,17 +2427,16 @@
                         <input type="radio" name="emTargetTherapist" value="${t.code}" ${isSelected ? 'checked' : ''} onchange="onTargetTherapistChanged('${t.code}')" style="margin-top: 3px;">
                         <div style="flex: 1;">
                             <div style="font-weight: 700; color: #1e293b; font-size: 13px;">
-                                ${t.name} ${bathBadge}
+                                ${escapeHtml(t.name)} ${bathBadge}
                             </div>
                             <div style="font-size: 11px; color: #64748b; margin-top: 2px;">
-                                Code: <strong>${t.code}</strong> • Grade: <strong>${t.grade || 'General'}</strong> • Gender: <strong>${t.gender}</strong>
+                                Code: <strong>${escapeHtml(t.code)}</strong> • Grade: <strong>${escapeHtml(t.grade || 'General')}</strong> • Gender: <strong>${escapeHtml(t.gender || '—')}</strong>
                             </div>
                         </div>
                     </label>
                 `;
             }).join('');
 
-            // Store currently loaded therapists in selectedEmergencyBooking
             if (selectedEmergencyBooking) {
                 selectedEmergencyBooking.assignedTherapists = currentTherapists;
             }
@@ -2222,7 +2477,16 @@
 
             if (!therapists || therapists.length === 0) {
                 if (noMsg) noMsg.style.display = 'block';
-                if (listContainer) listContainer.innerHTML = '<div style="padding: 16px; text-align: center; color: #94a3b8; font-size: 12px;">No available therapists found.</div>';
+                if (listContainer) {
+                    listContainer.innerHTML = `
+                        <div class="em-opt-item" onclick="setEmergencyMode('bathing_only'); closeReplacementMenu();" style="background: #fffbeb; border-bottom: 1.5px solid #fde68a; padding: 10px 12px;">
+                            <div style="display: flex; align-items: center; gap: 6px; color: #92400e; font-size: 12.5px; font-weight: 700;">
+                                <i class="fas fa-star" style="color: #f59e0b;"></i> Don't swap outer therapist &mdash; change bathing therapist in this group
+                            </div>
+                        </div>
+                        <div style="padding: 16px; text-align: center; color: #94a3b8; font-size: 12px;">No available outer therapists found.</div>
+                    `;
+                }
                 return;
             }
             if (noMsg) noMsg.style.display = 'none';
@@ -2246,12 +2510,21 @@
                 return name.includes(query) || code.includes(query) || grade.includes(query);
             });
 
+            // Quick option at top of dropdown to switch to within-group bathing change
+            let topOption = `
+                <div class="em-opt-item" onclick="setEmergencyMode('bathing_only'); closeReplacementMenu();" style="background: #eff6ff; border-bottom: 1.5px solid #bfdbfe; padding: 9px 12px;">
+                    <div style="display: flex; align-items: center; gap: 6px; color: #1e40af; font-size: 12.5px; font-weight: 700;">
+                        <i class="fas fa-star" style="color: #f59e0b;"></i> Don't swap outer therapist &mdash; change bathing therapist in this group
+                    </div>
+                </div>
+            `;
+
             if (filtered.length === 0) {
-                listContainer.innerHTML = '<div style="padding: 16px; text-align: center; color: #94a3b8; font-size: 12px;">No matching therapists found.</div>';
+                listContainer.innerHTML = topOption + '<div style="padding: 16px; text-align: center; color: #94a3b8; font-size: 12px;">No matching therapists found.</div>';
                 return;
             }
 
-            listContainer.innerHTML = filtered.map(t => {
+            listContainer.innerHTML = topOption + filtered.map(t => {
                 const isSelected = (t.therapist_code === currentSelected);
                 const isBathing = !!t.is_bathing_therapist;
                 const gradeName = t.grade || 'General';
@@ -2466,45 +2739,73 @@
                     return;
                 }
 
-                const targetTherapistCode = document.querySelector('input[name="emTargetTherapist"]:checked')?.value;
-                const replacementTherapistCode = document.getElementById('emReplacementDropdown')?.value;
-                const bathingTherapistCode = document.querySelector('input[name="emBathingTherapist"]:checked')?.value || '';
+                const statusMsg = document.getElementById('emStatusMsg');
+                const submitBtn = document.getElementById('emConfirmSubmitBtn');
                 const reason = (document.getElementById('emReasonInput')?.value || '').trim();
 
-                if (!targetTherapistCode) {
-                    alert('Please select the therapist to replace.');
-                    return;
-                }
-                if (!replacementTherapistCode) {
-                    alert('Please select a replacement therapist.');
-                    return;
-                }
                 if (!reason || reason.length < 3) {
                     document.getElementById('emReasonError').style.display = 'block';
                     document.getElementById('emReasonInput')?.focus();
                     return;
                 }
-
                 document.getElementById('emReasonError').style.display = 'none';
-                const statusMsg = document.getElementById('emStatusMsg');
-                const submitBtn = document.getElementById('emConfirmSubmitBtn');
 
-                if (submitBtn) {
-                    submitBtn.disabled = true;
-                    submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing replacement...';
-                }
-                if (statusMsg) {
-                    statusMsg.style.color = '#0284c7';
-                    statusMsg.textContent = 'Updating therapist assignments and audit log...';
-                }
+                let payload = {};
 
-                const payload = {
-                    booking_id: selectedEmergencyBooking.booking_id,
-                    replaced_therapist_code: targetTherapistCode,
-                    replacement_therapist_code: replacementTherapistCode,
-                    bathing_therapist_code: bathingTherapistCode,
-                    reason: reason,
-                };
+                if (currentEmergencyMode === 'bathing_only') {
+                    const chosenRadio = document.querySelector('input[name="emBathingOnlyRadio"]:checked');
+                    if (!chosenRadio) {
+                        alert('Please select which therapist should perform the bathing role, or choose "No bathing therapist".');
+                        return;
+                    }
+
+                    payload = {
+                        action_type: 'bathing_only',
+                        booking_id: selectedEmergencyBooking.booking_id,
+                        bathing_therapist_code: chosenRadio.value,
+                        reason: reason,
+                    };
+
+                    if (submitBtn) {
+                        submitBtn.disabled = true;
+                        submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing bathing role change...';
+                    }
+                    if (statusMsg) {
+                        statusMsg.style.color = '#0284c7';
+                        statusMsg.textContent = 'Updating bathing therapist role and audit log...';
+                    }
+                } else {
+                    const targetTherapistCode = document.querySelector('input[name="emTargetTherapist"]:checked')?.value;
+                    const replacementTherapistCode = document.getElementById('emReplacementDropdown')?.value;
+                    const bathingTherapistCode = document.querySelector('input[name="emBathingTherapist"]:checked')?.value || '';
+
+                    if (!targetTherapistCode) {
+                        alert('Please select the therapist to replace.');
+                        return;
+                    }
+                    if (!replacementTherapistCode) {
+                        alert('Please select a replacement therapist.');
+                        return;
+                    }
+
+                    payload = {
+                        action_type: 'replace',
+                        booking_id: selectedEmergencyBooking.booking_id,
+                        replaced_therapist_code: targetTherapistCode,
+                        replacement_therapist_code: replacementTherapistCode,
+                        bathing_therapist_code: bathingTherapistCode,
+                        reason: reason,
+                    };
+
+                    if (submitBtn) {
+                        submitBtn.disabled = true;
+                        submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing replacement...';
+                    }
+                    if (statusMsg) {
+                        statusMsg.style.color = '#0284c7';
+                        statusMsg.textContent = 'Updating therapist assignments and audit log...';
+                    }
+                }
 
                 const headers = {
                     'Content-Type': 'application/json',
@@ -2532,7 +2833,8 @@
                 .then(result => {
                     if (submitBtn) {
                         submitBtn.disabled = false;
-                        submitBtn.innerHTML = '<i class="fas fa-check"></i> Confirm Therapist Replacement';
+                        const btnText = (currentEmergencyMode === 'bathing_only') ? 'Confirm Bathing Role Change' : 'Confirm Therapist Replacement';
+                        submitBtn.innerHTML = `<i class="fas fa-check"></i> <span id="emSubmitBtnText">${btnText}</span>`;
                     }
 
                     const data = result.data || {};
@@ -2564,7 +2866,8 @@
                     clearTimeout(timeoutId);
                     if (submitBtn) {
                         submitBtn.disabled = false;
-                        submitBtn.innerHTML = '<i class="fas fa-check"></i> Confirm Therapist Replacement';
+                        const btnText = (currentEmergencyMode === 'bathing_only') ? 'Confirm Bathing Role Change' : 'Confirm Therapist Replacement';
+                        submitBtn.innerHTML = `<i class="fas fa-check"></i> <span id="emSubmitBtnText">${btnText}</span>`;
                     }
                     const errMsg = (err.name === 'AbortError')
                         ? 'Request timed out after 15 seconds. Please try again.'
@@ -2584,6 +2887,710 @@
                 }
                 alert('Client error: ' + ex.message);
             }
+        }
+    </script>
+
+    <!-- Continuity Details Modal (Click/Touch on Therapist or Cell) -->
+    <div id="continuityDetailModal" class="modal" style="display:none; position:fixed; z-index:1060; left:0; top:0; width:100%; height:100%; overflow:auto; background-color:rgba(15,23,42,0.65); backdrop-filter:blur(4px); align-items:center; justify-content:center;">
+        <div class="modal-content" style="background:#fff; border-radius:12px; max-width:540px; width:92%; margin:auto; box-shadow:0 25px 50px -12px rgba(0,0,0,0.25); overflow:hidden; border:1px solid #e2e8f0; animation:contModalPop 0.2s ease-out;">
+            <!-- Modal Header -->
+            <div style="background:linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%); padding:16px 20px; border-bottom:1px solid #e2e8f0; display:flex; justify-content:space-between; align-items:center;">
+                <div>
+                    <h3 style="margin:0; font-size:17px; font-weight:700; color:#0f172a; display:flex; align-items:center; gap:8px;">
+                        <span>🔍</span> Continuity Analysis
+                    </h3>
+                    <div id="contModalSubtitle" style="font-size:12px; color:#64748b; margin-top:3px;">
+                        Session & therapist continuity reason analysis
+                    </div>
+                </div>
+                <span class="close" onclick="closeContinuityDetailModal()" style="font-size:24px; color:#94a3b8; cursor:pointer; line-height:1; padding:2px 6px; border-radius:4px; transition:all 0.15s;" onmouseover="this.style.color='#1e293b'; this.style.background='#e2e8f0';" onmouseout="this.style.color='#94a3b8'; this.style.background='transparent';">&times;</span>
+            </div>
+
+            <!-- Modal Body -->
+            <div id="contModalBody" style="padding:18px 20px; max-height:72vh; overflow-y:auto;">
+                <!-- Dynamically populated -->
+            </div>
+
+            <!-- Modal Footer -->
+            <div style="background:#f8fafc; padding:12px 20px; border-top:1px solid #e2e8f0; display:flex; justify-content:flex-end; align-items:center;">
+                <button class="btn btn-secondary" onclick="closeContinuityDetailModal()" style="padding:7px 22px; border-radius:6px; font-weight:600; font-size:13px;">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Script for Continuity Detail Modal & PDF Report Download -->
+    <script>
+        const CONT_STATUS_THEMES = {
+            green: {
+                icon: '🟢',
+                color: '#059669',
+                bg: '#ecfdf5',
+                border: '#a7f3d0',
+                badgeBg: '#d1fae5',
+                label: 'Continuity Maintained',
+                meaning: 'Correctly assigned to ongoing therapist.'
+            },
+            purple: {
+                icon: '🟣',
+                color: '#7c3aed',
+                bg: '#f5f3ff',
+                border: '#ddd6fe',
+                badgeBg: '#ede9fe',
+                label: 'Conflict / Assigned Elsewhere',
+                meaning: 'Previous therapist is on duty, but occupied with another patient.'
+            },
+            violet: {
+                icon: '🟣',
+                color: '#7c3aed',
+                bg: '#f5f3ff',
+                border: '#ddd6fe',
+                badgeBg: '#ede9fe',
+                label: 'Conflict / Assigned Elsewhere',
+                meaning: 'Previous therapist is on duty, but occupied with another patient.'
+            },
+            red: {
+                icon: '🔴',
+                color: '#dc2626',
+                bg: '#fef2f2',
+                border: '#fecaca',
+                badgeBg: '#fee2e2',
+                label: 'Avoidable Break / Unassigned',
+                meaning: 'Previous therapist is free and available, but was not assigned.'
+            },
+            gray: {
+                icon: '⚪',
+                color: '#4b5563',
+                bg: '#f3f4f6',
+                border: '#e5e7eb',
+                badgeBg: '#e5e7eb',
+                label: 'Unavailable / On Leave',
+                meaning: 'Previous therapist is legitimately not in the active pool.'
+            },
+            blue: {
+                icon: '🔵',
+                color: '#2563eb',
+                bg: '#eff6ff',
+                border: '#bfdbfe',
+                badgeBg: '#dbeafe',
+                label: 'Preference Allocation',
+                meaning: 'Assigned specifically due to a registered preference.'
+            }
+        };
+
+        function openContinuityDetailModal(patient, therapyName, slot, dateStr, selectedTherapist, allCellTherapists) {
+            const modal = document.getElementById('continuityDetailModal');
+            const body = document.getElementById('contModalBody');
+            const subtitle = document.getElementById('contModalSubtitle');
+
+            const formattedDate = new Date(dateStr).toLocaleDateString('en-US', {
+                weekday: 'short', month: 'short', day: 'numeric', year: 'numeric'
+            });
+
+            subtitle.innerText = `${patient.name} • ${therapyName} • ${formattedDate}`;
+
+            let html = `
+                <!-- Patient & Session Summary Bar -->
+                <div style="background:#f8fafc; border-radius:8px; padding:10px 14px; margin-bottom:14px; display:grid; grid-template-columns:repeat(auto-fit, minmax(110px, 1fr)); gap:8px; font-size:12px; border:1px solid #e2e8f0;">
+                    <div><span style="color:#64748b; display:block; font-size:10px; font-weight:600; text-transform:uppercase;">Patient</span><strong style="color:#0f172a;">${patient.name}</strong> <span style="color:#64748b;">(${patient.reg_no})</span></div>
+                    <div><span style="color:#64748b; display:block; font-size:10px; font-weight:600; text-transform:uppercase;">Room</span><strong style="color:#0f172a;">${patient.room_no || '—'}</strong></div>
+                    <div><span style="color:#64748b; display:block; font-size:10px; font-weight:600; text-transform:uppercase;">Therapy</span><strong style="color:#0f172a;">${therapyName}</strong></div>
+                    <div><span style="color:#64748b; display:block; font-size:10px; font-weight:600; text-transform:uppercase;">Time Slot</span><strong style="color:#0f172a;">${slot || '—'}</strong></div>
+                </div>
+            `;
+
+            const therapistsToDisplay = allCellTherapists && allCellTherapists.length > 0 ? allCellTherapists : [selectedTherapist];
+
+            therapistsToDisplay.forEach((t) => {
+                const theme = CONT_STATUS_THEMES[t.status] || CONT_STATUS_THEMES.gray;
+                const statusLabel = t.status_label || theme.label;
+                const isSelected = selectedTherapist && (t.id === selectedTherapist.id || t.name === selectedTherapist.name);
+
+                // Extract clean, precise reason without clutter or score
+                let exactReason = t.sub_reason_detail || t.core_meaning || statusLabel;
+                exactReason = exactReason.replace(/•\s*Continuity score:\s*\d+%/gi, '');
+                exactReason = exactReason.replace(/Continuity score:\s*\d+%/gi, '');
+                exactReason = exactReason.replace(/<br\s*\/?>/gi, ' ');
+                exactReason = exactReason.replace(/^\s*[•\-\*]\s*/g, '').trim();
+
+                let notes = (t.sub_reason_notes || '').replace(/•\s*Continuity score:\s*\d+%/gi, '').replace(/Continuity score:\s*\d+%/gi, '').trim();
+                if (notes && (notes.toLowerCase() === exactReason.toLowerCase() || exactReason.toLowerCase().includes(notes.toLowerCase()))) {
+                    notes = '';
+                }
+
+                html += `
+                    <div style="border:1.5px solid ${isSelected ? theme.color : '#e2e8f0'}; border-radius:10px; padding:12px 14px; margin-bottom:10px; background:#fff; position:relative;">
+                        ${isSelected && therapistsToDisplay.length > 1 ? '<span style="position:absolute; top:-9px; right:12px; background:#3b82f6; color:#fff; font-size:9px; font-weight:700; padding:1px 6px; border-radius:8px; text-transform:uppercase;">Selected</span>' : ''}
+
+                        <!-- Therapist Name & Status Badge -->
+                        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:6px;">
+                            <div style="display:flex; align-items:center; gap:6px;">
+                                <span style="font-size:15px;">${t.is_bathing ? '🛁' : '👨‍⚕️'}</span>
+                                <strong style="font-size:14px; color:#0f172a;">${t.name}</strong>
+                                <span style="font-size:10px; font-weight:600; padding:1px 6px; border-radius:4px; ${t.is_bathing ? 'background:#fef3c7; color:#92400e;' : 'background:#f1f5f9; color:#475569;'}">
+                                    ${t.is_bathing ? 'Bathing Therapist' : 'Primary Therapist'}
+                                </span>
+                            </div>
+                            <div style="display:inline-flex; align-items:center; gap:5px; padding:3px 10px; border-radius:16px; font-size:11px; font-weight:700; background:${theme.badgeBg}; color:${theme.color}; border:1px solid ${theme.border};">
+                                <span>${theme.icon}</span> ${statusLabel}
+                            </div>
+                        </div>
+
+                        ${t.previous_therapist_name && t.previous_therapist_name !== t.name ? `
+                            <div style="font-size:11px; color:#64748b; margin-bottom:6px;">
+                                Replaced Previous Therapist: <strong style="color:#0f172a;">${t.previous_therapist_name}</strong>
+                            </div>
+                        ` : ''}
+
+                        <!-- Exact Reason (Clean, Simple, Precise) -->
+                        <div style="background:${theme.bg}; border-left:3px solid ${theme.color}; border-radius:0 6px 6px 0; padding:8px 12px; margin-top:4px;">
+                            <div style="font-size:10px; text-transform:uppercase; font-weight:700; color:${theme.color}; margin-bottom:2px; letter-spacing:0.5px;">
+                                Exact Reason
+                            </div>
+                            <div style="font-size:12px; font-weight:600; color:#1e293b; line-height:1.4;">
+                                ${exactReason}
+                            </div>
+                            ${notes ? `
+                                <div style="font-size:11px; color:#475569; margin-top:4px; line-height:1.35;">
+                                    ${notes}
+                                </div>
+                            ` : ''}
+                        </div>
+                    </div>
+                `;
+            });
+
+            body.innerHTML = html;
+            modal.style.display = 'flex';
+        }
+
+        function closeContinuityDetailModal() {
+            const modal = document.getElementById('continuityDetailModal');
+            if (modal) modal.style.display = 'none';
+        }
+
+        // Close modal on escape key or backdrop click
+        window.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') {
+                closeContinuityDetailModal();
+            }
+        });
+
+        window.addEventListener('click', function(e) {
+            const detailModal = document.getElementById('continuityDetailModal');
+            if (e.target === detailModal) closeContinuityDetailModal();
+        });
+
+        // =========================================================================
+        // Continuity Report PDF Generator
+        // Strictly applies Continuity Audit Rules:
+        // Discontinuity includes ONLY:
+        //  1. Red (Avoidable Break / Unassigned)
+        //  2. Purple with Sub-reasons:
+        //     - Assigned Newly: Assigned to another patient as a new allocation
+        //     - Assigned as Substitute: Covered another patient's session as emergency/leave substitute
+        // All other states (Green, Blue, Grey, and Purple 1 [Occupied as Primary] & 4 [Occupied as Bathing])
+        // are classified as CONTINUITY MAINTAINED.
+        // =========================================================================
+        async function downloadContinuityReportPDF() {
+            const fromInput = document.getElementById('cont-from');
+            const toInput = document.getElementById('cont-to');
+            const fromDate = fromInput ? fromInput.value : '';
+            const toDate = toInput ? toInput.value : '';
+            const excludeLeave = document.getElementById('cont-exclude')?.checked ?? true;
+
+            if (!fromDate || !toDate) {
+                alert('Please select From Date and To Date to generate the Continuity Report.');
+                return;
+            }
+
+            let data = window._continuityMatrixData;
+            const dataFrom = data?.meta?.date_range ? data.meta.date_range.split(' to ')[0] : '';
+            const dataTo = data?.meta?.date_range ? data.meta.date_range.split(' to ')[1] : '';
+
+            // If data not yet loaded or user selected different dates, auto-fetch
+            if (!data || !data.rows || dataFrom !== fromDate || dataTo !== toDate) {
+                const loading = document.getElementById('cont-loading');
+                if (loading) loading.style.display = 'flex';
+                try {
+                    const url = `/sheduling/scheduling/api/continuity-matrix/?from_date=${fromDate}&to_date=${toDate}&exclude_leave=${excludeLeave}`;
+                    const res = await fetch(url);
+                    data = await res.json();
+                    if (data.error) throw new Error(data.error);
+                    window._continuityMatrixData = data;
+                    if (typeof renderMatrix === 'function') renderMatrix(data);
+                } catch (err) {
+                    alert('Failed to load continuity data for report: ' + err.message);
+                    return;
+                } finally {
+                    if (loading) loading.style.display = 'none';
+                }
+            }
+
+            if (!data || !data.rows || data.rows.length === 0) {
+                alert('No treatment records found for the selected date range.');
+                return;
+            }
+
+            const { jsPDF } = window.jspdf || {};
+            if (!jsPDF) {
+                alert('PDF generation library (jsPDF) is not loaded.');
+                return;
+            }
+
+            const columns = data.columns || [];
+            let totalTreatments = 0;
+            let totalContinuityMaintained = 0;
+            let totalDiscontinuities = 0;
+
+            let redDiscontinuityCount = 0;
+            let purpleNewlyAssignedCount = 0;
+            let purpleSubstituteCount = 0;
+
+            const dailyStats = {};
+            columns.forEach(d => {
+                dailyStats[d] = {
+                    dateStr: d,
+                    total: 0,
+                    continuity: 0,
+                    discontinuity: 0,
+                    red: 0,
+                    purpleNew: 0,
+                    purpleSub: 0
+                };
+            });
+
+            const discontinuityIncidents = [];
+
+            // Evaluation helper per user requirements:
+            // Discontinuity ONLY if Red, or Purple (2. Assigned Newly, 3. Assigned as Substitute).
+            // All other cases (Green, Blue, Grey, and Purple 1 [Occupied as Primary] & 4 [Occupied as Bathing]) are Continuity Maintained.
+            function evalTherapistDiscontinuity(t) {
+                if (!t) return { isDisc: false, type: '', reason: '' };
+                const st = (t.status || '').toLowerCase();
+                const code = (t.sub_reason_code || '').toLowerCase();
+                const title = (t.sub_reason_title || '').toLowerCase();
+
+                if (st === 'red') {
+                    let r = t.sub_reason_detail || t.sub_reason_notes || t.core_meaning || 'Avoidable Break / Unassigned';
+                    r = r.replace(/•\s*Continuity score:\s*\d+%/gi, '').replace(/Continuity score:\s*\d+%/gi, '').replace(/<br\s*\/?>/gi, ' ').trim();
+                    return {
+                        isDisc: true,
+                        type: 'Avoidable Break (Red)',
+                        subType: 'red',
+                        title: t.sub_reason_title || 'Avoidable Break',
+                        reason: r
+                    };
+                }
+
+                if (st === 'purple' || st === 'violet') {
+                    if (code === 'assigned_newly' || title.includes('assigned newly')) {
+                        let r = t.sub_reason_detail || 'Assigned to another patient as a new allocation.';
+                        r = r.replace(/•\s*Continuity score:\s*\d+%/gi, '').replace(/Continuity score:\s*\d+%/gi, '').replace(/<br\s*\/?>/gi, ' ').trim();
+                        return {
+                            isDisc: true,
+                            type: 'Diverted - Assigned Newly (Purple)',
+                            subType: 'purple_new',
+                            title: 'Assigned Newly',
+                            reason: r
+                        };
+                    }
+                    if (code === 'assigned_substitute' || title.includes('substitute')) {
+                        let r = t.sub_reason_detail || "Covered another patient's session as an emergency/leave substitute.";
+                        r = r.replace(/•\s*Continuity score:\s*\d+%/gi, '').replace(/Continuity score:\s*\d+%/gi, '').replace(/<br\s*\/?>/gi, ' ').trim();
+                        return {
+                            isDisc: true,
+                            type: 'Diverted - Substitute (Purple)',
+                            subType: 'purple_sub',
+                            title: 'Assigned as Substitute',
+                            reason: r
+                        };
+                    }
+                }
+
+                return { isDisc: false, type: '', reason: '' };
+            }
+
+            // Loop through each row and date cell
+            data.rows.forEach(row => {
+                const patName = row.patient?.name || 'Patient';
+                const patReg = row.patient?.reg_no || '—';
+                const roomNo = row.patient?.room_no || '—';
+                const therapy = row.therapy_name || 'General';
+                const rowSlot = row.slot || '—';
+
+                columns.forEach(dateStr => {
+                    const cell = row.cells ? row.cells[dateStr] : null;
+                    if (!cell || cell.status === 'empty' || !cell.therapists || cell.therapists.length === 0) {
+                        return; // Not scheduled
+                    }
+
+                    const slot = cell.slot || rowSlot;
+                    totalTreatments++;
+                    dailyStats[dateStr].total++;
+
+                    // Check if any therapist in this session caused a discontinuity
+                    let discMatch = null;
+                    let discTherapist = null;
+
+                    for (const t of cell.therapists) {
+                        const check = evalTherapistDiscontinuity(t);
+                        if (check.isDisc) {
+                            discMatch = check;
+                            discTherapist = t;
+                            break;
+                        }
+                    }
+
+                    if (discMatch) {
+                        totalDiscontinuities++;
+                        dailyStats[dateStr].discontinuity++;
+
+                        if (discMatch.subType === 'red') {
+                            redDiscontinuityCount++;
+                            dailyStats[dateStr].red++;
+                        } else if (discMatch.subType === 'purple_new') {
+                            purpleNewlyAssignedCount++;
+                            dailyStats[dateStr].purpleNew++;
+                        } else if (discMatch.subType === 'purple_sub') {
+                            purpleSubstituteCount++;
+                            dailyStats[dateStr].purpleSub++;
+                        }
+
+                        const tName = discTherapist?.name || '—';
+                        const role = discTherapist?.is_bathing ? 'Bathing' : 'Primary';
+                        const prevTName = discTherapist?.previous_therapist_name || '—';
+
+                        discontinuityIncidents.push({
+                            dateStr: dateStr,
+                            patient: patName,
+                            regNo: patReg,
+                            room: roomNo,
+                            therapy: therapy,
+                            slot: slot,
+                            assignedTherapist: `${tName} (${role})`,
+                            replacedTherapist: prevTName,
+                            discType: discMatch.type,
+                            reason: discMatch.reason
+                        });
+                    } else {
+                        totalContinuityMaintained++;
+                        dailyStats[dateStr].continuity++;
+                    }
+                });
+            });
+
+            const overallContinuityPercentage = totalTreatments > 0
+                ? ((totalContinuityMaintained / totalTreatments) * 100).toFixed(1)
+                : '100.0';
+
+            // Generate clean, executive PDF report
+            const doc = new jsPDF('p', 'pt', 'a4');
+            const pageWidth = 595.28;
+            const pageHeight = 841.89;
+            const margin = 36;
+            const contentWidth = pageWidth - 2 * margin; // 523.28
+
+            // 1. Header Banner (Clean, without hospital name)
+            doc.setFillColor(30, 58, 138); // Deep Navy #1e3a8a
+            doc.roundedRect(margin, 26, contentWidth, 42, 4, 4, 'F');
+
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(13);
+            doc.setTextColor(255, 255, 255);
+            doc.text('THERAPIST CONTINUITY & ALLOCATION AUDIT REPORT', margin + 14, 46);
+
+            // Subtitle info
+            const formattedFrom = new Date(fromDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+            const formattedTo = new Date(toDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+            const genTimestamp = new Date().toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' });
+
+            doc.setFontSize(8);
+            doc.setFont('helvetica', 'normal');
+            doc.setTextColor(224, 231, 255);
+            doc.text(`Audit Period: ${formattedFrom} to ${formattedTo} (${columns.length} Days)   |   Generated: ${genTimestamp}`, margin + 14, 60);
+
+            // 2. Executive Summary: KPI Breakdown Table (Left) + Prominent Continuity Percentage Card (Right)
+            const kpiStartY = 76;
+            const leftTableWidth = 325;
+            const cardX = margin + leftTableWidth + 12;
+            const cardWidth = contentWidth - leftTableWidth - 12; // ~186 pt
+            const cardHeight = 114;
+
+            // Determine highlight colors based on percentage
+            const pctNum = parseFloat(overallContinuityPercentage) || 0;
+            let cardBg = [236, 253, 245];       // Emerald #ecfdf5
+            let cardBorder = [5, 150, 105];     // #059669
+            let scoreColor = [4, 120, 87];      // #047857
+            let badgeText = 'HIGH CONTINUITY';
+
+            if (pctNum < 75) {
+                cardBg = [254, 242, 242];       // Red #fef2f2
+                cardBorder = [220, 38, 38];     // #dc2626
+                scoreColor = [185, 28, 28];     // #b91c1c
+                badgeText = 'ATTENTION REQUIRED';
+            } else if (pctNum < 90) {
+                cardBg = [254, 243, 199];       // Amber #fef3c7
+                cardBorder = [217, 119, 6];     // #d97706
+                scoreColor = [180, 83, 9];      // #b45309
+                badgeText = 'MODERATE CONTINUITY';
+            }
+
+            // Draw Prominent Highlight Card for Continuity Percentage
+            doc.setFillColor(cardBg[0], cardBg[1], cardBg[2]);
+            doc.setDrawColor(cardBorder[0], cardBorder[1], cardBorder[2]);
+            doc.setLineWidth(1.5);
+            doc.roundedRect(cardX, kpiStartY, cardWidth, cardHeight, 6, 6, 'FD');
+
+            // Card Header Label
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(8.5);
+            doc.setTextColor(71, 85, 105);
+            doc.text('OVERALL CONTINUITY', cardX + cardWidth / 2, kpiStartY + 20, { align: 'center' });
+
+            // GIANT HIGHLIGHTED PERCENTAGE
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(28);
+            doc.setTextColor(scoreColor[0], scoreColor[1], scoreColor[2]);
+            doc.text(`${overallContinuityPercentage}%`, cardX + cardWidth / 2, kpiStartY + 54, { align: 'center' });
+
+            // Status Badge Pill inside Highlight Card
+            doc.setFillColor(cardBorder[0], cardBorder[1], cardBorder[2]);
+            doc.roundedRect(cardX + 20, kpiStartY + 64, cardWidth - 40, 18, 9, 9, 'F');
+            doc.setFontSize(7.5);
+            doc.setFont('helvetica', 'bold');
+            doc.setTextColor(255, 255, 255);
+            doc.text(badgeText, cardX + cardWidth / 2, kpiStartY + 76, { align: 'center' });
+
+            // Subtext inside Highlight Card
+            doc.setFont('helvetica', 'normal');
+            doc.setFontSize(7.5);
+            doc.setTextColor(100, 116, 139);
+            doc.text(`${totalContinuityMaintained} / ${totalTreatments} Maintained Sessions`, cardX + cardWidth / 2, kpiStartY + 100, { align: 'center' });
+
+            // Left Side KPI Breakdown Table
+            doc.autoTable({
+                startY: kpiStartY,
+                margin: { left: margin },
+                tableWidth: leftTableWidth,
+                head: [['CONTINUITY METRIC', 'COUNT', 'AUDIT CLASSIFICATION']],
+                body: [
+                    ['Total Treatments Scheduled', totalTreatments.toString(), 'All therapy sessions across selected dates'],
+                    ['Continuity Maintained', `${totalContinuityMaintained}  (${overallContinuityPercentage}%)`, 'Retained primary, preference, & legitimate conflicts'],
+                    ['Discontinuities (Total)', totalDiscontinuities.toString(), 'Avoidable breaks & diverted reallocations'],
+                    ['  • Avoidable Breaks (Red)', redDiscontinuityCount.toString(), 'Previous therapist free & available, but unassigned'],
+                    ['  • Assigned Newly (Purple)', purpleNewlyAssignedCount.toString(), 'Diverted to another patient as a new allocation'],
+                    ['  • Assigned as Substitute (Purple)', purpleSubstituteCount.toString(), 'Diverted to another patient as emergency substitute'],
+                ],
+                theme: 'grid',
+                headStyles: {
+                    fillColor: [30, 58, 138],
+                    textColor: [255, 255, 255],
+                    fontSize: 7.5,
+                    fontStyle: 'bold',
+                    cellPadding: 3.5
+                },
+                styles: {
+                    fontSize: 7,
+                    cellPadding: 3,
+                    textColor: [30, 41, 59]
+                },
+                columnStyles: {
+                    0: { cellWidth: 125, fontStyle: 'bold' },
+                    1: { cellWidth: 65, fontStyle: 'bold', halign: 'center' },
+                    2: { cellWidth: 135, textColor: [100, 116, 139] }
+                },
+                didParseCell: function(cellData) {
+                    if (cellData.section === 'body') {
+                        if (cellData.row.index === 1) {
+                            cellData.cell.styles.fillColor = [240, 253, 244];
+                            if (cellData.column.index === 1) cellData.cell.styles.textColor = [5, 150, 105];
+                        } else if (cellData.row.index === 2) {
+                            cellData.cell.styles.fillColor = totalDiscontinuities > 0 ? [254, 242, 242] : [248, 250, 252];
+                            if (cellData.column.index === 1 && totalDiscontinuities > 0) cellData.cell.styles.textColor = [220, 38, 38];
+                        }
+                    }
+                }
+            });
+
+            // 3. Daily Breakdown Table
+            const dailyStartY = Math.max(doc.lastAutoTable.finalY, kpiStartY + cardHeight) + 14;
+            doc.setFontSize(10);
+            doc.setFont('helvetica', 'bold');
+            doc.setTextColor(15, 23, 42);
+            doc.text('1. Daily Treatment Counts & Continuity Breakdown', margin, dailyStartY);
+
+            const dailyRows = [];
+            columns.forEach(dStr => {
+                const stat = dailyStats[dStr];
+                const dObj = new Date(dStr);
+                const dFmt = dObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+                const dayName = dObj.toLocaleDateString('en-US', { weekday: 'short' });
+                const dPct = stat.total > 0 ? ((stat.continuity / stat.total) * 100).toFixed(1) + '%' : '100.0%';
+
+                dailyRows.push([
+                    dFmt,
+                    dayName,
+                    stat.total.toString(),
+                    stat.continuity.toString(),
+                    stat.discontinuity.toString(),
+                    dPct
+                ]);
+            });
+
+            dailyRows.push([
+                'TOTAL / OVERALL',
+                '—',
+                totalTreatments.toString(),
+                totalContinuityMaintained.toString(),
+                totalDiscontinuities.toString(),
+                `${overallContinuityPercentage}%`
+            ]);
+
+            doc.autoTable({
+                startY: dailyStartY + 6,
+                margin: { left: margin, right: margin },
+                head: [['Date', 'Day', 'Treatments', 'Continuity Maintained', 'Discontinuities', 'Continuity %']],
+                body: dailyRows,
+                theme: 'grid',
+                headStyles: {
+                    fillColor: [51, 65, 85],
+                    textColor: [255, 255, 255],
+                    fontSize: 8,
+                    fontStyle: 'bold',
+                    halign: 'center'
+                },
+                styles: {
+                    fontSize: 7.5,
+                    cellPadding: 3.5,
+                    textColor: [30, 41, 59],
+                    halign: 'center'
+                },
+                columnStyles: {
+                    0: { cellWidth: 90, halign: 'left' },
+                    1: { cellWidth: 50, halign: 'center' },
+                    2: { cellWidth: 80, halign: 'center' },
+                    3: { cellWidth: 125, halign: 'center', textColor: [5, 150, 105] },
+                    4: { cellWidth: 85, halign: 'center' },
+                    5: { cellWidth: 93.28, halign: 'center', fontStyle: 'bold' }
+                },
+                didParseCell: function(cellData) {
+                    if (cellData.section === 'body') {
+                        const isLast = cellData.row.index === dailyRows.length - 1;
+                        if (isLast) {
+                            cellData.cell.styles.fillColor = [241, 245, 249];
+                            cellData.cell.styles.fontStyle = 'bold';
+                            cellData.cell.styles.textColor = [15, 23, 42];
+                            if (cellData.column.index === 5) {
+                                cellData.cell.styles.fillColor = [220, 252, 231];
+                                cellData.cell.styles.textColor = [22, 101, 52];
+                                cellData.cell.styles.fontSize = 8.5;
+                            }
+                        } else {
+                            if (cellData.column.index === 5) {
+                                const pctVal = parseFloat(cellData.cell.raw);
+                                if (pctVal >= 90) {
+                                    cellData.cell.styles.textColor = [5, 150, 105];
+                                    cellData.cell.styles.fontStyle = 'bold';
+                                } else if (pctVal >= 75) {
+                                    cellData.cell.styles.textColor = [217, 119, 6];
+                                    cellData.cell.styles.fontStyle = 'bold';
+                                } else {
+                                    cellData.cell.styles.textColor = [220, 38, 38];
+                                    cellData.cell.styles.fontStyle = 'bold';
+                                }
+                            }
+                            const dCount = parseInt(cellData.row.raw[4], 10);
+                            if (dCount > 0 && cellData.column.index === 4) {
+                                cellData.cell.styles.textColor = [220, 38, 38];
+                                cellData.cell.styles.fontStyle = 'bold';
+                            }
+                        }
+                    }
+                }
+            });
+
+            // 4. Discontinuity Incident Audit Log
+            let auditStartY = doc.lastAutoTable.finalY + 16;
+            if (auditStartY > 700) {
+                doc.addPage();
+                auditStartY = 45;
+            }
+
+            doc.setFontSize(10);
+            doc.setFont('helvetica', 'bold');
+            doc.setTextColor(15, 23, 42);
+            doc.text('2. Discontinuity Incident Audit Log', margin, auditStartY);
+
+            if (discontinuityIncidents.length === 0) {
+                doc.setFillColor(240, 253, 244);
+                doc.roundedRect(margin, auditStartY + 8, contentWidth, 28, 4, 4, 'F');
+                doc.setFontSize(8.5);
+                doc.setFont('helvetica', 'bold');
+                doc.setTextColor(5, 150, 105);
+                doc.text('✓ 100% CONTINUITY ACHIEVED: Zero discontinuity incidents detected across all scheduled treatments.', margin + 12, auditStartY + 26);
+            } else {
+                const incidentRows = discontinuityIncidents.map(inc => {
+                    const dFmt = new Date(inc.dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                    return [
+                        dFmt,
+                        `${inc.patient}\n(${inc.regNo}) [${inc.room}]`,
+                        `${inc.therapy}\nSlot: ${inc.slot}`,
+                        inc.assignedTherapist,
+                        inc.replacedTherapist,
+                        `[${inc.discType}]\n${inc.reason}`
+                    ];
+                });
+
+                doc.autoTable({
+                    startY: auditStartY + 8,
+                    margin: { left: margin, right: margin },
+                    head: [['Date', 'Patient & Room', 'Therapy & Slot', 'Assigned Therapist', 'Replaced Therapist', 'Discontinuity Type & Exact Reason']],
+                    body: incidentRows,
+                    theme: 'striped',
+                    headStyles: {
+                        fillColor: [185, 28, 28],
+                        textColor: [255, 255, 255],
+                        fontSize: 8,
+                        fontStyle: 'bold'
+                    },
+                    styles: {
+                        fontSize: 7,
+                        cellPadding: 3.5,
+                        textColor: [30, 41, 59],
+                        overflow: 'linebreak'
+                    },
+                    columnStyles: {
+                        0: { cellWidth: 50 },
+                        1: { cellWidth: 95 },
+                        2: { cellWidth: 85 },
+                        3: { cellWidth: 75 },
+                        4: { cellWidth: 70 },
+                        5: { cellWidth: 148.28 }
+                    }
+                });
+            }
+
+            // 5. Page Numbering Footer on All Pages
+            const totalPages = doc.getNumberOfPages();
+            for (let i = 1; i <= totalPages; i++) {
+                doc.setPage(i);
+                doc.setDrawColor(226, 232, 240);
+                doc.setLineWidth(0.5);
+                doc.line(margin, pageHeight - 30, pageWidth - margin, pageHeight - 30);
+
+                doc.setFontSize(7.5);
+                doc.setFont('helvetica', 'normal');
+                doc.setTextColor(148, 163, 184);
+                doc.text('Therapist Continuity & Allocation Audit Report', margin, pageHeight - 18);
+                doc.text(`Page ${i} of ${totalPages}`, pageWidth - margin, pageHeight - 18, { align: 'right' });
+            }
+
+            let filename = 'Continuity_Report';
+            if (fromDate && toDate) {
+                filename += `_${fromDate.replace(/-/g, '')}_${toDate.replace(/-/g, '')}`;
+            }
+            filename += '.pdf';
+            doc.save(filename);
         }
     </script>
 </body>
