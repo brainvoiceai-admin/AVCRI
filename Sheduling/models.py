@@ -838,6 +838,7 @@ class SchedulingAuditLog(models.Model):
     """
     CHANGE_TYPE_CHOICES = [
         ('emergency_replacement', 'Emergency Therapist Replacement'),
+        ('patient_emergency_reschedule', 'Patient Emergency Reschedule (Fever)'),
         ('bathing_reassignment', 'Bathing Therapist Change'),
         ('reschedule', 'Reschedule'),
         ('allocation_change', 'Allocation Change'),

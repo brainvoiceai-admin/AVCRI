@@ -8430,3 +8430,739 @@ def scheduling_audit_logs_data_api(request):
         traceback.print_exc()
         return JsonResponse({'error': str(e)}, status=500)
 
+
+# =============================================================================
+# Patient Emergency Reschedule (Fever Patients) APIs
+# =============================================================================
+
+@csrf_exempt
+@api_access_required
+def patient_emergency_filter_treatments_api(request):
+    """
+    Search and filter scheduled treatments for patient emergency reschedule (fever).
+    Identifies morning vs afternoon session treatments.
+    Filterable by:
+      - date (YYYY-MM-DD, defaults to today)
+      - patient (patient name or registration number)
+      - room (treatment room or staying room)
+      - only_morning (boolean/string, defaults to 'true')
+    """
+    if request.method != 'GET':
+        return JsonResponse({'error': 'GET method required'}, status=405)
+
+    try:
+        from .models import Booking
+        from masters.models import TherapistMaster, EmergencyLeave
+        from Patient.models import TherapistBooking
+        from .nurse_allocation import is_nurse_treatment
+        from reshedule import therapist_requirements
+
+        date_str = request.GET.get('date', '')
+        if date_str:
+            try:
+                filter_date = parse_date(date_str)
+            except Exception:
+                filter_date = timezone.localdate()
+        else:
+            filter_date = timezone.localdate()
+
+        patient_filter = (request.GET.get('patient') or '').strip().lower()
+        room_filter = (request.GET.get('room') or '').strip().lower()
+        only_morning = request.GET.get('only_morning', 'true').lower() in ['true', '1', 'yes']
+
+        bookings = Booking.objects.filter(
+            date=filter_date,
+            status='scheduled'
+        ).select_related(
+            'allocation', 'allocation__patient', 'allocation__room', 'room', 'timeslot'
+        ).prefetch_related(
+            'assignments__therapist'
+        )
+
+        all_therapist_masters = {tm.therapist_code: tm for tm in TherapistMaster.objects.all().select_related('therapist_grade')}
+        all_tb = {
+            (tb.visit_id, tb.therapist.therapist_code if tb.therapist else None): tb
+            for tb in TherapistBooking.objects.filter(date=filter_date, status='BOOKED').select_related('therapist')
+        }
+
+        treatments_list = []
+
+        for b in bookings:
+            alloc = b.allocation
+            if not alloc:
+                continue
+
+            # Skip nurse treatments
+            is_nurse = False
+            try:
+                is_nurse = is_nurse_treatment(alloc.therapy_code, alloc.therapy_name) is not None
+            except Exception:
+                is_nurse = False
+
+            if is_nurse:
+                continue
+
+            req = therapist_requirements(alloc)
+            if req.get('total', 1) == 0:
+                continue
+
+            # Check if this booking is in the morning session
+            is_morning = False
+            if b.timeslot:
+                is_morning = EmergencyLeave.is_forenoon_slot(b.timeslot)
+
+            if only_morning and not is_morning:
+                continue
+
+            # Assigned therapists
+            assigned_list = []
+            for a in b.assignments.filter(status='assigned'):
+                tc = a.therapist.therapist_code
+                tm = all_therapist_masters.get(tc)
+                tb = all_tb.get((alloc.id, tc))
+                is_bathing = tb.is_bathing if tb else False
+
+                t_name = tm.therapist_name if tm else getattr(a.therapist, 'therapist_name', tc)
+                t_grade = tm.therapist_grade.name if (tm and tm.therapist_grade) else getattr(a.therapist, 'therapist_grade', '')
+
+                assigned_list.append({
+                    'code': tc,
+                    'name': t_name,
+                    'grade': t_grade,
+                    'is_bathing': is_bathing
+                })
+
+            if not assigned_list:
+                continue
+
+            pat = alloc.patient
+            if patient_filter:
+                pat_name = (getattr(pat, 'pat_name', '') or '').lower()
+                pat_reg = (getattr(pat, 'pat_reg_no', '') or '').lower()
+                if patient_filter not in pat_name and patient_filter not in pat_reg:
+                    continue
+
+            staying_room_display = ''
+            if pat and pat.pat_room_no:
+                staying_room_display = get_staying_room_display_number(pat.pat_room_no)
+
+            t_room_no = b.room.room_no if b.room else ''
+            if room_filter:
+                if room_filter not in t_room_no.lower() and room_filter not in (staying_room_display or '').lower():
+                    continue
+
+            slot_str = '—'
+            if b.timeslot and b.timeslot.slot_time:
+                try:
+                    slot_str = b.timeslot.slot_time.strftime('%I:%M %p').lstrip('0')
+                except Exception:
+                    slot_str = str(b.timeslot.slot_time)
+
+            treatments_list.append({
+                'booking_id': b.id,
+                'allocation_id': alloc.id,
+                'patient_name': pat.pat_name if pat else '—',
+                'patient_reg_no': pat.pat_reg_no if pat else '—',
+                'patient_room_no': staying_room_display or '—',
+                'therapy_name': alloc.therapy_name or '—',
+                'therapy_code': alloc.therapy_code or '',
+                'slot_time': slot_str,
+                'slot_id': b.timeslot.id if b.timeslot else None,
+                'is_morning': is_morning,
+                'session_name': 'Morning' if is_morning else 'Afternoon',
+                'treatment_room': t_room_no or '—',
+                'therapists': assigned_list,
+                'bathing_count': getattr(b, 'bathing_therapists_count', 0) or getattr(alloc, 'bathing_therapists_count', 0) or 0,
+                'is_wheelchair': getattr(b, 'is_wheelchair', False) or getattr(alloc, 'is_wheelchair', False),
+            })
+
+        return JsonResponse({
+            'success': True,
+            'date': filter_date.isoformat(),
+            'treatments': treatments_list,
+            'total_count': len(treatments_list)
+        })
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return JsonResponse({'error': str(e)}, status=500)
+
+
+@csrf_exempt
+@api_access_required
+def patient_emergency_afternoon_slots_api(request):
+    """
+    Given a morning booking_id, evaluates all afternoon slots on that date.
+    Calculates:
+      - Room availability
+      - Original therapist availability count
+      - Identifies slots with the Maximum Therapist Match
+    """
+    if request.method != 'GET':
+        return JsonResponse({'error': 'GET method required'}, status=405)
+
+    try:
+        from datetime import time
+        from .models import Booking
+        from masters.models import SlotMaster, TherapistMaster, TherapistLeaveMaster, EmergencyLeave
+        from masters.models import is_therapist_on_emergency_leave, is_therapist_deputed, is_therapist_omitted_for_treatment
+        from Patient.models import TherapistBooking
+        from reshedule import therapist_requirements, therapy_needs_room, therapy_needs_bath, allocate_treatment_room
+        from final_allocation import resolve_desired_gender
+
+        booking_id = request.GET.get('booking_id')
+        if not booking_id:
+            return JsonResponse({'error': 'booking_id is required'}, status=400)
+
+        booking = Booking.objects.filter(id=booking_id).select_related(
+            'allocation', 'allocation__patient', 'allocation__room', 'room', 'timeslot'
+        ).first()
+
+        if not booking:
+            return JsonResponse({'error': 'Booking not found'}, status=404)
+
+        if not booking.timeslot:
+            return JsonResponse({'error': 'Booking does not have an assigned time slot'}, status=400)
+
+        # Ensure the booking is originally in the morning session
+        is_morning = EmergencyLeave.is_forenoon_slot(booking.timeslot)
+        if not is_morning:
+            return JsonResponse({
+                'success': False,
+                'error': 'This treatment is already scheduled in an afternoon session. Fever emergency reschedule applies only to morning session treatments.'
+            }, status=400)
+
+        alloc = booking.allocation
+        pat = alloc.patient if alloc else None
+        target_date = booking.date
+
+        # Fetch original assigned therapists
+        original_assignments = list(booking.assignments.filter(status='assigned').select_related('therapist'))
+        all_tm = {tm.therapist_code: tm for tm in TherapistMaster.objects.all().select_related('therapist_grade')}
+        all_tb = {
+            tb.therapist.therapist_code: tb
+            for tb in TherapistBooking.objects.filter(
+                visit=alloc,
+                date=target_date,
+                time_slot=booking.timeslot,
+                status='BOOKED'
+            ).select_related('therapist') if tb.therapist
+        }
+
+        orig_therapists = []
+        for asgn in original_assignments:
+            tc = asgn.therapist.therapist_code
+            tm = all_tm.get(tc)
+            tb = all_tb.get(tc)
+            orig_therapists.append({
+                'code': tc,
+                'name': tm.therapist_name if tm else getattr(asgn.therapist, 'therapist_name', tc),
+                'grade': tm.therapist_grade.name if (tm and tm.therapist_grade) else getattr(asgn.therapist, 'therapist_grade', ''),
+                'is_bathing': tb.is_bathing if tb else False,
+                'master_id': tm.id if tm else None
+            })
+
+        req = therapist_requirements(alloc)
+        total_required = int(req.get('total', len(orig_therapists)) or len(orig_therapists) or 1)
+        needs_room = therapy_needs_room(alloc)
+        needs_bath = therapy_needs_bath(alloc)
+        req_bathing_count = getattr(booking, 'bathing_therapists_count', 0) or getattr(alloc, 'bathing_therapists_count', 0) or (1 if needs_bath else 0)
+
+        desired_gender = resolve_desired_gender(
+            getattr(pat, 'pat_sex', None),
+            getattr(pat, 'pat_age', None)
+        )
+
+        # Query all active afternoon slots (slot_time >= 13:00)
+        afternoon_slots_qs = SlotMaster.objects.filter(
+            is_active=True,
+            slot_time__gte=time(13, 0)
+        ).order_by('slot_time')
+
+        evaluated_slots = []
+
+        for slot in afternoon_slots_qs:
+            # 1. Room check
+            room_available = False
+            cand_room_no = '—'
+            cand_room_id = None
+            room_reason = ''
+
+            if needs_room:
+                room_cand = allocate_treatment_room(
+                    target_date,
+                    slot,
+                    last_room=None,
+                    therapy_name=alloc.therapy_name if alloc else None,
+                    patient_id=getattr(pat, 'id', None),
+                    patient_staying_room=getattr(pat, 'pat_room_no', None),
+                    patient=pat,
+                    booking_id=booking.id,
+                    is_wheelchair=getattr(booking, 'is_wheelchair', False)
+                )
+                if room_cand:
+                    room_available = True
+                    cand_room_no = room_cand.room_no
+                    cand_room_id = room_cand.pk
+                else:
+                    room_available = False
+                    room_reason = 'No treatment room available'
+            else:
+                room_available = True
+                staying_no = get_staying_room_display_number(getattr(pat, 'pat_room_no', '')) if pat else ''
+                cand_room_no = staying_no or 'Patient Room'
+
+            # 2. Check original therapist availability at this slot
+            retained_therapists = []
+            unavailable_orig_therapists = []
+
+            for ot in orig_therapists:
+                tc = ot['code']
+                tm = all_tm.get(tc)
+                if not tm:
+                    unavailable_orig_therapists.append({'code': tc, 'name': ot['name'], 'reason': 'Therapist record missing'})
+                    continue
+
+                if not tm.is_active:
+                    unavailable_orig_therapists.append({'code': tc, 'name': ot['name'], 'reason': 'Therapist inactive'})
+                    continue
+
+                if is_therapist_on_emergency_leave(tm, target_date, slot):
+                    unavailable_orig_therapists.append({'code': tc, 'name': ot['name'], 'reason': 'On emergency leave in afternoon'})
+                    continue
+
+                if TherapistLeaveMaster.objects.filter(therapist=tm, leave_day=target_date.weekday()).exists():
+                    unavailable_orig_therapists.append({'code': tc, 'name': ot['name'], 'reason': 'On weekly leave'})
+                    continue
+
+                if is_therapist_deputed(tm, target_date):
+                    unavailable_orig_therapists.append({'code': tc, 'name': ot['name'], 'reason': 'Therapist deputed'})
+                    continue
+
+                if is_therapist_omitted_for_treatment(tm, alloc.therapy_name):
+                    unavailable_orig_therapists.append({'code': tc, 'name': ot['name'], 'reason': 'Omitted for this treatment'})
+                    continue
+
+                # Check if booked at THIS afternoon slot (exclude current allocation which will move from morning)
+                if TherapistBooking.objects.filter(therapist=tm, date=target_date, time_slot=slot, status='BOOKED').exclude(visit=alloc).exists():
+                    unavailable_orig_therapists.append({'code': tc, 'name': ot['name'], 'reason': f'Booked on another patient at {slot.slot_time.strftime("%I:%M %p").lstrip("0")}'})
+                    continue
+
+                # Daily session count (excluding current allocation)
+                session_count = TherapistBooking.objects.filter(therapist=tm, date=target_date, status='BOOKED').exclude(visit=alloc).count()
+                if session_count >= 6:
+                    unavailable_orig_therapists.append({'code': tc, 'name': ot['name'], 'reason': 'Max daily session limit (6) reached'})
+                    continue
+
+                retained_therapists.append(ot)
+
+            match_count = len(retained_therapists)
+            shortage = max(0, total_required - match_count)
+
+            # 3. Check replacement availability if shortage exists
+            available_replacements_count = 0
+            if shortage > 0:
+                retained_codes = {t['code'] for t in retained_therapists}
+                candidate_replacements_qs = TherapistMaster.objects.filter(
+                    is_active=True,
+                    is_helping_therapist=False
+                ).exclude(therapist_code__in=retained_codes)
+
+                if desired_gender:
+                    candidate_replacements_qs = candidate_replacements_qs.filter(therapist_gender__istartswith=desired_gender[0])
+
+                for rep in candidate_replacements_qs:
+                    if is_therapist_on_emergency_leave(rep, target_date, slot):
+                        continue
+                    if TherapistLeaveMaster.objects.filter(therapist=rep, leave_day=target_date.weekday()).exists():
+                        continue
+                    if is_therapist_deputed(rep, target_date):
+                        continue
+                    if is_therapist_omitted_for_treatment(rep, alloc.therapy_name):
+                        continue
+                    if TherapistBooking.objects.filter(therapist=rep, date=target_date, time_slot=slot, status='BOOKED').exists():
+                        continue
+                    if TherapistBooking.objects.filter(therapist=rep, date=target_date, status='BOOKED').count() >= 6:
+                        continue
+
+                    available_replacements_count += 1
+                    if available_replacements_count >= shortage:
+                        break
+
+            therapists_satisfied = (match_count + available_replacements_count) >= total_required
+            is_feasible = room_available and therapists_satisfied
+
+            st_formatted = slot.slot_time.strftime('%I:%M %p').lstrip('0')
+
+            evaluated_slots.append({
+                'slot_id': slot.id,
+                'slot_time': st_formatted,
+                'slot_number': slot.slot_number,
+                'room_no': cand_room_no,
+                'room_id': cand_room_id,
+                'room_available': room_available,
+                'room_reason': room_reason,
+                'match_count': match_count,
+                'total_required': total_required,
+                'total_original': len(orig_therapists),
+                'shortage': shortage,
+                'replacements_available_count': available_replacements_count,
+                'is_feasible': is_feasible,
+                'retained_therapists': retained_therapists,
+                'unavailable_orig_therapists': unavailable_orig_therapists,
+                'is_max_match': False,  # Will flag below
+            })
+
+        # Find maximum therapist match count among feasible slots
+        feasible_slots = [s for s in evaluated_slots if s['is_feasible']]
+        max_match_count = max([s['match_count'] for s in feasible_slots] or [0])
+
+        for s in evaluated_slots:
+            if s['is_feasible'] and s['match_count'] == max_match_count and max_match_count > 0:
+                s['is_max_match'] = True
+
+        current_slot_str = booking.timeslot.slot_time.strftime('%I:%M %p').lstrip('0') if booking.timeslot else '—'
+
+        return JsonResponse({
+            'success': True,
+            'booking_id': booking.id,
+            'patient': {
+                'name': pat.pat_name if pat else '—',
+                'reg_no': pat.pat_reg_no if pat else '—',
+                'room_no': get_staying_room_display_number(getattr(pat, 'pat_room_no', '')) if pat else '—',
+            },
+            'therapy': {
+                'name': alloc.therapy_name if alloc else '—',
+                'code': alloc.therapy_code if alloc else '',
+                'total_required': total_required,
+                'bathing_count': req_bathing_count,
+            },
+            'current_slot': {
+                'id': booking.timeslot.id,
+                'label': current_slot_str,
+                'room_no': booking.room.room_no if booking.room else '—',
+            },
+            'original_therapists': orig_therapists,
+            'afternoon_slots': evaluated_slots,
+            'max_match_count': max_match_count
+        })
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return JsonResponse({'error': str(e)}, status=500)
+
+
+@csrf_exempt
+@api_access_required
+def patient_emergency_confirm_reschedule_api(request):
+    """
+    Executes the Patient Emergency Reschedule due to fever.
+    Moves the booking from the morning session to the selected afternoon slot.
+    Retains available original therapists (maximum match) and assigns qualified replacements
+    for any shortfall.
+    Logs the event to SchedulingAuditLog.
+    """
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST method required'}, status=405)
+
+    try:
+        from datetime import time
+        from django.db import transaction
+        from .models import Booking, BookingAssignment, SchedulingAuditLog
+        from masters.models import SlotMaster, TherapistMaster, TherapistLeaveMaster, EmergencyLeave
+        from masters.models import is_therapist_on_emergency_leave, is_therapist_deputed, is_therapist_omitted_for_treatment, TherapyMaster
+        from Patient.models import TherapistBooking, Therapist, TreatmentRoom
+        from reshedule import therapist_requirements, therapy_needs_room, therapy_needs_bath, allocate_treatment_room
+        from final_allocation import resolve_desired_gender
+
+        data = json.loads(request.body)
+        booking_id = data.get('booking_id')
+        target_slot_id = data.get('target_slot_id')
+        target_room_id = data.get('target_room_id')
+        reason = (data.get('reason') or '').strip()
+
+        if not booking_id or not target_slot_id:
+            return JsonResponse({'error': 'booking_id and target_slot_id are required'}, status=400)
+
+        booking = Booking.objects.select_related(
+            'allocation', 'allocation__patient', 'allocation__room', 'room', 'timeslot'
+        ).filter(id=booking_id).first()
+
+        if not booking:
+            return JsonResponse({'error': 'Booking not found'}, status=404)
+
+        if not booking.timeslot:
+            return JsonResponse({'error': 'Booking does not have an original timeslot'}, status=400)
+
+        # Validate original session is morning
+        if not EmergencyLeave.is_forenoon_slot(booking.timeslot):
+            return JsonResponse({'error': 'Fever emergency reschedule applies only to morning session treatments.'}, status=400)
+
+        # Validate target slot is afternoon
+        target_slot = SlotMaster.objects.filter(id=target_slot_id, is_active=True).first()
+        if not target_slot or not target_slot.slot_time or target_slot.slot_time < time(13, 0):
+            return JsonResponse({'error': 'Target slot must be an active afternoon time slot (1:00 PM or later).'}, status=400)
+
+        alloc = booking.allocation
+        pat = alloc.patient if alloc else None
+        target_date = booking.date
+
+        # Capture BEFORE state
+        before_slot_label = booking.timeslot.slot_time.strftime('%I:%M %p').lstrip('0')
+        before_room_label = booking.room.room_no if booking.room else '—'
+        before_therapists = []
+        for asgn in booking.assignments.filter(status='assigned').select_related('therapist'):
+            tc = asgn.therapist.therapist_code
+            tm = TherapistMaster.objects.filter(therapist_code=tc).first()
+            tb = TherapistBooking.objects.filter(
+                visit=alloc,
+                date=target_date,
+                time_slot=booking.timeslot,
+                therapist__therapist_code=tc,
+                status='BOOKED'
+            ).first()
+            before_therapists.append({
+                'code': tc,
+                'name': tm.therapist_name if tm else getattr(asgn.therapist, 'therapist_name', tc),
+                'grade': tm.therapist_grade.name if (tm and tm.therapist_grade) else getattr(asgn.therapist, 'therapist_grade', ''),
+                'is_bathing': tb.is_bathing if tb else False,
+            })
+
+        req = therapist_requirements(alloc)
+        total_required = int(req.get('total', len(before_therapists)) or len(before_therapists) or 1)
+        needs_room = therapy_needs_room(alloc)
+        needs_bath = therapy_needs_bath(alloc)
+        req_bathing_count = getattr(booking, 'bathing_therapists_count', 0) or getattr(alloc, 'bathing_therapists_count', 0) or (1 if needs_bath else 0)
+
+        desired_gender = resolve_desired_gender(
+            getattr(pat, 'pat_sex', None),
+            getattr(pat, 'pat_age', None)
+        )
+
+        all_tm = {tm.therapist_code: tm for tm in TherapistMaster.objects.all().select_related('therapist_grade')}
+
+        # Identify which original therapists can be retained
+        retained_therapists = []
+        for bt in before_therapists:
+            tc = bt['code']
+            tm = all_tm.get(tc)
+            if not tm or not tm.is_active:
+                continue
+            if is_therapist_on_emergency_leave(tm, target_date, target_slot):
+                continue
+            if TherapistLeaveMaster.objects.filter(therapist=tm, leave_day=target_date.weekday()).exists():
+                continue
+            if is_therapist_deputed(tm, target_date):
+                continue
+            if is_therapist_omitted_for_treatment(tm, alloc.therapy_name):
+                continue
+            if TherapistBooking.objects.filter(therapist=tm, date=target_date, time_slot=target_slot, status='BOOKED').exclude(visit=alloc).exists():
+                continue
+            if TherapistBooking.objects.filter(therapist=tm, date=target_date, status='BOOKED').exclude(visit=alloc).count() >= 6:
+                continue
+
+            retained_therapists.append({
+                'tm': tm,
+                'code': tc,
+                'name': tm.therapist_name or tc,
+                'grade': tm.therapist_grade.name if tm.therapist_grade else '',
+                'is_bathing': bt['is_bathing']
+            })
+
+        # Identify replacement therapists if needed
+        shortage = max(0, total_required - len(retained_therapists))
+        replacement_therapists = []
+        if shortage > 0:
+            retained_codes = {t['code'] for t in retained_therapists}
+            rep_candidates = TherapistMaster.objects.filter(
+                is_active=True,
+                is_helping_therapist=False
+            ).exclude(therapist_code__in=retained_codes)
+
+            if desired_gender:
+                rep_candidates = rep_candidates.filter(therapist_gender__istartswith=desired_gender[0])
+
+            for tm in rep_candidates:
+                if len(replacement_therapists) >= shortage:
+                    break
+                if is_therapist_on_emergency_leave(tm, target_date, target_slot):
+                    continue
+                if TherapistLeaveMaster.objects.filter(therapist=tm, leave_day=target_date.weekday()).exists():
+                    continue
+                if is_therapist_deputed(tm, target_date):
+                    continue
+                if is_therapist_omitted_for_treatment(tm, alloc.therapy_name):
+                    continue
+                if TherapistBooking.objects.filter(therapist=tm, date=target_date, time_slot=target_slot, status='BOOKED').exists():
+                    continue
+                if TherapistBooking.objects.filter(therapist=tm, date=target_date, status='BOOKED').count() >= 6:
+                    continue
+
+                replacement_therapists.append({
+                    'tm': tm,
+                    'code': tm.therapist_code,
+                    'name': tm.therapist_name or tm.therapist_code,
+                    'grade': tm.therapist_grade.name if tm.therapist_grade else '',
+                    'is_bathing': tm.is_bathing_therapist
+                })
+
+        final_assigned = retained_therapists + replacement_therapists
+
+        # Determine target room
+        target_room_obj = None
+        if target_room_id:
+            target_room_obj = TreatmentRoom.objects.filter(pk=target_room_id).first()
+        elif needs_room:
+            target_room_obj = allocate_treatment_room(
+                target_date,
+                target_slot,
+                last_room=None,
+                therapy_name=alloc.therapy_name if alloc else None,
+                patient_id=getattr(pat, 'id', None),
+                patient_staying_room=getattr(pat, 'pat_room_no', None),
+                patient=pat,
+                booking_id=booking.id,
+                is_wheelchair=getattr(booking, 'is_wheelchair', False)
+            )
+
+        patient_num_id = None
+        try:
+            pat_reg = pat.pat_reg_no if pat else None
+            digits = ''.join(ch for ch in str(pat_reg or '') if ch.isdigit())
+            patient_num_id = int(digits) if digits else None
+        except Exception:
+            patient_num_id = None
+
+        therapy_obj = None
+        if alloc and alloc.therapy_code:
+            therapy_obj = TherapyMaster.objects.filter(therapy_code=alloc.therapy_code).first()
+        if not therapy_obj and alloc and alloc.therapy_name:
+            therapy_obj = TherapyMaster.objects.filter(therapy_name__iexact=alloc.therapy_name).first()
+
+        # Execute updates atomically
+        with transaction.atomic():
+            # 1. Release previous assignments and TherapistBookings
+            booking.assignments.all().delete()
+            TherapistBooking.objects.filter(
+                visit=alloc,
+                date=target_date,
+                time_slot=booking.timeslot
+            ).delete()
+
+            # 2. Update booking slot and room
+            booking.timeslot = target_slot
+            if target_room_obj:
+                booking.room = target_room_obj
+            booking.status = 'scheduled'
+            booking.failure_reason = ''
+            booking.save(update_fields=['timeslot', 'room', 'status', 'failure_reason', 'updated_at'])
+
+            # 3. Create new assignments & TherapistBookings
+            # Ensure proper number of bathing therapists
+            current_bathing_assigned = sum(1 for t in final_assigned if t['is_bathing'])
+            if current_bathing_assigned < req_bathing_count and req_bathing_count > 0:
+                # Designate additional therapist as bathing if qualified
+                for t in final_assigned:
+                    if not t['is_bathing'] and getattr(t['tm'], 'is_bathing_therapist', False):
+                        t['is_bathing'] = True
+                        current_bathing_assigned += 1
+                        if current_bathing_assigned >= req_bathing_count:
+                            break
+
+            after_therapists = []
+            for t_info in final_assigned:
+                tm = t_info['tm']
+                tc = t_info['code']
+                p_therapist, _ = Therapist.objects.get_or_create(
+                    therapist_code=tc,
+                    defaults={
+                        'therapist_name': t_info['name'],
+                        'therapist_grade': t_info['grade']
+                    }
+                )
+
+                BookingAssignment.objects.create(
+                    booking=booking,
+                    therapist=p_therapist,
+                    booking_date=target_date,
+                    booking_timeslot=target_slot,
+                    role=t_info['grade'] or 'Therapist',
+                    assigned_for='booking',
+                    status='assigned'
+                )
+
+                TherapistBooking.objects.create(
+                    therapist=tm,
+                    date=target_date,
+                    time_slot=target_slot,
+                    therapy_name=alloc.therapy_name if alloc else '',
+                    patient_id=patient_num_id,
+                    status='BOOKED',
+                    visit=alloc,
+                    therapy=therapy_obj,
+                    is_bathing=t_info['is_bathing']
+                )
+
+                after_therapists.append({
+                    'code': tc,
+                    'name': t_info['name'],
+                    'grade': t_info['grade'],
+                    'is_bathing': t_info['is_bathing']
+                })
+
+            after_slot_label = target_slot.slot_time.strftime('%I:%M %p').lstrip('0')
+            after_room_label = booking.room.room_no if booking.room else '—'
+
+            default_reason = f"Emergency Reschedule due to fever: moved from Morning ({before_slot_label}) to Afternoon ({after_slot_label})"
+            final_reason = reason if reason else default_reason
+
+            # 4. Record to SchedulingAuditLog
+            SchedulingAuditLog.objects.create(
+                booking=booking,
+                allocation=alloc,
+                change_type='patient_emergency_reschedule',
+                patient_name=getattr(pat, 'pat_name', '') or '',
+                patient_reg_no=getattr(pat, 'pat_reg_no', '') or '',
+                patient_room_no=get_staying_room_display_number(getattr(pat, 'pat_room_no', '')) if pat else '',
+                therapy_name=alloc.therapy_name if alloc else '',
+                therapy_code=alloc.therapy_code or '',
+                schedule_date=target_date,
+                time_slot_label=f"{before_slot_label} → {after_slot_label}",
+                room_number=after_room_label,
+                before_state={
+                    'date': str(target_date),
+                    'slot': before_slot_label,
+                    'room': before_room_label,
+                    'therapists': before_therapists
+                },
+                after_state={
+                    'date': str(target_date),
+                    'slot': after_slot_label,
+                    'room': after_room_label,
+                    'therapists': after_therapists,
+                    'retained_count': len(retained_therapists),
+                    'replaced_count': len(replacement_therapists)
+                },
+                reason=final_reason,
+                changed_by=request.user if request.user.is_authenticated else None,
+                changed_by_name=request.user.username if request.user.is_authenticated else 'Scheduling Team'
+            )
+
+        pat_name = pat.pat_name if pat else 'Patient'
+        return JsonResponse({
+            'success': True,
+            'message': f"Emergency reschedule confirmed for {pat_name}. Successfully moved from {before_slot_label} to {after_slot_label}.",
+            'new_slot': after_slot_label,
+            'room': after_room_label,
+            'retained_therapists_count': len(retained_therapists),
+            'replacement_therapists_count': len(replacement_therapists)
+        })
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return JsonResponse({'error': str(e)}, status=500)
+
+
