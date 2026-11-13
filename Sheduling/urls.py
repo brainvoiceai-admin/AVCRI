@@ -24,6 +24,9 @@ urlpatterns = [
     path('scheduling/api/emergency-filter-treatments/', views.emergency_filter_treatments_api, name='emergency_filter_treatments_api'),
     path('scheduling/api/emergency-available-therapists/', views.emergency_available_therapists_api, name='emergency_available_therapists_api'),
     path('scheduling/api/emergency-replace-therapist/', views.emergency_replace_therapist_api, name='emergency_replace_therapist_api'),
+    path('scheduling/api/patient-emergency-filter-treatments/', views.patient_emergency_filter_treatments_api, name='patient_emergency_filter_treatments_api'),
+    path('scheduling/api/patient-emergency-afternoon-slots/', views.patient_emergency_afternoon_slots_api, name='patient_emergency_afternoon_slots_api'),
+    path('scheduling/api/patient-emergency-confirm-reschedule/', views.patient_emergency_confirm_reschedule_api, name='patient_emergency_confirm_reschedule_api'),
 
     # Therapist Preference & Doctor Approval URLs
     path('therapist-preference-approvals/', preference_views.therapist_preference_approvals_view, name='therapist_preference_approvals'),
