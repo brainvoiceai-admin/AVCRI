@@ -84,10 +84,8 @@ def resolve_patient_vip_and_repeated(patient_reg_no, room_no=None):
     along with their total visits count.
 
     Eligibility Rule:
-    - VIP Patients: Eligible for preferred therapist marking.
-    - Repeated Patients: ONLY Cottage Repeated Patients (staying in a Cottage room CT-*)
-      are eligible for preferred therapist marking! Normal/non-cottage repeated patients
-      are NOT eligible.
+    - All patients are eligible for therapist preference allowance by their treating doctor.
+    - Still tracks is_vip, is_repeated, is_cottage, and is_cottage_repeated for display and filtering.
     """
     reg_str = normalize_patient_reg_no(patient_reg_no)
     is_vip = False
@@ -129,7 +127,7 @@ def resolve_patient_vip_and_repeated(patient_reg_no, room_no=None):
 
     is_cottage = is_cottage_room(effective_room)
     is_cottage_repeated = bool(is_repeated and is_cottage)
-    is_eligible = bool(is_vip or is_cottage_repeated)
+    is_eligible = True
 
     return {
         'is_vip': is_vip,
@@ -161,15 +159,16 @@ def get_active_preferred_roster(patient_identifier):
         is_active=True
     ).order_by('-updated_at').first()
 
-    if not roster or not roster.therapist_codes:
+    if not roster or (not roster.therapist_codes and not roster.unpreferred_therapist_codes):
         return None
 
     # Verify if linked allowance is active (if allowance exists)
     if roster.allowance and not roster.allowance.is_active:
         return None
 
-    codes_list = [str(c).strip() for c in roster.therapist_codes if str(c).strip()]
-    if not codes_list:
+    codes_list = [str(c).strip() for c in (roster.therapist_codes or []) if str(c).strip()]
+    unpref_list = [str(c).strip() for c in (roster.unpreferred_therapist_codes or []) if str(c).strip()]
+    if not codes_list and not unpref_list:
         return None
 
     return {
@@ -177,6 +176,8 @@ def get_active_preferred_roster(patient_identifier):
         'patient_reg_no': roster.patient_reg_no,
         'therapist_codes': codes_list,
         'therapist_codes_set': set(codes_list),
+        'unpreferred_codes': unpref_list,
+        'unpreferred_codes_set': set(unpref_list),
         'primary_bathing_code': (roster.primary_bathing_code or '').strip(),
         'secondary_bathing_code': (roster.secondary_bathing_code or '').strip(),
         'primary_bathing_therapist': roster.primary_bathing_therapist,
@@ -597,8 +598,8 @@ def toggle_doctor_patient_allowance(doctor_user, patient_reg_no, patient_name=''
     """
     Toggle preferred therapist allowance for a patient by the doctor.
     Enforces:
-      1. Treating Doctor: Only the particular treating doctor can give access to allow preferred therapist!
-      2. Eligibility: Only VIP patients and Cottage Repeated patients are eligible!
+      1. Treating Doctor: Only the particular treating doctor can give access to allow therapist preferences!
+      2. All patients belonging to the treating doctor are eligible (not restricted to VIP/Repeated).
       3. Monthly quota: At most 5 patients per doctor per calendar month!
     """
     now = timezone.now()
@@ -642,17 +643,7 @@ def toggle_doctor_patient_allowance(doctor_user, patient_reg_no, patient_name=''
                 'quota': quota
             }
 
-        # 2. Check eligibility before activating
-        info = resolve_patient_vip_and_repeated(reg_str, room_no=room_no)
-        if not info['is_eligible']:
-            quota = DoctorPatientPreferenceAllowance.get_monthly_quota(doctor_user, year, month)
-            return {
-                'status': 'ineligible',
-                'error': 'Only VIP patients and Cottage Repeated patients are eligible for preferred therapist assignment.',
-                'quota': quota
-            }
-
-        # 3. Otherwise, activating allowance. First verify quota!
+        # 2. Activating allowance (all patients of treating doctor are eligible). First verify quota!
         used_count = DoctorPatientPreferenceAllowance.objects.filter(
             doctor=doctor_user,
             year=year,
@@ -710,15 +701,19 @@ def toggle_doctor_patient_allowance(doctor_user, patient_reg_no, patient_name=''
         }
 
 
-def save_preferred_therapist_roster(patient_reg_no, therapist_codes, primary_bathing_code, secondary_bathing_code, configured_by=None, notes=''):
+def save_preferred_therapist_roster(patient_reg_no, therapist_codes=None, primary_bathing_code=None, secondary_bathing_code=None, configured_by=None, notes='', unpreferred_codes=None):
     """
-    Save or update the preferred therapist roster (up to 7 therapists) for an allowed patient.
+    Save or update the preferred therapist roster (up to 7 therapists) and/or
+    unpreferred therapists (excluded completely) for an allowed patient.
     Validations:
       - Patient must be marked as allowed by doctor in an active allowance.
-      - Total therapist codes must be between 1 and 7.
-      - Primary bathing code must be in the selected 7 codes.
-      - Secondary bathing code must be in the selected 7 codes.
-      - Primary bathing therapist != Secondary bathing therapist.
+      - At least 1 therapist must be specified (preferred or unpreferred).
+      - If preferred therapists are selected:
+          - Total preferred therapist codes must be between 1 and 7.
+          - Primary and Secondary bathing codes must be in the selected preferred codes.
+          - Primary bathing therapist != Secondary bathing therapist.
+          - Therapists must match patient gender.
+      - Overlap check: No therapist can be marked as both Preferred and Unpreferred.
     """
     reg_str = str(patient_reg_no).strip()
     if not reg_str:
@@ -740,42 +735,63 @@ def save_preferred_therapist_roster(patient_reg_no, therapist_codes, primary_bat
             ).order_by('-year', '-month', '-created_at').first()
 
     if not allowance:
-        raise ValidationError("Patient has not been allowed for preferred therapist assignment by their doctor.")
+        raise ValidationError("Patient has not been allowed for therapist preferences by their doctor.")
 
-    # 2. Clean therapist codes
+    # 2. Clean preferred and unpreferred codes
     clean_codes = []
-    for c in therapist_codes or []:
-        code_str = str(c).strip()
+    for c_code in therapist_codes or []:
+        code_str = str(c_code).strip()
         if code_str and code_str not in clean_codes:
             clean_codes.append(code_str)
 
-    if not clean_codes:
-        raise ValidationError("At least 1 preferred therapist must be selected.")
-    if len(clean_codes) > 7:
-        raise ValidationError(f"A maximum of 7 preferred therapists can be marked (selected: {len(clean_codes)}).")
+    clean_unpref = []
+    for u_code in unpreferred_codes or []:
+        code_str = str(u_code).strip()
+        if code_str and code_str not in clean_unpref:
+            clean_unpref.append(code_str)
 
-    # 3. Validate bathing therapists
-    p_code = str(primary_bathing_code).strip() if primary_bathing_code else ''
-    s_code = str(secondary_bathing_code).strip() if secondary_bathing_code else ''
+    if not clean_codes and not clean_unpref:
+        raise ValidationError("Please select at least 1 preferred therapist or 1 unpreferred therapist.")
 
-    if not p_code:
-        raise ValidationError("Primary Bathing Therapist is required.")
-    if not s_code:
-        raise ValidationError("Secondary Bathing Therapist is required.")
+    # Check mutual exclusivity / overlap
+    overlap = set(clean_codes).intersection(set(clean_unpref))
+    if overlap:
+        raise ValidationError(f"Therapist(s) {', '.join(overlap)} cannot be marked as both Preferred and Unpreferred.")
 
-    if p_code not in clean_codes:
-        raise ValidationError(f"Primary Bathing Therapist ({p_code}) must be one of the selected therapists.")
-    if s_code not in clean_codes:
-        raise ValidationError(f"Secondary Bathing Therapist ({s_code}) must be one of the selected therapists.")
-    if p_code == s_code:
-        raise ValidationError("Primary and Secondary Bathing Therapists cannot be the same therapist.")
+    # 3. Validate preferred therapists if specified
+    p_code = ''
+    s_code = ''
+    p_obj = None
+    s_obj = None
+    therapist_objs = []
 
-    # Resolve therapist objects
-    therapist_objs = list(TherapistMaster.objects.filter(therapist_code__in=clean_codes, is_active=True))
-    p_obj = next((t for t in therapist_objs if t.therapist_code == p_code), None)
-    s_obj = next((t for t in therapist_objs if t.therapist_code == s_code), None)
+    if clean_codes:
+        if len(clean_codes) > 7:
+            raise ValidationError(f"A maximum of 7 preferred therapists can be marked (selected: {len(clean_codes)}).")
 
-    # Validate therapist gender matches patient gender
+        p_code = str(primary_bathing_code).strip() if primary_bathing_code else ''
+        s_code = str(secondary_bathing_code).strip() if secondary_bathing_code else ''
+
+        if not p_code:
+            raise ValidationError("Primary Bathing Therapist is required when preferred therapists are selected.")
+        if not s_code:
+            raise ValidationError("Secondary Bathing Therapist is required when preferred therapists are selected.")
+
+        if p_code not in clean_codes:
+            raise ValidationError(f"Primary Bathing Therapist ({p_code}) must be one of the selected preferred therapists.")
+        if s_code not in clean_codes:
+            raise ValidationError(f"Secondary Bathing Therapist ({s_code}) must be one of the selected preferred therapists.")
+        if p_code == s_code:
+            raise ValidationError("Primary and Secondary Bathing Therapists cannot be the same therapist.")
+
+        therapist_objs = list(TherapistMaster.objects.filter(therapist_code__in=clean_codes, is_active=True))
+        p_obj = next((t for t in therapist_objs if t.therapist_code == p_code), None)
+        s_obj = next((t for t in therapist_objs if t.therapist_code == s_code), None)
+
+    # 4. Resolve unpreferred therapist objects
+    unpref_objs = list(TherapistMaster.objects.filter(therapist_code__in=clean_unpref, is_active=True)) if clean_unpref else []
+
+    # Validate therapist gender matches patient desired gender for both preferred and unpreferred
     patient_sex = None
     patient_age = None
     ps = PatientSnapshot.objects.filter(pat_reg_no=reg_str).first()
@@ -801,7 +817,13 @@ def save_preferred_therapist_roster(patient_reg_no, therapist_codes, primary_bat
             t_g = str(t_obj.therapist_gender or '').strip().lower()
             if t_g and t_g != desired_gender:
                 raise ValidationError(
-                    f"Therapist {t_obj.therapist_name} ({t_obj.therapist_code}) is {t_obj.therapist_gender}, but patient is {patient_sex}. Only {desired_gender.capitalize()} therapists can be selected for this patient."
+                    f"Therapist {t_obj.therapist_name} ({t_obj.therapist_code}) is {t_obj.therapist_gender}, but patient requires {desired_gender.capitalize()} therapist. Only {desired_gender.capitalize()} therapists can be selected."
+                )
+        for u_obj in unpref_objs:
+            u_g = str(u_obj.therapist_gender or '').strip().lower()
+            if u_g and u_g != desired_gender:
+                raise ValidationError(
+                    f"Unpreferred Therapist {u_obj.therapist_name} ({u_obj.therapist_code}) is {u_obj.therapist_gender}, but patient requires {desired_gender.capitalize()} therapist. Only {desired_gender.capitalize()} therapists can be selected."
                 )
 
     patient_name = allowance.patient_name
@@ -817,6 +839,7 @@ def save_preferred_therapist_roster(patient_reg_no, therapist_codes, primary_bat
                 'patient_name': patient_name or f"Patient {reg_str}",
                 'allowance': allowance,
                 'therapist_codes': clean_codes,
+                'unpreferred_therapist_codes': clean_unpref,
                 'primary_bathing_therapist': p_obj,
                 'primary_bathing_code': p_code,
                 'secondary_bathing_therapist': s_obj,
@@ -826,7 +849,32 @@ def save_preferred_therapist_roster(patient_reg_no, therapist_codes, primary_bat
                 'notes': notes or ''
             }
         )
-        if therapist_objs:
-            roster.therapists.set(therapist_objs)
+        roster.therapists.set(therapist_objs)
+        roster.unpreferred_therapists.set(unpref_objs)
+
+        # Synchronize with TherapistPreferenceRequest for backwards compatibility
+        try:
+            from .models import TherapistPreferenceRequest
+            pref_req, _ = TherapistPreferenceRequest.objects.update_or_create(
+                patient_id=reg_str,
+                defaults={
+                    'patient_name': patient_name or f"Patient {reg_str}",
+                    'preferred_therapist_codes': clean_codes,
+                    'preferred_therapist_names': [t.therapist_name for t in therapist_objs],
+                    'unpreferred_therapist_codes': clean_unpref,
+                    'unpreferred_therapist_names': [t.therapist_name for t in unpref_objs],
+                    'status': 'APPROVED',
+                    'is_active': True,
+                    'action_by': configured_by,
+                    'action_date': timezone.now(),
+                    'treating_doctor_code': allowance.doctor_code or '',
+                    'treating_doctor_name': allowance.doctor_name or '',
+                    'notes': notes or 'Configured by scheduling team via allowance roster'
+                }
+            )
+            pref_req.preferred_therapists.set(therapist_objs)
+            pref_req.unpreferred_therapists.set(unpref_objs)
+        except Exception as e:
+            print(f"[WARN] Error syncing TherapistPreferenceRequest: {e}")
 
     return roster

@@ -15,6 +15,7 @@ class PatientSnapshot(models.Model):
     pat_room_no = models.CharField(max_length=50, blank=True, null=True)
     pat_ref_id = models.CharField(max_length=100, blank=True, null=True)
     is_wheelchair = models.BooleanField(default=False, verbose_name="Wheelchair Patient")
+    is_vip = models.BooleanField(default=False, verbose_name="VIP Patient")
     source_updated_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -54,6 +55,7 @@ class TherapyAllocation(models.Model):
     locked = models.BooleanField(default=False)
     vamanam_timing = models.CharField(max_length=30, blank=True, null=True, verbose_name="Vamanam Timing", help_text="Configured Vamanam timing (e.g. 05:00 AM, 05:30 AM)")
     is_wheelchair = models.BooleanField(default=False, verbose_name="Wheelchair Patient", help_text="True if patient requires a wheelchair accessible treatment room")
+    is_vip = models.BooleanField(default=False, verbose_name="VIP Patient")
     bathing_therapists_count = models.PositiveIntegerField(
         default=0,
         verbose_name="Bathing Therapists Required",
@@ -102,6 +104,7 @@ class Booking(models.Model):
     room = models.ForeignKey(TreatmentRoom, null=True, blank=True, on_delete=models.SET_NULL)
     vamanam_timing = models.CharField(max_length=30, blank=True, null=True, verbose_name="Vamanam Timing")
     is_wheelchair = models.BooleanField(default=False, verbose_name="Wheelchair Patient")
+    is_vip = models.BooleanField(default=False, verbose_name="VIP Patient")
     bathing_therapists_count = models.PositiveIntegerField(
         default=0,
         verbose_name="Bathing Therapists Required",
@@ -969,6 +972,10 @@ class PatientPreferredTherapistRoster(models.Model):
     # Therapists in pool (up to 7)
     therapists = models.ManyToManyField('masters.TherapistMaster', related_name='preferred_rosters', blank=True)
     therapist_codes = models.JSONField(default=list, blank=True, help_text="List of up to 7 therapist codes")
+
+    # Unpreferred therapists (excluded completely)
+    unpreferred_therapists = models.ManyToManyField('masters.TherapistMaster', related_name='unpreferred_rosters', blank=True)
+    unpreferred_therapist_codes = models.JSONField(default=list, blank=True, help_text="List of unpreferred therapist codes to exclude completely")
     
     # 1 Primary Bathing Therapist
     primary_bathing_therapist = models.ForeignKey(
@@ -1002,4 +1009,6 @@ class PatientPreferredTherapistRoster(models.Model):
         verbose_name_plural = "Patient Preferred Therapist Rosters"
 
     def __str__(self):
-        return f"Roster for {self.patient_name or self.patient_reg_no} ({len(self.therapist_codes)} therapists)"
+        pref_cnt = len(self.therapist_codes) if self.therapist_codes else 0
+        unpref_cnt = len(self.unpreferred_therapist_codes) if self.unpreferred_therapist_codes else 0
+        return f"Roster for {self.patient_name or self.patient_reg_no} ({pref_cnt} pref, {unpref_cnt} unpref)"

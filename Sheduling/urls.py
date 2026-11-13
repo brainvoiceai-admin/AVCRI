@@ -38,6 +38,7 @@ urlpatterns = [
     path('doctor-patients-vip-repeated/', doctor_preferred_views.doctor_patients_vip_repeated_view, name='doctor_patients_vip_repeated'),
     path('api/doctor-patients-vip-repeated/', doctor_preferred_views.get_doctor_patients_vip_repeated_api, name='doctor_patients_vip_repeated_api'),
     path('api/doctor/toggle-patient-allowance/', doctor_preferred_views.toggle_doctor_patient_allowance_api, name='toggle_doctor_patient_allowance_api'),
+    path('api/update-patient-vip/', views.update_patient_vip_status_api, name='update_patient_vip_status_api'),
     path('scheduling/preferred-therapists/', doctor_preferred_views.scheduling_preferred_therapists_view, name='scheduling_preferred_therapists'),
     path('scheduling/api/allowed-patients-preferred-therapists/', doctor_preferred_views.get_allowed_patients_preferred_therapists_api, name='get_allowed_patients_preferred_therapists_api'),
     path('scheduling/api/therapists-with-leaves/', doctor_preferred_views.get_therapists_with_leaves_api, name='get_therapists_with_leaves_api'),

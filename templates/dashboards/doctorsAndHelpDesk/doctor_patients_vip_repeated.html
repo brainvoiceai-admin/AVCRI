@@ -238,7 +238,7 @@
                         </div>
                         <h4 class="fw-bold mb-1">Preferred Therapist Monthly Quota</h4>
                         <p class="mb-0 text-white-50 small" id="quota-summary-text">
-                            You can mark a maximum of <strong>5 patients</strong> per month. Allowed <strong>VIP</strong> and <strong>Cottage Repeated</strong> patients will appear in the scheduling dashboard for preferred therapist configuration.
+                            You can mark a maximum of <strong>5 patients</strong> per month. Any allowed patient will appear in the scheduling dashboard for preferred and unpreferred therapist configuration.
                         </p>
                     </div>
                     <div class="col-12 col-md-6">
@@ -283,7 +283,7 @@
                             <i class="fas fa-home text-success me-1"></i>Cottage Repeated (<span id="cnt-repeated">0</span>)
                         </button>
                         <button class="filter-tab-btn" data-filter="ALLOWED">
-                            <i class="fas fa-check-circle text-primary me-1"></i>Allowed for Preferred (<span id="cnt-allowed">0</span>)
+                            <i class="fas fa-check-circle text-primary me-1"></i>Allowed for Preference (<span id="cnt-allowed">0</span>)
                         </button>
                     </div>
 
@@ -304,7 +304,7 @@
                                 <th>Category / Badges</th>
                                 <th>Staying Room</th>
                                 <th>Treating Doctor</th>
-                                <th>Preferred Therapist Status</th>
+                                <th>Therapist Preference Status</th>
                                 <th class="text-end">Allowance Action</th>
                             </tr>
                         </thead>
@@ -457,7 +457,7 @@
                     if (pat.is_cottage_repeated) {
                         badgesHtml += `<span class="badge-cottage-rep me-1"><i class="fas fa-home me-1"></i>Cottage Repeated (${pat.total_visits} visits)</span>`;
                     } else if (pat.is_repeated) {
-                        badgesHtml += `<span class="badge-repeated-non-cottage me-1" title="Only Cottage Repeated patients are eligible for preferred therapist assignment"><i class="fas fa-history me-1"></i>Repeated (${pat.total_visits} visits)</span>`;
+                        badgesHtml += `<span class="badge-repeated-non-cottage me-1" title="Repeated Visitor (${pat.total_visits} visits)"><i class="fas fa-history me-1"></i>Repeated (${pat.total_visits} visits)</span>`;
                     }
                     if (!pat.is_vip && !pat.is_repeated) {
                         badgesHtml = `<span class="text-muted small">Standard Patient</span>`;
@@ -468,7 +468,14 @@
                     if (pat.is_allowed) {
                         allowBadge = `<span class="badge-allowed"><i class="fas fa-check-circle me-1"></i>Allowed (Active)</span>`;
                         if (pat.has_roster) {
-                            allowBadge += `<div class="small text-muted mt-1"><i class="fas fa-users-cog me-1"></i>${pat.roster_therapist_count} Therapists Assigned</div>`;
+                            let rosterParts = [];
+                            if (pat.roster_pref_count > 0) {
+                                rosterParts.push(`<span class="badge bg-primary bg-opacity-10 text-primary border" style="font-size: 11px;"><i class="fas fa-user-check me-1"></i>${pat.roster_pref_count} Preferred</span>`);
+                            }
+                            if (pat.roster_unpref_count > 0) {
+                                rosterParts.push(`<span class="badge bg-danger bg-opacity-10 text-danger border" style="font-size: 11px;"><i class="fas fa-user-slash me-1"></i>${pat.roster_unpref_count} Excluded</span>`);
+                            }
+                            allowBadge += `<div class="d-flex flex-wrap gap-1 mt-1">${rosterParts.join(' ')}</div>`;
                         } else {
                             allowBadge += `<div class="small text-warning mt-1"><i class="fas fa-clock me-1"></i>Pending Roster in Scheduling</div>`;
                         }
@@ -499,16 +506,10 @@
                                     <i class="fas fa-user-lock me-1"></i>Treating Dr Only
                                 </button>
                             `;
-                        } else if (!pat.is_eligible) {
-                            actionBtn = `
-                                <button class="btn btn-sm btn-light border text-muted btn-allow-toggle" disabled title="Only VIP patients and Cottage Repeated patients are eligible for preferred therapist assignment.">
-                                    <i class="fas fa-lock me-1"></i>Ineligible (Cottage/VIP Only)
-                                </button>
-                            `;
                         } else if (quotaData.remaining > 0) {
                             actionBtn = `
                                 <button class="btn btn-sm btn-primary btn-allow-toggle" onclick="toggleAllowance('${pat.patient_reg_no}', '${escapeHtml(pat.patient_name)}', '${escapeHtml(pat.room_no || '')}')">
-                                    <i class="fas fa-user-check me-1"></i>Allow Preferred Therapist
+                                    <i class="fas fa-user-check me-1"></i>Allow Preference
                                 </button>
                             `;
                         } else {

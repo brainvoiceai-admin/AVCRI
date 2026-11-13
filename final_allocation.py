@@ -4527,10 +4527,25 @@ def bulk_allocate_for_date(target_date_str):
             return len(digits) == 5
         return False
 
+    def _booking_priority_sort_key(item):
+        bookings = item[1]
+        first_bk = bookings[0] if bookings else None
+        alloc = getattr(first_bk, 'allocation', None) if first_bk else None
+        pat = getattr(alloc, 'patient', None) if alloc else None
+
+        from Sheduling.vip_service import is_patient_vip
+        is_vip = is_patient_vip(pat) or getattr(first_bk, 'is_vip', False) or getattr(alloc, 'is_vip', False)
+        is_op = _is_patient_op(pat)
+        # Priority order:
+        # 1. VIP patients FIRST (priority 0)
+        # 2. Non-VIP IP patients SECOND (priority 1, 0)
+        # 3. Non-VIP OP patients THIRD (priority 1, 1)
+        return (0 if is_vip else 1, 1 if is_op else 0)
+
     ordered_bookings = []
     sorted_by_patient = sorted(
         by_patient.items(),
-        key=lambda item: 1 if _is_patient_op(getattr(item[1][0].allocation, 'patient', None) if item[1] else None) else 0
+        key=_booking_priority_sort_key
     )
     for pid, bookings in sorted_by_patient:
         bookings.sort(key=lambda bk: getattr(bk.allocation, 'from_date', target_date))

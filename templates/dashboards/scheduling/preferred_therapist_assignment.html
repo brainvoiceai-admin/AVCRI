@@ -204,8 +204,8 @@
             <!-- Header -->
             <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
                 <div>
-                    <h2 class="mb-1 fw-bold text-dark"><i class="fas fa-calendar-alt text-primary me-2"></i>Preferred Therapist Assignment</h2>
-                    <p class="text-muted mb-0">Showing <strong>ONLY patients allowed by their Treating Doctor</strong> for dedicated preferred therapist allocation.</p>
+                    <h2 class="mb-1 fw-bold text-dark"><i class="fas fa-users-cog text-primary me-2"></i>Therapist Preference & Exclusion Assignment</h2>
+                    <p class="text-muted mb-0">Showing <strong>ONLY patients allowed by their Treating Doctor</strong> for preferred therapist assignment and therapist exclusions.</p>
                 </div>
                 <div>
                     <a href="{% url 'doctor_patients_vip_repeated' %}" class="btn btn-outline-secondary me-2">
@@ -285,14 +285,15 @@
                                 <th>Patient Info</th>
                                 <th>Treating Doctor</th>
                                 <th>Room</th>
-                                <th>Roster Status</th>
-                                <th>Assigned Preferred Therapists (Up to 7)</th>
+                                <th>Status</th>
+                                <th>Assigned Preferred (Up to 7)</th>
+                                <th>Unpreferred (Exclude Completely)</th>
                                 <th class="text-end">Action</th>
                             </tr>
                         </thead>
                         <tbody id="allowed-patients-tbody">
                             <tr>
-                                <td colspan="6" class="text-center py-5 text-muted">
+                                <td colspan="7" class="text-center py-5 text-muted">
                                     <div class="spinner-border spinner-border-sm text-primary me-2"></div>Loading allowed patients...
                                 </td>
                             </tr>
@@ -310,7 +311,7 @@
                 <div class="modal-header py-3 px-4 bg-white border-bottom">
                     <div>
                         <h5 class="modal-title fw-bold text-dark mb-0" id="rosterModalLabel">
-                            <i class="fas fa-user-cog text-primary me-2"></i>Configure Preferred Therapists
+                            <i class="fas fa-user-cog text-primary me-2"></i>Configure Therapist Preferences & Exclusions
                         </h5>
                         <div class="text-muted small mt-1" id="modal-patient-subtitle">
                             Patient: <strong class="text-dark" id="modal-patient-name">—</strong>
@@ -326,7 +327,7 @@
                     <!-- Step 1: Preferred Therapists Selection -->
                     <div class="mb-3">
                         <div class="d-flex justify-content-between align-items-center mb-1">
-                            <label class="form-label fw-bold mb-0">
+                            <label class="form-label fw-bold mb-0" id="pref-section-label">
                                 1. Select Preferred Therapists <span class="text-muted fw-normal">(Maximum 7)</span>
                             </label>
                             <span class="badge bg-primary" id="selected-count-badge">0 / 7 Selected</span>
@@ -371,7 +372,33 @@
                         </div>
                     </div>
 
-                    <!-- Step 3: Optional Notes -->
+                    <!-- Step 3: Unpreferred Therapists Selection (Exclude Completely) -->
+                    <div class="mb-3">
+                        <div class="d-flex justify-content-between align-items-center mb-1">
+                            <label class="form-label fw-bold mb-0 text-danger" id="unpref-section-label">
+                                <i class="fas fa-user-slash me-1"></i>3. Select Unpreferred Therapists <span class="text-muted fw-normal">(Exclude Completely)</span>
+                            </label>
+                            <span class="badge bg-danger" id="unpref-count-badge">0 Selected</span>
+                        </div>
+
+                        <!-- Unpreferred Selected Chips Box -->
+                        <div id="unpref-chips-box" class="p-2 mb-2 bg-light rounded border d-flex flex-wrap gap-1 align-items-center" style="min-height: 40px;">
+                            <span class="text-muted small">No therapists excluded. Check therapists below to exclude completely.</span>
+                        </div>
+
+                        <!-- Unpreferred Search Box -->
+                        <div class="input-group input-group-sm mb-1">
+                            <span class="input-group-text bg-white border-end-0"><i class="fas fa-search text-muted"></i></span>
+                            <input type="text" id="modal-unpref-search" class="form-control border-start-0" placeholder="Search therapists to exclude...">
+                        </div>
+
+                        <!-- Unpreferred Checkbox List -->
+                        <div id="modal-unpref-list" class="border rounded bg-white" style="max-height: 150px; overflow-y: auto;">
+                            <div class="text-center py-4 text-muted small">Loading therapists...</div>
+                        </div>
+                    </div>
+
+                    <!-- Step 4: Optional Notes -->
                     <div>
                         <label class="form-label small text-muted mb-1">Notes / Instructions (Optional)</label>
                         <input type="text" id="roster-notes-input" class="form-control form-control-sm" placeholder="e.g. Approved for Room 102 Dhara & Pizichil">
@@ -386,7 +413,7 @@
                     <div class="d-flex gap-2">
                         <button type="button" class="btn btn-secondary btn-sm px-3" data-bs-dismiss="modal">Cancel</button>
                         <button type="button" class="btn btn-primary btn-sm px-4 fw-semibold" id="btn-save-roster" onclick="saveRoster()">
-                            Save Preferred Roster
+                            Save Preferences
                         </button>
                     </div>
                 </div>
@@ -410,21 +437,33 @@
         let currentPatientDesiredGender = '';
         let allowedPatientsMap = {};
         let selectedTherapistCodes = new Set();
+        let selectedUnpreferredCodes = new Set();
         let primaryBathingCode = null;
         let secondaryBathingCode = null;
         let modalTherapistSearchQuery = '';
+        let modalUnprefSearchQuery = '';
         let rosterModalInstance = null;
 
+        function matchesGender(therapistGender, desiredGender) {
+            if (!desiredGender) return true;
+            const tg = String(therapistGender || '').trim().toLowerCase();
+            const dg = String(desiredGender || '').trim().toLowerCase();
+            if (dg.startsWith('m')) return tg.startsWith('m');
+            if (dg.startsWith('f')) return tg.startsWith('f');
+            return true;
+        }
+
         function resolveDesiredTherapistGender(gender, age) {
-            if (!gender || gender === '—') return null;
-            const g = String(gender).trim().toLowerCase();
             const ageNum = parseFloat(age);
             if (!isNaN(ageNum) && ageNum < 5) {
                 return 'Female';
             }
-            if (g.startsWith('f')) return 'Female';
-            if (g.startsWith('m')) return 'Male';
-            return null;
+            if (gender && gender !== '—') {
+                const g = String(gender).trim().toLowerCase();
+                if (g.startsWith('m')) return 'Male';
+                if (g.startsWith('f')) return 'Female';
+            }
+            return 'Male';
         }
 
         function getCookie(name) {
@@ -481,7 +520,7 @@
             const tbody = document.getElementById('allowed-patients-tbody');
             tbody.innerHTML = `
                 <tr>
-                    <td colspan="6" class="text-center py-5 text-muted">
+                    <td colspan="7" class="text-center py-5 text-muted">
                         <div class="spinner-border spinner-border-sm text-primary me-2"></div>Loading allowed patients...
                     </td>
                 </tr>
@@ -493,7 +532,7 @@
                 const data = await response.json();
 
                 if (data.status !== 'success') {
-                    tbody.innerHTML = `<tr><td colspan="6" class="text-center py-4 text-danger">${data.message || 'Error loading allowed patients.'}</td></tr>`;
+                    tbody.innerHTML = `<tr><td colspan="7" class="text-center py-4 text-danger">${data.message || 'Error loading allowed patients.'}</td></tr>`;
                     return;
                 }
 
@@ -510,7 +549,7 @@
                 if (!data.patients || data.patients.length === 0) {
                     tbody.innerHTML = `
                         <tr>
-                            <td colspan="6" class="text-center py-5 text-muted">
+                            <td colspan="7" class="text-center py-5 text-muted">
                                 <i class="fas fa-user-clock fs-1 d-block mb-3 opacity-25"></i>
                                 No allowed patients found matching your search.
                             </td>
@@ -534,56 +573,90 @@
                         catHtml += `<span class="badge bg-purple bg-opacity-25 text-primary me-1"><i class="fas fa-history me-1"></i>Repeated (${pat.total_visits})</span>`;
                     }
 
-                    // Roster Status Pill
+                    // Roster Status Pill & Therapists Display
                     let statusPill = '';
                     let therapistsDisplay = '';
-                    if (pat.is_configured && pat.roster) {
-                        statusPill = `<span class="badge bg-success bg-opacity-10 text-success fw-bold px-2 py-1"><i class="fas fa-check-circle me-1"></i>Configured (${pat.roster.therapist_count}/7)</span>`;
-                        
-                        // Chips
-                        let chipsHtml = '';
-                        chipsHtml += `
-                            <span class="therapist-chip chip-primary-bath" title="Primary Bathing Therapist">
-                                <i class="fas fa-shower me-1"></i>Primary: ${escapeHtml(pat.roster.primary_bathing_name)}
-                                <span class="week-off-badge">Off: ${escapeHtml(pat.roster.primary_bathing_week_off)}</span>
-                            </span>
-                        `;
-                        chipsHtml += `
-                            <span class="therapist-chip chip-secondary-bath" title="Secondary Bathing Therapist">
-                                <i class="fas fa-bath me-1"></i>Secondary: ${escapeHtml(pat.roster.secondary_bathing_name)}
-                                <span class="week-off-badge">Off: ${escapeHtml(pat.roster.secondary_bathing_week_off)}</span>
-                            </span>
-                        `;
+                    let unprefDisplay = '';
 
-                        if (pat.roster.therapists_detail) {
-                            pat.roster.therapists_detail.forEach(t => {
-                                if (t.code !== pat.roster.primary_bathing_code && t.code !== pat.roster.secondary_bathing_code) {
-                                    chipsHtml += `
-                                        <span class="therapist-chip">
-                                            ${escapeHtml(t.name)}
-                                            <span class="week-off-badge">Off: ${escapeHtml(t.week_off)}</span>
-                                        </span>
-                                    `;
-                                }
-                            });
+                    if (pat.is_configured && pat.roster) {
+                        const pCnt = pat.roster.therapist_count || 0;
+                        const uCnt = pat.roster.unpreferred_count || 0;
+                        let pillParts = [];
+                        if (pCnt > 0) pillParts.push(`${pCnt} pref`);
+                        if (uCnt > 0) pillParts.push(`${uCnt} excl`);
+                        const pillDesc = pillParts.length > 0 ? pillParts.join(', ') : 'Configured';
+
+                        statusPill = `<span class="badge bg-success bg-opacity-10 text-success fw-bold px-2 py-1"><i class="fas fa-check-circle me-1"></i>${pillDesc}</span>`;
+                        
+                        // Preferred Chips
+                        if (pCnt > 0) {
+                            let chipsHtml = '';
+                            if (pat.roster.primary_bathing_code) {
+                                chipsHtml += `
+                                    <span class="therapist-chip chip-primary-bath" title="Primary Bathing Therapist">
+                                        <i class="fas fa-shower me-1"></i>Primary: ${escapeHtml(pat.roster.primary_bathing_name)}
+                                        <span class="week-off-badge">Off: ${escapeHtml(pat.roster.primary_bathing_week_off)}</span>
+                                    </span>
+                                `;
+                            }
+                            if (pat.roster.secondary_bathing_code) {
+                                chipsHtml += `
+                                    <span class="therapist-chip chip-secondary-bath" title="Secondary Bathing Therapist">
+                                        <i class="fas fa-bath me-1"></i>Secondary: ${escapeHtml(pat.roster.secondary_bathing_name)}
+                                        <span class="week-off-badge">Off: ${escapeHtml(pat.roster.secondary_bathing_week_off)}</span>
+                                    </span>
+                                `;
+                            }
+
+                            if (pat.roster.therapists_detail) {
+                                pat.roster.therapists_detail.forEach(t => {
+                                    if (t.code !== pat.roster.primary_bathing_code && t.code !== pat.roster.secondary_bathing_code) {
+                                        chipsHtml += `
+                                            <span class="therapist-chip">
+                                                ${escapeHtml(t.name)}
+                                                <span class="week-off-badge">Off: ${escapeHtml(t.week_off)}</span>
+                                            </span>
+                                        `;
+                                    }
+                                });
+                            }
+                            therapistsDisplay = chipsHtml;
+                        } else {
+                            therapistsDisplay = `<span class="text-muted small fst-italic">No preferred assigned</span>`;
                         }
-                        therapistsDisplay = chipsHtml;
+
+                        // Unpreferred Chips
+                        if (pat.roster.unpreferred_detail && pat.roster.unpreferred_detail.length > 0) {
+                            let uHtml = '';
+                            pat.roster.unpreferred_detail.forEach(u => {
+                                uHtml += `
+                                    <span class="therapist-chip" style="background: #fef2f2; border-color: #fca5a5; color: #991b1b; font-weight: 500;">
+                                        <i class="fas fa-user-slash me-1 text-danger"></i>${escapeHtml(u.name)} (${escapeHtml(u.code)})
+                                        <span class="week-off-badge">Off: ${escapeHtml(u.week_off)}</span>
+                                    </span>
+                                `;
+                            });
+                            unprefDisplay = uHtml;
+                        } else {
+                            unprefDisplay = `<span class="text-muted small fst-italic">None excluded</span>`;
+                        }
                     } else {
                         statusPill = `<span class="badge bg-warning bg-opacity-10 text-warning-emphasis fw-bold px-2 py-1"><i class="fas fa-clock me-1"></i>Pending Assignment</span>`;
-                        therapistsDisplay = `<span class="text-muted small fst-italic">No therapists assigned yet</span>`;
+                        therapistsDisplay = `<span class="text-muted small fst-italic">No preferred assigned</span>`;
+                        unprefDisplay = `<span class="text-muted small fst-italic">None excluded</span>`;
                     }
 
                     allowedPatientsMap[pat.patient_reg_no] = pat;
                     const actionBtn = `
-                        <button class="btn btn-sm ${pat.is_configured ? 'btn-outline-primary' : 'btn-primary'}" onclick="openRosterModal('${escapeHtml(pat.patient_reg_no)}', '${escapeHtml(pat.patient_name)}', '${escapeHtml(pat.gender || '')}', '${escapeHtml(pat.age || '')}')">
-                            <i class="fas ${pat.is_configured ? 'fa-edit' : 'fa-plus'} me-1"></i>${pat.is_configured ? 'Edit Roster' : 'Assign Therapists'}
+                        <button class="btn btn-sm ${pat.is_configured ? 'btn-outline-primary' : 'btn-primary'}" onclick="openRosterModal('${escapeHtml(pat.patient_reg_no)}', '${escapeHtml(pat.patient_name)}', '${escapeHtml(pat.gender || '')}', '${escapeHtml(pat.age || '')}', '${escapeHtml(pat.desired_gender || '')}')">
+                            <i class="fas ${pat.is_configured ? 'fa-edit' : 'fa-plus'} me-1"></i>${pat.is_configured ? 'Edit Preferences' : 'Assign Therapists'}
                         </button>
                     `;
 
                     tr.innerHTML = `
                         <td>
                             <div class="fw-bold text-dark">${escapeHtml(pat.patient_name)}</div>
-                            <div class="text-muted small">Reg No: <strong>${escapeHtml(pat.patient_reg_no)}</strong></div>
+                            <div class="text-muted small">Reg No: <strong>${escapeHtml(pat.patient_reg_no)}</strong> • ${escapeHtml(pat.gender || '—')}${pat.age && pat.age !== '—' ? ', ' + escapeHtml(pat.age) + ' yrs' : ''}</div>
                             <div class="mt-1">${catHtml}</div>
                         </td>
                         <td>
@@ -596,7 +669,8 @@
                             </span>
                         </td>
                         <td>${statusPill}</td>
-                        <td style="max-width: 420px;">${therapistsDisplay}</td>
+                        <td style="max-width: 300px;">${therapistsDisplay}</td>
+                        <td style="max-width: 300px;">${unprefDisplay}</td>
                         <td class="text-end">${actionBtn}</td>
                     `;
                     tbody.appendChild(tr);
@@ -604,35 +678,56 @@
 
             } catch (err) {
                 console.error('Error fetching allowed patients:', err);
-                tbody.innerHTML = `<tr><td colspan="6" class="text-center py-4 text-danger">Network error loading allowed patients.</td></tr>`;
+                tbody.innerHTML = `<tr><td colspan="7" class="text-center py-4 text-danger">Network error loading allowed patients.</td></tr>`;
             }
         }
 
-        async function openRosterModal(regNo, patName, patGender, patAge) {
+        async function openRosterModal(regNo, patName, patGender, patAge, patDesiredGender) {
             currentPatientRegNo = regNo;
             currentPatientName = patName;
 
             const patData = allowedPatientsMap[regNo] || {};
             currentPatientGender = patGender || patData.gender || '';
             currentPatientAge = patAge || patData.age || '';
-            currentPatientDesiredGender = resolveDesiredTherapistGender(currentPatientGender, currentPatientAge);
+            
+            let targetGender = patDesiredGender || patData.desired_gender;
+            if (!targetGender || targetGender === '—') {
+                targetGender = resolveDesiredTherapistGender(currentPatientGender, currentPatientAge);
+            }
+            currentPatientDesiredGender = targetGender || 'Male';
 
             // Set Header details
             document.getElementById('modal-patient-name').textContent = patName || '—';
             document.getElementById('modal-patient-reg').textContent = regNo || '—';
 
-            let detailsText = `${currentPatientDesiredGender || currentPatientGender || 'Patient'}`;
-            if (patData.room_no) detailsText += ` • Room ${patData.room_no}`;
+            let detailsText = `${currentPatientDesiredGender} Therapists Only`;
+            if (currentPatientGender && currentPatientGender !== '—') {
+                detailsText += ` (${currentPatientGender}${currentPatientAge && currentPatientAge !== '—' ? ', ' + currentPatientAge + ' yrs' : ''})`;
+            }
+            if (patData.room_no && patData.room_no !== '—') detailsText += ` • Room ${patData.room_no}`;
             if (patData.is_vip) detailsText += ` • VIP`;
             if (patData.is_cottage_repeated) detailsText += ` • Cottage Repeated (${patData.total_visits})`;
             document.getElementById('modal-patient-details-text').textContent = detailsText;
 
+            // Section labels with gender badges
+            const prefLabel = document.getElementById('pref-section-label');
+            if (prefLabel) {
+                prefLabel.innerHTML = `1. Select Preferred Therapists <span class="badge bg-primary bg-opacity-10 text-primary ms-1" style="font-size: 11px;">${currentPatientDesiredGender} only</span> <span class="text-muted fw-normal">(Max 7)</span>`;
+            }
+            const unprefLabel = document.getElementById('unpref-section-label');
+            if (unprefLabel) {
+                unprefLabel.innerHTML = `<i class="fas fa-user-slash me-1"></i>3. Select Unpreferred Therapists <span class="badge bg-danger bg-opacity-10 text-danger ms-1" style="font-size: 11px;">${currentPatientDesiredGender} only</span> <span class="text-muted fw-normal">(Exclude Completely)</span>`;
+            }
+
             // Reset state
             selectedTherapistCodes.clear();
+            selectedUnpreferredCodes.clear();
             primaryBathingCode = null;
             secondaryBathingCode = null;
             modalTherapistSearchQuery = '';
+            modalUnprefSearchQuery = '';
             document.getElementById('modal-therapist-search').value = '';
+            document.getElementById('modal-unpref-search').value = '';
             document.getElementById('roster-notes-input').value = '';
 
             // Load therapists if needed
@@ -655,10 +750,15 @@
                 console.error('Error fetching current roster:', e);
             }
 
-            if (existingRoster && existingRoster.therapist_codes) {
-                existingRoster.therapist_codes.forEach(c => selectedTherapistCodes.add(c));
-                primaryBathingCode = existingRoster.primary_bathing_code || null;
-                secondaryBathingCode = existingRoster.secondary_bathing_code || null;
+            if (existingRoster) {
+                if (existingRoster.therapist_codes) {
+                    existingRoster.therapist_codes.forEach(c => selectedTherapistCodes.add(c));
+                    primaryBathingCode = existingRoster.primary_bathing_code || null;
+                    secondaryBathingCode = existingRoster.secondary_bathing_code || null;
+                }
+                if (existingRoster.unpreferred_codes) {
+                    existingRoster.unpreferred_codes.forEach(c => selectedUnpreferredCodes.add(c));
+                }
                 if (existingRoster.notes) {
                     document.getElementById('roster-notes-input').value = existingRoster.notes;
                 }
@@ -666,6 +766,8 @@
 
             renderTherapistChecklist();
             renderSelectedChips();
+            renderUnprefChecklist();
+            renderUnprefSelectedChips();
             updateBathingDropdowns();
             updateCoverageNote();
 
@@ -679,15 +781,8 @@
             const listEl = document.getElementById('modal-therapist-list');
             const searchVal = (modalTherapistSearchQuery || '').trim().toLowerCase();
 
-            // Strictly filter by gender
-            const genderFiltered = allTherapists.filter(t => {
-                if (currentPatientDesiredGender) {
-                    const tGen = String(t.gender || '').trim().toLowerCase();
-                    const reqGen = currentPatientDesiredGender.toLowerCase();
-                    if (tGen !== reqGen) return false;
-                }
-                return true;
-            });
+            // Strictly filter by gender: if male patient, show ONLY male therapists
+            const genderFiltered = allTherapists.filter(t => matchesGender(t.gender, currentPatientDesiredGender));
 
             // Search filter
             const displayList = genderFiltered.filter(t => {
@@ -710,6 +805,7 @@
             listEl.innerHTML = '';
             displayList.forEach(t => {
                 const isChecked = selectedTherapistCodes.has(t.therapist_code);
+                const isUnpref = selectedUnpreferredCodes.has(t.therapist_code);
                 const row = document.createElement('div');
                 row.className = `therapist-check-row ${isChecked ? 'is-checked' : ''}`;
 
@@ -719,10 +815,11 @@
 
                 row.innerHTML = `
                     <div class="d-flex align-items-center gap-2 text-truncate me-2">
-                        <input type="checkbox" class="form-check-input mt-0" ${isChecked ? 'checked' : ''} ${!isChecked && isMaxReached ? 'disabled' : ''} style="cursor: pointer;">
+                        <input type="checkbox" class="form-check-input mt-0" ${isChecked ? 'checked' : ''} ${(!isChecked && isMaxReached) || isUnpref ? 'disabled' : ''} style="cursor: pointer;">
                         <span class="fw-semibold text-dark small text-truncate">${escapeHtml(t.therapist_name)}</span>
                         <span class="text-muted small">(${escapeHtml(t.therapist_code)})</span>
                         <span class="text-secondary small">• ${escapeHtml(t.grade)}</span>
+                        ${isUnpref ? '<span class="badge bg-danger bg-opacity-25 text-danger" style="font-size: 10px;">Excluded</span>' : ''}
                     </div>
                     <div class="small flex-shrink-0">
                         <span class="text-danger fw-semibold">Off: ${escapeHtml(t.week_off_display)}</span>
@@ -731,6 +828,10 @@
                 `;
 
                 row.addEventListener('click', (e) => {
+                    if (isUnpref) {
+                        showToast(`Therapist ${t.therapist_name} (${t.therapist_code}) is marked as Unpreferred (Excluded). Remove from Unpreferred first.`, 'warning');
+                        return;
+                    }
                     if (e.target.tagName !== 'INPUT') {
                         const cb = row.querySelector('input[type="checkbox"]');
                         if (!cb.disabled) {
@@ -747,6 +848,10 @@
         }
 
         function toggleTherapist(code) {
+            if (selectedUnpreferredCodes.has(code)) {
+                showToast(`Therapist ${code} is already marked as Unpreferred (Excluded). Remove from Unpreferred first.`, 'warning');
+                return;
+            }
             if (selectedTherapistCodes.has(code)) {
                 uncheckTherapist(code);
             } else {
@@ -765,6 +870,7 @@
 
                 renderTherapistChecklist();
                 renderSelectedChips();
+                renderUnprefChecklist();
                 updateBathingDropdowns();
                 updateCoverageNote();
             }
@@ -777,6 +883,7 @@
 
             renderTherapistChecklist();
             renderSelectedChips();
+            renderUnprefChecklist();
             updateBathingDropdowns();
             updateCoverageNote();
         }
@@ -791,7 +898,7 @@
             badge.className = count === 7 ? 'badge bg-success' : (count > 0 ? 'badge bg-primary' : 'badge bg-secondary');
 
             if (count === 0) {
-                container.innerHTML = `<span class="text-muted small">No therapists selected yet. Check therapists below.</span>`;
+                container.innerHTML = `<span class="text-muted small">No preferred therapists selected yet. Check therapists below.</span>`;
                 return;
             }
 
@@ -804,6 +911,119 @@
                     <span class="fw-semibold text-dark">${escapeHtml(t.therapist_name)}</span>
                     <span class="text-muted small font-monospace">(${escapeHtml(t.therapist_code)})</span>
                     <span class="chip-remove" onclick="uncheckTherapist('${t.therapist_code}')" title="Remove">&times;</span>
+                `;
+                container.appendChild(chip);
+            });
+        }
+
+        function renderUnprefChecklist() {
+            const listEl = document.getElementById('modal-unpref-list');
+            const searchVal = (modalUnprefSearchQuery || '').trim().toLowerCase();
+
+            // Strictly filter by gender: if male patient, show ONLY male therapists
+            const genderFiltered = allTherapists.filter(t => matchesGender(t.gender, currentPatientDesiredGender));
+
+            const displayList = genderFiltered.filter(t => {
+                if (!searchVal) return true;
+                const matchName = (t.therapist_name || '').toLowerCase().includes(searchVal);
+                const matchCode = (t.therapist_code || '').toLowerCase().includes(searchVal);
+                const matchGrade = (t.grade || '').toLowerCase().includes(searchVal);
+                const matchWeek = (t.week_off_display || '').toLowerCase().includes(searchVal);
+                return matchName || matchCode || matchGrade || matchWeek;
+            });
+
+            if (displayList.length === 0) {
+                listEl.innerHTML = `<div class="text-center py-4 text-muted small">No therapists match "${escapeHtml(searchVal)}"</div>`;
+                return;
+            }
+
+            listEl.innerHTML = '';
+            displayList.forEach(t => {
+                const isChecked = selectedUnpreferredCodes.has(t.therapist_code);
+                const isPreferred = selectedTherapistCodes.has(t.therapist_code);
+                const row = document.createElement('div');
+                row.className = `therapist-check-row ${isChecked ? 'is-checked bg-danger bg-opacity-10' : ''}`;
+
+                row.innerHTML = `
+                    <div class="d-flex align-items-center gap-2 text-truncate me-2">
+                        <input type="checkbox" class="form-check-input mt-0" ${isChecked ? 'checked' : ''} ${isPreferred ? 'disabled' : ''} style="cursor: pointer; accent-color: #dc2626;">
+                        <span class="fw-semibold text-dark small text-truncate">${escapeHtml(t.therapist_name)}</span>
+                        <span class="text-muted small">(${escapeHtml(t.therapist_code)})</span>
+                        <span class="text-secondary small">• ${escapeHtml(t.grade)}</span>
+                        ${isPreferred ? '<span class="badge bg-primary bg-opacity-25 text-primary" style="font-size: 10px;">Preferred</span>' : ''}
+                    </div>
+                    <div class="small flex-shrink-0">
+                        <span class="text-danger fw-semibold">Off: ${escapeHtml(t.week_off_display)}</span>
+                    </div>
+                `;
+
+                row.addEventListener('click', (e) => {
+                    if (isPreferred) {
+                        showToast(`Therapist ${t.therapist_name} (${t.therapist_code}) is marked as Preferred. Remove from Preferred first.`, 'warning');
+                        return;
+                    }
+                    if (e.target.tagName !== 'INPUT') {
+                        const cb = row.querySelector('input[type="checkbox"]');
+                        if (!cb.disabled) {
+                            cb.checked = !cb.checked;
+                            toggleUnprefTherapist(t.therapist_code);
+                        }
+                    } else {
+                        toggleUnprefTherapist(t.therapist_code);
+                    }
+                });
+
+                listEl.appendChild(row);
+            });
+        }
+
+        function toggleUnprefTherapist(code) {
+            if (selectedTherapistCodes.has(code)) {
+                showToast(`Therapist ${code} is already marked as Preferred. Remove from Preferred first.`, 'warning');
+                return;
+            }
+            if (selectedUnpreferredCodes.has(code)) {
+                uncheckUnprefTherapist(code);
+            } else {
+                selectedUnpreferredCodes.add(code);
+                renderUnprefChecklist();
+                renderUnprefSelectedChips();
+                renderTherapistChecklist();
+                updateCoverageNote();
+            }
+        }
+
+        function uncheckUnprefTherapist(code) {
+            selectedUnpreferredCodes.delete(code);
+            renderUnprefChecklist();
+            renderUnprefSelectedChips();
+            renderTherapistChecklist();
+            updateCoverageNote();
+        }
+
+        function renderUnprefSelectedChips() {
+            const container = document.getElementById('unpref-chips-box');
+            const count = selectedUnpreferredCodes.size;
+
+            const badge = document.getElementById('unpref-count-badge');
+            badge.textContent = `${count} Selected`;
+            badge.className = count > 0 ? 'badge bg-danger' : 'badge bg-secondary';
+
+            if (count === 0) {
+                container.innerHTML = `<span class="text-muted small">No therapists excluded. Check therapists below to exclude completely.</span>`;
+                return;
+            }
+
+            container.innerHTML = '';
+            selectedUnpreferredCodes.forEach(code => {
+                const t = allTherapists.find(x => x.therapist_code === code) || { therapist_name: code, therapist_code: code };
+                const chip = document.createElement('span');
+                chip.className = 'therapist-chip-item border-danger text-danger';
+                chip.style.backgroundColor = '#fef2f2';
+                chip.innerHTML = `
+                    <span class="fw-semibold text-danger"><i class="fas fa-user-slash me-1"></i>${escapeHtml(t.therapist_name)}</span>
+                    <span class="text-muted small font-monospace">(${escapeHtml(t.therapist_code)})</span>
+                    <span class="chip-remove text-danger" onclick="uncheckUnprefTherapist('${t.therapist_code}')" title="Remove">&times;</span>
                 `;
                 container.appendChild(chip);
             });
@@ -873,18 +1093,26 @@
             const pObj = allTherapists.find(t => t.therapist_code === pCode);
             const sObj = allTherapists.find(t => t.therapist_code === sCode);
 
-            const count = selectedTherapistCodes.size;
+            const prefCount = selectedTherapistCodes.size;
+            const unprefCount = selectedUnpreferredCodes.size;
 
-            if (count === 0) {
-                noteEl.innerHTML = `<span class="text-muted"><i class="fas fa-info-circle me-1"></i>Select therapists above to populate bathing choices.</span>`;
-                summaryEl.innerHTML = `<span class="text-danger"><i class="fas fa-exclamation-circle me-1"></i>Select at least 1 therapist.</span>`;
+            if (prefCount === 0 && unprefCount === 0) {
+                noteEl.innerHTML = `<span class="text-muted"><i class="fas fa-info-circle me-1"></i>Select preferred therapists or unpreferred therapists above.</span>`;
+                summaryEl.innerHTML = `<span class="text-danger"><i class="fas fa-exclamation-circle me-1"></i>Select at least 1 therapist to configure.</span>`;
                 btnSave.disabled = true;
+                return;
+            }
+
+            if (prefCount === 0 && unprefCount > 0) {
+                noteEl.innerHTML = `<span class="text-muted"><i class="fas fa-info-circle me-1"></i>No preferred therapists selected. Only therapist exclusions will apply.</span>`;
+                summaryEl.innerHTML = `<span class="text-success fw-semibold"><i class="fas fa-check-circle me-1"></i>${unprefCount} therapist(s) excluded completely. Ready to save.</span>`;
+                btnSave.disabled = false;
                 return;
             }
 
             if (!pCode || !sCode) {
                 noteEl.innerHTML = `<span class="text-warning fw-semibold"><i class="fas fa-exclamation-circle me-1"></i>Please choose both Primary and Secondary Bathing Therapists.</span>`;
-                summaryEl.innerHTML = `<span class="text-warning fw-semibold">${count}/7 selected. Please choose Primary & Secondary.</span>`;
+                summaryEl.innerHTML = `<span class="text-warning fw-semibold">${prefCount}/7 selected. Please choose Primary & Secondary.</span>`;
                 btnSave.disabled = true;
                 return;
             }
@@ -908,7 +1136,9 @@
                 noteEl.innerHTML = `<span class="text-warning fw-semibold"><i class="fas fa-exclamation-triangle me-1"></i>Notice: Both therapists share week off day(s) (${pOff}).</span>`;
             }
 
-            summaryEl.innerHTML = `<span class="text-success fw-semibold"><i class="fas fa-check-circle me-1"></i>${count} therapists selected. Ready to save.</span>`;
+            let summaryText = `${prefCount} preferred`;
+            if (unprefCount > 0) summaryText += `, ${unprefCount} excluded`;
+            summaryEl.innerHTML = `<span class="text-success fw-semibold"><i class="fas fa-check-circle me-1"></i>${summaryText}. Ready to save.</span>`;
             btnSave.disabled = false;
         }
 
@@ -917,26 +1147,49 @@
             const sCode = document.getElementById('secondary-bathing-select').value;
             const notes = document.getElementById('roster-notes-input').value.trim();
             const therapistCodes = Array.from(selectedTherapistCodes);
+            const unpreferredCodes = Array.from(selectedUnpreferredCodes);
 
-            if (therapistCodes.length === 0) {
-                showToast('Please select at least 1 preferred therapist.', 'warning');
+            if (therapistCodes.length === 0 && unpreferredCodes.length === 0) {
+                showToast('Please select at least 1 preferred or unpreferred therapist.', 'warning');
                 return;
             }
             if (therapistCodes.length > 7) {
                 showToast('Maximum of 7 preferred therapists can be marked.', 'danger');
                 return;
             }
-            if (!pCode) {
-                showToast('Please designate a Primary Bathing Therapist.', 'warning');
-                return;
+
+            // Client-side safety check on therapist gender
+            if (currentPatientDesiredGender) {
+                const invalidPref = therapistCodes.filter(c => {
+                    const t = allTherapists.find(x => x.therapist_code === c);
+                    return t && !matchesGender(t.gender, currentPatientDesiredGender);
+                });
+                if (invalidPref.length > 0) {
+                    showToast(`Preferred therapist(s) ${invalidPref.join(', ')} do not match patient gender requirement (${currentPatientDesiredGender}).`, 'danger');
+                    return;
+                }
+                const invalidUnpref = unpreferredCodes.filter(c => {
+                    const t = allTherapists.find(x => x.therapist_code === c);
+                    return t && !matchesGender(t.gender, currentPatientDesiredGender);
+                });
+                if (invalidUnpref.length > 0) {
+                    showToast(`Unpreferred therapist(s) ${invalidUnpref.join(', ')} do not match patient gender requirement (${currentPatientDesiredGender}).`, 'danger');
+                    return;
+                }
             }
-            if (!sCode) {
-                showToast('Please designate a Secondary Bathing Therapist.', 'warning');
-                return;
-            }
-            if (pCode === sCode) {
-                showToast('Primary and Secondary Bathing Therapists cannot be the same therapist.', 'danger');
-                return;
+            if (therapistCodes.length > 0) {
+                if (!pCode) {
+                    showToast('Please designate a Primary Bathing Therapist.', 'warning');
+                    return;
+                }
+                if (!sCode) {
+                    showToast('Please designate a Secondary Bathing Therapist.', 'warning');
+                    return;
+                }
+                if (pCode === sCode) {
+                    showToast('Primary and Secondary Bathing Therapists cannot be the same therapist.', 'danger');
+                    return;
+                }
             }
 
             const btnSave = document.getElementById('btn-save-roster');
@@ -953,6 +1206,7 @@
                     body: JSON.stringify({
                         patient_reg_no: currentPatientRegNo,
                         therapist_codes: therapistCodes,
+                        unpreferred_codes: unpreferredCodes,
                         primary_bathing_code: pCode,
                         secondary_bathing_code: sCode,
                         notes: notes
@@ -965,14 +1219,14 @@
                     if (rosterModalInstance) rosterModalInstance.hide();
                     loadAllowedPatients();
                 } else {
-                    showToast(res.message || 'Failed to save roster.', 'danger');
+                    showToast(res.message || 'Failed to save preferences.', 'danger');
                 }
             } catch (err) {
-                console.error('Save roster error:', err);
-                showToast('Network error while saving roster.', 'danger');
+                console.error('Save preferences error:', err);
+                showToast('Network error while saving preferences.', 'danger');
             } finally {
                 btnSave.disabled = false;
-                btnSave.innerHTML = 'Save Preferred Roster';
+                btnSave.innerHTML = 'Save Preferences';
             }
         }
 
@@ -1011,10 +1265,16 @@
                 }, 300);
             });
 
-            // Modal Therapist Search
+            // Modal Preferred Therapist Search
             document.getElementById('modal-therapist-search').addEventListener('input', (e) => {
                 modalTherapistSearchQuery = e.target.value;
                 renderTherapistChecklist();
+            });
+
+            // Modal Unpreferred Therapist Search
+            document.getElementById('modal-unpref-search').addEventListener('input', (e) => {
+                modalUnprefSearchQuery = e.target.value;
+                renderUnprefChecklist();
             });
         });
     </script>

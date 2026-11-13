@@ -346,8 +346,11 @@ def get_doctor_patients_vip_repeated_api(request):
         if is_allowed:
             allowed_count += 1
 
-        has_roster = reg_no in rosters_map
-        roster_therapist_count = len(rosters_map[reg_no].therapist_codes) if has_roster else 0
+        roster_obj = rosters_map.get(reg_no)
+        has_roster = bool(roster_obj and (roster_obj.therapist_codes or roster_obj.unpreferred_therapist_codes))
+        roster_pref_count = len(roster_obj.therapist_codes) if roster_obj and roster_obj.therapist_codes else 0
+        roster_unpref_count = len(roster_obj.unpreferred_therapist_codes) if roster_obj and roster_obj.unpreferred_therapist_codes else 0
+        roster_therapist_count = roster_pref_count
 
         # Filter criteria:
         if filter_type == 'VIP' and not is_vip:
@@ -399,6 +402,8 @@ def get_doctor_patients_vip_repeated_api(request):
             'is_allowed': is_allowed,
             'has_roster': has_roster,
             'roster_therapist_count': roster_therapist_count,
+            'roster_pref_count': roster_pref_count,
+            'roster_unpref_count': roster_unpref_count,
             'allowance_id': active_allowances[reg_no].id if is_allowed else None,
             'treating_doctor_name': doc_name if (doc_name and doc_name != 'Not Assigned') else (f"Dr. {doc_code}" if doc_code else 'Not Assigned'),
             'treating_doctor_code': doc_code or '',
@@ -549,6 +554,24 @@ def get_allowed_patients_preferred_therapists_api(request):
         age = ps.pat_age if ps and ps.pat_age else '—'
         gender = ps.pat_sex if ps and ps.pat_sex else '—'
 
+        if not gender or gender == '—' or not age or age == '—':
+            try:
+                from MySql_Data_pull.models import Registration
+                d = ''.join(ch for ch in str(reg_no) if ch.isdigit())
+                if d:
+                    h_r = Registration.objects.using('therapy_db').filter(pat_reg_no=int(d)).values('pat_sex', 'pat_age').first()
+                    if h_r:
+                        if not gender or gender == '—':
+                            gender = h_r.get('pat_sex') or '—'
+                        if not age or age == '—':
+                            age = h_r.get('pat_age') or '—'
+            except Exception:
+                pass
+
+        from final_allocation import resolve_desired_gender
+        raw_desired = resolve_desired_gender(gender if gender != '—' else None, age if age != '—' else None)
+        desired_gender = raw_desired.capitalize() if raw_desired else 'Male'
+
         vip_rep = resolve_patient_vip_and_repeated(reg_no, room_no=ps.pat_room_no if ps else None)
         is_vip = vip_rep['is_vip']
         is_repeated = vip_rep['is_repeated']
@@ -557,7 +580,7 @@ def get_allowed_patients_preferred_therapists_api(request):
         total_visits = vip_rep['total_visits']
 
         roster = PatientPreferredTherapistRoster.objects.filter(patient_reg_no=reg_no, is_active=True).first()
-        is_configured = bool(roster and roster.therapist_codes)
+        is_configured = bool(roster and (roster.therapist_codes or roster.unpreferred_therapist_codes))
 
         if is_configured:
             configured_count += 1
@@ -625,11 +648,41 @@ def get_allowed_patients_preferred_therapists_api(request):
                 sb_week_off = ", ".join(l.leave_day_name for l in sb_leaves if l.leave_day_name) or "None"
                 sb_name = sb_obj.therapist_name
 
+            # Unpreferred therapists info
+            unpref_codes = roster.unpreferred_therapist_codes or []
+            unpref_objs = {t.therapist_code: t for t in TherapistMaster.objects.filter(therapist_code__in=unpref_codes).select_related('therapist_grade').prefetch_related('leaves')}
+            unpreferred_detail = []
+            for uc in unpref_codes:
+                u_obj = unpref_objs.get(uc)
+                if u_obj:
+                    u_leaves = list(u_obj.leaves.filter(is_active=True))
+                    u_week_off_str = ", ".join(l.leave_day_name for l in u_leaves if l.leave_day_name) or "None"
+                    unpreferred_detail.append({
+                        'code': u_obj.therapist_code,
+                        'name': u_obj.therapist_name,
+                        'grade': u_obj.therapist_grade.name if u_obj.therapist_grade else "Therapist",
+                        'gender': u_obj.therapist_gender,
+                        'is_bathing': u_obj.is_bathing_therapist,
+                        'week_off': u_week_off_str,
+                    })
+                else:
+                    unpreferred_detail.append({
+                        'code': uc,
+                        'name': uc,
+                        'grade': '—',
+                        'gender': '—',
+                        'is_bathing': False,
+                        'week_off': 'None',
+                    })
+
             roster_data = {
                 'id': roster.id,
                 'therapist_codes': codes,
                 'therapist_count': len(codes),
                 'therapists_detail': therapists_detail,
+                'unpreferred_codes': unpref_codes,
+                'unpreferred_count': len(unpref_codes),
+                'unpreferred_detail': unpreferred_detail,
                 'primary_bathing_code': roster.primary_bathing_code,
                 'primary_bathing_name': pb_name,
                 'primary_bathing_week_off': pb_week_off,
@@ -646,6 +699,7 @@ def get_allowed_patients_preferred_therapists_api(request):
             'room_no': room,
             'age': age,
             'gender': gender,
+            'desired_gender': desired_gender,
             'is_vip': is_vip,
             'is_repeated': is_repeated,
             'is_cottage': is_cottage,
@@ -728,6 +782,7 @@ def save_patient_preferred_roster_api(request):
 
     patient_reg_no = data.get('patient_reg_no')
     therapist_codes = data.get('therapist_codes', [])
+    unpreferred_codes = data.get('unpreferred_codes', data.get('unpreferred_therapist_codes', []))
     primary_bathing_code = data.get('primary_bathing_code')
     secondary_bathing_code = data.get('secondary_bathing_code')
     notes = data.get('notes', '')
@@ -742,19 +797,21 @@ def save_patient_preferred_roster_api(request):
             primary_bathing_code=primary_bathing_code,
             secondary_bathing_code=secondary_bathing_code,
             configured_by=request.user,
-            notes=notes
+            notes=notes,
+            unpreferred_codes=unpreferred_codes
         )
     except ValidationError as ve:
         return JsonResponse({'status': 'error', 'message': str(ve.message if hasattr(ve, 'message') else ve)}, status=400)
     except Exception as e:
-        return JsonResponse({'status': 'error', 'message': f'Error saving preferred therapist roster: {str(e)}'}, status=500)
+        return JsonResponse({'status': 'error', 'message': f'Error saving therapist preferences: {str(e)}'}, status=500)
 
     return JsonResponse({
         'status': 'success',
-        'message': f'Preferred therapist roster saved successfully for patient {patient_reg_no} ({len(roster.therapist_codes)} therapists).',
+        'message': f'Therapist preferences saved successfully for patient {patient_reg_no} ({len(roster.therapist_codes)} preferred, {len(roster.unpreferred_therapist_codes)} excluded).',
         'roster_id': roster.id,
         'patient_reg_no': roster.patient_reg_no,
         'therapist_count': len(roster.therapist_codes),
+        'unpreferred_count': len(roster.unpreferred_therapist_codes),
         'primary_bathing_code': roster.primary_bathing_code,
         'secondary_bathing_code': roster.secondary_bathing_code,
     })

@@ -72,6 +72,7 @@ $(function () {
   const $therapySelect = $('#therapy-select'), $slotSelect = $('#slot-select'), $fromDate = $('#from-date-input'), $toDate = $('#to-date-input'), $daysInput = $('#days-input');
   const $vamanamTimingGroup = $('#vamanam-timing-group'), $vamanamTimingSelect = $('#vamanam-timing-select');
   const $wheelchairSelect = $('#wheelchair-select');
+  const $vipSelect = $('#vip-select');
   const $bathingTherapistsGroup = $('#bathing-therapists-group');
   const $bathingTherapistsCount = $('#bathing-therapists-count');
 
@@ -84,6 +85,35 @@ $(function () {
     } else {
       $bathingTherapistsGroup.slideUp(150);
       $bathingTherapistsCount.val(1);
+    }
+  });
+
+  $vipSelect.on('change', function () {
+    const isVip = ($(this).val() === 'Yes');
+    if (isVip) {
+      $('#hdr-pat-vip-badge').show();
+    } else {
+      $('#hdr-pat-vip-badge').hide();
+    }
+
+    if (selectedPatient) {
+      selectedPatient.is_vip = isVip;
+      selectedPatient.vip_status = isVip ? 'Yes' : 'No';
+      const regNo = selectedPatient.pat_reg_no || selectedPatient.pat_op_reg_no;
+      if (regNo) {
+        fetch('/api/update-patient-vip/', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': getCookie('csrftoken') || ''
+          },
+          body: JSON.stringify({
+            patient_reg_no: regNo,
+            patient_name: selectedPatient.pat_name || '',
+            is_vip: isVip
+          })
+        }).catch(err => console.error('Error updating VIP status:', err));
+      }
     }
   });
 
@@ -606,6 +636,10 @@ $(function () {
     const isWc = !!(patient && (patient.is_wheelchair === true || patient.is_wheelchair === 'Yes'));
     $wheelchairSelect.val(isWc ? 'Yes' : 'No').trigger('change');
 
+    // Set VIP patient select based on selected patient's status
+    const isVip = !!(patient && (patient.is_vip === true || patient.is_vip === 'Yes' || (patient.vip_status && patient.vip_status.toLowerCase() === 'yes')));
+    $vipSelect.val(isVip ? 'Yes' : 'No').trigger('change');
+
     $('#header-patient-select').val(patient.pat_reg_no || patient.pat_op_reg_no);
     // Make patient name bold/highlighted
     $('#hdr-pat-name').html(`<strong style="font-weight: bold; color: var(--primary);">${patient.pat_name || 'Unknown'}</strong>`);
@@ -626,6 +660,10 @@ $(function () {
       if (addedTherapies.some(t => t.is_wheelchair)) {
         $wheelchairSelect.val('Yes').trigger('change');
       }
+      // If any existing therapy is marked VIP, preserve Yes
+      if (addedTherapies.some(t => t.is_vip)) {
+        $vipSelect.val('Yes').trigger('change');
+      }
       bookings = [];
       addedTherapies.forEach((t, idx) => {
         if (t.from_date && t.to_date) getDateRange(t.from_date, t.to_date).forEach(d => bookings.push({ id: Math.random().toString(36).slice(2, 9), allocation_id: t.allocation_id || t.allocation_id || t.allocation_id, therapyIndex: idx, date: d, slot: t.slot || '', room: t.room || '', therapist: t.therapist || '', status: 'scheduled' }));
@@ -644,6 +682,7 @@ $(function () {
   function clearPatientSelection() {
     selectedPatient = null;
     $wheelchairSelect.val('No').trigger('change');
+    $vipSelect.val('No').trigger('change');
     $bathingTherapistsCount.val(1);
     $('#header-patient-select').val('');
     $('#hdr-pat-name').text('No patient selected');
@@ -1367,6 +1406,7 @@ $(function () {
       slot: $slotSelect.val() || '',
       vamanam_timing: isVamanam ? ($vamanamTimingSelect.val() || '') : '',
       is_wheelchair: ($wheelchairSelect.val() === 'Yes'),
+      is_vip: ($vipSelect.val() === 'Yes'),
       bathing_therapists_count: ($wheelchairSelect.val() === 'Yes') ? (parseInt($bathingTherapistsCount.val(), 10) || 1) : 0,
       from_date: from,
       to_date: to,
@@ -1593,7 +1633,7 @@ $(function () {
       const rowActionClass = getTodayTherapyColorClass(t);
       const row = `<tr class="${rowActionClass}">
         <td>${i + 1}</td>
-        <td>${esc(t.therapy_name)}${t.is_wheelchair ? `<br><span class="badge bg-primary text-white" style="font-size:11px; font-weight:600;"><i class="fas fa-wheelchair me-1"></i>Wheelchair</span>` : ''}${t.bathing_therapists_count ? `<br><span class="badge bg-info text-white" style="font-size:11px; font-weight:600;"><i class="fas fa-bath me-1"></i>Bathing Therapists: ${t.bathing_therapists_count}</span>` : ''}</td>
+        <td>${esc(t.therapy_name)}${t.is_vip ? `<br><span class="badge bg-warning text-dark" style="font-size:11px; font-weight:600;"><i class="fas fa-crown me-1"></i>VIP</span>` : ''}${t.is_wheelchair ? `<br><span class="badge bg-primary text-white" style="font-size:11px; font-weight:600;"><i class="fas fa-wheelchair me-1"></i>Wheelchair</span>` : ''}${t.bathing_therapists_count ? `<br><span class="badge bg-info text-white" style="font-size:11px; font-weight:600;"><i class="fas fa-bath me-1"></i>Bathing Therapists: ${t.bathing_therapists_count}</span>` : ''}</td>
         <td>${therapyUsageDisplay !== '—' ? esc(therapyUsageDisplay) : '—'}</td>
         <td>${esc(t.ext_int || '')}</td>
         <td>${esc(format12Hour(t.slot || ''))}${t.vamanam_timing ? `<br><span class="badge bg-danger text-white" style="font-size:11px; font-weight:600;"><i class="fas fa-stopwatch me-1"></i>${esc(t.vamanam_timing)}</span>` : ''}</td>
@@ -2067,6 +2107,7 @@ $(function () {
       $vamanamTimingGroup.hide();
     }
     $wheelchairSelect.val(t.is_wheelchair ? 'Yes' : 'No').trigger('change');
+    $vipSelect.val(t.is_vip ? 'Yes' : 'No').trigger('change');
     if (t.bathing_therapists_count) {
       $bathingTherapistsCount.val(t.bathing_therapists_count);
     } else {
@@ -2083,6 +2124,8 @@ $(function () {
     t.ext_int = $('#ext-int-select').val();
     const isWc = ($wheelchairSelect.val() === 'Yes');
     t.is_wheelchair = isWc;
+    const isVip = ($vipSelect.val() === 'Yes');
+    t.is_vip = isVip;
     t.bathing_therapists_count = isWc ? (parseInt($bathingTherapistsCount.val(), 10) || 1) : 0;
     // reflect potential edits
     const selTherapy = $therapySelect.select2('data')[0];
@@ -2155,6 +2198,7 @@ $(function () {
         slot: t.slot,
         vamanam_timing: t.vamanam_timing || '',
         is_wheelchair: !!t.is_wheelchair,
+        is_vip: !!t.is_vip,
         bathing_therapists_count: t.bathing_therapists_count || 0,
         from_date: t.from_date,
         to_date: t.to_date,

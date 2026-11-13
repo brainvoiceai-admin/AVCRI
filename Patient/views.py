@@ -99,10 +99,13 @@ def get_patient_details_api(request):
         
         # Handle VIP status lookup
         try:
-            reg_no_int = int(pat_reg_no)
-            vip_status = "Yes" if Repeated_Visitors.objects.filter(register_number=reg_no_int, is_vip=1).exists() else "No"
+            from Sheduling.vip_service import is_patient_vip
+            is_vip_bool = is_patient_vip(pat_reg_no)
+            vip_status = "Yes" if is_vip_bool else "No"
+            digits = ''.join(ch for ch in str(pat_reg_no) if ch.isdigit())
+            reg_no_int = int(digits) if digits else 0
             repeated_status = "Yes" if Repeated_Visitors.objects.filter(register_number=reg_no_int, total_visits__gt=2).exists() else "No"
-        except (ValueError, TypeError):
+        except (ValueError, TypeError, Exception):
             vip_status = "No"
             repeated_status = "No"
         
@@ -125,6 +128,7 @@ def get_patient_details_api(request):
             'pat_age': patient.pat_age or 'Unknown',
             'pat_sex': patient.pat_sex or 'Unknown',
             'vip_status': vip_status,
+            'is_vip': (vip_status == 'Yes'),
             'pat_op_reg_no': patient.pat_op_reg_no or '',
             'pat_room_no': display_room_no or '',
             'pat_ref_id': patient.pat_ref_id or '',
@@ -169,10 +173,13 @@ def get_patient_details_api(request):
             if op_patient:
                 # Handle VIP status lookup for OP patients
                 try:
-                    reg_no_int = int(pat_reg_no)
-                    vip_status = "Yes" if Repeated_Visitors.objects.filter(register_number=reg_no_int, is_vip=1).exists() else "No"
+                    from Sheduling.vip_service import is_patient_vip
+                    is_vip_bool = is_patient_vip(pat_reg_no)
+                    vip_status = "Yes" if is_vip_bool else "No"
+                    digits = ''.join(ch for ch in str(pat_reg_no) if ch.isdigit())
+                    reg_no_int = int(digits) if digits else 0
                     repeated_status = "Yes" if Repeated_Visitors.objects.filter(register_number=reg_no_int, total_visits__gt=2).exists() else "No"
-                except (ValueError, TypeError):
+                except (ValueError, TypeError, Exception):
                     vip_status = "No"
                     repeated_status = "No"
                 
@@ -243,6 +250,7 @@ def get_patient_details_api(request):
                     'pat_age': op_age,  # Fetch from Treatment model
                     'pat_sex': op_patient.NPat_Sex or 'Unknown',
                     'vip_status': vip_status,
+            'is_vip': (vip_status == 'Yes'),
                     'pat_op_reg_no': '',  # OP patients don't have OP reg no
                     'pat_room_no': op_room_no,  # Fetch from Treatment model
                     'pat_ref_id': '',  # OP patients don't have ref ID
@@ -1748,3 +1756,9 @@ def unit_numbers(request):
     except Exception as e:
         print(f"Error fetching unit numbers: {e}")
         return JsonResponse({"units": []}, status=500)
+
+
+def update_patient_vip_status_api(request):
+    """Delegate to Sheduling.views.update_patient_vip_status_api"""
+    from Sheduling.views import update_patient_vip_status_api as _update_vip
+    return _update_vip(request)
