@@ -286,7 +286,7 @@
                                 <th>Treating Doctor</th>
                                 <th>Room</th>
                                 <th>Status</th>
-                                <th>Assigned Preferred (Up to 7)</th>
+                                <th>Assigned Preferred (Up to {{ max_preferred_therapists|default:7 }})</th>
                                 <th>Unpreferred (Exclude Completely)</th>
                                 <th class="text-end">Action</th>
                             </tr>
@@ -328,9 +328,9 @@
                     <div class="mb-3">
                         <div class="d-flex justify-content-between align-items-center mb-1">
                             <label class="form-label fw-bold mb-0" id="pref-section-label">
-                                1. Select Preferred Therapists <span class="text-muted fw-normal">(Maximum 7)</span>
+                                1. Select Preferred Therapists <span class="text-muted fw-normal">(Maximum {{ max_preferred_therapists|default:7 }})</span>
                             </label>
-                            <span class="badge bg-primary" id="selected-count-badge">0 / 7 Selected</span>
+                            <span class="badge bg-primary" id="selected-count-badge">0 / {{ max_preferred_therapists|default:7 }} Selected</span>
                         </div>
 
                         <!-- Selected Chips Box -->
@@ -443,6 +443,7 @@
         let modalTherapistSearchQuery = '';
         let modalUnprefSearchQuery = '';
         let rosterModalInstance = null;
+        const MAX_PREF = {{ max_preferred_therapists|default:7 }};
 
         function matchesGender(therapistGender, desiredGender) {
             if (!desiredGender) return true;
@@ -712,7 +713,7 @@
             // Section labels with gender badges
             const prefLabel = document.getElementById('pref-section-label');
             if (prefLabel) {
-                prefLabel.innerHTML = `1. Select Preferred Therapists <span class="badge bg-primary bg-opacity-10 text-primary ms-1" style="font-size: 11px;">${currentPatientDesiredGender} only</span> <span class="text-muted fw-normal">(Max 7)</span>`;
+                prefLabel.innerHTML = `1. Select Preferred Therapists <span class="badge bg-primary bg-opacity-10 text-primary ms-1" style="font-size: 11px;">${currentPatientDesiredGender} only</span> <span class="text-muted fw-normal">(Max ${MAX_PREF})</span>`;
             }
             const unprefLabel = document.getElementById('unpref-section-label');
             if (unprefLabel) {
@@ -800,7 +801,7 @@
             }
 
             const count = selectedTherapistCodes.size;
-            const isMaxReached = count >= 7;
+            const isMaxReached = count >= MAX_PREF;
 
             listEl.innerHTML = '';
             displayList.forEach(t => {
@@ -855,8 +856,8 @@
             if (selectedTherapistCodes.has(code)) {
                 uncheckTherapist(code);
             } else {
-                if (selectedTherapistCodes.size >= 7) {
-                    showToast('Maximum of 7 preferred therapists can be selected.', 'warning');
+                if (selectedTherapistCodes.size >= MAX_PREF) {
+                    showToast(`Maximum of ${MAX_PREF} preferred therapists can be selected.`, 'warning');
                     renderTherapistChecklist();
                     return;
                 }
@@ -894,8 +895,8 @@
 
             // Counter Badge
             const badge = document.getElementById('selected-count-badge');
-            badge.textContent = `${count} / 7 Selected`;
-            badge.className = count === 7 ? 'badge bg-success' : (count > 0 ? 'badge bg-primary' : 'badge bg-secondary');
+            badge.textContent = `${count} / ${MAX_PREF} Selected`;
+            badge.className = count === MAX_PREF ? 'badge bg-success' : (count > 0 ? 'badge bg-primary' : 'badge bg-secondary');
 
             if (count === 0) {
                 container.innerHTML = `<span class="text-muted small">No preferred therapists selected yet. Check therapists below.</span>`;
@@ -1112,7 +1113,7 @@
 
             if (!pCode || !sCode) {
                 noteEl.innerHTML = `<span class="text-warning fw-semibold"><i class="fas fa-exclamation-circle me-1"></i>Please choose both Primary and Secondary Bathing Therapists.</span>`;
-                summaryEl.innerHTML = `<span class="text-warning fw-semibold">${prefCount}/7 selected. Please choose Primary & Secondary.</span>`;
+                summaryEl.innerHTML = `<span class="text-warning fw-semibold">${prefCount}/${MAX_PREF} selected. Please choose Primary & Secondary.</span>`;
                 btnSave.disabled = true;
                 return;
             }
@@ -1153,8 +1154,8 @@
                 showToast('Please select at least 1 preferred or unpreferred therapist.', 'warning');
                 return;
             }
-            if (therapistCodes.length > 7) {
-                showToast('Maximum of 7 preferred therapists can be marked.', 'danger');
+            if (therapistCodes.length > MAX_PREF) {
+                showToast(`Maximum of ${MAX_PREF} preferred therapists can be marked.`, 'danger');
                 return;
             }
 

@@ -944,7 +944,11 @@ class DoctorPatientPreferenceAllowance(models.Model):
         y = year or now.year
         m = month or now.month
         used = cls.objects.filter(doctor=doctor_user, year=y, month=m, is_active=True).count()
-        limit = 5
+        try:
+            from masters.models import get_doctor_monthly_quota
+            limit = get_doctor_monthly_quota()
+        except Exception:
+            limit = 5
         remaining = max(0, limit - used)
         return {
             'used': used,

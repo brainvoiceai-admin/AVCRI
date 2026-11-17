@@ -325,13 +325,18 @@ def allocate_therapists(date, time_slot, therapy_requirements, last_therapists=N
         for grade, needed in list(grade_map.items()):
             if needed <= 0:
                 continue
-            candidates_qs = TherapistMaster.objects.filter(
-                therapist_grade__name__iexact=grade, 
-                is_active=True,
-                is_helping_therapist=is_helping_flag
-            )
             if preferred_roster_info:
-                candidates_qs = candidates_qs.filter(therapist_code__in=preferred_roster_info['therapist_codes_set'])
+                candidates_qs = TherapistMaster.objects.filter(
+                    therapist_grade__name__iexact=grade, 
+                    is_active=True,
+                    therapist_code__in=preferred_roster_info['therapist_codes_set']
+                )
+            else:
+                candidates_qs = TherapistMaster.objects.filter(
+                    therapist_grade__name__iexact=grade, 
+                    is_active=True,
+                    is_helping_therapist=is_helping_flag
+                )
             if needs_bathing:
                 candidates_qs = candidates_qs.filter(is_bathing_therapist=True)
 
@@ -515,8 +520,8 @@ def allocate_for_allocation_date_preferred_only(therapy_allocation_id, target_da
         patient_already_booked = False
         try:
             patient_already_booked = (
-                RoomBooking.objects.filter(patient_id=patient_id, date=target_date, time_slot=canonical_slot, status__in=['BOOKED','scheduled']).exclude(pk=booking.pk).exists()
-                or TherapistBooking.objects.filter(patient_id=patient_id, date=target_date, time_slot=canonical_slot, status='BOOKED').exclude(pk=booking.pk).exists()
+                RoomBooking.objects.filter(patient_id=patient_id, date=target_date, time_slot=canonical_slot, status__in=['BOOKED','scheduled']).exclude(visit=booking).exclude(therapy_id=allocation.id).exists()
+                or TherapistBooking.objects.filter(patient_id=patient_id, date=target_date, time_slot=canonical_slot, status='BOOKED').exclude(visit_id=allocation.id).exists()
             )
         except Exception:
             # fallback: match on start_time
@@ -524,8 +529,8 @@ def allocate_for_allocation_date_preferred_only(therapy_allocation_id, target_da
                 slot_start = getattr(pref_slot, 'start_time', None)
                 if slot_start:
                     patient_already_booked = (
-                        RoomBooking.objects.filter(patient_id=patient_id, date=target_date, time_slot__start_time=slot_start, status__in=['BOOKED','scheduled']).exclude(pk=booking.pk).exists()
-                        or TherapistBooking.objects.filter(patient_id=patient_id, date=target_date, time_slot__start_time=slot_start, status='BOOKED').exclude(pk=booking.pk).exists()
+                        RoomBooking.objects.filter(patient_id=patient_id, date=target_date, time_slot__start_time=slot_start, status__in=['BOOKED','scheduled']).exclude(visit=booking).exclude(therapy_id=allocation.id).exists()
+                        or TherapistBooking.objects.filter(patient_id=patient_id, date=target_date, time_slot__start_time=slot_start, status='BOOKED').exclude(visit_id=allocation.id).exists()
                     )
             except Exception:
                 patient_already_booked = False

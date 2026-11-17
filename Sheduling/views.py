@@ -169,6 +169,64 @@ def _refresh_patient_staying_rooms(reg_nos):
         return {'success': False, 'updated': 0, 'error': str(e)}
 
 
+def is_internal_treatment(therapy_code='', therapy_name='', ext_int=''):
+    """
+    Check if a therapy is an internal treatment (which does not require a time slot).
+    Internal treatments include:
+      1. Explicitly marked ext_int == 'Internal'
+      2. Nurse treatments (from NurseTreatmentMaster or codes starting with NT)
+      3. Known zero-therapist treatments (Snehapaanam, Virechanam, Mathra Vasthi, etc.)
+      4. Therapies configured with total_no_of_therapist == 0 or therapy_category == 'Internal'
+    """
+    if (ext_int or '').strip().lower() == 'internal':
+        return True
+
+    code_str = str(therapy_code or '').strip().upper()
+    name_str = str(therapy_name or '').strip().lower()
+
+    if code_str.startswith('NT'):
+        return True
+
+    try:
+        from .nurse_allocation import is_nurse_treatment
+        if is_nurse_treatment(code_str, therapy_name) is not None:
+            return True
+    except Exception:
+        pass
+
+    KNOWN_ZERO_THERAPIST_CODES = {
+        'THEB114', 'THEB128', 'THEB236', 'THEB037', 'THEB155',
+        'THEB210', 'THEB145', 'THEB237', 'THEB238', 'THEB226',
+        'THEB235', 'THEB225'
+    }
+    if code_str in KNOWN_ZERO_THERAPIST_CODES:
+        return True
+
+    if any(k in name_str for k in [
+        'snehapaan', 'snehapan', 'virechanam', 'mathra vasthi', 'matra vasthi',
+        'uttaravasthi', 'uttara vasthi', 'putapakam', 'tharpanam', 'tarpanam',
+        'jalouka', 'jalooka', 'kshalanam', 'dhoopanam', 'no tpt'
+    ]):
+        return True
+
+    if TherapyMaster is not None and (therapy_code or therapy_name):
+        try:
+            tm = None
+            if therapy_code:
+                tm = TherapyMaster.objects.filter(therapy_code=therapy_code).first()
+            if not tm and therapy_name:
+                tm = TherapyMaster.objects.filter(therapy_name__iexact=therapy_name).first()
+            if tm:
+                if (getattr(tm, 'therapy_category', '') or '').strip().lower() == 'internal':
+                    return True
+                if getattr(tm, 'total_no_of_therapist', 1) == 0:
+                    return True
+        except Exception:
+            pass
+
+    return False
+
+
 def get_room_sort_key(room_no):
     """
     Returns a sort key tuple (priority, number, original_string) based on hospital room hierarchy:
@@ -694,9 +752,10 @@ def therapy_entry(request):
                         date__lte=parse_date(cancel_to),
                     ).update(status='CANCELLED')
 
-                    # 2) Also cancel therapist bookings for this patient (safety net for rows without visit FK)
+                    # 2) Also cancel therapist bookings for this patient (safety net for orphaned rows without visit FK)
                     TB.objects.filter(
                         patient_id=allocation.patient.id,
+                        visit__isnull=True,
                         date__gte=parse_date(cancel_from),
                         date__lte=parse_date(cancel_to),
                     ).update(status='CANCELLED')
@@ -711,6 +770,7 @@ def therapy_entry(request):
                     # 4) Also cancel orphaned room bookings for this patient (no explicit therapy/visit)
                     RB.objects.filter(
                         patient_id=allocation.patient.id,
+                        therapy__isnull=True,
                         date__gte=parse_date(cancel_from),
                         date__lte=parse_date(cancel_to),
                     ).update(status='CANCELLED')
@@ -1057,6 +1117,29 @@ def therapy_entry(request):
                                 new_timeslot = SlotMaster.objects.filter(slot_number=int(ts_val), is_active=True).first()
                     except Exception:
                         new_timeslot = None
+
+                # Enforce mandatory timeslot for non-internal therapies on update
+                eff_ext_int = (payload.get('ext_int') or allocation.ext_int or '').strip()
+                is_internal = is_internal_treatment(
+                    therapy_code=allocation.therapy_code,
+                    therapy_name=allocation.therapy_name,
+                    ext_int=eff_ext_int
+                )
+                from .nurse_allocation import is_nurse_treatment
+                is_nurse = is_nurse_treatment(allocation.therapy_code, allocation.therapy_name) is not None
+
+                if not is_internal and not is_nurse:
+                    eff_slot = new_timeslot if ts_val else allocation.timeslot
+                    if ('slot' in payload or 'timeslot' in payload) and not payload.get('slot') and not payload.get('timeslot'):
+                        return JsonResponse({
+                            'error': 'timeslot_required',
+                            'message': 'Time slot is mandatory for this treatment. Please select a time slot.'
+                        }, status=400)
+                    if not eff_slot:
+                        return JsonResponse({
+                            'error': 'timeslot_required',
+                            'message': 'Time slot is mandatory for this treatment. Please select a time slot.'
+                        }, status=400)
 
                 # Update therapy details
                 therapy_name_changed = False
@@ -1769,6 +1852,25 @@ def therapy_entry(request):
                 except Exception:
                     pass
 
+                # Enforce mandatory timeslot for non-internal therapies
+                ext_int_val = (payload.get('ext_int') or '').strip()
+                therapy_code_val = payload.get('therapy_code') or ''
+                therapy_name_val = payload.get('therapy_name') or ''
+
+                is_internal = is_internal_treatment(
+                    therapy_code=therapy_code_val,
+                    therapy_name=therapy_name_val,
+                    ext_int=ext_int_val
+                )
+                from .nurse_allocation import is_nurse_treatment
+                is_nurse = is_nurse_treatment(therapy_code_val, therapy_name_val) is not None
+
+                if not is_internal and not is_nurse and not timeslot_obj:
+                    return JsonResponse({
+                        'error': 'timeslot_required',
+                        'message': 'Time slot is mandatory for this treatment. Please select a time slot.'
+                    }, status=400)
+
                 # room resolution (optional)
                 room_obj = None
                 room_no = payload.get('room_no') or payload.get('room')
@@ -1842,6 +1944,35 @@ def therapy_entry(request):
                     if is_vip_val and not getattr(ps, 'is_vip', False):
                         ps.is_vip = True
                         ps.save(update_fields=['is_vip', 'updated_at'])
+
+                    # Deduplication guard: prevent duplicate allocations on rapid double-clicks
+                    recent_window = timezone.now() - timedelta(seconds=15)
+                    dup_alloc = TherapyAllocation.objects.filter(
+                        patient=ps,
+                        therapy_code=payload.get('therapy_code'),
+                        from_date=fdate,
+                        to_date=tdate,
+                        timeslot=timeslot_obj,
+                        created_at__gte=recent_window
+                    ).exclude(status='cancelled').first()
+
+                    if dup_alloc:
+                        dup_bookings = Booking.objects.filter(allocation=dup_alloc)
+                        sc = {'allocated': 0, 'failed': 0, 'draft': 0, 'cancelled': 0}
+                        dsm = {}
+                        for b in dup_bookings:
+                            sc[b.status] = sc.get(b.status, 0) + 1
+                            dsm[b.date.isoformat()] = b.status
+                        return JsonResponse({
+                            'status': 'ok',
+                            'allocation_id': dup_alloc.pk,
+                            'bookings_created': dup_bookings.count(),
+                            'status_counts': sc,
+                            'status_summary': {k: v for k, v in sc.items() if v > 0},
+                            'date_status_map': dsm,
+                            'overall_status': dup_alloc.status,
+                            'deduplicated': True
+                        }, status=200)
 
                     alloc = TherapyAllocation.objects.create(
                         patient=ps,
@@ -2177,6 +2308,7 @@ def therapy_entry(request):
                     'therapy_code': getattr(t, 'therapy_code', ''),
                     'therapy_name': getattr(t, 'therapy_name', ''),
                     'therapy_category': getattr(t, 'therapy_category', '') or '',
+                    'total_no_of_therapist': getattr(t, 'total_no_of_therapist', 1),
                     'is_vamanam': is_vam,
                     'is_vasthi': is_vsth
                 })
@@ -4128,22 +4260,35 @@ def allocate_therapy(request):
     nurse_treatment = is_nurse_treatment(payload.get("therapy_code"), payload.get("therapy_name"))
     
     # timeslot: accept either slot_number (int) or "HH:MM" string
-    # For nurse treatments, timeslot is optional (they work entire day)
+    # For nurse treatments and internal treatments, timeslot is optional
     timeslot = None
-    if not nurse_treatment:  # Only require timeslot for regular therapies
+    ext_int_val = (payload.get('ext_int') or '').strip()
+    is_internal = is_internal_treatment(
+        therapy_code=payload.get("therapy_code"),
+        therapy_name=payload.get("therapy_name"),
+        ext_int=ext_int_val
+    )
+
+    if not nurse_treatment and not is_internal:  # Only require timeslot for regular non-internal therapies
         if payload.get("timeslot_slot_number") is not None:
             try:
                 timeslot = SlotMaster.objects.get(slot_number=int(payload["timeslot_slot_number"]), is_active=True)  # Use local master table
             except SlotMaster.DoesNotExist:
                 return JsonResponse({"error": "Slot with that slot_number not found"}, status=400)
-        elif payload.get("timeslot"):
-            t = parse_time_hhmm(payload["timeslot"])
+        elif payload.get("timeslot") or payload.get("slot"):
+            slot_str = payload.get("timeslot") or payload.get("slot")
+            t = parse_time_hhmm(slot_str)
             if not t:
                 return JsonResponse({"error": "Invalid timeslot format, expected HH:MM"}, status=400)
             timeslot = SlotMaster.objects.filter(slot_time=t, is_active=True).first()  # Use local master table
             if not timeslot:
                 # Optionally create a timeslot if you want; for safety we require an existing one:
                 return JsonResponse({"error": "TimeSlot with that slot_time not found"}, status=400)
+        else:
+            return JsonResponse({
+                "error": "timeslot_required",
+                "message": "Time slot is mandatory for this treatment. Please select a time slot."
+            }, status=400)
     else:
         # For nurse treatments, timeslot is optional - use if provided, but not required
         if payload.get("timeslot_slot_number") is not None:

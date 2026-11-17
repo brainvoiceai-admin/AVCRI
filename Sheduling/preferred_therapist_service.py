@@ -25,7 +25,10 @@ from django.utils import timezone
 from django.db import transaction
 from django.core.exceptions import ValidationError
 
-from masters.models import TherapistMaster, TherapistLeaveMaster, EmergencyLeave
+from masters.models import (
+    TherapistMaster, TherapistLeaveMaster, EmergencyLeave,
+    get_doctor_monthly_quota, get_max_preferred_therapists
+)
 from Patient.models import Repeated_Visitors, TherapistBooking
 from .models import DoctorPatientPreferenceAllowance, PatientPreferredTherapistRoster, PatientSnapshot
 
@@ -159,6 +162,22 @@ def get_active_preferred_roster(patient_identifier):
         is_active=True
     ).order_by('-updated_at').first()
 
+    if not roster and digits:
+        try:
+            ps = PatientSnapshot.objects.filter(id=int(digits)).first()
+            if ps and ps.pat_reg_no and str(ps.pat_reg_no).strip() not in candidate_keys:
+                snap_reg = str(ps.pat_reg_no).strip()
+                candidate_keys.append(snap_reg)
+                snap_digits = ''.join(ch for ch in snap_reg if ch.isdigit())
+                if snap_digits and snap_digits not in candidate_keys:
+                    candidate_keys.append(snap_digits)
+                roster = PatientPreferredTherapistRoster.objects.filter(
+                    patient_reg_no__in=candidate_keys,
+                    is_active=True
+                ).order_by('-updated_at').first()
+        except Exception:
+            pass
+
     if not roster or (not roster.therapist_codes and not roster.unpreferred_therapist_codes):
         return None
 
@@ -222,7 +241,7 @@ def get_therapists_with_schedule_info(gender=None):
     return result
 
 
-def is_therapist_available(therapist_obj_or_code, target_date, slot=None, exclude_booking_id=None):
+def is_therapist_available(therapist_obj_or_code, target_date, slot=None, exclude_booking_id=None, exclude_visit_id=None):
     """
     Check if a therapist is available on target_date (and slot if specified).
     Takes into account:
@@ -265,22 +284,32 @@ def is_therapist_available(therapist_obj_or_code, target_date, slot=None, exclud
         )
         if exclude_booking_id:
             qs = qs.exclude(id=exclude_booking_id)
+        if exclude_visit_id:
+            if hasattr(exclude_visit_id, 'id'):
+                qs = qs.exclude(visit=exclude_visit_id)
+            else:
+                qs = qs.exclude(visit_id=exclude_visit_id)
         if qs.exists():
             return False
 
     # Check daily session limit
-    session_count = TherapistBooking.objects.filter(
+    session_qs = TherapistBooking.objects.filter(
         therapist=therapist,
         date=target_date,
         status='BOOKED'
-    ).count()
-    if session_count >= 5:
+    )
+    if exclude_visit_id:
+        if hasattr(exclude_visit_id, 'id'):
+            session_qs = session_qs.exclude(visit=exclude_visit_id)
+        else:
+            session_qs = session_qs.exclude(visit_id=exclude_visit_id)
+    if session_qs.count() >= 5:
         return False
 
     return True
 
 
-def pick_bathing_therapist_from_roster(roster_info, target_date, slot=None, exclude_booking_id=None):
+def pick_bathing_therapist_from_roster(roster_info, target_date, slot=None, exclude_booking_id=None, exclude_visit_id=None):
     """
     Primary bathing therapist rule:
     Always choose Primary Bathing Therapist if available.
@@ -302,11 +331,11 @@ def pick_bathing_therapist_from_roster(roster_info, target_date, slot=None, excl
         secondary_therapist = TherapistMaster.objects.filter(therapist_code=secondary_code, is_active=True).first()
 
     # Try Primary Bathing Therapist first
-    if primary_therapist and is_therapist_available(primary_therapist, target_date, slot, exclude_booking_id):
+    if primary_therapist and is_therapist_available(primary_therapist, target_date, slot, exclude_booking_id, exclude_visit_id):
         return primary_therapist, 'primary'
 
     # When Primary is not available, try Secondary Bathing Therapist
-    if secondary_therapist and is_therapist_available(secondary_therapist, target_date, slot, exclude_booking_id):
+    if secondary_therapist and is_therapist_available(secondary_therapist, target_date, slot, exclude_booking_id, exclude_visit_id):
         return secondary_therapist, 'secondary'
 
     # Fallback to any bathing therapist within the 7 roster who is available
@@ -315,7 +344,7 @@ def pick_bathing_therapist_from_roster(roster_info, target_date, slot=None, excl
         if code in [primary_code, secondary_code]:
             continue
         cand = TherapistMaster.objects.filter(therapist_code=code, is_bathing_therapist=True, is_active=True).first()
-        if cand and is_therapist_available(cand, target_date, slot, exclude_booking_id):
+        if cand and is_therapist_available(cand, target_date, slot, exclude_booking_id, exclude_visit_id):
             return cand, 'pool_bathing'
 
     return None, None
@@ -651,11 +680,12 @@ def toggle_doctor_patient_allowance(doctor_user, patient_reg_no, patient_name=''
             is_active=True
         ).count()
 
-        if used_count >= 5:
+        quota_limit = get_doctor_monthly_quota()
+        if used_count >= quota_limit:
             quota = DoctorPatientPreferenceAllowance.get_monthly_quota(doctor_user, year, month)
             return {
                 'status': 'quota_exceeded',
-                'error': f'Monthly quota limit of 5 patients reached for {now.strftime("%B %Y")}. You cannot mark more than 5 patients.',
+                'error': f'Monthly quota limit of {quota_limit} patients reached for {now.strftime("%B %Y")}. You cannot mark more than {quota_limit} patients.',
                 'quota': quota
             }
 
@@ -766,8 +796,9 @@ def save_preferred_therapist_roster(patient_reg_no, therapist_codes=None, primar
     therapist_objs = []
 
     if clean_codes:
-        if len(clean_codes) > 7:
-            raise ValidationError(f"A maximum of 7 preferred therapists can be marked (selected: {len(clean_codes)}).")
+        max_pref = get_max_preferred_therapists()
+        if len(clean_codes) > max_pref:
+            raise ValidationError(f"A maximum of {max_pref} preferred therapists can be marked (selected: {len(clean_codes)}).")
 
         p_code = str(primary_bathing_code).strip() if primary_bathing_code else ''
         s_code = str(secondary_bathing_code).strip() if secondary_bathing_code else ''
@@ -877,4 +908,358 @@ def save_preferred_therapist_roster(patient_reg_no, therapist_codes=None, primar
         except Exception as e:
             print(f"[WARN] Error syncing TherapistPreferenceRequest: {e}")
 
+        # Auto-reassign upcoming bookings for this patient with newly preferred therapists
+        try:
+            reassign_patient_upcoming_bookings_with_roster(reg_str)
+        except Exception as e:
+            print(f"[WARN] Error auto-reassigning upcoming bookings for {reg_str}: {e}")
+
     return roster
+
+
+def displace_non_vip_therapist_for_slot(therapist_obj, target_date, slot_obj, exclude_therapist_codes=None):
+    """
+    If therapist_obj is booked by a non-VIP patient at target_date + slot_obj:
+    Displace the therapist from the non-VIP booking and assign an alternative available therapist
+    to that non-VIP booking, so therapist_obj becomes free for the VIP patient.
+    """
+    from Patient.models import TherapistBooking, Therapist
+    from Sheduling.models import BookingAssignment
+    from masters.models import TherapistMaster
+    from Sheduling.vip_service import is_patient_vip
+
+    conflict_tb = TherapistBooking.objects.filter(
+        therapist=therapist_obj,
+        date=target_date,
+        time_slot=slot_obj,
+        status='BOOKED'
+    ).first()
+    if not conflict_tb:
+        return True  # Already free
+
+    # Check if conflicting patient is VIP
+    conf_pat = getattr(getattr(conflict_tb, 'visit', None), 'patient', None)
+    if is_patient_vip(conf_pat):
+        # Conflicting patient is also VIP, cannot displace
+        return False
+
+    # Find the conflicting BookingAssignment
+    conf_ba = BookingAssignment.objects.filter(
+        booking_date=target_date,
+        booking_timeslot=slot_obj,
+        therapist__therapist_code=therapist_obj.therapist_code
+    ).first()
+    conf_booking = getattr(conf_ba, 'booking', None)
+
+    # Find replacement therapist for non-VIP booking
+    t_gender = getattr(therapist_obj, 'therapist_gender', 'Female')
+    is_bath = bool(getattr(conflict_tb, 'is_bathing', False))
+
+    excl_set = set(exclude_therapist_codes or [])
+    excl_set.add(getattr(therapist_obj, 'therapist_code', ''))
+
+    replacement = None
+    candidates = TherapistMaster.objects.filter(
+        is_active=True,
+        therapist_gender__iexact=t_gender
+    ).exclude(therapist_code__in=excl_set)
+    if is_bath:
+        candidates = candidates.filter(is_bathing_therapist=True)
+
+    for cand in candidates:
+        if cand.id == therapist_obj.id or cand.therapist_code in excl_set:
+            continue
+        if is_therapist_available(cand, target_date, slot_obj):
+            replacement = cand
+            break
+
+    # If no replacement found with bath requirement, try any available active therapist of same gender
+    if not replacement:
+        for cand in TherapistMaster.objects.filter(is_active=True, therapist_gender__iexact=t_gender).exclude(therapist_code__in=excl_set):
+            if cand.id != therapist_obj.id and is_therapist_available(cand, target_date, slot_obj):
+                replacement = cand
+                break
+
+    old_therapy_name = conflict_tb.therapy_name
+    old_patient_id = conflict_tb.patient_id
+    old_visit = conflict_tb.visit
+    old_therapy = getattr(conflict_tb, 'therapy', None)
+
+    # Release therapist_obj from non-VIP booking
+    conflict_tb.delete()
+    BookingAssignment.objects.filter(
+        booking_date=target_date,
+        booking_timeslot=slot_obj,
+        therapist__therapist_code=therapist_obj.therapist_code
+    ).delete()
+
+    if replacement and conf_booking:
+        # Assign replacement to non-VIP booking
+        TherapistBooking.objects.create(
+            therapist=replacement,
+            date=target_date,
+            time_slot=slot_obj,
+            status='BOOKED',
+            therapy_name=old_therapy_name,
+            patient_id=old_patient_id,
+            visit=old_visit,
+            therapy=old_therapy,
+            is_bathing=is_bath
+        )
+        try:
+            th_patient, _ = Therapist.objects.get_or_create(
+                therapist_code=replacement.therapist_code,
+                defaults={
+                    'therapist_name': getattr(replacement, 'therapist_name', replacement.therapist_code),
+                    'therapist_grade': getattr(getattr(replacement, 'therapist_grade', None), 'name', 'Therapist'),
+                    'is_bathing_therapist': getattr(replacement, 'is_bathing_therapist', False)
+                }
+            )
+            BookingAssignment.objects.filter(
+                therapist=th_patient,
+                booking_date=target_date,
+                booking_timeslot=slot_obj
+            ).delete()
+            BookingAssignment.objects.create(
+                booking=conf_booking,
+                therapist=th_patient,
+                role=conf_ba.role if conf_ba else '',
+                status='assigned',
+                booking_date=target_date,
+                booking_timeslot=slot_obj
+            )
+        except Exception as e:
+            print(f"[WARN] Error assigning replacement in BookingAssignment: {e}")
+
+    return True
+
+
+def reassign_patient_upcoming_bookings_with_roster(patient_reg_no, from_date=None):
+    """
+    Auto-reassign newly preferred therapists to upcoming bookings (tomorrow onwards)
+    for this patient.
+    
+    If tomorrow's schedule has already run:
+      - Finds this patient's scheduled bookings on upcoming dates.
+      - Reallocates them strictly using the newly updated preferred roster.
+      - If a preferred therapist is occupied by a non-VIP patient at that slot,
+        displaces the non-VIP patient to an alternative therapist so the VIP patient
+        gets their preferred therapist.
+    """
+    from datetime import date, timedelta
+    from Sheduling.models import Booking, BookingAssignment, PatientSnapshot
+    from Patient.models import TherapistBooking, Therapist
+    from masters.models import TherapistMaster, TherapistLeaveMaster
+    from django.db.models import Q
+
+    reg_str = normalize_patient_reg_no(patient_reg_no)
+    if not reg_str:
+        return 0
+
+    if not from_date:
+        from_date = date.today() + timedelta(days=1)
+
+    pref_roster = get_active_preferred_roster(reg_str)
+    if not pref_roster:
+        return 0
+
+    roster_codes = pref_roster.get('therapist_codes', [])
+    if not roster_codes:
+        return 0
+
+    primary_code = pref_roster.get('primary_bathing_code')
+    secondary_code = pref_roster.get('secondary_bathing_code')
+    unpref_set = pref_roster.get('unpreferred_codes_set', set())
+
+    # Find patient snapshots and IDs
+    candidate_keys = [reg_str]
+    digits = ''.join(ch for ch in reg_str if ch.isdigit())
+    if digits and digits not in candidate_keys:
+        candidate_keys.append(digits)
+
+    patient_ids = []
+    for k in candidate_keys:
+        ps_list = list(PatientSnapshot.objects.filter(pat_reg_no=k).values_list('id', flat=True))
+        patient_ids.extend(ps_list)
+        if k.isdigit():
+            patient_ids.append(int(k))
+    patient_ids = list(set(patient_ids))
+
+    q = Q(allocation__patient__pat_reg_no__in=candidate_keys)
+    if patient_ids:
+        q |= Q(allocation__patient__id__in=patient_ids)
+
+    from Sheduling.models import TherapyAllocation, FinalScheduleRun
+    from final_allocation import therapist_requirements, therapy_needs_bath
+
+    # Clean up any stale assignments for cancelled allocations of this patient
+    cancelled_allocs = TherapyAllocation.objects.filter(
+        Q(patient__pat_reg_no__in=candidate_keys) | Q(patient__id__in=patient_ids),
+        status='cancelled'
+    )
+    if cancelled_allocs.exists():
+        TherapistBooking.objects.filter(visit__in=cancelled_allocs, date__gte=from_date).delete()
+        BookingAssignment.objects.filter(booking__allocation__in=cancelled_allocs, booking_date__gte=from_date).delete()
+        Booking.objects.filter(allocation__in=cancelled_allocs, date__gte=from_date).update(status='cancelled')
+
+    upcoming_bookings = list(Booking.objects.filter(
+        date__gte=from_date
+    ).filter(q).exclude(
+        allocation__status='cancelled'
+    ).exclude(
+        status='cancelled'
+    ).select_related('allocation', 'timeslot', 'allocation__patient').order_by('date', 'timeslot__slot_time'))
+
+    reassigned_count = 0
+
+    for booking in upcoming_bookings:
+        allocation = booking.allocation
+        slot = booking.timeslot
+        b_date = booking.date
+        if not allocation or not slot:
+            continue
+        if allocation.status == 'cancelled' or booking.status == 'cancelled':
+            continue
+
+        existing_tbs = list(TherapistBooking.objects.filter(
+            visit=allocation,
+            date=b_date,
+            time_slot=slot,
+            status='BOOKED'
+        ))
+
+        # Check if this date has had a final schedule run or if this booking was already scheduled
+        has_run_for_date = FinalScheduleRun.objects.filter(run_date=b_date, status='success').exists()
+        if not existing_tbs and booking.status == 'draft' and not has_run_for_date:
+            continue
+
+        current_codes = [tb.therapist.therapist_code for tb in existing_tbs if tb.therapist]
+        current_bath_codes = [tb.therapist.therapist_code for tb in existing_tbs if tb.therapist and tb.is_bathing]
+
+        reqs = therapist_requirements(allocation)
+        needed_total = int(reqs.get('total', 1) or len(existing_tbs) or 1)
+        needs_bathing = therapy_needs_bath(allocation)
+
+        # Check if currently assigned codes already match the preferred roster perfectly
+        already_optimal = False
+        if len(current_codes) >= needed_total and set(current_codes).issubset(set(roster_codes)) and not set(current_codes).intersection(unpref_set):
+            # Check bathing therapist optimality: if primary is available, is primary assigned?
+            if not needs_bathing:
+                already_optimal = True
+            elif primary_code in current_bath_codes:
+                already_optimal = True
+            elif not is_therapist_available(primary_code, b_date, slot) and secondary_code in current_bath_codes:
+                already_optimal = True
+
+        if already_optimal:
+            continue
+
+        # Reassignment needed!
+        # Step 1: Release existing assignments for this booking
+        BookingAssignment.objects.filter(booking=booking).delete()
+        TherapistBooking.objects.filter(
+            visit=allocation,
+            date=b_date,
+            time_slot=slot
+        ).delete()
+
+        # Step 2: Pick bathing therapist if needed
+        allocated_therapists = []
+        allocated_bathing = None
+
+        if needs_bathing:
+            # Try Primary Bathing Therapist
+            p_obj = TherapistMaster.objects.filter(therapist_code=primary_code, is_active=True).first() if primary_code else None
+            s_obj = TherapistMaster.objects.filter(therapist_code=secondary_code, is_active=True).first() if secondary_code else None
+
+            # Attempt Primary first
+            if p_obj and not TherapistLeaveMaster.objects.filter(therapist=p_obj, leave_day=b_date.weekday(), is_active=True).exists():
+                displace_non_vip_therapist_for_slot(p_obj, b_date, slot, exclude_therapist_codes=[p_obj.therapist_code] + [t.therapist_code for t in allocated_therapists])
+                if is_therapist_available(p_obj, b_date, slot):
+                    allocated_bathing = p_obj
+                    allocated_therapists.append(p_obj)
+
+            # Fallback to Secondary
+            if not allocated_bathing and s_obj and not TherapistLeaveMaster.objects.filter(therapist=s_obj, leave_day=b_date.weekday(), is_active=True).exists():
+                displace_non_vip_therapist_for_slot(s_obj, b_date, slot, exclude_therapist_codes=[s_obj.therapist_code] + [t.therapist_code for t in allocated_therapists])
+                if is_therapist_available(s_obj, b_date, slot):
+                    allocated_bathing = s_obj
+                    allocated_therapists.append(s_obj)
+
+            # Fallback to any bathing-qualified therapist in roster
+            if not allocated_bathing:
+                for c in roster_codes:
+                    if c in [primary_code, secondary_code] or c in unpref_set:
+                        continue
+                    cand = TherapistMaster.objects.filter(therapist_code=c, is_bathing_therapist=True, is_active=True).first()
+                    if cand and not TherapistLeaveMaster.objects.filter(therapist=cand, leave_day=b_date.weekday(), is_active=True).exists():
+                        displace_non_vip_therapist_for_slot(cand, b_date, slot, exclude_therapist_codes=[cand.therapist_code] + [t.therapist_code for t in allocated_therapists])
+                        if is_therapist_available(cand, b_date, slot):
+                            allocated_bathing = cand
+                            allocated_therapists.append(cand)
+                            break
+
+        # Step 3: Pick remaining therapists from roster_codes in order
+        remaining_needed = needed_total - len(allocated_therapists)
+        for c in roster_codes:
+            if remaining_needed <= 0:
+                break
+            if c in unpref_set:
+                continue
+            cand = TherapistMaster.objects.filter(therapist_code=c, is_active=True).first()
+            if not cand or cand in allocated_therapists:
+                continue
+            if TherapistLeaveMaster.objects.filter(therapist=cand, leave_day=b_date.weekday(), is_active=True).exists():
+                continue
+            displace_non_vip_therapist_for_slot(cand, b_date, slot, exclude_therapist_codes=[cand.therapist_code] + [t.therapist_code for t in allocated_therapists])
+            if is_therapist_available(cand, b_date, slot):
+                allocated_therapists.append(cand)
+                remaining_needed -= 1
+
+        # Step 4: Create TherapistBooking and BookingAssignment records
+        from final_allocation import create_therapist_booking_safe
+
+        patient_snap_id = patient_ids[0] if patient_ids else getattr(allocation.patient, 'id', None)
+        therapy_name = allocation.therapy_name or ''
+
+        for t in allocated_therapists:
+            is_bath = (t == allocated_bathing)
+            create_therapist_booking_safe(
+                therapist=t,
+                date=b_date,
+                time_slot=slot,
+                therapy_name=therapy_name,
+                patient_id=patient_snap_id,
+                visit=allocation,
+                is_bathing=is_bath
+            )
+            th_patient, _ = Therapist.objects.get_or_create(
+                therapist_code=t.therapist_code,
+                defaults={
+                    'therapist_name': getattr(t, 'therapist_name', t.therapist_code),
+                    'therapist_grade': getattr(getattr(t, 'therapist_grade', None), 'name', 'Therapist'),
+                    'is_bathing_therapist': getattr(t, 'is_bathing_therapist', False)
+                }
+            )
+            BookingAssignment.objects.filter(
+                therapist=th_patient,
+                booking_date=b_date,
+                booking_timeslot=slot
+            ).delete()
+            BookingAssignment.objects.create(
+                booking=booking,
+                therapist=th_patient,
+                role='Bathing' if is_bath else 'Assistant',
+                status='assigned',
+                booking_date=b_date,
+                booking_timeslot=slot
+            )
+
+        if len(allocated_therapists) >= needed_total:
+            booking.status = 'scheduled'
+        else:
+            booking.status = 'scheduled' if (allocated_therapists and has_run_for_date) else 'draft'
+        booking.save(update_fields=['status'])
+        reassigned_count += 1
+
+    return reassigned_count

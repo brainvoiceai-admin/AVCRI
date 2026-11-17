@@ -22,7 +22,8 @@ from .models import (
     TherapistTreatmentOmission, is_therapist_omitted_for_treatment,
     get_omitted_therapist_ids_for_treatment, get_omitted_therapist_codes_for_treatment,
     can_approve_treatment_omission,
-    TherapistOmissionRequestGroup, group_omissions_by_request
+    TherapistOmissionRequestGroup, group_omissions_by_request,
+    TherapistPreferenceConfig
 )
 from Patient.models import TreatmentRoom, RoomName, Floor
 import json
@@ -1489,6 +1490,14 @@ def master_management_dashboard(request):
                 'description': 'Manage treatment rooms for therapy allocation',
                 'count': TreatmentRoom.objects.count(),
                 'active_count': TreatmentRoom.objects.filter(is_active=True).count(),
+            },
+            {
+                'name': 'Therapist Preference Config',
+                'model': 'TherapistPreferenceConfig',
+                'url': 'admin:masters_therapistpreferenceconfig_changelist',
+                'description': 'Configure doctor monthly quota & max preferred therapists limit',
+                'count': TherapistPreferenceConfig.objects.count(),
+                'active_count': TherapistPreferenceConfig.objects.filter(is_active=True).count(),
             },
         ]
     }

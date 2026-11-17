@@ -238,7 +238,7 @@
                         </div>
                         <h4 class="fw-bold mb-1">Preferred Therapist Monthly Quota</h4>
                         <p class="mb-0 text-white-50 small" id="quota-summary-text">
-                            You can mark a maximum of <strong>5 patients</strong> per month. Any allowed patient will appear in the scheduling dashboard for preferred and unpreferred therapist configuration.
+                            You can mark a maximum of <strong>{{ quota.limit }} patients</strong> per month. Any allowed patient will appear in the scheduling dashboard for preferred and unpreferred therapist configuration.
                         </p>
                     </div>
                     <div class="col-12 col-md-6">
@@ -340,7 +340,7 @@
         let currentFilter = 'ALL';
         let searchQuery = '';
         let currentPage = 1;
-        let quotaData = { limit: 5, used: 0, remaining: 5 };
+        let quotaData = { limit: {{ quota.limit|default:5 }}, used: {{ quota.used|default:0 }}, remaining: {{ quota.remaining|default:5 }} };
 
         function getCookie(name) {
             let cookieValue = null;
@@ -392,12 +392,12 @@
 
             if (quota.remaining === 0) {
                 document.getElementById('quota-summary-text').innerHTML = `
-                    <span class="text-warning fw-bold"><i class="fas fa-exclamation-triangle me-1"></i>Monthly quota reached (5/5 used).</span>
+                    <span class="text-warning fw-bold"><i class="fas fa-exclamation-triangle me-1"></i>Monthly quota reached (${quota.limit}/${quota.limit} used).</span>
                     You cannot mark any more patients for preferred therapists this month unless an existing allowance is revoked.
                 `;
             } else {
                 document.getElementById('quota-summary-text').innerHTML = `
-                    You can mark up to <strong>5 patients</strong> per month. <strong>${quota.remaining} slots left</strong> for this month.
+                    You can mark up to <strong>${quota.limit} patients</strong> per month. <strong>${quota.remaining} slots left</strong> for this month.
                 `;
             }
         }
@@ -514,8 +514,8 @@
                             `;
                         } else {
                             actionBtn = `
-                                <button class="btn btn-sm btn-secondary btn-allow-toggle" disabled title="Monthly Quota Limit of 5 Reached">
-                                    <i class="fas fa-ban me-1"></i>Quota Reached (5/5)
+                                <button class="btn btn-sm btn-secondary btn-allow-toggle" disabled title="Monthly Quota Limit of ${quotaData.limit} Reached">
+                                    <i class="fas fa-ban me-1"></i>Quota Reached (${quotaData.used}/${quotaData.limit})
                                 </button>
                             `;
                         }

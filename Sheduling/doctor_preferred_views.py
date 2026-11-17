@@ -14,7 +14,10 @@ from django.db.models import Q
 from django.core.exceptions import ValidationError
 
 from authentication.decorators import role_required
-from masters.models import TherapistMaster, TherapistLeaveMaster, get_staying_room_display_number
+from masters.models import (
+    TherapistMaster, TherapistLeaveMaster, get_staying_room_display_number,
+    get_doctor_monthly_quota, get_max_preferred_therapists
+)
 from Patient.models import Repeated_Visitors
 from .models import (
     PatientSnapshot,
@@ -57,6 +60,7 @@ def doctor_patients_vip_repeated_view(request):
     context = {
         'dashboard_title': 'My Patients — VIP & Preferred Therapist Allocation',
         'quota': quota,
+        'doctor_monthly_quota': get_doctor_monthly_quota(),
         'current_month_name': now.strftime("%B %Y"),
         'user_role': getattr(request.user, 'role', ''),
         'doctor_name': request.user.get_full_name() or request.user.username,
@@ -519,6 +523,7 @@ def scheduling_preferred_therapists_view(request):
         'roster_count': roster_count,
         'pending_count': max(0, allowed_count - roster_count),
         'user_role': getattr(request.user, 'role', ''),
+        'max_preferred_therapists': get_max_preferred_therapists(),
     }
     return render(request, 'dashboards/scheduling/preferred_therapist_assignment.html', context)
 

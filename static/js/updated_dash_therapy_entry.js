@@ -592,6 +592,7 @@ $(function () {
     $therapySelect.val(null).trigger('change').prop('disabled', false);
     $slotSelect.val('').prop('disabled', false);
     $('#ext-int-select').val('').prop('value', '');
+    updateSlotRequirement();
     // Set from date: tomorrow after 5:30 PM, otherwise today
     var _defDate = _defaultFromDate();
     $fromDate.val(_defDate).prop('value', _defDate).prop('disabled', false);
@@ -882,6 +883,7 @@ $(function () {
           therapy_name: t.therapy_name,
           therapy_code: t.therapy_code,
           therapy_category: t.therapy_category || '',
+          total_no_of_therapist: t.total_no_of_therapist !== undefined ? t.total_no_of_therapist : 1,
           is_vamanam: !!t.is_vamanam,
           is_vasthi: !!t.is_vasthi
         }))
@@ -970,6 +972,60 @@ $(function () {
     return `${hours.padStart(2, '0')}:${minutes}`;
   }
 
+  // Known zero-therapist / internal therapy codes
+  const KNOWN_INTERNAL_CODES = new Set([
+    'THEB114', // Snehapaanam
+    'THEB128', // Virechanam
+    'THEB236', // Virechanam
+    'THEB037', // Mathra Vasthi
+    'THEB155', // NASYAM (NO TPT)
+    'THEB210', // Uttaravasthi
+    'THEB145', // Lepam(f)
+    'THEB237', // Putapakam
+    'THEB238', // Tharpanam
+    'THEB226', // dhoopanam
+    'THEB235', // jalouka
+    'THEB225'  // kshalanam
+  ]);
+
+  // Helper function to check if the current therapy or selection is an internal treatment
+  function isInternalTreatment(extraData) {
+    const extIntVal = ($('#ext-int-select').val() || (extraData && extraData.ext_int) || '').trim().toLowerCase();
+    if (extIntVal === 'internal') {
+      return true;
+    }
+    const selectedTherapy = $therapySelect.select2('data');
+    const th = (selectedTherapy && selectedTherapy.length > 0) ? selectedTherapy[0] : (extraData || null);
+    if (th) {
+      const code = String(th.therapy_code || th.id || '').trim().toUpperCase();
+      const name = String(th.therapy_name || th.text || '').trim().toLowerCase();
+      const category = String(th.therapy_category || '').trim().toLowerCase();
+
+      if (category === 'internal' || category === 'nurse treatment') {
+        return true;
+      }
+      if (code.startsWith('NT')) {
+        return true;
+      }
+      if (KNOWN_INTERNAL_CODES.has(code)) {
+        return true;
+      }
+      if (th.total_no_of_therapist !== undefined && Number(th.total_no_of_therapist) === 0) {
+        return true;
+      }
+      if (/virechanam|snehapaan|snehapan|mathra\s*vasthi|matra\s*vasthi|uttaravasthi|uttara\s*vasthi|putapakam|tharpanam|tarpanam|jalouka|jalooka|kshalanam|dhoopanam|no\s*tpt/i.test(name)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // Update visual indicators and requirement state for the slot select element
+  function updateSlotRequirement(extraData) {
+    const isInternal = isInternalTreatment(extraData);
+    $slotSelect.prop('required', !isInternal);
+  }
+
   // Function to populate slots with optional exclusion list and Vamanam/Vasthi filtering
   function populateSlots(excludeSlots = [], slotMode = 'regular') {
     if (slotMode === true) slotMode = 'vamanam_only';
@@ -987,6 +1043,7 @@ $(function () {
     return ajax(params).then(resp => {
       const slots = (resp && resp.slots) || resp || FALLBACK_SLOTS;
       $slotSelect.find('option').not(':first').remove();
+      $slotSelect.find('option:first').text('-- Select --');
       (slots || FALLBACK_SLOTS).forEach(s => {
         const st = s.start_time || s.slot_time || s;
         const slotTime = typeof st === 'string' ? st : (st.strftime ? st.strftime('%H:%M') : String(st));
@@ -1027,6 +1084,7 @@ $(function () {
       return Promise.resolve(); // Return promise for chaining
     }).catch(() => {
       $slotSelect.find('option').not(':first').remove();
+      $slotSelect.find('option:first').text('-- Select --');
       FALLBACK_SLOTS.forEach(s => {
         const st = s.start_time || s;
         const slotTime = typeof st === 'string' ? st : (st.strftime ? st.strftime('%H:%M') : String(st));
@@ -1060,9 +1118,21 @@ $(function () {
   // Store the slot value that should be restored after slot repopulation (for edit mode)
   let pendingSlotValue = null;
 
+  $('#ext-int-select').on('change', function () {
+    updateSlotRequirement();
+  });
+
   // Listen for therapy selection changes
   $therapySelect.on('change', function () {
     const currentVal = $slotSelect.val();
+    const selData = $therapySelect.select2('data');
+    if (selData && selData.length > 0) {
+      const isInternal = isInternalTreatment();
+      if (isInternal && !$('#ext-int-select').val()) {
+        $('#ext-int-select').val('Internal');
+      }
+    }
+    updateSlotRequirement();
     updateSlotsForTherapy().then(() => {
       // If there's a pending slot value (from edit mode), restore it after slots are populated
       if (pendingSlotValue) {
@@ -1367,7 +1437,13 @@ $(function () {
   $toDate.on('change', calcDays);
 
   // add therapy - auto-save to server as draft
+  let isSavingTherapy = false;
   $allocateBtn.on('click', function () {
+    if (isSavingTherapy) {
+      console.warn('Therapy save already in progress, ignoring duplicate click.');
+      return;
+    }
+
     if (!selectedPatient) {
       alert('Please select a patient first');
       return;
@@ -1378,6 +1454,14 @@ $(function () {
     const from = $fromDate.val(), to = $toDate.val();
     if (!from || !to) { alert('Please set From and To dates'); return; }
     if (from > to) { alert('From must be <= To'); return; }
+
+    const isInternal = isInternalTreatment();
+    const slotVal = ($slotSelect.val() || '').trim();
+    if (!isInternal && !slotVal) {
+      alert('Time slot is mandatory for this treatment. Please select a time slot.');
+      $slotSelect.focus();
+      return;
+    }
 
     const isVamanam = (therapy.id === 'THEB126' || therapy.therapy_code === 'THEB126') ||
       !!therapy.is_vamanam ||
@@ -1420,6 +1504,11 @@ $(function () {
       })),
       notes: ''
     };
+
+    // Lock button and set in-progress flag to prevent duplicate submissions
+    isSavingTherapy = true;
+    const originalBtnHtml = $allocateBtn.html();
+    $allocateBtn.prop('disabled', true).addClass('disabled').css('pointer-events', 'none').html('<i class="fas fa-spinner fa-spin me-1"></i> Saving...');
 
     // Send to server immediately
     fetch(API_URL + '?action=allocate', {
@@ -1496,6 +1585,10 @@ $(function () {
         // Show more detailed error message
         const errorMessage = error.message || 'Error saving therapy to server. Please check your connection and try again.';
         alert('Error saving therapy to server: ' + errorMessage);
+      })
+      .finally(() => {
+        isSavingTherapy = false;
+        $allocateBtn.prop('disabled', false).removeClass('disabled').css('pointer-events', '').html(originalBtnHtml);
       });
   });
 
@@ -2113,12 +2206,26 @@ $(function () {
     } else {
       $bathingTherapistsCount.val(1);
     }
+    updateSlotRequirement();
 
     $allocateBtn.hide(); $updateBtn.show(); window.scrollTo({ top: 0, behavior: 'smooth' });
   }
   $updateBtn.on('click', function () {
     if (editTherapyIndex === null) { alert('No therapy in edit mode'); return; }
     const t = addedTherapies[editTherapyIndex]; if (!t) return;
+
+    const fromVal = $fromDate.val() || t.from_date;
+    const toVal = $toDate.val() || t.to_date;
+    if (fromVal && toVal && fromVal > toVal) { alert('From must be <= To'); return; }
+
+    const isInternal = isInternalTreatment(t);
+
+    const slotVal = ($slotSelect.val() || '').trim();
+    if (!isInternal && !slotVal) {
+      alert('Time slot is mandatory for this treatment. Please select a time slot.');
+      $slotSelect.focus();
+      return;
+    }
 
     // Update local data
     t.ext_int = $('#ext-int-select').val();
@@ -2289,6 +2396,7 @@ $(function () {
     $('#vamanam-slot-badge').hide();
     $('#vasthi-slot-badge').hide();
     $('#ext-int-select').val('');
+    updateSlotRequirement();
     if (addedTherapies.some(t => t.is_wheelchair) || (selectedPatient && (selectedPatient.is_wheelchair === true || selectedPatient.is_wheelchair === 'Yes'))) {
       $wheelchairSelect.val('Yes').trigger('change');
     } else {
@@ -2715,6 +2823,9 @@ $(function () {
 
   // Set from date: tomorrow after 5:30 PM, otherwise today
   $fromDate.val(_defaultFromDate());
+
+  // Initialize slot requirement indicator
+  updateSlotRequirement();
 
   // Clear form button
   $('#clear-form').on('click', function () {

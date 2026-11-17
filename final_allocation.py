@@ -444,13 +444,11 @@ def create_therapist_booking_safe(therapist, date, time_slot, therapy_name, pati
         print(f"[DEBUG create_therapist_booking_safe] get_or_create returned: tb={tb} (pk={tb.pk if tb else None}), created={created}")
         # CRITICAL: Use full save() instead of update_fields to ensure FK is properly set in SQLite
         needs_save = False
-        if not created and tb.visit is None and visit is not None:
-            print(f"[DEBUG create_therapist_booking_safe] Updating visit for existing TherapistBooking: tb.visit = {visit}")
+        if tb.visit != visit and visit is not None:
+            print(f"[DEBUG create_therapist_booking_safe] Updating visit for TherapistBooking: tb.visit = {visit}")
             tb.visit = visit
-            needs_save = True
-        elif created and tb.visit != visit and visit is not None:
-            print(f"[DEBUG create_therapist_booking_safe] Updating visit for newly created TherapistBooking: tb.visit = {visit}")
-            tb.visit = visit
+            if patient_id:
+                tb.patient_id = patient_id
             needs_save = True
 
         # Ensure therapy FK is populated if we resolved TherapyMaster
@@ -1259,15 +1257,20 @@ def allocate_therapists(
             if needed <= 0:
                 break
 
-            candidates_qs = TherapistMaster.objects.filter(
-                therapist_grade__name__iexact=current_grade_search, 
-                is_active=True,
-                is_helping_therapist=is_helping_flag
-            )
-
-            # Strict Preferred Therapist Pool enforcement
             if preferred_roster_info:
-                candidates_qs = candidates_qs.filter(therapist_code__in=preferred_roster_info['therapist_codes_set'])
+                # If patient has preferred roster, candidate pool is strictly the roster.
+                # Do NOT filter by is_helping_therapist because roster therapists are explicitly assigned.
+                candidates_qs = TherapistMaster.objects.filter(
+                    therapist_grade__name__iexact=current_grade_search, 
+                    is_active=True,
+                    therapist_code__in=preferred_roster_info['therapist_codes_set']
+                )
+            else:
+                candidates_qs = TherapistMaster.objects.filter(
+                    therapist_grade__name__iexact=current_grade_search, 
+                    is_active=True,
+                    is_helping_therapist=is_helping_flag
+                )
 
             if exclusion_set:
                 candidates_qs = candidates_qs.exclude(therapist_code__in=exclusion_set)
@@ -1373,12 +1376,68 @@ def allocate_therapists(
     # -----------------------
     # STEP 1 – Normal Scheduling (First Attempt: consider only is_helping_therapist=False)
     # -----------------------
+    # PREFERRED ROSTER: Designate & Allocate Bathing Therapist FIRST
+    if preferred_roster_info and needs_bathing:
+        current_bath_allocated = sum(1 for a in allocated if getattr(a, 'is_bathing_therapist', False))
+        if current_bath_allocated < num_bathing_needed:
+            try:
+                from Sheduling.preferred_therapist_service import pick_bathing_therapist_from_roster
+                picked_bath, bath_role = pick_bathing_therapist_from_roster(preferred_roster_info, date, time_slot)
+                if picked_bath and picked_bath not in allocated:
+                    bath_avail = True
+                    if therapist_on_leave(picked_bath):
+                        bath_avail = False
+                    elif shift_filter_enabled and picked_bath.id in mapped_ids and picked_bath.id not in eligible_ids:
+                        bath_avail = False
+                    elif TherapistBooking.objects.filter(therapist=picked_bath, date=date, time_slot=time_slot, status='BOOKED').exists():
+                        bath_avail = False
+                    elif desired_gender and get_therapist_gender(picked_bath) != desired_gender:
+                        bath_avail = False
+                    elif exclusion_set and picked_bath.therapist_code in exclusion_set:
+                        bath_avail = False
+                    elif not can_assign_therapist(picked_bath, allow_extra=False) and not can_assign_therapist(picked_bath, allow_extra=True):
+                        bath_avail = False
+
+                    if bath_avail:
+                        allocated.append(picked_bath)
+                        bath_grade = get_therapist_grade_name(picked_bath)
+                        if grade_map.get(bath_grade, 0) > 0:
+                            grade_map[bath_grade] -= 1
+                        else:
+                            sub_hierarchy = {
+                                "Trainee Therapist": ["Junior Therapist", "Senior Therapist", "Super Senior Therapist"],
+                                "Junior Therapist": ["Senior Therapist", "Super Senior Therapist", "Trainee Therapist"],
+                                "Senior Therapist": ["Super Senior Therapist", "Junior Therapist", "Trainee Therapist"],
+                                "Super Senior Therapist": ["Senior Therapist", "Junior Therapist", "Trainee Therapist"]
+                            }
+                            decremented = False
+                            for g in sub_hierarchy.get(bath_grade, []):
+                                if grade_map.get(g, 0) > 0:
+                                    grade_map[g] -= 1
+                                    decremented = True
+                                    break
+                            if not decremented:
+                                for g in ["Trainee Therapist", "Junior Therapist", "Senior Therapist", "Super Senior Therapist"]:
+                                    if grade_map.get(g, 0) > 0:
+                                        grade_map[g] -= 1
+                                        break
+                        print(f"[PREFERRED ROSTER] Pre-allocated designated bathing therapist {picked_bath.therapist_code} ({bath_role}, {bath_grade})")
+            except Exception as e:
+                print(f"[PREFERRED ROSTER] Error resolving designated bathing therapist: {e}")
+
     if last_therapists:
         for code in last_therapists:
+            if preferred_roster_info and code not in preferred_roster_info.get('therapist_codes_set', set()):
+                continue
+            if exclusion_set and code in exclusion_set:
+                continue
             try:
                 t = TherapistMaster.objects.get(therapist_code=code, is_active=True)
-                if getattr(t, 'is_helping_therapist', False):
+                if t in allocated:
                     continue
+                if getattr(t, 'is_helping_therapist', False):
+                    if not (preferred_roster_info and t.therapist_code in preferred_roster_info['therapist_codes_set']):
+                        continue
             except TherapistMaster.DoesNotExist:
                 continue
 
@@ -1742,14 +1801,28 @@ def assign_continuity_therapists_pass1(booking, allocation, target_date, locked_
     if preferred_roster_info:
         roster_set = preferred_roster_info['therapist_codes_set']
         continuity_therapists = [t for t in continuity_therapists if getattr(t, 'therapist_code', None) in roster_set]
+
+        # Add all preferred therapists from the roster in order so they are available for assignment
+        existing_tids = {getattr(t, 'id', None) for t in continuity_therapists}
+        for code in preferred_roster_info.get('therapist_codes', []):
+            try:
+                from masters.models import TherapistMaster
+                t_obj = TherapistMaster.objects.filter(therapist_code=code, is_active=True).first()
+                if t_obj and t_obj.id not in existing_tids:
+                    continuity_therapists.append(t_obj)
+                    existing_tids.add(t_obj.id)
+            except Exception:
+                pass
+
         if needs_bath_flag:
             try:
                 from Sheduling.preferred_therapist_service import pick_bathing_therapist_from_roster
                 picked_bath, bath_role = pick_bathing_therapist_from_roster(preferred_roster_info, target_date, slot_master)
                 if picked_bath:
                     previous_bathing_therapist = picked_bath
-                    if picked_bath not in continuity_therapists:
-                        continuity_therapists.insert(0, picked_bath)
+                    if picked_bath in continuity_therapists:
+                        continuity_therapists.remove(picked_bath)
+                    continuity_therapists.insert(0, picked_bath)
             except Exception as e:
                 print(f"[CONTINUITY PASS1] Error resolving roster bathing therapist: {e}")
 
@@ -1758,7 +1831,14 @@ def assign_continuity_therapists_pass1(booking, allocation, target_date, locked_
 
     # Exclude Helping Therapists from Pass 1 (Primary Continuity Pass)
     if continuity_therapists:
-        continuity_therapists = [t for t in continuity_therapists if not getattr(t, 'is_helping_therapist', False)]
+        if preferred_roster_info:
+            roster_pool = preferred_roster_info.get('therapist_codes_set', set())
+            continuity_therapists = [
+                t for t in continuity_therapists 
+                if not getattr(t, 'is_helping_therapist', False) or getattr(t, 'therapist_code', None) in roster_pool
+            ]
+        else:
+            continuity_therapists = [t for t in continuity_therapists if not getattr(t, 'is_helping_therapist', False)]
 
     if not continuity_therapists:
         # No continuity therapists - skip this booking in PASS 1
@@ -1925,9 +2005,10 @@ def assign_continuity_therapists_pass1(booking, allocation, target_date, locked_
                     break
         
         # Check bathing requirement
+        has_bath_already = any(getattr(a, 'is_bathing_therapist', False) for a in assigned_continuity)
         if needs_bath_flag and not getattr(t, 'is_bathing_therapist', False):
             # Only skip if we haven't assigned a bathing therapist yet
-            if not result['bath_assigned']:
+            if not has_bath_already and not result.get('bath_assigned'):
                 print(f"[CONTINUITY PASS1] Therapist {t.therapist_code} not a bathing therapist but bathing required - skipping")
                 continue
         
@@ -1947,6 +2028,8 @@ def assign_continuity_therapists_pass1(booking, allocation, target_date, locked_
         
         # All checks passed - assign this continuity therapist
         assigned_continuity.append(t)
+        if needs_bath_flag and getattr(t, 'is_bathing_therapist', False) and not result.get('bath_assigned'):
+            result['bath_assigned'] = t
         
         # Decrement the appropriate grade (may be different from therapist's grade for continuity)
         if grade_to_decrement and grade_map.get(grade_to_decrement, 0) > 0:
@@ -1962,21 +2045,32 @@ def assign_continuity_therapists_pass1(booking, allocation, target_date, locked_
         print(f"[CONTINUITY PASS1]   - Will create TherapistBooking to LOCK this therapist-slot combination")
     
     # Assign bathing therapist FIRST (maintain continuity for bathing)
-    # Priority: Previous bathing therapist should remain as bathing therapist
+    # Priority: Preferred roster designated bathing therapist, then previous bathing therapist
     if needs_bath_flag and assigned_continuity:
-        if previous_bathing_therapist and previous_bathing_therapist in assigned_continuity:
-            result['bath_assigned'] = previous_bathing_therapist
-            print(f"[CONTINUITY PASS1] ✓ Using previous bathing therapist: {previous_bathing_therapist.therapist_code} (maintaining continuity)")
-        else:
-            # Find first bathing therapist from assigned list
-            # But log a warning if previous_bathing_therapist was identified but not in assigned_continuity
-            if previous_bathing_therapist:
-                print(f"[CONTINUITY PASS1] ⚠ Previous bathing therapist {previous_bathing_therapist.therapist_code} identified but not in assigned_continuity (may have been filtered out)")
-            for t in assigned_continuity:
-                if getattr(t, 'is_bathing_therapist', False):
-                    result['bath_assigned'] = t
-                    print(f"[CONTINUITY PASS1] Assigned bathing therapist: {t.therapist_code} (previous {previous_bathing_therapist.therapist_code if previous_bathing_therapist else 'None'} not available)")
-                    break
+        if preferred_roster_info:
+            try:
+                from Sheduling.preferred_therapist_service import pick_bathing_therapist_from_roster
+                picked_bath, _ = pick_bathing_therapist_from_roster(preferred_roster_info, target_date, slot_master)
+                if picked_bath and picked_bath in assigned_continuity:
+                    result['bath_assigned'] = picked_bath
+                    print(f"[CONTINUITY PASS1] ✓ Using preferred roster bathing therapist: {picked_bath.therapist_code}")
+            except Exception as e:
+                print(f"[CONTINUITY PASS1] Error resolving preferred roster bathing therapist: {e}")
+
+        if not result.get('bath_assigned'):
+            if previous_bathing_therapist and previous_bathing_therapist in assigned_continuity:
+                result['bath_assigned'] = previous_bathing_therapist
+                print(f"[CONTINUITY PASS1] ✓ Using previous bathing therapist: {previous_bathing_therapist.therapist_code} (maintaining continuity)")
+            else:
+                # Find first bathing therapist from assigned list
+                # But log a warning if previous_bathing_therapist was identified but not in assigned_continuity
+                if previous_bathing_therapist:
+                    print(f"[CONTINUITY PASS1] ⚠ Previous bathing therapist {previous_bathing_therapist.therapist_code} identified but not in assigned_continuity (may have been filtered out)")
+                for t in assigned_continuity:
+                    if getattr(t, 'is_bathing_therapist', False):
+                        result['bath_assigned'] = t
+                        print(f"[CONTINUITY PASS1] Assigned bathing therapist: {t.therapist_code} (previous {previous_bathing_therapist.therapist_code if previous_bathing_therapist else 'None'} not available)")
+                        break
     
     # Check for senior tag assignment (special treatments)
     # CRITICAL: Senior therapist MUST be different from bathing therapist
@@ -2268,7 +2362,18 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
     used_slots = []
     any_success = False
     patient_id = getattr(allocation.patient, 'id', None)
+    pat_reg_no = getattr(getattr(allocation, 'patient', None), 'pat_reg_no', None)
     patient_staying_room = getattr(allocation.patient, 'pat_room_no', None)
+
+    preferred_roster_info = None
+    for pid in filter(None, [patient_id, pat_reg_no]):
+        try:
+            from Sheduling.preferred_therapist_service import get_active_preferred_roster
+            preferred_roster_info = get_active_preferred_roster(pid)
+            if preferred_roster_info:
+                break
+        except Exception:
+            pass
     
     # PASS 2: booking_continuity_map contains continuity assignments from PASS 1
     # Maps booking_id -> continuity_assigned dict
@@ -2399,20 +2504,20 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
         query_slot = slot_master if slot_master else canonical_slot
         
         # patient already booked check
-        # IMPORTANT: Exclude TherapistBooking records from PASS 1 (same visit/allocation) to avoid false positives
+        # IMPORTANT: Exclude RoomBooking and TherapistBooking records for this booking/visit to avoid false positives
         patient_already_booked = False
         try:
             patient_already_booked = (
-                RoomBooking.objects.filter(patient_id=patient_id, date=target_date, time_slot=query_slot, status__in=['BOOKED','scheduled']).exclude(pk=booking.pk).exists()
-                or TherapistBooking.objects.filter(patient_id=patient_id, date=target_date, time_slot=query_slot, status='BOOKED').exclude(pk=booking.pk).exclude(visit_id=allocation.id).exists()
+                RoomBooking.objects.filter(patient_id=patient_id, date=target_date, time_slot=query_slot, status__in=['BOOKED','scheduled']).exclude(visit=booking).exclude(therapy_id=allocation.id).exists()
+                or TherapistBooking.objects.filter(patient_id=patient_id, date=target_date, time_slot=query_slot, status='BOOKED').exclude(visit_id=allocation.id).exists()
             )
         except Exception:
             try:
                 slot_start = getattr(pref_slot, 'start_time', None)
                 if slot_start:
                     patient_already_booked = (
-                        RoomBooking.objects.filter(patient_id=patient_id, date=target_date, time_slot__start_time=slot_start, status__in=['BOOKED','scheduled']).exclude(pk=booking.pk).exists()
-                        or TherapistBooking.objects.filter(patient_id=patient_id, date=target_date, time_slot__start_time=slot_start, status='BOOKED').exclude(pk=booking.pk).exclude(visit_id=allocation.id).exists()
+                        RoomBooking.objects.filter(patient_id=patient_id, date=target_date, time_slot__start_time=slot_start, status__in=['BOOKED','scheduled']).exclude(visit=booking).exclude(therapy_id=allocation.id).exists()
+                        or TherapistBooking.objects.filter(patient_id=patient_id, date=target_date, time_slot__start_time=slot_start, status='BOOKED').exclude(visit_id=allocation.id).exists()
                     )
             except Exception:
                 patient_already_booked = False
@@ -2696,6 +2801,13 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                                 print(f"[CONTINUITY PASS2] Preferring {len(from_start_codes)} from-start therapist(s) when filling remaining: {from_start_codes}")
                     except Exception as e:
                         print(f"[CONTINUITY PASS2] Error building from-start for remaining: {e}")
+
+                    if preferred_roster_info and preferred_roster_info.get('therapist_codes'):
+                        last_therapists_for_remaining = [
+                            c for c in preferred_roster_info['therapist_codes']
+                            if c not in assigned_codes
+                        ]
+                        print(f"[PREFERRED ROSTER] Preferring {len(last_therapists_for_remaining)} preferred roster therapist(s) when filling remaining: {last_therapists_for_remaining}")
                     
                     # Build avoid set from continuity therapists so allocate_therapists
                     # does not return them again (their PASS 1 bookings were cancelled by
@@ -2732,7 +2844,10 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                 # allocate_therapists will check availability for each and assign available ones,
                 # then fill remaining slots with new therapists
                 last_therapists = None
-                if previous_therapist_group and len(previous_therapist_group) > 0:
+                if preferred_roster_info and preferred_roster_info.get('therapist_codes'):
+                    last_therapists = list(preferred_roster_info['therapist_codes'])
+                    print(f"[PREFERRED ROSTER] PASS 2 using preferred roster therapists: {last_therapists}")
+                elif previous_therapist_group and len(previous_therapist_group) > 0:
                     # Use all previous therapists as last_therapists for maximum continuity
                     last_therapists = [tm.therapist_code for tm in previous_therapist_group]
                     print(f"[DEBUG] Using all previous therapists for maximum continuity: {last_therapists}")
@@ -3263,10 +3378,22 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
             # For special treatments: Senior therapist should NOT be the bathing therapist
             # Priority: Maintain bathing therapist continuity (previous bathing therapist should stay as bathing)
             if requires_senior_tag and senior_therapist:
-                # CRITICAL FIX: Prioritize bath_assigned_from_pass1 (from PASS 1) over previous_bathing_therapist
-                # This ensures continuity is maintained even if previous_bathing_therapist is not in assigned_therapists
-                preferred_bathing_therapist = bath_assigned_from_pass1 if bath_assigned_from_pass1 and bath_assigned_from_pass1 in assigned_therapists else None
-                if not preferred_bathing_therapist and previous_bathing_therapist and previous_bathing_therapist in assigned_therapists:
+                # PREFERRED ROSTER: Priority for roster's designated bathing therapist
+                roster_bath = None
+                if preferred_roster_info and needs_bath_flag:
+                    try:
+                        from Sheduling.preferred_therapist_service import pick_bathing_therapist_from_roster
+                        roster_bath, _ = pick_bathing_therapist_from_roster(preferred_roster_info, target_date, slot_master or allocate_slot, exclude_visit_id=allocation.id)
+                    except Exception:
+                        roster_bath = None
+
+                preferred_bathing_therapist = None
+                if bath_assigned_from_pass1 and bath_assigned_from_pass1 in assigned_therapists:
+                    preferred_bathing_therapist = bath_assigned_from_pass1
+                elif roster_bath and roster_bath in assigned_therapists:
+                    preferred_bathing_therapist = roster_bath
+                    print(f"[DEBUG] Special treatment: Using designated preferred roster bathing therapist {preferred_bathing_therapist.therapist_code}")
+                elif previous_bathing_therapist and previous_bathing_therapist in assigned_therapists:
                     preferred_bathing_therapist = previous_bathing_therapist
                 
                 if preferred_bathing_therapist:
@@ -3380,13 +3507,22 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                             continue  # Skip to next booking
             else:
                 # Not Dhara & Pizichil or no senior therapist - use normal logic
-                # CRITICAL: Prioritize PASS 1 bathing therapist (first-day / from-start-of-therapy) over previous day's.
-                # PASS 1 already implements "from start of therapy" - so when original therapist returns from leave, we must not override with yesterday's replacement.
-                # Priority order: 1) bath_assigned_from_pass1, 2) previous_bathing_therapist, 3) first from list
+                # PREFERRED ROSTER: Always designate preferred roster's bathing therapist if in assigned list
+                roster_bath = None
+                if preferred_roster_info and needs_bath_flag:
+                    try:
+                        from Sheduling.preferred_therapist_service import pick_bathing_therapist_from_roster
+                        roster_bath, _ = pick_bathing_therapist_from_roster(preferred_roster_info, target_date, slot_master or allocate_slot, exclude_visit_id=allocation.id)
+                    except Exception:
+                        roster_bath = None
+
                 if bath_assigned_from_pass1 and bath_assigned_from_pass1 in assigned_therapists:
-                    # PASS 1 chose the first-day bathing therapist (or first available from start of therapy) - keep them
+                    # PASS 1 chose the first-day bathing therapist (or designated from roster) - keep them
                     bath_assigned = bath_assigned_from_pass1
                     print(f"[DEBUG] ✓ Using PASS 1 bathing therapist {bath_assigned.therapist_code} for patient {patient_id} (first-day continuity)")
+                elif roster_bath and roster_bath in assigned_therapists:
+                    bath_assigned = roster_bath
+                    print(f"[FINAL_ALLOC] ✓ Using designated preferred roster bathing therapist: {bath_assigned.therapist_code} for patient {patient_id}")
                 elif previous_bathing_therapist and previous_bathing_therapist in assigned_therapists:
                     # Fallback: previous day's bathing therapist (e.g. when PASS 1 didn't assign or that therapist not in list)
                     if bath_assigned != previous_bathing_therapist:
@@ -4536,11 +4672,26 @@ def bulk_allocate_for_date(target_date_str):
         from Sheduling.vip_service import is_patient_vip
         is_vip = is_patient_vip(pat) or getattr(first_bk, 'is_vip', False) or getattr(alloc, 'is_vip', False)
         is_op = _is_patient_op(pat)
+
+        pref_roster = None
+        for pid_check in [getattr(pat, 'id', None), getattr(pat, 'pat_reg_no', None)]:
+            if pid_check:
+                try:
+                    from Sheduling.preferred_therapist_service import get_active_preferred_roster
+                    pref_roster = get_active_preferred_roster(pid_check)
+                    if pref_roster:
+                        break
+                except Exception:
+                    pass
+        has_roster = bool(pref_roster)
+
         # Priority order:
         # 1. VIP patients FIRST (priority 0)
-        # 2. Non-VIP IP patients SECOND (priority 1, 0)
-        # 3. Non-VIP OP patients THIRD (priority 1, 1)
-        return (0 if is_vip else 1, 1 if is_op else 0)
+        # 2. Patients with active preferred roster (priority 1)
+        # 3. Non-VIP IP patients (priority 2)
+        # 4. Non-VIP OP patients (priority 2, 1)
+        pat_rank = 0 if is_vip else (1 if has_roster else 2)
+        return (pat_rank, 1 if is_op else 0)
 
     ordered_bookings = []
     sorted_by_patient = sorted(
@@ -4551,7 +4702,7 @@ def bulk_allocate_for_date(target_date_str):
         bookings.sort(key=lambda bk: getattr(bk.allocation, 'from_date', target_date))
         ordered_bookings.extend(bookings)
     
-    # Derive the unique allocations from these ordered bookings
+    # Derive the unique allocations from these ordered bookings (preserving sort order!)
     allocation_ids = []
     seen_alloc_ids = set()
     for b in ordered_bookings:
@@ -4559,7 +4710,8 @@ def bulk_allocate_for_date(target_date_str):
         if aid and aid not in seen_alloc_ids:
             seen_alloc_ids.add(aid)
             allocation_ids.append(aid)
-    draft_allocations = TherapyAllocation.objects.filter(id__in=allocation_ids)
+    alloc_map = {a.id: a for a in TherapyAllocation.objects.filter(id__in=allocation_ids)}
+    draft_allocations = [alloc_map[aid] for aid in allocation_ids if aid in alloc_map]
     
     results = []
     successful_count = 0
@@ -4594,6 +4746,18 @@ def bulk_allocate_for_date(target_date_str):
             patient_name = getattr(patient, 'pat_name', '') or ''
             current_therapy_name = allocation.therapy_name
 
+            pref_roster = None
+            try:
+                from Sheduling.preferred_therapist_service import get_active_preferred_roster
+                for pid_check in [patient_snapshot_id, getattr(patient, 'pat_reg_no', None)]:
+                    if not pid_check:
+                        continue
+                    pref_roster = get_active_preferred_roster(pid_check)
+                    if pref_roster:
+                        break
+            except Exception:
+                pref_roster = None
+
             # Resolve TherapyMaster for robust matching
             therapy_obj = None
             therapy_code = getattr(allocation, 'therapy_code', None)
@@ -4625,6 +4789,28 @@ def bulk_allocate_for_date(target_date_str):
 
             continuity_rows = []
 
+            # PREFERRED ROSTER: Add all preferred therapists at highest priority (-3000..)
+            if pref_roster and pref_roster.get('therapist_codes'):
+                p_code = pref_roster.get('primary_bathing_code')
+                s_code = pref_roster.get('secondary_bathing_code')
+                unpref_set = pref_roster.get('unpreferred_codes_set', set())
+                roster_added = 0
+                for r_idx, code in enumerate(pref_roster['therapist_codes']):
+                    if code in unpref_set:
+                        continue
+                    t_obj = _TM.objects.filter(therapist_code=code, is_active=True).first()
+                    if t_obj:
+                        is_bath = (code == p_code) or (code == s_code and not p_code) or bool(getattr(t_obj, 'is_bathing_therapist', False))
+                        continuity_rows.append({
+                            "therapist": t_obj,
+                            "is_bathing": is_bath,
+                            "priority": -3000 + r_idx,
+                            "source_date": target_date,
+                        })
+                        roster_added += 1
+                if roster_added:
+                    print(f"[CONTINUITY PLAN]   Injected {roster_added} preferred roster therapists at top priority (-3000..)")
+
             # FROM START OF THERAPY: Add all therapists who have done this allocation from from_date to today (in order of first appearance).
             # Use distinct priorities (-1000, -999, ...) so order is preserved: first-day therapist always tried first when they return from leave.
             therapy_start_date = getattr(allocation, 'from_date', None)
@@ -4645,7 +4831,8 @@ def bulk_allocate_for_date(target_date_str):
                         if not getattr(tb.therapist, 'is_active', True):
                             continue
                         if getattr(tb.therapist, 'is_helping_therapist', False):
-                            continue
+                            if not (pref_roster and tb.therapist.therapist_code in pref_roster.get('therapist_codes_set', set())):
+                                continue
                         tid = getattr(tb.therapist, 'id', None)
                         if tid is None or tid in seen_from_start:
                             continue
@@ -4708,8 +4895,9 @@ def bulk_allocate_for_date(target_date_str):
                         print(f"[CONTINUITY PLAN]   Skipping TherapistBooking {tb.pk} - therapist {tb.therapist.therapist_code} is INACTIVE")
                         continue
                     if getattr(tb.therapist, 'is_helping_therapist', False):
-                        print(f"[CONTINUITY PLAN]   Skipping TherapistBooking {tb.pk} - therapist {tb.therapist.therapist_code} is HELPING THERAPIST")
-                        continue
+                        if not (pref_roster and tb.therapist.therapist_code in pref_roster.get('therapist_codes_set', set())):
+                            print(f"[CONTINUITY PLAN]   Skipping TherapistBooking {tb.pk} - therapist {tb.therapist.therapist_code} is HELPING THERAPIST")
+                            continue
                     # CRITICAL FIX: Only mark as bathing if the TherapistBooking record actually has is_bathing=True
                     # Do NOT use therapist.is_bathing_therapist attribute - that just means they CAN be a bathing therapist,
                     # not that they WERE the bathing therapist on this specific day
@@ -4777,8 +4965,9 @@ def bulk_allocate_for_date(target_date_str):
                             print(f"[CONTINUITY PLAN]   DEBUG: Skipping TherapistBooking {tb.pk} - therapist {tb.therapist.therapist_code} is INACTIVE")
                             continue
                         if getattr(tb.therapist, 'is_helping_therapist', False):
-                            print(f"[CONTINUITY PLAN]   DEBUG: Skipping TherapistBooking {tb.pk} - therapist {tb.therapist.therapist_code} is HELPING THERAPIST")
-                            continue
+                            if not (pref_roster and tb.therapist.therapist_code in pref_roster.get('therapist_codes_set', set())):
+                                print(f"[CONTINUITY PLAN]   DEBUG: Skipping TherapistBooking {tb.pk} - therapist {tb.therapist.therapist_code} is HELPING THERAPIST")
+                                continue
                         # CRITICAL FIX: Only mark as bathing if the TherapistBooking record actually has is_bathing=True
                         # Do NOT use therapist.is_bathing_therapist attribute - that just means they CAN be a bathing therapist,
                         # not that they WERE the bathing therapist on this specific day
@@ -4792,6 +4981,14 @@ def bulk_allocate_for_date(target_date_str):
                     print(f"[CONTINUITY PLAN]   Found {rows_added_any} therapists from any-therapy date {any_date}")
                 else:
                     print(f"[CONTINUITY PLAN]   No any-therapy history found")
+
+            # Enforce strict preferred roster pool and unpreferred therapist exclusion
+            if pref_roster and pref_roster.get('therapist_codes_set'):
+                roster_pool = pref_roster['therapist_codes_set']
+                continuity_rows = [r for r in continuity_rows if getattr(r['therapist'], 'therapist_code', None) in roster_pool]
+            if pref_roster and pref_roster.get('unpreferred_codes_set'):
+                unpref_pool = pref_roster['unpreferred_codes_set']
+                continuity_rows = [r for r in continuity_rows if getattr(r['therapist'], 'therapist_code', None) not in unpref_pool]
 
             if continuity_rows:
                 print(f"[CONTINUITY PLAN]   Raw continuity candidates:")
@@ -4862,6 +5059,7 @@ def bulk_allocate_for_date(target_date_str):
         """
         Returns a tuple (priority_score, most_recent_date) for sorting.
         Lower priority_score = higher priority (processed first).
+        Priority -1: Active preferred therapist roster (highest priority)
         Priority 0: Same therapy (any slot) on most recent date
         Priority 2: Any previous therapy (any slot)
         Priority 3: No previous therapy
@@ -4871,6 +5069,21 @@ def bulk_allocate_for_date(target_date_str):
         
         if not patient_id or not current_therapy_name:
             return (3, None)  # No continuity possible
+
+        # Check if patient has active preferred therapist roster
+        pat = getattr(allocation, 'patient', None)
+        pref_roster = None
+        for pid_check in [patient_id, getattr(pat, 'pat_reg_no', None)]:
+            if pid_check:
+                try:
+                    from Sheduling.preferred_therapist_service import get_active_preferred_roster
+                    pref_roster = get_active_preferred_roster(pid_check)
+                    if pref_roster:
+                        break
+                except Exception:
+                    pass
+        if pref_roster and pref_roster.get('therapist_codes'):
+            return (-1, target_date)
 
         try:
             # Resolve TherapyMaster for robust matching (by code or case-insensitive name)
@@ -4910,26 +5123,45 @@ def bulk_allocate_for_date(target_date_str):
             print(f"[CONTINUITY PRIORITY] Error computing priority for patient {patient_id}, therapy='{current_therapy_name}': {e}")
             return (3, None)  # Error case: treat as no continuity
     
-    # Compute priority for each allocation once (Checklist #5: IP prioritized over OP)
+    # Compute priority for each allocation once (Checklist: VIP prioritized over non-VIP, Preferred Roster, IP over OP)
+    from Sheduling.vip_service import is_patient_vip
     allocation_priorities = []
     for allocation in draft_allocations:
+        patient_obj = getattr(allocation, 'patient', None)
+        is_vip = is_patient_vip(patient_obj) or getattr(allocation, 'is_vip', False)
+        vip_rank = 0 if is_vip else 1
+
+        pref_roster = None
+        for pid_check in [getattr(patient_obj, 'id', None), getattr(patient_obj, 'pat_reg_no', None)]:
+            if pid_check:
+                try:
+                    from Sheduling.preferred_therapist_service import get_active_preferred_roster
+                    pref_roster = get_active_preferred_roster(pid_check)
+                    if pref_roster:
+                        break
+                except Exception:
+                    pass
+        roster_rank = 0 if pref_roster else 1
+
         priority_score, most_recent_date = get_continuity_priority(allocation)
         # Use date ordinal for sorting (more recent = larger ordinal = higher priority)
         # We negate it so that larger dates come first in ascending sort
         date_ordinal = -most_recent_date.toordinal() if most_recent_date else 0
-        op_rank = 1 if _is_patient_op(getattr(allocation, 'patient', None)) else 0  # 0=IP (strict priority), 1=OP
-        allocation_priorities.append((allocation, op_rank, priority_score, date_ordinal))
+        op_rank = 1 if _is_patient_op(patient_obj) else 0  # 0=IP (strict priority), 1=OP
+        allocation_priorities.append((allocation, vip_rank, roster_rank, op_rank, priority_score, date_ordinal))
     
-    # Sort: IP first (op_rank=0), then priority score (0 = highest), then by most recent date
-    sorted_allocations = [a for a, _, _, _ in sorted(allocation_priorities, key=lambda x: (x[1], x[2], x[3]))]
+    # Sort: VIP first (vip_rank=0), then preferred roster (roster_rank=0), then IP (op_rank=0), then priority score, then by most recent date
+    sorted_allocations = [a for a, _, _, _, _, _ in sorted(allocation_priorities, key=lambda x: (x[1], x[2], x[3], x[4], x[5]))]
     
     # Count statistics
     continuity_stats = {
-        'same_therapy': sum(1 for _, _, p, _ in allocation_priorities if p == 0),
-        'any_therapy': sum(1 for _, _, p, _ in allocation_priorities if p == 2),
-        'no_continuity': sum(1 for _, _, p, _ in allocation_priorities if p == 3)
+        'preferred_roster': sum(1 for _, _, _, _, p, _ in allocation_priorities if p == -1),
+        'same_therapy': sum(1 for _, _, _, _, p, _ in allocation_priorities if p == 0),
+        'any_therapy': sum(1 for _, _, _, _, p, _ in allocation_priorities if p == 2),
+        'no_continuity': sum(1 for _, _, _, _, p, _ in allocation_priorities if p == 3)
     }
     print(f"[DEBUG Continuity Priority] Processing {len(sorted_allocations)} allocations:")
+    print(f"  - Active Preferred Roster: {continuity_stats['preferred_roster']}")
     print(f"  - Same therapy yesterday: {continuity_stats['same_therapy']}")
     print(f"  - Any previous therapy: {continuity_stats['any_therapy']}")
     print(f"  - No continuity: {continuity_stats['no_continuity']}")
@@ -4962,8 +5194,8 @@ def bulk_allocate_for_date(target_date_str):
             # Bookings without patient - process separately
             patient_bookings_map[None].append(booking)
     
-    # Sort patients by priority (same as allocations)
-    allocation_id_to_priority = {alloc.id: (op_r, p, d) for alloc, op_r, p, d in allocation_priorities}
+    # Sort patients by priority (same as allocations: vip_rank, roster_rank, op_rank, priority, date_ordinal)
+    allocation_id_to_priority = {alloc.id: (vip_r, ros_r, op_r, p, d) for alloc, vip_r, ros_r, op_r, p, d in allocation_priorities}
     
     # Tie-breaker: earliest "from start" date in continuity plan (priority < 0).
     # Patients whose therapy started earliest get processed first so their first-day therapists (e.g. Latha) are locked for them, not for a patient who had that therapist only on a later date.
@@ -4979,23 +5211,44 @@ def bulk_allocate_for_date(target_date_str):
         plan_earliest = {}
     
     def get_patient_priority(patient_id):
-        """Get (op_rank, priority_score, date_ordinal, earliest_from_start_ordinal) for sorting.
+        """Get (vip_rank, roster_rank, op_rank, priority_score, date_ordinal, earliest_from_start_ordinal) for sorting.
+        VIP patients (vip_rank=0) strictly prioritized over non-VIP (vip_rank=1).
+        Patients with active preferred roster (roster_rank=0) strictly prioritized.
         IP patients (op_rank=0) strictly prioritized over OP (op_rank=1).
         Patients with earlier 'from start' date get processed first so first-day therapists are assigned to them."""
         if patient_id is None:
-            return (1, 3, 0, 999999)
+            return (1, 1, 1, 3, 0, 999999)
         first_pat = patient_bookings_map[patient_id][0].allocation.patient if patient_bookings_map[patient_id] else None
+        
+        from Sheduling.vip_service import is_patient_vip
+        is_vip = is_patient_vip(first_pat)
+        if not is_vip and patient_bookings_map[patient_id]:
+            is_vip = any(getattr(b, 'is_vip', False) or getattr(b.allocation, 'is_vip', False) for b in patient_bookings_map[patient_id])
+        vip_rank = 0 if is_vip else 1
+
+        pref_roster = None
+        for pid_check in [patient_id, getattr(first_pat, 'pat_reg_no', None) if first_pat else None]:
+            if pid_check:
+                try:
+                    from Sheduling.preferred_therapist_service import get_active_preferred_roster
+                    pref_roster = get_active_preferred_roster(pid_check)
+                    if pref_roster:
+                        break
+                except Exception:
+                    pass
+        roster_rank = 0 if pref_roster else 1
+
         op_rank = 1 if _is_patient_op(first_pat) else 0
         min_priority = (3, 0)
         for booking in patient_bookings_map[patient_id]:
             alloc_id = booking.allocation_id
-            p_tuple = allocation_id_to_priority.get(alloc_id, (op_rank, 3, 0))
-            priority = (p_tuple[1], p_tuple[2])
+            p_tuple = allocation_id_to_priority.get(alloc_id, (vip_rank, roster_rank, op_rank, 3, 0))
+            priority = (p_tuple[3], p_tuple[4])
             if priority[0] < min_priority[0] or (priority[0] == min_priority[0] and priority[1] > min_priority[1]):
                 min_priority = priority
         earliest_sd = plan_earliest.get(patient_id)
         earliest_ord = earliest_sd.toordinal() if earliest_sd else 999999
-        return (op_rank, min_priority[0], min_priority[1], earliest_ord)
+        return (vip_rank, roster_rank, op_rank, min_priority[0], min_priority[1], earliest_ord)
     
     # Sort patients by priority, then by earliest from-start date (therapy started first = process first)
     sorted_patient_ids = sorted(
