@@ -663,6 +663,10 @@
                         <td>
                             <div class="fw-semibold text-secondary">${escapeHtml(pat.doctor_name)}</div>
                             <div class="text-muted small">Allowed: ${escapeHtml(pat.allowed_date)}</div>
+                            <div class="d-flex flex-wrap gap-1 mt-1">
+                                ${pat.allow_preferred ? (pat.roster && pat.roster.therapist_count > 0 ? '<span class="badge bg-primary bg-opacity-10 text-primary border" style="font-size: 10px;"><i class="fas fa-user-check me-1"></i>Preferred (Quota Deducted: 1)</span>' : '<span class="badge bg-warning bg-opacity-10 text-warning border" style="font-size: 10px;"><i class="fas fa-clock me-1"></i>Preferred (Pending - Quota Not Deducted)</span>') : ''}
+                                ${pat.allow_unpreferred ? '<span class="badge bg-info bg-opacity-10 text-info border" style="font-size: 10px;"><i class="fas fa-shield-alt me-1"></i>Unpreferred (Free)</span>' : ''}
+                            </div>
                         </td>
                         <td>
                             <span class="badge bg-light text-dark border px-2 py-1">
@@ -780,6 +784,11 @@
 
         function renderTherapistChecklist() {
             const listEl = document.getElementById('modal-therapist-list');
+            const patData = allowedPatientsMap[currentPatientRegNo] || {};
+            if (patData.allow_preferred === false) {
+                listEl.innerHTML = `<div class="p-3 text-muted small"><i class="fas fa-lock me-2 text-warning"></i>Doctor has granted <strong>Unpreferred Therapist Exclusion only</strong>. Preferred therapist selection is disabled for this patient.</div>`;
+                return;
+            }
             const searchVal = (modalTherapistSearchQuery || '').trim().toLowerCase();
 
             // Strictly filter by gender: if male patient, show ONLY male therapists
@@ -919,6 +928,11 @@
 
         function renderUnprefChecklist() {
             const listEl = document.getElementById('modal-unpref-list');
+            const patData = allowedPatientsMap[currentPatientRegNo] || {};
+            if (patData.allow_unpreferred === false) {
+                listEl.innerHTML = `<div class="p-3 text-muted small"><i class="fas fa-lock me-2 text-warning"></i>Doctor has granted <strong>Preferred Therapist selection only</strong>. Unpreferred therapist exclusion is disabled for this patient.</div>`;
+                return;
+            }
             const searchVal = (modalUnprefSearchQuery || '').trim().toLowerCase();
 
             // Strictly filter by gender: if male patient, show ONLY male therapists

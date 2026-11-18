@@ -150,7 +150,23 @@ class DoctorQuotaAndPreferredTherapistTests(TestCase):
             self.assertEqual(res['status'], 'allowed')
             self.assertTrue(res['is_allowed'])
 
-        # Check quota showcase: 5 used, 0 remaining
+        # Doctor has allowed 5 patients, but scheduling has NOT assigned therapists yet: Quota NOT minused!
+        q_pending = DoctorPatientPreferenceAllowance.get_monthly_quota(self.doc_user, now.year, now.month)
+        self.assertEqual(q_pending['used'], 0)
+        self.assertEqual(q_pending['remaining'], 5)
+
+        # Now scheduling assigns preferred therapists to all 5 allowed patients
+        for i in range(1, 6):
+            reg = f"8800{i}"
+            save_preferred_therapist_roster(
+                patient_reg_no=reg,
+                therapist_codes=[self.therapists[0].therapist_code, self.therapists[1].therapist_code],
+                primary_bathing_code=self.therapists[0].therapist_code,
+                secondary_bathing_code=self.therapists[1].therapist_code,
+                configured_by=self.doc_user,
+            )
+
+        # NOW quota showcase: 5 used, 0 remaining (minused upon assignment!)
         quota = DoctorPatientPreferenceAllowance.get_monthly_quota(self.doc_user, now.year, now.month)
         self.assertEqual(quota['used'], 5)
         self.assertEqual(quota['remaining'], 0)
@@ -390,8 +406,21 @@ class DoctorQuotaAndPreferredTherapistTests(TestCase):
         t_data = toggle_res.json()
         self.assertEqual(t_data['status'], 'success')
         self.assertTrue(t_data['is_allowed'])
-        self.assertEqual(t_data['quota']['used'], 1)
-        self.assertEqual(t_data['quota']['remaining'], 4)
+        # Quota is not minused yet because scheduling has not assigned preferred therapists
+        self.assertEqual(t_data['quota']['used'], 0)
+        self.assertEqual(t_data['quota']['remaining'], 5)
+
+        # Once scheduling assigns preferred therapists, quota is minused!
+        save_preferred_therapist_roster(
+            patient_reg_no="90001",
+            therapist_codes=[self.therapists[0].therapist_code, self.therapists[1].therapist_code],
+            primary_bathing_code=self.therapists[0].therapist_code,
+            secondary_bathing_code=self.therapists[1].therapist_code,
+            configured_by=self.doc_user,
+        )
+        q_after = DoctorPatientPreferenceAllowance.get_monthly_quota(self.doc_user)
+        self.assertEqual(q_after['used'], 1)
+        self.assertEqual(q_after['remaining'], 4)
 
     def test_scheduling_dashboard_preferred_therapists_api_and_views(self):
         """Test Scheduling View, only allowed patients showing, and roster saving."""

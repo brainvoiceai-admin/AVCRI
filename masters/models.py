@@ -1456,12 +1456,12 @@ def group_omissions_by_request(omissions_queryset):
 
 
 class TherapistPreferenceConfig(models.Model):
-    """Configuration master for patient therapist preferences and doctor quotas."""
+    """Configuration master for patient therapist preferences and doctor team quotas."""
     name = models.CharField(max_length=100, default="Default Configuration", verbose_name="Configuration Name")
     doctor_monthly_quota = models.PositiveIntegerField(
         default=5,
-        verbose_name="Doctor Monthly Quota",
-        help_text="Maximum number of patient preference allowances a doctor can grant per calendar month"
+        verbose_name="Doctor Team Monthly Quota (Hospital-Wide)",
+        help_text="Shared monthly quota for the entire doctor team: maximum number of patient preferred therapist allowances that can be granted across all doctors per calendar month"
     )
     max_preferred_therapists = models.PositiveIntegerField(
         default=7,
@@ -1477,7 +1477,15 @@ class TherapistPreferenceConfig(models.Model):
         verbose_name_plural = "Therapist Preference Configurations"
 
     def __str__(self):
-        return f"{self.name} (Quota: {self.doctor_monthly_quota}, Max Pref: {self.max_preferred_therapists})"
+        return f"{self.name} (Team Quota: {self.doctor_monthly_quota}, Max Pref: {self.max_preferred_therapists})"
+
+    @property
+    def team_monthly_quota(self):
+        return self.doctor_monthly_quota
+
+    @property
+    def hospital_monthly_quota(self):
+        return self.doctor_monthly_quota
 
     @classmethod
     def get_config(cls):
@@ -1497,6 +1505,10 @@ def get_doctor_monthly_quota():
         return TherapistPreferenceConfig.get_config().doctor_monthly_quota
     except Exception:
         return 5
+
+
+def get_team_monthly_quota():
+    return get_doctor_monthly_quota()
 
 
 def get_max_preferred_therapists():

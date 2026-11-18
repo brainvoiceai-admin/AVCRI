@@ -181,12 +181,36 @@ def get_active_preferred_roster(patient_identifier):
     if not roster or (not roster.therapist_codes and not roster.unpreferred_therapist_codes):
         return None
 
+    # Check discharge status: if patient is discharged, deactivate roster and allowance, releasing quota
+    try:
+        from final_allocation import is_patient_active
+        if not is_patient_active(roster.patient_reg_no):
+            roster.is_active = False
+            roster.save(update_fields=['is_active'])
+            if roster.allowance:
+                roster.allowance.is_active = False
+                orig_notes = roster.allowance.notes or ''
+                if '[Discharge Quota Retained]' not in orig_notes:
+                    roster.allowance.notes = (orig_notes + ' [Discharge Quota Retained]').strip()
+                roster.allowance.save(update_fields=['is_active', 'notes', 'updated_at'])
+            return None
+    except Exception:
+        pass
+
     # Verify if linked allowance is active (if allowance exists)
     if roster.allowance and not roster.allowance.is_active:
         return None
 
     codes_list = [str(c).strip() for c in (roster.therapist_codes or []) if str(c).strip()]
     unpref_list = [str(c).strip() for c in (roster.unpreferred_therapist_codes or []) if str(c).strip()]
+
+    # Separate permissions check:
+    if roster.allowance:
+        if not roster.allowance.allow_preferred:
+            codes_list = []
+        if not roster.allowance.allow_unpreferred:
+            unpref_list = []
+
     if not codes_list and not unpref_list:
         return None
 
@@ -383,26 +407,23 @@ def find_doctor_user_by_code_or_name(doc_code, doc_name):
                 return u
 
     if doc_name and doc_name != "Not Assigned":
-        def _clean(s):
-            s = re.sub(r'\b(dr\.?|doctor)\b', '', s, flags=re.IGNORECASE)
+        def _clean_words(s):
+            s = re.sub(r'\b(dr\.?|doctor|bams|md|ms|ayu|ayurveda|mbbs|vaidya)\b', '', s, flags=re.IGNORECASE)
             s = re.sub(r'[^a-zA-Z0-9\s]', '', s)
-            return set(s.lower().split())
+            return [w.lower() for w in s.split() if w.strip()]
 
-        d_tokens = _clean(doc_name)
+        d_words = _clean_words(doc_name)
+        d_tokens = set(d_words)
         if d_tokens:
             for u in doc_users_qs:
                 u_fullname = u.get_full_name() or ''
                 u_username = u.username or ''
-                u_tokens = _clean(f"{u_fullname} {u_username}")
-                if d_tokens and u_tokens:
+                u_words = _clean_words(f"{u_fullname} {u_username}")
+                u_tokens = set(u_words)
+                # Primary given name (first name) must match!
+                if d_words and u_words and d_words[0] == u_words[0]:
                     if d_tokens == u_tokens or d_tokens.issubset(u_tokens) or u_tokens.issubset(d_tokens):
                         return u
-            for u in doc_users_qs:
-                u_fullname = u.get_full_name() or ''
-                u_username = u.username or ''
-                u_tokens = _clean(f"{u_fullname} {u_username}")
-                if d_tokens.intersection(u_tokens):
-                    return u
 
     return None
 
@@ -553,14 +574,18 @@ def is_user_patient_treating_doctor(user, patient_reg_no):
     # Compare doc_name
     if doc_name and doc_name != "Not Assigned":
         import re
-        def _clean(s):
-            s = re.sub(r'\b(dr\.?|doctor)\b', '', s, flags=re.IGNORECASE)
+        def _clean_words(s):
+            s = re.sub(r'\b(dr\.?|doctor|bams|md|ms|ayu|ayurveda|mbbs|vaidya)\b', '', s, flags=re.IGNORECASE)
             s = re.sub(r'[^a-zA-Z0-9\s]', '', s)
-            return set(s.lower().split())
-        d_tokens = _clean(doc_name)
-        u_tokens = _clean(f"{user_fullname} {user_username}")
-        if d_tokens and u_tokens and (d_tokens.issubset(u_tokens) or u_tokens.issubset(d_tokens) or d_tokens.intersection(u_tokens)):
-            return True
+            return [w.lower() for w in s.split() if w.strip()]
+        d_words = _clean_words(doc_name)
+        u_words = _clean_words(f"{user_fullname} {user_username}")
+        # Primary given name (first name) must match!
+        if d_words and u_words and d_words[0] == u_words[0]:
+            d_tokens = set(d_words)
+            u_tokens = set(u_words)
+            if d_tokens == u_tokens or d_tokens.issubset(u_tokens) or u_tokens.issubset(d_tokens):
+                return True
 
     # 3. Check hospital DB doctor patients lookup
     try:
@@ -623,13 +648,23 @@ def is_user_patient_treating_doctor(user, patient_reg_no):
     return False
 
 
-def toggle_doctor_patient_allowance(doctor_user, patient_reg_no, patient_name='', notes='', room_no=None):
+def toggle_doctor_patient_allowance(
+    doctor_user,
+    patient_reg_no,
+    patient_name='',
+    notes='',
+    room_no=None,
+    allow_preferred=None,
+    allow_unpreferred=None,
+    action=None
+):
     """
-    Toggle preferred therapist allowance for a patient by the doctor.
+    Toggle or update preferred and/or unpreferred therapist allowance for a patient by the doctor.
     Enforces:
-      1. Treating Doctor: Only the particular treating doctor can give access to allow therapist preferences!
-      2. All patients belonging to the treating doctor are eligible (not restricted to VIP/Repeated).
-      3. Monthly quota: At most 5 patients per doctor per calendar month!
+      1. Treating Doctor: Only the particular treating doctor can give access!
+      2. Quota: The WHOLE doctor team shares a total hospital quota (default 5) per month ONLY for PREFERRED allowances.
+      3. Unpreferred allowances are UNLIMITED and do NOT consume quota.
+      4. If an allowed patient gets discharged, the quota is retained (released back to the pool).
     """
     now = timezone.now()
     year = now.year
@@ -639,27 +674,10 @@ def toggle_doctor_patient_allowance(doctor_user, patient_reg_no, patient_name=''
     with transaction.atomic():
         # Check existing allowance
         allowance = DoctorPatientPreferenceAllowance.objects.filter(
-            doctor=doctor_user,
             patient_reg_no=reg_str,
             year=year,
             month=month
         ).first()
-
-        if allowance and allowance.is_active:
-            # Revoke/Deactivate allowance (allowed if this user granted it or is treating doctor)
-            allowance.is_active = False
-            allowance.save()
-
-            # Deactivate any linked roster
-            PatientPreferredTherapistRoster.objects.filter(patient_reg_no=reg_str).update(is_active=False)
-
-            quota = DoctorPatientPreferenceAllowance.get_monthly_quota(doctor_user, year, month)
-            return {
-                'status': 'revoked',
-                'is_allowed': False,
-                'message': f'Allowance revoked for patient {reg_str}.',
-                'quota': quota
-            }
 
         # 1. ENFORCE: Only the particular treating doctor can give access!
         if not is_user_patient_treating_doctor(doctor_user, reg_str):
@@ -672,22 +690,52 @@ def toggle_doctor_patient_allowance(doctor_user, patient_reg_no, patient_name=''
                 'quota': quota
             }
 
-        # 2. Activating allowance (all patients of treating doctor are eligible). First verify quota!
-        used_count = DoctorPatientPreferenceAllowance.objects.filter(
-            doctor=doctor_user,
-            year=year,
-            month=month,
-            is_active=True
-        ).count()
+        # Determine target state
+        if action == 'revoke':
+            target_pref = False
+            target_unpref = False
+        elif allow_preferred is None and allow_unpreferred is None:
+            # Legacy toggle
+            if allowance and allowance.is_active:
+                target_pref = False
+                target_unpref = False
+            else:
+                target_pref = True
+                target_unpref = True
+        else:
+            target_pref = bool(allow_preferred)
+            target_unpref = bool(allow_unpreferred)
 
-        quota_limit = get_doctor_monthly_quota()
-        if used_count >= quota_limit:
-            quota = DoctorPatientPreferenceAllowance.get_monthly_quota(doctor_user, year, month)
+        # Handle complete revocation
+        if not target_pref and not target_unpref:
+            if allowance and allowance.is_active:
+                allowance.is_active = False
+                allowance.allow_preferred = False
+                allowance.allow_unpreferred = False
+                allowance.save()
+                PatientPreferredTherapistRoster.objects.filter(patient_reg_no=reg_str).update(is_active=False)
+
+            quota = DoctorPatientPreferenceAllowance.get_monthly_quota(year=year, month=month)
             return {
-                'status': 'quota_exceeded',
-                'error': f'Monthly quota limit of {quota_limit} patients reached for {now.strftime("%B %Y")}. You cannot mark more than {quota_limit} patients.',
+                'status': 'revoked',
+                'is_allowed': False,
+                'allow_preferred': False,
+                'allow_unpreferred': False,
+                'message': f'Allowance revoked for patient {reg_str}.',
                 'quota': quota
             }
+
+        # If activating preferred allowance, verify shared team quota
+        if target_pref:
+            already_has_pref = bool(allowance and allowance.is_active and allowance.allow_preferred)
+            if not already_has_pref:
+                quota = DoctorPatientPreferenceAllowance.get_monthly_quota(year=year, month=month)
+                if quota['remaining'] <= 0:
+                    return {
+                        'status': 'quota_exceeded',
+                        'error': f'Monthly quota limit of {quota["limit"]} patients reached for {now.strftime("%B %Y")}. Shared doctor team quota of {quota["limit"]} preferred patients reached across all doctors.',
+                        'quota': quota
+                    }
 
         doc_code = ''
         if hasattr(doctor_user, 'doctor_profile') and doctor_user.doctor_profile:
@@ -702,7 +750,12 @@ def toggle_doctor_patient_allowance(doctor_user, patient_reg_no, patient_name=''
                 patient_name = ps.pat_name or ''
 
         if allowance:
+            allowance.doctor = doctor_user
+            allowance.doctor_code = doc_code or allowance.doctor_code
+            allowance.doctor_name = doc_name or allowance.doctor_name
             allowance.is_active = True
+            allowance.allow_preferred = target_pref
+            allowance.allow_unpreferred = target_unpref
             allowance.patient_name = patient_name or allowance.patient_name
             allowance.notes = notes or allowance.notes
             allowance.save()
@@ -716,17 +769,32 @@ def toggle_doctor_patient_allowance(doctor_user, patient_reg_no, patient_name=''
                 year=year,
                 month=month,
                 is_active=True,
+                allow_preferred=target_pref,
+                allow_unpreferred=target_unpref,
                 notes=notes
             )
 
         # Reactivate roster if one existed previously
         PatientPreferredTherapistRoster.objects.filter(patient_reg_no=reg_str).update(is_active=True, allowance=allowance)
 
-        quota = DoctorPatientPreferenceAllowance.get_monthly_quota(doctor_user, year, month)
+        quota = DoctorPatientPreferenceAllowance.get_monthly_quota(year=year, month=month)
+        types = []
+        if target_pref:
+            types.append("Preferred Therapists")
+        if target_unpref:
+            types.append("Unpreferred Exclusions")
+        allowed_str = " and ".join(types) if types else "Preferences"
+
+        msg = f'Patient {reg_str} is now allowed for {allowed_str}.'
+        if target_pref:
+            msg += ' Quota will be deducted once preferred therapists are assigned by the scheduling team.'
+
         return {
             'status': 'allowed',
             'is_allowed': True,
-            'message': f'Patient {reg_str} is now allowed for preferred therapist assignment.',
+            'allow_preferred': target_pref,
+            'allow_unpreferred': target_unpref,
+            'message': msg,
             'quota': quota
         }
 
@@ -788,6 +856,12 @@ def save_preferred_therapist_roster(patient_reg_no, therapist_codes=None, primar
     if overlap:
         raise ValidationError(f"Therapist(s) {', '.join(overlap)} cannot be marked as both Preferred and Unpreferred.")
 
+    # Check separate permissions granted by treating doctor
+    if clean_codes and not allowance.allow_preferred:
+        raise ValidationError("Treating doctor has not granted Preferred Therapist allowance for this patient (only Unpreferred Therapist exclusion is allowed).")
+    if clean_unpref and not allowance.allow_unpreferred:
+        raise ValidationError("Treating doctor has not granted Unpreferred Therapist exclusion allowance for this patient.")
+
     # 3. Validate preferred therapists if specified
     p_code = ''
     s_code = ''
@@ -799,6 +873,23 @@ def save_preferred_therapist_roster(patient_reg_no, therapist_codes=None, primar
         max_pref = get_max_preferred_therapists()
         if len(clean_codes) > max_pref:
             raise ValidationError(f"A maximum of {max_pref} preferred therapists can be marked (selected: {len(clean_codes)}).")
+
+        # Quota check: Quota is minused ONLY when scheduling team assigns preferred therapists!
+        existing_roster = PatientPreferredTherapistRoster.objects.filter(
+            patient_reg_no=reg_str,
+            is_active=True
+        ).first()
+        already_had_preferred = bool(
+            existing_roster and existing_roster.therapist_codes and len(existing_roster.therapist_codes) > 0
+        )
+        if not already_had_preferred:
+            quota = DoctorPatientPreferenceAllowance.get_monthly_quota()
+            if quota['remaining'] <= 0:
+                raise ValidationError(
+                    f"Hospital shared quota limit of {quota['limit']} preferred patients reached for this month. "
+                    f"All {quota['limit']} slots have already been assigned therapists by the scheduling team. "
+                    f"Cannot assign preferred therapists for this patient until an active patient is discharged or quota is released."
+                )
 
         p_code = str(primary_bathing_code).strip() if primary_bathing_code else ''
         s_code = str(secondary_bathing_code).strip() if secondary_bathing_code else ''
