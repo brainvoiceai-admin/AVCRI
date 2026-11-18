@@ -52,5 +52,5 @@ path('prescription/<int:prescription_id>/add-item/', views.add_prescription_item
   path('time_slots/', views.time_slots, name='time_slots'),
   path('unit_numbers/', views.unit_numbers, name='unit_numbers'),
   path('allocation-result/', views.allocation_result_view, name='allocation_result'),
-
+  path('api/update-patient-vip/', views.update_patient_vip_status_api, name='update_patient_vip_status_api'),
 ]

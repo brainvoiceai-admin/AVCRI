@@ -4,7 +4,8 @@ from .models import (
     PrescriptionScope, UnitNo, TherapyMaster, TherapyGroup, ItemMaster, ItemGroup, SlotMaster,
     TherapistMaster, TherapistLeaveMaster, TherapistGrade, StayingRoom,
     ShiftMaster, ShiftSlotMapping, TherapistShiftMapping,
-    NurseTreatmentMaster, NurseMaster, TherapistDeputation, TherapistOnCallLog
+    NurseTreatmentMaster, NurseMaster, TherapistDeputation, TherapistOnCallLog,
+    TherapistPreferenceConfig
 )
 
 @admin.register(Procured)
@@ -303,3 +304,21 @@ class TherapistOnCallLogAdmin(admin.ModelAdmin):
     list_filter = ['status', 'created_at']
     search_fields = ['therapist__therapist_name', 'therapist__therapist_code', 'remarks']
     ordering = ['-created_at']
+
+
+@admin.register(TherapistPreferenceConfig)
+class TherapistPreferenceConfigAdmin(admin.ModelAdmin):
+    list_display = ['name', 'doctor_monthly_quota', 'max_preferred_therapists', 'is_active', 'updated_at']
+    list_filter = ['is_active', 'created_at']
+    search_fields = ['name']
+    list_editable = ['doctor_monthly_quota', 'max_preferred_therapists', 'is_active']
+    ordering = ['-updated_at']
+    fieldsets = (
+        ('Preference & Quota Limits', {
+            'fields': ('name', 'doctor_monthly_quota', 'max_preferred_therapists')
+        }),
+        ('Status', {
+            'fields': ('is_active',)
+        }),
+    )
+

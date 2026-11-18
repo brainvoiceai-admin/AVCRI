@@ -1129,6 +1129,26 @@ def process_reassignments(target_date=None, dry_run=True, max_daily_normal=5, ma
         if not old:
             continue
         
+        # VIP Protection Rule:
+        # If a patient is marked as VIP, their treatment should be excluded from the rescheduling process,
+        # ensuring the assigned preferred therapist and time slot remain unchanged.
+        pat_ident = None
+        if hasattr(booking, 'visit') and booking.visit:
+            alloc_pat = getattr(booking.visit, 'patient', None)
+            if alloc_pat:
+                pat_ident = getattr(alloc_pat, 'pat_reg_no', None) or alloc_pat
+        if not pat_ident and getattr(booking, 'patient_id', None):
+            pat_ident = booking.patient_id
+
+        try:
+            from Sheduling.vip_service import is_patient_vip
+            if is_patient_vip(booking) or (pat_ident and is_patient_vip(pat_ident)):
+                print(f"   [VIP EXCLUSION] Booking {booking.pk} belongs to VIP patient {pat_ident or getattr(booking, 'patient_id', '')} ({getattr(booking, 'patient_name', '')}) - "
+                      f"EXCLUDED from rescheduling process. Assigned preferred therapist and time slot remain unchanged.")
+                continue
+        except Exception as vip_err:
+            logger.debug("Error checking VIP status in reschedule: %s", vip_err)
+
         print(f"   [{idx}/{len(affected)}] Processing Booking {booking.pk}: Therapist {getattr(old, 'therapist_code', old.pk)} on emergency leave")
         
         # Get therapist grade properly

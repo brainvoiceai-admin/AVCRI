@@ -169,6 +169,64 @@ def _refresh_patient_staying_rooms(reg_nos):
         return {'success': False, 'updated': 0, 'error': str(e)}
 
 
+def is_internal_treatment(therapy_code='', therapy_name='', ext_int=''):
+    """
+    Check if a therapy is an internal treatment (which does not require a time slot).
+    Internal treatments include:
+      1. Explicitly marked ext_int == 'Internal'
+      2. Nurse treatments (from NurseTreatmentMaster or codes starting with NT)
+      3. Known zero-therapist treatments (Snehapaanam, Virechanam, Mathra Vasthi, etc.)
+      4. Therapies configured with total_no_of_therapist == 0 or therapy_category == 'Internal'
+    """
+    if (ext_int or '').strip().lower() == 'internal':
+        return True
+
+    code_str = str(therapy_code or '').strip().upper()
+    name_str = str(therapy_name or '').strip().lower()
+
+    if code_str.startswith('NT'):
+        return True
+
+    try:
+        from .nurse_allocation import is_nurse_treatment
+        if is_nurse_treatment(code_str, therapy_name) is not None:
+            return True
+    except Exception:
+        pass
+
+    KNOWN_ZERO_THERAPIST_CODES = {
+        'THEB114', 'THEB128', 'THEB236', 'THEB037', 'THEB155',
+        'THEB210', 'THEB145', 'THEB237', 'THEB238', 'THEB226',
+        'THEB235', 'THEB225'
+    }
+    if code_str in KNOWN_ZERO_THERAPIST_CODES:
+        return True
+
+    if any(k in name_str for k in [
+        'snehapaan', 'snehapan', 'virechanam', 'mathra vasthi', 'matra vasthi',
+        'uttaravasthi', 'uttara vasthi', 'putapakam', 'tharpanam', 'tarpanam',
+        'jalouka', 'jalooka', 'kshalanam', 'dhoopanam', 'no tpt'
+    ]):
+        return True
+
+    if TherapyMaster is not None and (therapy_code or therapy_name):
+        try:
+            tm = None
+            if therapy_code:
+                tm = TherapyMaster.objects.filter(therapy_code=therapy_code).first()
+            if not tm and therapy_name:
+                tm = TherapyMaster.objects.filter(therapy_name__iexact=therapy_name).first()
+            if tm:
+                if (getattr(tm, 'therapy_category', '') or '').strip().lower() == 'internal':
+                    return True
+                if getattr(tm, 'total_no_of_therapist', 1) == 0:
+                    return True
+        except Exception:
+            pass
+
+    return False
+
+
 def get_room_sort_key(room_no):
     """
     Returns a sort key tuple (priority, number, original_string) based on hospital room hierarchy:
@@ -694,9 +752,10 @@ def therapy_entry(request):
                         date__lte=parse_date(cancel_to),
                     ).update(status='CANCELLED')
 
-                    # 2) Also cancel therapist bookings for this patient (safety net for rows without visit FK)
+                    # 2) Also cancel therapist bookings for this patient (safety net for orphaned rows without visit FK)
                     TB.objects.filter(
                         patient_id=allocation.patient.id,
+                        visit__isnull=True,
                         date__gte=parse_date(cancel_from),
                         date__lte=parse_date(cancel_to),
                     ).update(status='CANCELLED')
@@ -711,6 +770,7 @@ def therapy_entry(request):
                     # 4) Also cancel orphaned room bookings for this patient (no explicit therapy/visit)
                     RB.objects.filter(
                         patient_id=allocation.patient.id,
+                        therapy__isnull=True,
                         date__gte=parse_date(cancel_from),
                         date__lte=parse_date(cancel_to),
                     ).update(status='CANCELLED')
@@ -1058,6 +1118,29 @@ def therapy_entry(request):
                     except Exception:
                         new_timeslot = None
 
+                # Enforce mandatory timeslot for non-internal therapies on update
+                eff_ext_int = (payload.get('ext_int') or allocation.ext_int or '').strip()
+                is_internal = is_internal_treatment(
+                    therapy_code=allocation.therapy_code,
+                    therapy_name=allocation.therapy_name,
+                    ext_int=eff_ext_int
+                )
+                from .nurse_allocation import is_nurse_treatment
+                is_nurse = is_nurse_treatment(allocation.therapy_code, allocation.therapy_name) is not None
+
+                if not is_internal and not is_nurse:
+                    eff_slot = new_timeslot if ts_val else allocation.timeslot
+                    if ('slot' in payload or 'timeslot' in payload) and not payload.get('slot') and not payload.get('timeslot'):
+                        return JsonResponse({
+                            'error': 'timeslot_required',
+                            'message': 'Time slot is mandatory for this treatment. Please select a time slot.'
+                        }, status=400)
+                    if not eff_slot:
+                        return JsonResponse({
+                            'error': 'timeslot_required',
+                            'message': 'Time slot is mandatory for this treatment. Please select a time slot.'
+                        }, status=400)
+
                 # Update therapy details
                 therapy_name_changed = False
                 items_changed = False
@@ -1088,6 +1171,13 @@ def therapy_entry(request):
                     allocation.ext_int = payload['ext_int'] or ''
                 if 'vamanam_timing' in payload:
                     allocation.vamanam_timing = payload.get('vamanam_timing') or None
+                if 'is_vip' in payload:
+                    vip_bool = bool(payload['is_vip'])
+                    allocation.is_vip = vip_bool
+                    Booking.objects.filter(allocation=allocation).update(is_vip=vip_bool)
+                    if hasattr(allocation, 'patient') and allocation.patient:
+                        from .vip_service import set_patient_vip_status
+                        set_patient_vip_status(allocation.patient.pat_reg_no, vip_bool, allocation.patient.pat_name)
                 if 'is_wheelchair' in payload:
                     wc_bool = bool(payload['is_wheelchair'])
                     allocation.is_wheelchair = wc_bool
@@ -1762,6 +1852,25 @@ def therapy_entry(request):
                 except Exception:
                     pass
 
+                # Enforce mandatory timeslot for non-internal therapies
+                ext_int_val = (payload.get('ext_int') or '').strip()
+                therapy_code_val = payload.get('therapy_code') or ''
+                therapy_name_val = payload.get('therapy_name') or ''
+
+                is_internal = is_internal_treatment(
+                    therapy_code=therapy_code_val,
+                    therapy_name=therapy_name_val,
+                    ext_int=ext_int_val
+                )
+                from .nurse_allocation import is_nurse_treatment
+                is_nurse = is_nurse_treatment(therapy_code_val, therapy_name_val) is not None
+
+                if not is_internal and not is_nurse and not timeslot_obj:
+                    return JsonResponse({
+                        'error': 'timeslot_required',
+                        'message': 'Time slot is mandatory for this treatment. Please select a time slot.'
+                    }, status=400)
+
                 # room resolution (optional)
                 room_obj = None
                 room_no = payload.get('room_no') or payload.get('room')
@@ -1828,6 +1937,43 @@ def therapy_entry(request):
                         ps.is_wheelchair = True
                         ps.save(update_fields=['is_wheelchair', 'updated_at'])
 
+                    from .vip_service import set_patient_vip_status, is_patient_vip
+                    is_vip_val = bool(payload.get('is_vip', False)) or is_patient_vip(ps)
+                    if 'is_vip' in payload:
+                        set_patient_vip_status(ps.pat_reg_no, is_vip_val, ps.pat_name)
+                    if is_vip_val and not getattr(ps, 'is_vip', False):
+                        ps.is_vip = True
+                        ps.save(update_fields=['is_vip', 'updated_at'])
+
+                    # Deduplication guard: prevent duplicate allocations on rapid double-clicks
+                    recent_window = timezone.now() - timedelta(seconds=15)
+                    dup_alloc = TherapyAllocation.objects.filter(
+                        patient=ps,
+                        therapy_code=payload.get('therapy_code'),
+                        from_date=fdate,
+                        to_date=tdate,
+                        timeslot=timeslot_obj,
+                        created_at__gte=recent_window
+                    ).exclude(status='cancelled').first()
+
+                    if dup_alloc:
+                        dup_bookings = Booking.objects.filter(allocation=dup_alloc)
+                        sc = {'allocated': 0, 'failed': 0, 'draft': 0, 'cancelled': 0}
+                        dsm = {}
+                        for b in dup_bookings:
+                            sc[b.status] = sc.get(b.status, 0) + 1
+                            dsm[b.date.isoformat()] = b.status
+                        return JsonResponse({
+                            'status': 'ok',
+                            'allocation_id': dup_alloc.pk,
+                            'bookings_created': dup_bookings.count(),
+                            'status_counts': sc,
+                            'status_summary': {k: v for k, v in sc.items() if v > 0},
+                            'date_status_map': dsm,
+                            'overall_status': dup_alloc.status,
+                            'deduplicated': True
+                        }, status=200)
+
                     alloc = TherapyAllocation.objects.create(
                         patient=ps,
                         therapy_code=payload.get('therapy_code'),
@@ -1837,6 +1983,7 @@ def therapy_entry(request):
                         room=room_obj,
                         vamanam_timing=payload.get('vamanam_timing') or None,
                         is_wheelchair=is_wheelchair_val,
+                        is_vip=is_vip_val,
                         bathing_therapists_count=bathing_therapists_count_val,
                         items_groups=items_groups,
                         oil_class=payload.get('oil_class') or payload.get('oil_class_id') or '',
@@ -1876,6 +2023,7 @@ def therapy_entry(request):
                             room=room_obj,
                             vamanam_timing=payload.get('vamanam_timing') or None,
                             is_wheelchair=is_wheelchair_val,
+                            is_vip=is_vip_val,
                             bathing_therapists_count=bathing_therapists_count_val,
                             status=booking_status,
                             snapshot_therapy_name=(alloc.therapy_name or '')[:255]
@@ -2160,6 +2308,7 @@ def therapy_entry(request):
                     'therapy_code': getattr(t, 'therapy_code', ''),
                     'therapy_name': getattr(t, 'therapy_name', ''),
                     'therapy_category': getattr(t, 'therapy_category', '') or '',
+                    'total_no_of_therapist': getattr(t, 'total_no_of_therapist', 1),
                     'is_vamanam': is_vam,
                     'is_vasthi': is_vsth
                 })
@@ -2629,6 +2778,7 @@ def therapy_entry(request):
                     'slot': slot_value,
                     'vamanam_timing': getattr(a, 'vamanam_timing', '') or '',
                     'is_wheelchair': bool(getattr(a, 'is_wheelchair', False)),
+                    'is_vip': bool(getattr(a, 'is_vip', False) or (a.patient and getattr(a.patient, 'is_vip', False))),
                     'bathing_therapists_count': getattr(a, 'bathing_therapists_count', 0) or 0,
                     'oil_class': a.oil_class,
                     'usage': a.usage,
@@ -4110,22 +4260,35 @@ def allocate_therapy(request):
     nurse_treatment = is_nurse_treatment(payload.get("therapy_code"), payload.get("therapy_name"))
     
     # timeslot: accept either slot_number (int) or "HH:MM" string
-    # For nurse treatments, timeslot is optional (they work entire day)
+    # For nurse treatments and internal treatments, timeslot is optional
     timeslot = None
-    if not nurse_treatment:  # Only require timeslot for regular therapies
+    ext_int_val = (payload.get('ext_int') or '').strip()
+    is_internal = is_internal_treatment(
+        therapy_code=payload.get("therapy_code"),
+        therapy_name=payload.get("therapy_name"),
+        ext_int=ext_int_val
+    )
+
+    if not nurse_treatment and not is_internal:  # Only require timeslot for regular non-internal therapies
         if payload.get("timeslot_slot_number") is not None:
             try:
                 timeslot = SlotMaster.objects.get(slot_number=int(payload["timeslot_slot_number"]), is_active=True)  # Use local master table
             except SlotMaster.DoesNotExist:
                 return JsonResponse({"error": "Slot with that slot_number not found"}, status=400)
-        elif payload.get("timeslot"):
-            t = parse_time_hhmm(payload["timeslot"])
+        elif payload.get("timeslot") or payload.get("slot"):
+            slot_str = payload.get("timeslot") or payload.get("slot")
+            t = parse_time_hhmm(slot_str)
             if not t:
                 return JsonResponse({"error": "Invalid timeslot format, expected HH:MM"}, status=400)
             timeslot = SlotMaster.objects.filter(slot_time=t, is_active=True).first()  # Use local master table
             if not timeslot:
                 # Optionally create a timeslot if you want; for safety we require an existing one:
                 return JsonResponse({"error": "TimeSlot with that slot_time not found"}, status=400)
+        else:
+            return JsonResponse({
+                "error": "timeslot_required",
+                "message": "Time slot is mandatory for this treatment. Please select a time slot."
+            }, status=400)
     else:
         # For nurse treatments, timeslot is optional - use if provided, but not required
         if payload.get("timeslot_slot_number") is not None:
@@ -4259,6 +4422,13 @@ def allocate_therapy(request):
     if changed:
         patient_snapshot.save(update_fields=["pat_name","pat_age","pat_sex","pat_ref_id","updated_at"])
 
+    from .vip_service import set_patient_vip_status, is_patient_vip
+    is_vip_val = bool(payload.get('is_vip', False)) or is_patient_vip(patient_snapshot)
+    if 'is_vip' in payload:
+        set_patient_vip_status(patient_snapshot.pat_reg_no, is_vip_val, patient_snapshot.pat_name)
+    if is_vip_val and not getattr(patient_snapshot, 'is_vip', False):
+        patient_snapshot.is_vip = True
+        patient_snapshot.save(update_fields=['is_vip', 'updated_at'])
 
     # start atomic transaction for entire allocation (all-or-nothing)
     try:
@@ -4271,6 +4441,7 @@ def allocate_therapy(request):
                 ext_int=ext_int,
                 timeslot=timeslot,
                 room=room,
+                is_vip=is_vip_val,
                 items_groups=items_groups,
                 oil_class=oil_class,
                 usage=usage,
@@ -4341,6 +4512,7 @@ def allocate_therapy(request):
                     date=d,
                     timeslot=timeslot,
                     room=room,
+                    is_vip=is_vip_val,
                     status=initial_status,
                     snapshot_therapy_name=(allocation.therapy_name or '')[:255]
                 )
@@ -4549,17 +4721,21 @@ def scheduling_dashboard(request):
             bookings__failure_reason='Patient Inactive'
         ).distinct().select_related('patient', 'room', 'timeslot').prefetch_related('bookings__assignments__therapist')
         
-        # Filter out therapies with zero therapist requirements
+        # Filter out therapies with zero therapist requirements and exclude VIP patients from rescheduling
         from reshedule import therapist_requirements
-        failed_allocations = [alloc for alloc in failed_allocations if therapist_requirements(alloc).get("total", 1) > 0]
+        from .vip_service import is_patient_vip
+        failed_allocations = [alloc for alloc in failed_allocations if therapist_requirements(alloc).get("total", 1) > 0 and not is_patient_vip(alloc)]
         # Failed bookings for this date (one row per booking) so template can show exact failure_reason
         failed_bookings = list(
             Booking.objects.filter(date=filter_date, status='failed')
             .exclude(failure_reason='Patient Inactive')
+            .exclude(is_vip=True)
+            .exclude(allocation__is_vip=True)
+            .exclude(allocation__patient__is_vip=True)
             .select_related('allocation__patient', 'allocation', 'timeslot', 'room')
             .order_by('allocation_id', 'timeslot_id')
         )
-        failed_bookings = [b for b in failed_bookings if therapist_requirements(b.allocation).get("total", 1) > 0]
+        failed_bookings = [b for b in failed_bookings if therapist_requirements(b.allocation).get("total", 1) > 0 and not is_patient_vip(b)]
         
         # Scheduled: show allocations that have scheduled bookings for this date
         scheduled_allocations = TherapyAllocation.objects.filter(
@@ -4583,9 +4759,10 @@ def scheduling_dashboard(request):
             bookings__failure_reason='Patient Inactive'
         ).distinct().select_related('patient', 'room', 'timeslot').prefetch_related('bookings__assignments__therapist')
         
-        # Filter out therapies with zero therapist requirements
+        # Filter out therapies with zero therapist requirements and exclude VIP patients
         from reshedule import therapist_requirements
-        failed_allocations = [alloc for alloc in failed_allocations if therapist_requirements(alloc).get("total", 1) > 0]
+        from .vip_service import is_patient_vip
+        failed_allocations = [alloc for alloc in failed_allocations if therapist_requirements(alloc).get("total", 1) > 0 and not is_patient_vip(alloc)]
         failed_bookings = []  # No date filter: show allocations only, reason column will show "—"
         scheduled_allocations = TherapyAllocation.objects.filter(
             bookings__status='scheduled'
@@ -4804,12 +4981,14 @@ def user_therapy_entry_dashboard(request):
     failed_allocations = base_failed.filter(
         bookings__status='failed'
     ).distinct().select_related('patient', 'room', 'timeslot', 'allocated_by').prefetch_related('bookings__assignments__therapist')
-    failed_allocations = [a for a in failed_allocations if therapist_requirements(a).get("total", 1) > 0]
+    from .vip_service import is_patient_vip
+    failed_allocations = [a for a in failed_allocations if therapist_requirements(a).get("total", 1) > 0 and not is_patient_vip(a)]
 
     booking_failed = Booking.objects.filter(allocation__allocated_by=current_user, date=failed_date, status='failed')
     failed_bookings = booking_failed.select_related(
         'allocation__patient', 'allocation', 'timeslot', 'room', 'allocation__allocated_by'
     ).prefetch_related('assignments__therapist').order_by('-date', '-created_at')
+    failed_bookings = [b for b in failed_bookings if not is_patient_vip(b)]
 
     # ---- Scheduled: filter by scheduled_date only ----
     base_scheduled = TherapyAllocation.objects.filter(allocated_by=current_user).filter(
@@ -5024,7 +5203,8 @@ def doctor_patients_therapy_dashboard(request):
     failed_allocations = base_failed.filter(bookings__status='failed').distinct().select_related(
         'patient', 'room', 'timeslot', 'allocated_by'
     ).prefetch_related('bookings__assignments__therapist')
-    failed_allocations = [a for a in failed_allocations if therapist_requirements(a).get('total', 1) > 0]
+    from .vip_service import is_patient_vip
+    failed_allocations = [a for a in failed_allocations if therapist_requirements(a).get('total', 1) > 0 and not is_patient_vip(a)]
 
     booking_failed = Booking.objects.filter(
         booking_patient_q, date=failed_date, status='failed'
@@ -5032,6 +5212,7 @@ def doctor_patients_therapy_dashboard(request):
     failed_bookings = booking_failed.select_related(
         'allocation__patient', 'allocation', 'timeslot', 'room', 'allocation__allocated_by'
     ).prefetch_related('assignments__therapist').order_by('-date', '-created_at')
+    failed_bookings = [b for b in failed_bookings if not is_patient_vip(b)]
 
     base_scheduled = TherapyAllocation.objects.filter(patient_q).filter(
         Q(from_date__lte=scheduled_date) & Q(to_date__gte=scheduled_date)
@@ -5664,6 +5845,8 @@ def get_therapy_data_api(request):
                 
                 if status_filter in ('failed', 'all'):
                     base_bookings_qs = base_bookings_qs.exclude(failure_reason='Patient Inactive')
+                if status_filter == 'failed':
+                    base_bookings_qs = base_bookings_qs.exclude(is_vip=True).exclude(allocation__is_vip=True).exclude(allocation__patient__is_vip=True)
                 
                 # For 'allocated' status (used by prescription scheduling PDF), we also want to
                 # include zero‑therapist (non‑nurse) therapies. They are auto-scheduled as 'scheduled'
@@ -5676,6 +5859,10 @@ def get_therapy_data_api(request):
                     bookings = list(base_bookings_qs)
                 else:
                     bookings = list(base_bookings_qs)
+
+                if status_filter == 'failed':
+                    from .vip_service import is_patient_vip
+                    bookings = [b for b in bookings if not is_patient_vip(b)]
                 
                 # Hide inactive patient treatments in active views (draft, scheduled, allocated).
                 # Use shared logic `final_allocation.is_patient_active()` which covers both:
@@ -5935,6 +6122,7 @@ def get_therapy_data_api(request):
                         'oil_class': booking.allocation.oil_class or '',
                         'vamanam_timing': getattr(booking, 'vamanam_timing', None) or getattr(booking.allocation, 'vamanam_timing', None) or '',
                         'is_wheelchair': bool(getattr(booking, 'is_wheelchair', False) or getattr(booking.allocation, 'is_wheelchair', False)),
+                        'is_vip': bool(getattr(booking, 'is_vip', False) or getattr(booking.allocation, 'is_vip', False) or (booking.allocation.patient and getattr(booking.allocation.patient, 'is_vip', False))),
                         'bathing_therapists_count': getattr(booking, 'bathing_therapists_count', 0) or getattr(booking.allocation, 'bathing_therapists_count', 0),
                         'therapists_required': therapy_req.get('total', 0),
                     }
@@ -6214,6 +6402,12 @@ def reschedule_options_api(request):
         if not allocation:
             return JsonResponse({'error': 'Therapy allocation not found'}, status=404)
         
+        from .vip_service import is_patient_vip
+        if is_patient_vip(allocation):
+            return JsonResponse({
+                'error': 'VIP patient treatments are excluded from the rescheduling process to ensure their preferred therapist and assigned slot remain unchanged.'
+            }, status=400)
+        
         target_date = parse_date(date)
         if not target_date:
             return JsonResponse({'error': 'Invalid date format. Use YYYY-MM-DD.'}, status=400)
@@ -6459,6 +6653,13 @@ def reschedule_therapy_api(request):
         try:
             # Get allocation - don't require status='failed' since failed is determined by booking status
             allocation = TherapyAllocation.objects.get(id=allocation_id)
+            
+            from .vip_service import is_patient_vip
+            if is_patient_vip(allocation):
+                return JsonResponse({
+                    'success': False,
+                    'error': 'VIP patient treatments are excluded from the rescheduling process to ensure their preferred therapist and assigned slot remain unchanged.'
+                }, status=400)
             
             # Parse date
             target_date = parse_date(date)
@@ -6712,11 +6913,18 @@ def reschedule_all_failed_api(request):
         # Get failed bookings for the target date and order them per patient by therapy start date,
         # so that for the same patient, earlier-started therapies get continuity first.
         # Exclude bookings failed due to 'Patient Inactive' — they are not reschedulable.
+        # Exclude VIP patient bookings — VIP treatments are excluded from rescheduling.
         failed_bookings_qs = Booking.objects.filter(
             date=filter_date,
             status='failed'
         ).exclude(
             failure_reason='Patient Inactive'
+        ).exclude(
+            is_vip=True
+        ).exclude(
+            allocation__is_vip=True
+        ).exclude(
+            allocation__patient__is_vip=True
         ).select_related('allocation', 'allocation__patient')
 
         # Refresh staying rooms for all patients involved before rescheduling (keep algorithm unchanged)
@@ -6746,8 +6954,11 @@ def reschedule_all_failed_api(request):
             })
         
         from collections import defaultdict
+        from .vip_service import is_patient_vip
         by_patient = defaultdict(list)
         for b in failed_bookings_qs:
+            if is_patient_vip(b):
+                continue
             pat = getattr(b.allocation, 'patient', None)
             pid = getattr(pat, 'id', None)
             by_patient[pid].append(b)
@@ -8428,6 +8639,40 @@ def scheduling_audit_logs_data_api(request):
     except Exception as e:
         import traceback
         traceback.print_exc()
+        return JsonResponse({'error': str(e)}, status=500)
+
+
+@csrf_exempt
+def update_patient_vip_status_api(request):
+    """
+    API endpoint to update a patient's VIP status.
+    Accepts POST with JSON:
+      {
+        "patient_reg_no": "...",
+        "is_vip": true/false,
+        "patient_name": "..." (optional)
+      }
+    """
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST method required'}, status=405)
+
+    try:
+        try:
+            payload = json.loads(request.body.decode('utf-8') or '{}')
+        except Exception:
+            return JsonResponse({'error': 'Invalid JSON'}, status=400)
+
+        patient_reg_no = payload.get('patient_reg_no')
+        if not patient_reg_no:
+            return JsonResponse({'error': 'patient_reg_no is required'}, status=400)
+
+        is_vip = bool(payload.get('is_vip', False))
+        patient_name = payload.get('patient_name', '')
+
+        from .vip_service import set_patient_vip_status
+        result = set_patient_vip_status(patient_reg_no, is_vip, patient_name)
+        return JsonResponse(result)
+    except Exception as e:
         return JsonResponse({'error': str(e)}, status=500)
 
 

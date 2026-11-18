@@ -15,6 +15,7 @@ class PatientSnapshot(models.Model):
     pat_room_no = models.CharField(max_length=50, blank=True, null=True)
     pat_ref_id = models.CharField(max_length=100, blank=True, null=True)
     is_wheelchair = models.BooleanField(default=False, verbose_name="Wheelchair Patient")
+    is_vip = models.BooleanField(default=False, verbose_name="VIP Patient")
     source_updated_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -54,6 +55,7 @@ class TherapyAllocation(models.Model):
     locked = models.BooleanField(default=False)
     vamanam_timing = models.CharField(max_length=30, blank=True, null=True, verbose_name="Vamanam Timing", help_text="Configured Vamanam timing (e.g. 05:00 AM, 05:30 AM)")
     is_wheelchair = models.BooleanField(default=False, verbose_name="Wheelchair Patient", help_text="True if patient requires a wheelchair accessible treatment room")
+    is_vip = models.BooleanField(default=False, verbose_name="VIP Patient")
     bathing_therapists_count = models.PositiveIntegerField(
         default=0,
         verbose_name="Bathing Therapists Required",
@@ -102,6 +104,7 @@ class Booking(models.Model):
     room = models.ForeignKey(TreatmentRoom, null=True, blank=True, on_delete=models.SET_NULL)
     vamanam_timing = models.CharField(max_length=30, blank=True, null=True, verbose_name="Vamanam Timing")
     is_wheelchair = models.BooleanField(default=False, verbose_name="Wheelchair Patient")
+    is_vip = models.BooleanField(default=False, verbose_name="VIP Patient")
     bathing_therapists_count = models.PositiveIntegerField(
         default=0,
         verbose_name="Bathing Therapists Required",
@@ -905,8 +908,12 @@ class SchedulingAuditLog(models.Model):
 # -----------------------------------------------------------------------------
 class DoctorPatientPreferenceAllowance(models.Model):
     """
-    Tracks patients marked/allowed by a doctor to receive preferred therapist assignment.
-    Quota rule: A doctor can only mark/allow up to 5 patients per calendar month.
+    Tracks patients marked/allowed by a doctor to receive preferred therapist assignment
+    and/or unpreferred therapist exclusion.
+    Shared Quota rule: The whole doctor team shares a total hospital quota (default 5)
+    per calendar month ONLY for PREFERRED therapist allowances.
+    Unpreferred therapist allowances are UNLIMITED and do not consume quota.
+    When an allowed patient is discharged, their quota is retained (released back to pool).
     """
     doctor = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -920,6 +927,8 @@ class DoctorPatientPreferenceAllowance(models.Model):
     year = models.PositiveSmallIntegerField(db_index=True)
     month = models.PositiveSmallIntegerField(db_index=True)
     is_active = models.BooleanField(default=True, db_index=True)
+    allow_preferred = models.BooleanField(default=True, db_index=True, help_text="Allows scheduling preferred therapists (counts towards shared quota)")
+    allow_unpreferred = models.BooleanField(default=True, db_index=True, help_text="Allows scheduling unpreferred therapist exclusions (unlimited)")
     notes = models.TextField(blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -932,23 +941,82 @@ class DoctorPatientPreferenceAllowance(models.Model):
 
     def __str__(self):
         status = "Active" if self.is_active else "Revoked"
-        return f"{self.doctor_name or self.doctor.username} -> {self.patient_name or self.patient_reg_no} ({self.month}/{self.year}) [{status}]"
+        types = []
+        if self.allow_preferred:
+            types.append("Preferred")
+        if self.allow_unpreferred:
+            types.append("Unpreferred")
+        type_str = "+".join(types) if types else "None"
+        return f"{self.doctor_name or self.doctor.username} -> {self.patient_name or self.patient_reg_no} ({self.month}/{self.year}) [{status} - {type_str}]"
 
     @classmethod
-    def get_monthly_quota(cls, doctor_user, year=None, month=None):
+    def get_monthly_quota(cls, doctor_user=None, year=None, month=None):
         from django.utils import timezone
         now = timezone.now()
         y = year or now.year
         m = month or now.month
-        used = cls.objects.filter(doctor=doctor_user, year=y, month=m, is_active=True).count()
-        limit = 5
-        remaining = max(0, limit - used)
+
+        # Shared Quota for the ENTIRE doctor team:
+        # Count only active allowances with allow_preferred=True across all doctors
+        active_prefs = list(cls.objects.filter(year=y, month=m, is_active=True, allow_preferred=True))
+
+        # Check discharge status for each:
+        # If patient is discharged (is_patient_active == False), retain/release the quota!
+        valid_used = 0
+        try:
+            from final_allocation import is_patient_active
+        except Exception:
+            is_patient_active = None
+
+        for al in active_prefs:
+            is_active_pat = True
+            if is_patient_active:
+                try:
+                    is_active_pat = is_patient_active(al.patient_reg_no)
+                except Exception:
+                    is_active_pat = True
+
+            if not is_active_pat:
+                # Patient was discharged -> auto-deactivate allowance to retain quota permanently
+                al.is_active = False
+                orig_notes = al.notes or ''
+                if '[Discharge Quota Retained]' not in orig_notes:
+                    al.notes = (orig_notes + ' [Discharge Quota Retained]').strip()
+                al.save(update_fields=['is_active', 'notes', 'updated_at'])
+                # Also deactivate linked roster
+                PatientPreferredTherapistRoster.objects.filter(patient_reg_no=al.patient_reg_no).update(is_active=False)
+                continue
+
+            # Quota is minused ONLY if preferred therapist(s) have been assigned by scheduling team
+            roster = PatientPreferredTherapistRoster.objects.filter(
+                patient_reg_no=al.patient_reg_no,
+                is_active=True
+            ).first()
+            if not roster:
+                digits = ''.join(ch for ch in str(al.patient_reg_no) if ch.isdigit())
+                if digits:
+                    roster = PatientPreferredTherapistRoster.objects.filter(
+                        patient_reg_no=digits,
+                        is_active=True
+                    ).first()
+
+            if roster and roster.therapist_codes and len(roster.therapist_codes) > 0:
+                valid_used += 1
+
+        try:
+            from masters.models import get_doctor_monthly_quota
+            limit = get_doctor_monthly_quota()
+        except Exception:
+            limit = 5
+
+        remaining = max(0, limit - valid_used)
         return {
-            'used': used,
+            'used': valid_used,
             'limit': limit,
             'remaining': remaining,
             'year': y,
-            'month': m
+            'month': m,
+            'scope': 'team'
         }
 
 
@@ -970,6 +1038,10 @@ class PatientPreferredTherapistRoster(models.Model):
     # Therapists in pool (up to 7)
     therapists = models.ManyToManyField('masters.TherapistMaster', related_name='preferred_rosters', blank=True)
     therapist_codes = models.JSONField(default=list, blank=True, help_text="List of up to 7 therapist codes")
+
+    # Unpreferred therapists (excluded completely)
+    unpreferred_therapists = models.ManyToManyField('masters.TherapistMaster', related_name='unpreferred_rosters', blank=True)
+    unpreferred_therapist_codes = models.JSONField(default=list, blank=True, help_text="List of unpreferred therapist codes to exclude completely")
     
     # 1 Primary Bathing Therapist
     primary_bathing_therapist = models.ForeignKey(
@@ -1003,4 +1075,6 @@ class PatientPreferredTherapistRoster(models.Model):
         verbose_name_plural = "Patient Preferred Therapist Rosters"
 
     def __str__(self):
-        return f"Roster for {self.patient_name or self.patient_reg_no} ({len(self.therapist_codes)} therapists)"
+        pref_cnt = len(self.therapist_codes) if self.therapist_codes else 0
+        unpref_cnt = len(self.unpreferred_therapist_codes) if self.unpreferred_therapist_codes else 0
+        return f"Roster for {self.patient_name or self.patient_reg_no} ({pref_cnt} pref, {unpref_cnt} unpref)"

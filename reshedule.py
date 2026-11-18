@@ -1862,13 +1862,20 @@ def allocate_therapists(date, time_slot, therapy_requirements, last_therapists=N
             if needed <= 0:
                 break
 
-            candidates_qs = TherapistMaster.objects.filter(
-                therapist_grade__name__iexact=current_grade_search, 
-                is_active=True,
-                is_helping_therapist=is_helping_flag
-            )
             if preferred_roster_info:
-                candidates_qs = candidates_qs.filter(therapist_code__in=preferred_roster_info['therapist_codes_set'])
+                # If patient has preferred roster, candidate pool is strictly the roster.
+                # Do NOT filter by is_helping_therapist because roster therapists are explicitly assigned.
+                candidates_qs = TherapistMaster.objects.filter(
+                    therapist_grade__name__iexact=current_grade_search, 
+                    is_active=True,
+                    therapist_code__in=preferred_roster_info['therapist_codes_set']
+                )
+            else:
+                candidates_qs = TherapistMaster.objects.filter(
+                    therapist_grade__name__iexact=current_grade_search, 
+                    is_active=True,
+                    is_helping_therapist=is_helping_flag
+                )
             if exclusion_set:
                 candidates_qs = candidates_qs.exclude(therapist_code__in=exclusion_set)
 
@@ -2007,12 +2014,64 @@ def allocate_therapists(date, time_slot, therapy_requirements, last_therapists=N
     # -----------------------
     # STEP 1 – Normal Scheduling (First Attempt: consider only is_helping_therapist=False)
     # -----------------------
+    # PREFERRED ROSTER: Designate & Allocate Bathing Therapist FIRST
+    if preferred_roster_info and needs_bathing:
+        current_bath_allocated = sum(1 for a in allocated if getattr(a, 'is_bathing_therapist', False))
+        if current_bath_allocated < num_bathing_needed:
+            try:
+                from Sheduling.preferred_therapist_service import pick_bathing_therapist_from_roster
+                picked_bath, bath_role = pick_bathing_therapist_from_roster(preferred_roster_info, date, time_slot)
+                if picked_bath and picked_bath not in allocated:
+                    bath_avail = True
+                    if therapist_on_leave(picked_bath):
+                        bath_avail = False
+                    elif shift_filter_enabled and picked_bath.id in mapped_ids and picked_bath.id not in eligible_ids:
+                        bath_avail = False
+                    elif TherapistBooking.objects.filter(therapist=picked_bath, date=date, time_slot=time_slot, status='BOOKED').exists():
+                        bath_avail = False
+                    elif desired_gender and get_therapist_gender(picked_bath) != desired_gender:
+                        bath_avail = False
+                    elif exclusion_set and picked_bath.therapist_code in exclusion_set:
+                        bath_avail = False
+                    elif not can_assign_therapist(picked_bath, allow_extra=False) and not can_assign_therapist(picked_bath, allow_extra=True):
+                        bath_avail = False
+
+                    if bath_avail:
+                        allocated.append(picked_bath)
+                        bath_grade = get_therapist_grade_name(picked_bath)
+                        if grade_map.get(bath_grade, 0) > 0:
+                            grade_map[bath_grade] -= 1
+                        else:
+                            sub_hierarchy = {
+                                "Trainee Therapist": ["Junior Therapist", "Senior Therapist", "Super Senior Therapist"],
+                                "Junior Therapist": ["Senior Therapist", "Super Senior Therapist", "Trainee Therapist"],
+                                "Senior Therapist": ["Super Senior Therapist", "Junior Therapist", "Trainee Therapist"],
+                                "Super Senior Therapist": ["Senior Therapist", "Junior Therapist", "Trainee Therapist"]
+                            }
+                            decremented = False
+                            for g in sub_hierarchy.get(bath_grade, []):
+                                if grade_map.get(g, 0) > 0:
+                                    grade_map[g] -= 1
+                                    decremented = True
+                                    break
+                            if not decremented:
+                                for g in ["Trainee Therapist", "Junior Therapist", "Senior Therapist", "Super Senior Therapist"]:
+                                    if grade_map.get(g, 0) > 0:
+                                        grade_map[g] -= 1
+                                        break
+                        print(f"[RESCHEDULE PREFERRED ROSTER] Pre-allocated designated bathing therapist {picked_bath.therapist_code} ({bath_role}, {bath_grade})")
+            except Exception as e:
+                print(f"[RESCHEDULE PREFERRED ROSTER] Error resolving designated bathing therapist: {e}")
+
     if last_therapists:
         for code in last_therapists:
             try:
                 t = TherapistMaster.objects.get(therapist_code=code, is_active=True)
-                if getattr(t, 'is_helping_therapist', False):
+                if t in allocated:
                     continue
+                if getattr(t, 'is_helping_therapist', False):
+                    if not (preferred_roster_info and t.therapist_code in preferred_roster_info['therapist_codes_set']):
+                        continue
             except TherapistMaster.DoesNotExist:
                 continue
 
@@ -2485,15 +2544,26 @@ def allocate_therapists_with_grade_substitution(date, time_slot, therapy_require
             if needed <= 0:
                 break
             
-            candidates_qs = TherapistMaster.objects.filter(therapist_grade__name=search_grade, is_active=True, is_helping_therapist=False)
+            _p_roster = None
             if patient_id:
                 try:
                     from Sheduling.preferred_therapist_service import get_active_preferred_roster
                     _p_roster = get_active_preferred_roster(patient_id)
-                    if _p_roster:
-                        candidates_qs = candidates_qs.filter(therapist_code__in=_p_roster['therapist_codes_set'])
                 except Exception:
-                    pass
+                    _p_roster = None
+
+            if _p_roster:
+                candidates_qs = TherapistMaster.objects.filter(
+                    therapist_grade__name=search_grade, 
+                    is_active=True,
+                    therapist_code__in=_p_roster['therapist_codes_set']
+                )
+            else:
+                candidates_qs = TherapistMaster.objects.filter(
+                    therapist_grade__name=search_grade, 
+                    is_active=True, 
+                    is_helping_therapist=False
+                )
             if exclusion_set:
                 candidates_qs = candidates_qs.exclude(therapist_code__in=exclusion_set)
             
@@ -2782,6 +2852,13 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
     # If ALL previous therapists are available together, assign them as a group
     previous_bathing_therapist = None
     previous_therapist_group = []  # All previous therapists (bathing + non-bathing) from most recent day
+    pref_roster = None
+    if patient_id:
+        try:
+            from Sheduling.preferred_therapist_service import get_active_preferred_roster
+            pref_roster = get_active_preferred_roster(patient_id)
+        except Exception:
+            pref_roster = None
     try:
         from Patient.models import TherapistBooking
         from masters.models import TherapistMaster, TherapistLeaveMaster, EmergencyLeave, is_therapist_omitted_for_treatment
@@ -2815,7 +2892,8 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
                     if not getattr(prev_booking.therapist, 'is_active', True):
                         continue
                     if getattr(prev_booking.therapist, 'is_helping_therapist', False):
-                        continue
+                        if not (pref_roster and prev_booking.therapist.therapist_code in pref_roster.get('therapist_codes_set', set())):
+                            continue
                     therapist_id = prev_booking.therapist.pk
                     if therapist_id not in seen_therapist_ids:
                         previous_therapist_masters.append(prev_booking.therapist)
@@ -3503,9 +3581,22 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
             # Exclude senior therapist from bathing assignment
             bathing_candidates = [t for t in assigned_therapists if t != senior_therapist and getattr(t, 'is_bathing_therapist', False)]
             
-            # CRITICAL: Prefer bath_assigned_from_pass1 first (from start of therapy), then previous_bathing_therapist.
-            # So Dhara & Pizichil use start-of-therapy bathing therapist when available, not just previous day.
-            if bath_assigned_from_pass1 and bath_assigned_from_pass1 in bathing_candidates:
+            # PREFERRED ROSTER: Priority for roster's designated bathing therapist
+            roster_bath = None
+            if patient_id and needs_bath_flag:
+                try:
+                    from Sheduling.preferred_therapist_service import get_active_preferred_roster, pick_bathing_therapist_from_roster
+                    _r_info = get_active_preferred_roster(patient_id)
+                    if _r_info:
+                        roster_bath, _ = pick_bathing_therapist_from_roster(_r_info, date, canonical_slot)
+                except Exception:
+                    roster_bath = None
+
+            # CRITICAL: Prefer roster_bath first, then bath_assigned_from_pass1, then previous_bathing_therapist.
+            if roster_bath and roster_bath in bathing_candidates:
+                bath_assigned = roster_bath
+                print(f"[RESCHEDULE] [OK] Special treatment: Using preferred roster bathing therapist {bath_assigned.therapist_code} (senior {senior_therapist.therapist_code} excluded)")
+            elif bath_assigned_from_pass1 and bath_assigned_from_pass1 in bathing_candidates:
                 bath_assigned = bath_assigned_from_pass1
                 print(f"[RESCHEDULE] [OK] Special treatment: Using PASS 1 bathing therapist {bath_assigned.therapist_code} (from start of therapy, senior {senior_therapist.therapist_code} excluded)")
             elif previous_bathing_therapist and previous_bathing_therapist in bathing_candidates:
@@ -3613,10 +3704,20 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
                     }, False, reason)
         else:
             # Not special treatment or no senior therapist - use normal logic
-            # CRITICAL: Prioritize PASS 1 bathing therapist (first-day / from-start-of-therapy) over previous day's.
-            # PASS 1 implements "from start of therapy" - when original therapist returns from leave, do not override with yesterday's replacement.
-            # Priority order: 1) bath_assigned_from_pass1, 2) previous_bathing_therapist, 3) first from list
-            if bath_assigned_from_pass1 and bath_assigned_from_pass1 in assigned_therapists:
+            roster_bath = None
+            if patient_id and needs_bath_flag:
+                try:
+                    from Sheduling.preferred_therapist_service import get_active_preferred_roster, pick_bathing_therapist_from_roster
+                    _r_info = get_active_preferred_roster(patient_id)
+                    if _r_info:
+                        roster_bath, _ = pick_bathing_therapist_from_roster(_r_info, date, canonical_slot)
+                except Exception:
+                    roster_bath = None
+
+            if roster_bath and roster_bath in assigned_therapists:
+                bath_assigned = roster_bath
+                print(f"[RESCHEDULE] [OK] Using preferred roster bathing therapist {bath_assigned.therapist_code} for patient {patient_id}")
+            elif bath_assigned_from_pass1 and bath_assigned_from_pass1 in assigned_therapists:
                 # PASS 1 chose the first-day bathing therapist - keep them
                 bath_assigned = bath_assigned_from_pass1
                 print(f"[RESCHEDULE] [OK] Using PASS 1 bathing therapist {bath_assigned.therapist_code} for patient {patient_id} (first-day continuity)")
@@ -4656,14 +4757,25 @@ def assign_continuity_therapists_pass1(booking, allocation, target_date, locked_
     
     # Assign bathing therapist if needed
     if needs_bath_flag and assigned_continuity:
-        if previous_bathing_therapist and previous_bathing_therapist in assigned_continuity:
-            result['bath_assigned'] = previous_bathing_therapist
-        else:
-            # Find first bathing therapist from assigned list
-            for t in assigned_continuity:
-                if getattr(t, 'is_bathing_therapist', False):
-                    result['bath_assigned'] = t
-                    break
+        if preferred_roster_info:
+            try:
+                from Sheduling.preferred_therapist_service import pick_bathing_therapist_from_roster
+                picked_bath, _ = pick_bathing_therapist_from_roster(preferred_roster_info, target_date, slot_master)
+                if picked_bath and picked_bath in assigned_continuity:
+                    result['bath_assigned'] = picked_bath
+                    print(f"[RESCHEDULE PASS1] [OK] Using preferred roster bathing therapist: {picked_bath.therapist_code}")
+            except Exception as e:
+                print(f"[RESCHEDULE PASS1] Error resolving preferred roster bathing therapist: {e}")
+
+        if not result.get('bath_assigned'):
+            if previous_bathing_therapist and previous_bathing_therapist in assigned_continuity:
+                result['bath_assigned'] = previous_bathing_therapist
+            else:
+                # Find first bathing therapist from assigned list
+                for t in assigned_continuity:
+                    if getattr(t, 'is_bathing_therapist', False):
+                        result['bath_assigned'] = t
+                        break
     
     # Check for senior tag assignment (special treatments)
     # CRITICAL: Senior therapist MUST be different from bathing therapist

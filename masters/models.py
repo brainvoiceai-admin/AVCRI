@@ -1454,3 +1454,67 @@ def group_omissions_by_request(omissions_queryset):
 
     return list(groups.values())
 
+
+class TherapistPreferenceConfig(models.Model):
+    """Configuration master for patient therapist preferences and doctor team quotas."""
+    name = models.CharField(max_length=100, default="Default Configuration", verbose_name="Configuration Name")
+    doctor_monthly_quota = models.PositiveIntegerField(
+        default=5,
+        verbose_name="Doctor Team Monthly Quota (Hospital-Wide)",
+        help_text="Shared monthly quota for the entire doctor team: maximum number of patient preferred therapist allowances that can be granted across all doctors per calendar month"
+    )
+    max_preferred_therapists = models.PositiveIntegerField(
+        default=7,
+        verbose_name="Max Preferred Therapists Limit",
+        help_text="Maximum number of preferred therapists that can be marked for a patient"
+    )
+    is_active = models.BooleanField(default=True, verbose_name="Active")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Created At")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="Updated At")
+
+    class Meta:
+        verbose_name = "Therapist Preference Configuration"
+        verbose_name_plural = "Therapist Preference Configurations"
+
+    def __str__(self):
+        return f"{self.name} (Team Quota: {self.doctor_monthly_quota}, Max Pref: {self.max_preferred_therapists})"
+
+    @property
+    def team_monthly_quota(self):
+        return self.doctor_monthly_quota
+
+    @property
+    def hospital_monthly_quota(self):
+        return self.doctor_monthly_quota
+
+    @classmethod
+    def get_config(cls):
+        config = cls.objects.filter(is_active=True).first()
+        if not config:
+            config = cls.objects.create(
+                name="Default Configuration",
+                doctor_monthly_quota=5,
+                max_preferred_therapists=7,
+                is_active=True
+            )
+        return config
+
+
+def get_doctor_monthly_quota():
+    try:
+        return TherapistPreferenceConfig.get_config().doctor_monthly_quota
+    except Exception:
+        return 5
+
+
+def get_team_monthly_quota():
+    return get_doctor_monthly_quota()
+
+
+def get_max_preferred_therapists():
+    try:
+        return TherapistPreferenceConfig.get_config().max_preferred_therapists
+    except Exception:
+        return 7
+
+

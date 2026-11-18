@@ -14,7 +14,10 @@ from django.db.models import Q
 from django.core.exceptions import ValidationError
 
 from authentication.decorators import role_required
-from masters.models import TherapistMaster, TherapistLeaveMaster, get_staying_room_display_number
+from masters.models import (
+    TherapistMaster, TherapistLeaveMaster, get_staying_room_display_number,
+    get_doctor_monthly_quota, get_max_preferred_therapists
+)
 from Patient.models import Repeated_Visitors
 from .models import (
     PatientSnapshot,
@@ -49,14 +52,16 @@ def doctor_patients_vip_repeated_view(request):
       - VIP Patients
       - Repeated Patients
       - Allowed for Preferred Therapist
-    Shows monthly quota (max 5 allowed patients per calendar month) and remaining quota.
+    Shows shared doctor team monthly quota (default 5 allowed patients across all doctors per calendar month)
+    and remaining quota.
     """
     now = timezone.now()
-    quota = DoctorPatientPreferenceAllowance.get_monthly_quota(request.user, now.year, now.month)
+    quota = DoctorPatientPreferenceAllowance.get_monthly_quota(year=now.year, month=now.month)
 
     context = {
         'dashboard_title': 'My Patients — VIP & Preferred Therapist Allocation',
         'quota': quota,
+        'doctor_monthly_quota': quota['limit'],
         'current_month_name': now.strftime("%B %Y"),
         'user_role': getattr(request.user, 'role', ''),
         'doctor_name': request.user.get_full_name() or request.user.username,
@@ -139,20 +144,20 @@ def get_doctor_patients_vip_repeated_api(request):
             return True
         if not is_doctor:
             return False
-        # 1. Direct doctcode check
+        # 1. Direct doctcode check: if patient has assigned doctor in hospital DB
         if doctcode:
             dc_clean = str(doctcode).split('.')[0].strip()
             if dc_clean in doc_codes:
                 return True
             if dc_clean.isdigit() and str(int(dc_clean)) in doc_codes:
                 return True
-        # 2. Check if linked in local DB (prescriptions, allocations, allowances)
+            # Assigned to a different doctor in hospital DB -> strictly exclude!
+            return False
+
+        # 2. Fallback only if doctcode is absent: check local records or treating doctor resolution
         if reg_no in my_patient_regs:
             return True
-        # 3. Fallback only if doctcode is absent
-        if not doctcode:
-            return is_user_patient_treating_doctor(request.user, reg_no)
-        return False
+        return is_user_patient_treating_doctor(request.user, reg_no)
 
     # 2. Bulk fetch active admitted IP patients and their doctors from therapy_db
     active_hospital_regs = {}
@@ -180,6 +185,27 @@ def get_doctor_patients_vip_repeated_api(request):
                 active_doc_cache[code_key] = d_name
                 if code_key.isdigit():
                     active_doc_cache[str(int(code_key))] = d_name
+
+            # Resolve logged-in doctor's hospital doctor codes from active_doc_cache by exact first name
+            if is_doctor and not is_admin:
+                full_name = (request.user.get_full_name() or request.user.username or '').strip()
+                import re
+                clean_str = re.sub(r'\b(dr\.?|doctor|bams|md|ms|ayu|ayurveda|mbbs|vaidya)\b', '', full_name, flags=re.IGNORECASE)
+                clean_str = re.sub(r'[^a-zA-Z0-9\s]', '', clean_str)
+                u_words = [w.lower() for w in clean_str.split() if w.strip()]
+                u_primary = u_words[0] if u_words else ''
+                if u_primary and len(u_primary) >= 3:
+                    for dc_key, doc_disp in list(active_doc_cache.items()):
+                        if not doc_disp:
+                            continue
+                        d_clean = re.sub(r'\b(dr\.?|doctor|bams|md|ms|ayu|ayurveda|mbbs|vaidya)\b', '', doc_disp, flags=re.IGNORECASE)
+                        d_clean = re.sub(r'[^a-zA-Z0-9\s]', '', d_clean)
+                        d_words = [w.lower() for w in d_clean.split() if w.strip()]
+                        if d_words and d_words[0] == u_primary:
+                            doc_codes.add(dc_key)
+                            if dc_key.isdigit():
+                                doc_codes.add(str(int(dc_key)))
+                                doc_codes.add(dc_key.zfill(4))
     except Exception:
         # Hospital DB offline / unreachable (falls back to active PatientSnapshot)
         pass
@@ -259,7 +285,7 @@ def get_doctor_patients_vip_repeated_api(request):
     if is_doctor and not is_admin and my_patient_regs:
         missing_my_regs = my_patient_regs - seen_regs
         for mr in missing_my_regs:
-            if is_patient_active(mr):
+            if is_patient_active(mr) and patient_belongs_to_doctor(mr):
                 ps = PatientSnapshot.objects.filter(pat_reg_no=mr).first()
                 if ps and ps.pat_room_no and str(ps.pat_room_no).upper() not in ['N/A', 'NONE', '0', '']:
                     seen_regs.add(mr)
@@ -268,11 +294,10 @@ def get_doctor_patients_vip_repeated_api(request):
                     seen_regs.add(mr)
                     patient_snapshots.append(ps or PatientSnapshot(pat_reg_no=mr, pat_name=f"Patient {mr}", pat_room_no='Active'))
 
-    # Preload active allowances for this month
+    # Preload active allowances for this month (across doctor team)
     active_allowances = {
         a.patient_reg_no: a
         for a in DoctorPatientPreferenceAllowance.objects.filter(
-            doctor=request.user,
             year=now.year,
             month=now.month,
             is_active=True
@@ -290,6 +315,8 @@ def get_doctor_patients_vip_repeated_api(request):
     vip_count = 0
     cottage_repeated_count = 0
     allowed_count = 0
+    preferred_allowed_count = 0
+    unpreferred_allowed_count = 0
     total_active_count = 0
 
     for ps in patient_snapshots:
@@ -342,12 +369,23 @@ def get_doctor_patients_vip_repeated_api(request):
         if is_cottage_repeated:
             cottage_repeated_count += 1
 
-        is_allowed = reg_no in active_allowances
+        al_obj = active_allowances.get(reg_no)
+        is_allowed = bool(al_obj and al_obj.is_active)
+        allow_preferred = bool(al_obj and al_obj.is_active and al_obj.allow_preferred)
+        allow_unpreferred = bool(al_obj and al_obj.is_active and al_obj.allow_unpreferred)
+
         if is_allowed:
             allowed_count += 1
+        if allow_preferred:
+            preferred_allowed_count += 1
+        if allow_unpreferred:
+            unpreferred_allowed_count += 1
 
-        has_roster = reg_no in rosters_map
-        roster_therapist_count = len(rosters_map[reg_no].therapist_codes) if has_roster else 0
+        roster_obj = rosters_map.get(reg_no)
+        has_roster = bool(roster_obj and (roster_obj.therapist_codes or roster_obj.unpreferred_therapist_codes))
+        roster_pref_count = len(roster_obj.therapist_codes) if roster_obj and roster_obj.therapist_codes else 0
+        roster_unpref_count = len(roster_obj.unpreferred_therapist_codes) if roster_obj and roster_obj.unpreferred_therapist_codes else 0
+        roster_therapist_count = roster_pref_count
 
         # Filter criteria:
         if filter_type == 'VIP' and not is_vip:
@@ -355,6 +393,10 @@ def get_doctor_patients_vip_repeated_api(request):
         if filter_type in ['REPEATED', 'COTTAGE_REPEATED'] and not is_cottage_repeated:
             continue
         if filter_type == 'ALLOWED' and not is_allowed:
+            continue
+        if filter_type == 'PREFERRED' and not allow_preferred:
+            continue
+        if filter_type == 'UNPREFERRED' and not allow_unpreferred:
             continue
 
         # Search filter
@@ -397,9 +439,13 @@ def get_doctor_patients_vip_repeated_api(request):
             'is_eligible': is_eligible,
             'total_visits': total_visits,
             'is_allowed': is_allowed,
+            'allow_preferred': allow_preferred,
+            'allow_unpreferred': allow_unpreferred,
             'has_roster': has_roster,
             'roster_therapist_count': roster_therapist_count,
-            'allowance_id': active_allowances[reg_no].id if is_allowed else None,
+            'roster_pref_count': roster_pref_count,
+            'roster_unpref_count': roster_unpref_count,
+            'allowance_id': al_obj.id if is_allowed else None,
             'treating_doctor_name': doc_name if (doc_name and doc_name != 'Not Assigned') else (f"Dr. {doc_code}" if doc_code else 'Not Assigned'),
             'treating_doctor_code': doc_code or '',
             'is_treating_doctor': is_treating_doctor,
@@ -411,7 +457,7 @@ def get_doctor_patients_vip_repeated_api(request):
     end_idx = start_idx + page_size
     paged_items = patient_items[start_idx:end_idx]
 
-    quota = DoctorPatientPreferenceAllowance.get_monthly_quota(request.user, now.year, now.month)
+    quota = DoctorPatientPreferenceAllowance.get_monthly_quota(year=now.year, month=now.month)
 
     return JsonResponse({
         'status': 'success',
@@ -426,6 +472,8 @@ def get_doctor_patients_vip_repeated_api(request):
             'vip': vip_count,
             'repeated': cottage_repeated_count,
             'allowed': allowed_count,
+            'preferred': preferred_allowed_count,
+            'unpreferred': unpreferred_allowed_count,
         }
     })
 
@@ -438,8 +486,10 @@ def get_doctor_patients_vip_repeated_api(request):
 @require_http_methods(["POST"])
 def toggle_doctor_patient_allowance_api(request):
     """
-    API for Doctor to mark / unmark a patient as allowed for preferred therapist assignment.
-    Enforces the monthly quota limit of 5 patients per month.
+    API for Doctor to mark / unmark a patient as allowed for preferred therapist assignment
+    and/or unpreferred therapist exclusion.
+    Enforces shared doctor team monthly quota of 5 patients ONLY for preferred allowances.
+    Unpreferred allowances are unlimited.
     """
     try:
         data = json.loads(request.body.decode('utf-8'))
@@ -450,6 +500,9 @@ def toggle_doctor_patient_allowance_api(request):
     patient_name = data.get('patient_name', '')
     notes = data.get('notes', '')
     room_no = data.get('room_no', None)
+    allow_preferred = data.get('allow_preferred')
+    allow_unpreferred = data.get('allow_unpreferred')
+    action = data.get('action')
 
     if not patient_reg_no:
         return JsonResponse({'status': 'error', 'message': 'Patient registration number is required'}, status=400)
@@ -459,7 +512,10 @@ def toggle_doctor_patient_allowance_api(request):
         patient_reg_no=patient_reg_no,
         patient_name=patient_name,
         notes=notes,
-        room_no=room_no
+        room_no=room_no,
+        allow_preferred=allow_preferred,
+        allow_unpreferred=allow_unpreferred,
+        action=action
     )
 
     if result.get('status') == 'not_treating_doctor':
@@ -489,6 +545,8 @@ def toggle_doctor_patient_allowance_api(request):
     return JsonResponse({
         'status': 'success',
         'is_allowed': result.get('is_allowed'),
+        'allow_preferred': result.get('allow_preferred'),
+        'allow_unpreferred': result.get('allow_unpreferred'),
         'message': result.get('message'),
         'quota': result.get('quota')
     })
@@ -514,6 +572,7 @@ def scheduling_preferred_therapists_view(request):
         'roster_count': roster_count,
         'pending_count': max(0, allowed_count - roster_count),
         'user_role': getattr(request.user, 'role', ''),
+        'max_preferred_therapists': get_max_preferred_therapists(),
     }
     return render(request, 'dashboards/scheduling/preferred_therapist_assignment.html', context)
 
@@ -549,6 +608,24 @@ def get_allowed_patients_preferred_therapists_api(request):
         age = ps.pat_age if ps and ps.pat_age else '—'
         gender = ps.pat_sex if ps and ps.pat_sex else '—'
 
+        if not gender or gender == '—' or not age or age == '—':
+            try:
+                from MySql_Data_pull.models import Registration
+                d = ''.join(ch for ch in str(reg_no) if ch.isdigit())
+                if d:
+                    h_r = Registration.objects.using('therapy_db').filter(pat_reg_no=int(d)).values('pat_sex', 'pat_age').first()
+                    if h_r:
+                        if not gender or gender == '—':
+                            gender = h_r.get('pat_sex') or '—'
+                        if not age or age == '—':
+                            age = h_r.get('pat_age') or '—'
+            except Exception:
+                pass
+
+        from final_allocation import resolve_desired_gender
+        raw_desired = resolve_desired_gender(gender if gender != '—' else None, age if age != '—' else None)
+        desired_gender = raw_desired.capitalize() if raw_desired else 'Male'
+
         vip_rep = resolve_patient_vip_and_repeated(reg_no, room_no=ps.pat_room_no if ps else None)
         is_vip = vip_rep['is_vip']
         is_repeated = vip_rep['is_repeated']
@@ -557,7 +634,7 @@ def get_allowed_patients_preferred_therapists_api(request):
         total_visits = vip_rep['total_visits']
 
         roster = PatientPreferredTherapistRoster.objects.filter(patient_reg_no=reg_no, is_active=True).first()
-        is_configured = bool(roster and roster.therapist_codes)
+        is_configured = bool(roster and (roster.therapist_codes or roster.unpreferred_therapist_codes))
 
         if is_configured:
             configured_count += 1
@@ -625,11 +702,41 @@ def get_allowed_patients_preferred_therapists_api(request):
                 sb_week_off = ", ".join(l.leave_day_name for l in sb_leaves if l.leave_day_name) or "None"
                 sb_name = sb_obj.therapist_name
 
+            # Unpreferred therapists info
+            unpref_codes = roster.unpreferred_therapist_codes or []
+            unpref_objs = {t.therapist_code: t for t in TherapistMaster.objects.filter(therapist_code__in=unpref_codes).select_related('therapist_grade').prefetch_related('leaves')}
+            unpreferred_detail = []
+            for uc in unpref_codes:
+                u_obj = unpref_objs.get(uc)
+                if u_obj:
+                    u_leaves = list(u_obj.leaves.filter(is_active=True))
+                    u_week_off_str = ", ".join(l.leave_day_name for l in u_leaves if l.leave_day_name) or "None"
+                    unpreferred_detail.append({
+                        'code': u_obj.therapist_code,
+                        'name': u_obj.therapist_name,
+                        'grade': u_obj.therapist_grade.name if u_obj.therapist_grade else "Therapist",
+                        'gender': u_obj.therapist_gender,
+                        'is_bathing': u_obj.is_bathing_therapist,
+                        'week_off': u_week_off_str,
+                    })
+                else:
+                    unpreferred_detail.append({
+                        'code': uc,
+                        'name': uc,
+                        'grade': '—',
+                        'gender': '—',
+                        'is_bathing': False,
+                        'week_off': 'None',
+                    })
+
             roster_data = {
                 'id': roster.id,
                 'therapist_codes': codes,
                 'therapist_count': len(codes),
                 'therapists_detail': therapists_detail,
+                'unpreferred_codes': unpref_codes,
+                'unpreferred_count': len(unpref_codes),
+                'unpreferred_detail': unpreferred_detail,
                 'primary_bathing_code': roster.primary_bathing_code,
                 'primary_bathing_name': pb_name,
                 'primary_bathing_week_off': pb_week_off,
@@ -646,6 +753,7 @@ def get_allowed_patients_preferred_therapists_api(request):
             'room_no': room,
             'age': age,
             'gender': gender,
+            'desired_gender': desired_gender,
             'is_vip': is_vip,
             'is_repeated': is_repeated,
             'is_cottage': is_cottage,
@@ -653,6 +761,8 @@ def get_allowed_patients_preferred_therapists_api(request):
             'total_visits': total_visits,
             'doctor_name': doc_display,
             'allowed_date': al.created_at.strftime('%d/%m/%Y') if al.created_at else '—',
+            'allow_preferred': al.allow_preferred,
+            'allow_unpreferred': al.allow_unpreferred,
             'is_configured': is_configured,
             'roster': roster_data,
         })
@@ -728,6 +838,7 @@ def save_patient_preferred_roster_api(request):
 
     patient_reg_no = data.get('patient_reg_no')
     therapist_codes = data.get('therapist_codes', [])
+    unpreferred_codes = data.get('unpreferred_codes', data.get('unpreferred_therapist_codes', []))
     primary_bathing_code = data.get('primary_bathing_code')
     secondary_bathing_code = data.get('secondary_bathing_code')
     notes = data.get('notes', '')
@@ -742,19 +853,21 @@ def save_patient_preferred_roster_api(request):
             primary_bathing_code=primary_bathing_code,
             secondary_bathing_code=secondary_bathing_code,
             configured_by=request.user,
-            notes=notes
+            notes=notes,
+            unpreferred_codes=unpreferred_codes
         )
     except ValidationError as ve:
         return JsonResponse({'status': 'error', 'message': str(ve.message if hasattr(ve, 'message') else ve)}, status=400)
     except Exception as e:
-        return JsonResponse({'status': 'error', 'message': f'Error saving preferred therapist roster: {str(e)}'}, status=500)
+        return JsonResponse({'status': 'error', 'message': f'Error saving therapist preferences: {str(e)}'}, status=500)
 
     return JsonResponse({
         'status': 'success',
-        'message': f'Preferred therapist roster saved successfully for patient {patient_reg_no} ({len(roster.therapist_codes)} therapists).',
+        'message': f'Therapist preferences saved successfully for patient {patient_reg_no} ({len(roster.therapist_codes)} preferred, {len(roster.unpreferred_therapist_codes)} excluded).',
         'roster_id': roster.id,
         'patient_reg_no': roster.patient_reg_no,
         'therapist_count': len(roster.therapist_codes),
+        'unpreferred_count': len(roster.unpreferred_therapist_codes),
         'primary_bathing_code': roster.primary_bathing_code,
         'secondary_bathing_code': roster.secondary_bathing_code,
     })

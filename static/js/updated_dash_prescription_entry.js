@@ -91,7 +91,37 @@ $(function () {
   const $procuredSelect = $('#procured-from-select'); // Keep for backward compatibility, but use item-builder-procured-from for new groups
   const $itemBuilderProcuredFrom = $('#item-builder-procured-from');
   const $scopeSelect = $('#scope-select');
+  const $vipSelect = $('#vip-select');
   const $commonUsageSelect = $('#common-usage-select');
+
+  $vipSelect.on('change', function () {
+    const isVip = ($(this).val() === 'Yes');
+    if (isVip) {
+      $('#hdr-pat-vip-badge').show();
+    } else {
+      $('#hdr-pat-vip-badge').hide();
+    }
+
+    if (selectedPatient) {
+      selectedPatient.is_vip = isVip;
+      selectedPatient.vip_status = isVip ? 'Yes' : 'No';
+      const regNo = selectedPatient.pat_reg_no || selectedPatient.pat_op_reg_no;
+      if (regNo) {
+        fetch('/api/update-patient-vip/', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': getCookie('csrftoken') || ''
+          },
+          body: JSON.stringify({
+            patient_reg_no: regNo,
+            patient_name: selectedPatient.pat_name || '',
+            is_vip: isVip
+          })
+        }).catch(err => console.error('Error updating VIP status:', err));
+      }
+    }
+  });
   let usageSelectionOrder = []; // Track selection order for usage field
 
   // Flag to prevent reordering during unselect operations
@@ -609,6 +639,9 @@ $(function () {
     $('#hdr-pat-name').html(`<strong style="font-weight: bold; color: var(--primary);">${patient.pat_name || 'Unknown'}</strong>`);
     updatePatientAvatar(patient);
 
+    const isVip = !!(patient && (patient.is_vip === true || patient.is_vip === 'Yes' || (patient.vip_status && patient.vip_status.toLowerCase() === 'yes')));
+    $vipSelect.val(isVip ? 'Yes' : 'No').trigger('change');
+
     // Load patient prescriptions
     ajax({ action: 'patient_prescriptions', patient_reg_no: patientRegNo }).then(list => {
       addedPrescriptions = decoratePrescriptionList(list || []);
@@ -622,6 +655,7 @@ $(function () {
   // Clear patient selection functionality
   function clearPatientSelection() {
     selectedPatient = null;
+    $vipSelect.val('No').trigger('change');
     $('#header-patient-select').val('');
     $('#hdr-pat-name').text('No patient selected');
     updatePatientAvatar(null);

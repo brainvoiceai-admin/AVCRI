@@ -214,10 +214,10 @@ def is_helping_therapist_assignment(assignment, booking=None):
                     time_slot=booking_timeslot,
                     status='BOOKED'
                 ).first()
-                if tb and getattr(tb, 'is_helping_therapist_assignment', False):
-                    return True
+                if tb:
+                    return bool(getattr(tb, 'is_helping_therapist_assignment', False))
         
-        # Fallback to checking TherapistMaster directly
+        # Fallback to checking TherapistMaster directly only if no booking record was found
         tm = TherapistMaster.objects.filter(therapist_code=code, is_active=True).first()
         if tm and getattr(tm, 'is_helping_therapist', False):
             return True

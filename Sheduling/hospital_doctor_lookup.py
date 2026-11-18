@@ -77,14 +77,25 @@ def get_doctor_codes_for_user(user):
     if core_name and len(core_name) >= 3:
         try:
             from MySql_Data_pull.models import doctor_master
-            q = Q(Doct_Name__icontains=core_name) | Q(Doct_Code__iexact=core_name)
-            for w in core_name.split():
-                if len(w) >= 4:
-                    q |= Q(Doct_Name__icontains=w)
-            dms = doctor_master.objects.using(EXTERNAL_DB_ALIAS).filter(q)
-            for dm in dms:
-                if dm.Doct_Code:
-                    codes.update(doctor_code_string_variants(dm.Doct_Code))
+            # Clean words to extract distinctive given name
+            clean_str = re.sub(r'[^a-zA-Z0-9\s]', '', core_name)
+            user_words = [w.lower() for w in clean_str.split() if w.strip()]
+            primary_name = user_words[0] if user_words else ''
+
+            if primary_name and len(primary_name) >= 3:
+                # Search by primary given name (e.g. 'deleep', 'somit', 'tara')
+                dms = doctor_master.objects.using(EXTERNAL_DB_ALIAS).filter(
+                    Q(Doct_Name__icontains=primary_name) | Q(Doct_Code__iexact=core_name)
+                )
+                for dm in dms:
+                    d_clean = re.sub(r'[^a-zA-Z0-9\s]', '', dm.Doct_Name or '')
+                    d_words = [w.lower() for w in d_clean.split() if w.strip()]
+                    if d_words and d_words[0] in ['dr', 'doctor']:
+                        d_words = d_words[1:]
+                    # Doctor's first name in doctor_master must match user's first name!
+                    if d_words and d_words[0] == primary_name:
+                        if dm.Doct_Code:
+                            codes.update(doctor_code_string_variants(dm.Doct_Code))
         except Exception:
             pass
 

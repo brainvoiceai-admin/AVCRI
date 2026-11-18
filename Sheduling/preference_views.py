@@ -1,6 +1,6 @@
 import json
 from django.http import JsonResponse
-from django.shortcuts import render, get_object_or_404
+from django.shortcuts import render, redirect, get_object_or_404
 from django.views.decorators.http import require_http_methods
 from django.contrib.auth.decorators import login_required
 from django.utils import timezone
@@ -194,23 +194,40 @@ def get_active_patient_therapist_preferences(patient_id):
                 )
         return set(), set()
 
+    preferred_codes = set()
+    unpreferred_codes = set()
+
     active_pref = TherapistPreferenceRequest.objects.filter(
         patient_id__in=candidate_ids,
         status='APPROVED',
         is_active=True
     ).order_by('-action_date', '-id').first()
 
-    if not active_pref:
-        return set(), set()
+    if active_pref:
+        preferred_codes.update(active_pref.preferred_therapist_codes or [])
+        unpreferred_codes.update(active_pref.unpreferred_therapist_codes or [])
+        if active_pref.preferred_therapists.exists():
+            preferred_codes.update(active_pref.preferred_therapists.values_list('therapist_code', flat=True))
+        if active_pref.unpreferred_therapists.exists():
+            unpreferred_codes.update(active_pref.unpreferred_therapists.values_list('therapist_code', flat=True))
 
-    preferred_codes = set(active_pref.preferred_therapist_codes or [])
-    unpreferred_codes = set(active_pref.unpreferred_therapist_codes or [])
-
-    # If ManyToMany exists, complement from DB relations
-    if active_pref.preferred_therapists.exists():
-        preferred_codes.update(active_pref.preferred_therapists.values_list('therapist_code', flat=True))
-    if active_pref.unpreferred_therapists.exists():
-        unpreferred_codes.update(active_pref.unpreferred_therapists.values_list('therapist_code', flat=True))
+    try:
+        from .models import PatientPreferredTherapistRoster
+        roster = PatientPreferredTherapistRoster.objects.filter(
+            patient_reg_no__in=candidate_ids,
+            is_active=True
+        ).order_by('-updated_at').first()
+        if roster and (not roster.allowance or roster.allowance.is_active):
+            if roster.therapist_codes:
+                preferred_codes.update(roster.therapist_codes)
+            if roster.unpreferred_therapist_codes:
+                unpreferred_codes.update(roster.unpreferred_therapist_codes)
+            if roster.therapists.exists():
+                preferred_codes.update(roster.therapists.values_list('therapist_code', flat=True))
+            if roster.unpreferred_therapists.exists():
+                unpreferred_codes.update(roster.unpreferred_therapists.values_list('therapist_code', flat=True))
+    except Exception:
+        pass
 
     return preferred_codes, unpreferred_codes
 
@@ -410,20 +427,9 @@ def get_patient_therapist_preference_api(request, patient_id):
 @role_required(['doctor', 'admin', 'super_admin', 'scheduling_staff'])
 def therapist_preference_approvals_view(request):
     """
-    Doctor Dashboard section / page for reviewing Therapist Preference Requests.
+    Deprecated page: redirects to scheduling_preferred_therapists.
     """
-    pending_count = TherapistPreferenceRequest.objects.filter(status='PENDING').count()
-    approved_count = TherapistPreferenceRequest.objects.filter(status='APPROVED', is_active=True).count()
-    rejected_count = TherapistPreferenceRequest.objects.filter(status='REJECTED').count()
-
-    context = {
-        'dashboard_title': 'Therapist Preference Approvals',
-        'pending_count': pending_count,
-        'approved_count': approved_count,
-        'rejected_count': rejected_count,
-        'is_doctor': request.user.role in ['doctor', 'admin', 'super_admin']
-    }
-    return render(request, 'dashboards/scheduling/therapist_preference_approvals.html', context)
+    return redirect('scheduling_preferred_therapists')
 
 
 @login_required

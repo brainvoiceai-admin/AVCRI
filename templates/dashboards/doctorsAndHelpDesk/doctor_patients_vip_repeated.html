@@ -234,24 +234,24 @@
                             <span class="badge bg-white text-primary px-3 py-1 rounded-pill fw-bold me-2">
                                 <i class="fas fa-calendar-alt me-1"></i>{{ current_month_name }}
                             </span>
-                            <span class="text-white-50 small">Doctor Monthly Allowance</span>
+                            <span class="text-white-50 small">Hospital-Wide Shared Doctor Team Quota</span>
                         </div>
-                        <h4 class="fw-bold mb-1">Preferred Therapist Monthly Quota</h4>
+                        <h4 class="fw-bold mb-1">Preferred Therapist Monthly Quota (Doctor Team)</h4>
                         <p class="mb-0 text-white-50 small" id="quota-summary-text">
-                            You can mark a maximum of <strong>5 patients</strong> per month. Allowed <strong>VIP</strong> and <strong>Cottage Repeated</strong> patients will appear in the scheduling dashboard for preferred therapist configuration.
+                            The whole doctor team shares a total hospital quota of <strong>{{ quota.limit }} patients</strong> per month for <strong>Preferred Therapists</strong>. Quota is minused only once the scheduling team assigns preferred therapists. <strong>Unpreferred therapist exclusions are Unlimited</strong> for all patients. When an allowed patient is discharged, their quota is automatically retained.
                         </p>
                     </div>
                     <div class="col-12 col-md-6">
                         <div class="row g-2 justify-content-end">
                             <div class="col-4">
                                 <div class="quota-stat-box">
-                                    <div class="text-white-50 small text-uppercase">Monthly Limit</div>
+                                    <div class="text-white-50 small text-uppercase">Team Quota</div>
                                     <div class="fs-3 fw-bold text-white" id="quota-limit-val">{{ quota.limit }}</div>
                                 </div>
                             </div>
                             <div class="col-4">
                                 <div class="quota-stat-box">
-                                    <div class="text-white-50 small text-uppercase">Marked / Used</div>
+                                    <div class="text-white-50 small text-uppercase">Team Used</div>
                                     <div class="fs-3 fw-bold text-warning" id="quota-used-val">{{ quota.used }}</div>
                                 </div>
                             </div>
@@ -283,7 +283,7 @@
                             <i class="fas fa-home text-success me-1"></i>Cottage Repeated (<span id="cnt-repeated">0</span>)
                         </button>
                         <button class="filter-tab-btn" data-filter="ALLOWED">
-                            <i class="fas fa-check-circle text-primary me-1"></i>Allowed for Preferred (<span id="cnt-allowed">0</span>)
+                            <i class="fas fa-check-circle text-primary me-1"></i>Allowed for Preference (<span id="cnt-allowed">0</span>)
                         </button>
                     </div>
 
@@ -304,7 +304,7 @@
                                 <th>Category / Badges</th>
                                 <th>Staying Room</th>
                                 <th>Treating Doctor</th>
-                                <th>Preferred Therapist Status</th>
+                                <th>Therapist Preference Status</th>
                                 <th class="text-end">Allowance Action</th>
                             </tr>
                         </thead>
@@ -331,6 +331,115 @@
             </div>
         </div>
 
+    <!-- Modal: Manage Therapist Allowance (Popup Message / Controls) -->
+    <div class="modal fade" id="allowanceModal" tabindex="-1" aria-labelledby="allowanceModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered modal-lg">
+            <div class="modal-content border-0 shadow-lg" style="border-radius: 18px; overflow: hidden;">
+                <div class="modal-header text-white" style="background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%); padding: 20px 24px;">
+                    <div>
+                        <h5 class="modal-title fw-bold" id="allowanceModalLabel">
+                            <i class="fas fa-sliders-h me-2"></i>Therapist Preference Allowance
+                        </h5>
+                        <p class="mb-0 text-white-50 small" id="modal-patient-subtitle">
+                            Configure preferences for patient
+                        </p>
+                    </div>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body p-4" style="background: #ffffff;">
+                    <!-- Alert message container inside modal -->
+                    <div id="modal-alert-box" class="d-none"></div>
+
+                    <!-- Shared Team Quota Card inside Modal -->
+                    <div class="p-3 mb-3 border d-flex align-items-center justify-content-between flex-wrap gap-2" style="border-radius: 12px; background: #f0f7ff; border-color: #bfdbfe !important;">
+                        <div>
+                            <div class="fw-bold text-primary mb-1">
+                                <i class="fas fa-users-cog me-2"></i>Hospital-Wide Doctor Team Monthly Quota
+                            </div>
+                            <div class="small text-muted" id="modal-quota-text">
+                                Used: <strong id="modal-quota-used" class="text-warning">0</strong> of <strong id="modal-quota-limit">5</strong> slots &bull;
+                                Remaining for ALL doctors: <strong id="modal-quota-remaining" class="text-success">5</strong>
+                            </div>
+                        </div>
+                        <span class="badge bg-primary px-3 py-2 rounded-pill fw-semibold" id="modal-quota-badge">
+                            Shared Doctor Team Pool
+                        </span>
+                    </div>
+
+                    <!-- Option 1: Preferred Therapist Allowance (Quota Limited) -->
+                    <div class="card mb-3 border p-3 shadow-none" style="border-radius: 12px; background: #fbfcfe; border-color: #e2e8f0;">
+                        <div class="d-flex justify-content-between align-items-start">
+                            <div class="pe-3">
+                                <div class="d-flex align-items-center mb-1 flex-wrap gap-2">
+                                    <h6 class="fw-bold mb-0 text-dark">
+                                        <i class="fas fa-user-check text-primary me-2"></i>Allow Preferred Therapists
+                                    </h6>
+                                    <span class="badge bg-warning bg-opacity-10 text-dark border border-warning" style="font-size: 11px;">
+                                        Consumes 1 Quota Slot (Limit: 5 Total for Team)
+                                    </span>
+                                </div>
+                                <p class="text-muted small mb-0">
+                                    Allows the scheduling team to assign up to 7 preferred therapists and designate 1 primary and 1 secondary bathing therapist for this patient.
+                                </p>
+                            </div>
+                            <div class="form-check form-switch pt-1">
+                                <input class="form-check-input" type="checkbox" role="switch" id="toggle-allow-preferred" style="width: 2.8em; height: 1.4em; cursor: pointer;">
+                            </div>
+                        </div>
+                        <div id="modal-pref-quota-warning" class="alert alert-warning py-2 px-3 mt-3 mb-0 small d-none" style="border-radius: 8px;">
+                            <i class="fas fa-exclamation-triangle me-1"></i><strong>Team Monthly Quota Exhausted:</strong> All 5 preferred slots have been used by the doctor team for this month. Preferred therapist allowance cannot be granted until an active patient is discharged or an allowance is revoked.
+                        </div>
+                    </div>
+
+                    <!-- Option 2: Unpreferred Therapist Allowance (Unlimited) -->
+                    <div class="card mb-3 border p-3 shadow-none" style="border-radius: 12px; background: #fbfcfe; border-color: #e2e8f0;">
+                        <div class="d-flex justify-content-between align-items-start">
+                            <div class="pe-3">
+                                <div class="d-flex align-items-center mb-1 flex-wrap gap-2">
+                                    <h6 class="fw-bold mb-0 text-dark">
+                                        <i class="fas fa-user-slash text-danger me-2"></i>Allow Unpreferred Therapist Exclusion
+                                    </h6>
+                                    <span class="badge bg-success bg-opacity-10 text-success border border-success" style="font-size: 11px;">
+                                        Unlimited Quota &bull; Free for All Patients
+                                    </span>
+                                </div>
+                                <p class="text-muted small mb-0">
+                                    Allows the scheduling team to mark therapists who must <strong>NEVER</strong> be assigned to this patient. Does NOT consume any quota.
+                                </p>
+                            </div>
+                            <div class="form-check form-switch pt-1">
+                                <input class="form-check-input" type="checkbox" role="switch" id="toggle-allow-unpreferred" style="width: 2.8em; height: 1.4em; cursor: pointer;">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Discharge Quota Retention Info Note -->
+                    <div class="alert alert-light border py-2 px-3 mb-3 small text-muted d-flex align-items-center" style="border-radius: 8px; background: #f8fafc;">
+                        <i class="fas fa-shield-alt text-primary me-2 fs-5"></i>
+                        <div>
+                            <strong>Automatic Quota Retention:</strong> When a patient with preferred allowance is discharged, their slot is retained and automatically released back to the doctor team pool.
+                        </div>
+                    </div>
+
+                    <!-- Notes Input -->
+                    <div>
+                        <label class="form-label small fw-semibold text-secondary mb-1">Doctor Remarks / Clinical Notes (Optional)</label>
+                        <textarea class="form-control" id="modal-notes" rows="2" placeholder="e.g. VIP patient request, medical considerations, requires specific therapist handling..." style="border-radius: 8px; font-size: 13px;"></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer bg-light px-4 py-3 border-top">
+                    <button type="button" class="btn btn-outline-danger me-auto d-none" id="btn-modal-revoke" onclick="submitAllowance('revoke')">
+                        <i class="fas fa-times me-1"></i>Revoke All Allowance
+                    </button>
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-primary px-4" id="btn-modal-save" onclick="submitAllowance('save')">
+                        <i class="fas fa-save me-1"></i>Save Allowance
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Toast Notifications -->
     <div class="toast-container" id="toast-container"></div>
 
@@ -340,7 +449,9 @@
         let currentFilter = 'ALL';
         let searchQuery = '';
         let currentPage = 1;
-        let quotaData = { limit: 5, used: 0, remaining: 5 };
+        let quotaData = { limit: {{ quota.limit|default:5 }}, used: {{ quota.used|default:0 }}, remaining: {{ quota.remaining|default:5 }} };
+        let activeModalPatient = null;
+        let allowanceModalInstance = null;
 
         function getCookie(name) {
             let cookieValue = null;
@@ -392,12 +503,12 @@
 
             if (quota.remaining === 0) {
                 document.getElementById('quota-summary-text').innerHTML = `
-                    <span class="text-warning fw-bold"><i class="fas fa-exclamation-triangle me-1"></i>Monthly quota reached (5/5 used).</span>
-                    You cannot mark any more patients for preferred therapists this month unless an existing allowance is revoked.
+                    <span class="text-warning fw-bold"><i class="fas fa-exclamation-triangle me-1"></i>Doctor team monthly quota reached (${quota.limit}/${quota.limit} used).</span>
+                    Preferred therapist allowance cannot be granted for new patients until an active patient is discharged or allowance is revoked. Unpreferred exclusion remains <strong>Unlimited</strong>.
                 `;
             } else {
                 document.getElementById('quota-summary-text').innerHTML = `
-                    You can mark up to <strong>5 patients</strong> per month. <strong>${quota.remaining} slots left</strong> for this month.
+                    The whole doctor team shares a total hospital quota of <strong>${quota.limit} patients</strong> per month for Preferred Therapists. Quota is minused only once the scheduling team assigns preferred therapists. <strong>${quota.remaining} slots remaining</strong> for all doctors. Unpreferred exclusion is <strong>Unlimited</strong>.
                 `;
             }
         }
@@ -457,7 +568,7 @@
                     if (pat.is_cottage_repeated) {
                         badgesHtml += `<span class="badge-cottage-rep me-1"><i class="fas fa-home me-1"></i>Cottage Repeated (${pat.total_visits} visits)</span>`;
                     } else if (pat.is_repeated) {
-                        badgesHtml += `<span class="badge-repeated-non-cottage me-1" title="Only Cottage Repeated patients are eligible for preferred therapist assignment"><i class="fas fa-history me-1"></i>Repeated (${pat.total_visits} visits)</span>`;
+                        badgesHtml += `<span class="badge-repeated-non-cottage me-1" title="Repeated Visitor (${pat.total_visits} visits)"><i class="fas fa-history me-1"></i>Repeated (${pat.total_visits} visits)</span>`;
                     }
                     if (!pat.is_vip && !pat.is_repeated) {
                         badgesHtml = `<span class="text-muted small">Standard Patient</span>`;
@@ -466,11 +577,32 @@
                     // Allowed Pill
                     let allowBadge = '';
                     if (pat.is_allowed) {
-                        allowBadge = `<span class="badge-allowed"><i class="fas fa-check-circle me-1"></i>Allowed (Active)</span>`;
+                        let allowedPills = [];
+                        if (pat.allow_preferred) {
+                            allowedPills.push(`<span class="badge bg-success bg-opacity-10 text-success border border-success" style="font-size: 11px;"><i class="fas fa-check-circle me-1"></i>Preferred Allowed</span>`);
+                        }
+                        if (pat.allow_unpreferred) {
+                            allowedPills.push(`<span class="badge bg-info bg-opacity-10 text-info border border-info" style="font-size: 11px;"><i class="fas fa-user-slash me-1"></i>Unpreferred Allowed</span>`);
+                        }
+                        allowBadge = `<div class="d-flex flex-wrap gap-1">${allowedPills.join(' ')}</div>`;
+                        
                         if (pat.has_roster) {
-                            allowBadge += `<div class="small text-muted mt-1"><i class="fas fa-users-cog me-1"></i>${pat.roster_therapist_count} Therapists Assigned</div>`;
+                            let rosterParts = [];
+                            if (pat.roster_pref_count > 0) {
+                                rosterParts.push(`<span class="badge bg-primary bg-opacity-10 text-primary border" style="font-size: 11px;"><i class="fas fa-user-check me-1"></i>${pat.roster_pref_count} Preferred (Quota Deducted)</span>`);
+                            } else if (pat.allow_preferred) {
+                                rosterParts.push(`<span class="small text-warning" style="font-size: 11px;"><i class="fas fa-clock me-1"></i>Pending Preferred Assignment (Quota Not Deducted)</span>`);
+                            }
+                            if (pat.roster_unpref_count > 0) {
+                                rosterParts.push(`<span class="badge bg-danger bg-opacity-10 text-danger border" style="font-size: 11px;"><i class="fas fa-shield-alt me-1"></i>${pat.roster_unpref_count} Excluded</span>`);
+                            }
+                            allowBadge += `<div class="d-flex flex-wrap gap-1 mt-1">${rosterParts.join(' ')}</div>`;
                         } else {
-                            allowBadge += `<div class="small text-warning mt-1"><i class="fas fa-clock me-1"></i>Pending Roster in Scheduling</div>`;
+                            if (pat.allow_preferred) {
+                                allowBadge += `<div class="small text-warning mt-1"><i class="fas fa-clock me-1"></i>Pending Assignment in Scheduling (Quota Not Deducted)</div>`;
+                            } else {
+                                allowBadge += `<div class="small text-muted mt-1"><i class="fas fa-clock me-1"></i>Pending Exclusion in Scheduling</div>`;
+                            }
                         }
                     } else {
                         allowBadge = `<span class="badge-not-allowed">Not Allowed</span>`;
@@ -478,46 +610,24 @@
 
                     // Action Button
                     let actionBtn = '';
-                    if (pat.is_allowed) {
-                        if (pat.is_treating_doctor) {
-                            actionBtn = `
-                                <button class="btn btn-sm btn-outline-danger btn-allow-toggle" onclick="toggleAllowance('${pat.patient_reg_no}', '${escapeHtml(pat.patient_name)}', '${escapeHtml(pat.room_no || '')}')">
-                                    <i class="fas fa-times me-1"></i>Revoke Allowance
-                                </button>
-                            `;
-                        } else {
-                            actionBtn = `
-                                <button class="btn btn-sm btn-light border text-success btn-allow-toggle" disabled title="Allowed by treating doctor ${escapeHtml(pat.treating_doctor_name)}">
-                                    <i class="fas fa-check-circle me-1"></i>Allowed (${escapeHtml(pat.treating_doctor_name || 'Treating Dr')})
-                                </button>
-                            `;
-                        }
+                    if (!pat.is_treating_doctor) {
+                        actionBtn = `
+                            <button class="btn btn-sm btn-light border text-muted btn-allow-toggle" disabled title="Only the assigned treating doctor (${escapeHtml(pat.treating_doctor_name || 'Doctor')}) can grant or change allowance.">
+                                <i class="fas fa-user-lock me-1"></i>Treating Dr Only
+                            </button>
+                        `;
+                    } else if (pat.is_allowed) {
+                        actionBtn = `
+                            <button class="btn btn-sm btn-outline-primary btn-allow-toggle" onclick="openAllowanceModal('${pat.patient_reg_no}')">
+                                <i class="fas fa-sliders-h me-1"></i>Manage Allowance
+                            </button>
+                        `;
                     } else {
-                        if (!pat.is_treating_doctor) {
-                            actionBtn = `
-                                <button class="btn btn-sm btn-light border text-muted btn-allow-toggle" disabled title="Only the particular treating doctor (${escapeHtml(pat.treating_doctor_name || 'Assigned Doctor')}) can give access to allow preferred therapist for this patient.">
-                                    <i class="fas fa-user-lock me-1"></i>Treating Dr Only
-                                </button>
-                            `;
-                        } else if (!pat.is_eligible) {
-                            actionBtn = `
-                                <button class="btn btn-sm btn-light border text-muted btn-allow-toggle" disabled title="Only VIP patients and Cottage Repeated patients are eligible for preferred therapist assignment.">
-                                    <i class="fas fa-lock me-1"></i>Ineligible (Cottage/VIP Only)
-                                </button>
-                            `;
-                        } else if (quotaData.remaining > 0) {
-                            actionBtn = `
-                                <button class="btn btn-sm btn-primary btn-allow-toggle" onclick="toggleAllowance('${pat.patient_reg_no}', '${escapeHtml(pat.patient_name)}', '${escapeHtml(pat.room_no || '')}')">
-                                    <i class="fas fa-user-check me-1"></i>Allow Preferred Therapist
-                                </button>
-                            `;
-                        } else {
-                            actionBtn = `
-                                <button class="btn btn-sm btn-secondary btn-allow-toggle" disabled title="Monthly Quota Limit of 5 Reached">
-                                    <i class="fas fa-ban me-1"></i>Quota Reached (5/5)
-                                </button>
-                            `;
-                        }
+                        actionBtn = `
+                            <button class="btn btn-sm btn-primary btn-allow-toggle" onclick="openAllowanceModal('${pat.patient_reg_no}')">
+                                <i class="fas fa-user-plus me-1"></i>Allow Preference
+                            </button>
+                        `;
                     }
 
                     tr.innerHTML = `
@@ -543,6 +653,9 @@
                     tbody.appendChild(tr);
                 });
 
+                // Cache patient list
+                window.loadedPatients = data.patients;
+
                 // Update pagination
                 document.getElementById('pagination-wrapper').style.display = 'flex';
                 document.getElementById('page-start').textContent = (data.page - 1) * data.page_size + 1;
@@ -557,7 +670,78 @@
             }
         }
 
-        async function toggleAllowance(regNo, patName, roomNo) {
+        function openAllowanceModal(regNo) {
+            const pat = (window.loadedPatients || []).find(p => p.patient_reg_no === regNo);
+            if (!pat) return;
+
+            activeModalPatient = pat;
+            if (!allowanceModalInstance) {
+                allowanceModalInstance = new bootstrap.Modal(document.getElementById('allowanceModal'));
+            }
+
+            document.getElementById('modal-patient-subtitle').textContent =
+                `${pat.patient_name} (Reg: ${pat.patient_reg_no}, Room: ${pat.room_no || 'N/A'}) • Treating: ${pat.treating_doctor_name}`;
+
+            // Update modal quota counter
+            document.getElementById('modal-quota-limit').textContent = quotaData.limit;
+            document.getElementById('modal-quota-used').textContent = quotaData.used;
+            document.getElementById('modal-quota-remaining').textContent = quotaData.remaining;
+
+            const prefToggle = document.getElementById('toggle-allow-preferred');
+            const unprefToggle = document.getElementById('toggle-allow-unpreferred');
+            const quotaWarn = document.getElementById('modal-pref-quota-warning');
+            const revokeBtn = document.getElementById('btn-modal-revoke');
+            const alertBox = document.getElementById('modal-alert-box');
+
+            alertBox.className = 'd-none';
+            alertBox.innerHTML = '';
+
+            prefToggle.checked = Boolean(pat.allow_preferred);
+            unprefToggle.checked = Boolean(pat.allow_unpreferred);
+
+            // If not currently allowed for preferred and remaining quota is 0, show quota warning
+            if (quotaData.remaining <= 0 && !pat.allow_preferred) {
+                quotaWarn.classList.remove('d-none');
+            } else {
+                quotaWarn.classList.add('d-none');
+            }
+
+            // Show or hide revoke button
+            if (pat.is_allowed) {
+                revokeBtn.classList.remove('d-none');
+            } else {
+                revokeBtn.classList.add('d-none');
+            }
+
+            allowanceModalInstance.show();
+        }
+
+        // Handle Preferred toggle click when quota is reached
+        document.getElementById('toggle-allow-preferred').addEventListener('change', function(e) {
+            if (this.checked && quotaData.remaining <= 0 && (!activeModalPatient || !activeModalPatient.allow_preferred)) {
+                this.checked = false;
+                const alertBox = document.getElementById('modal-alert-box');
+                alertBox.className = 'alert alert-danger py-2 px-3 mb-3 small';
+                alertBox.innerHTML = `<i class="fas fa-ban me-2"></i><strong>Team Monthly Quota Limit Reached (${quotaData.limit}/${quotaData.limit}):</strong> All preferred slots have been used across all doctors. You cannot enable preferred therapists until a quota slot is retained/released or revoked.`;
+                showToast('Team Quota Exceeded: 5/5 preferred allowances used across all doctors.', 'danger');
+            }
+        });
+
+        async function submitAllowance(actionType) {
+            if (!activeModalPatient) return;
+
+            const prefChecked = actionType === 'revoke' ? false : document.getElementById('toggle-allow-preferred').checked;
+            const unprefChecked = actionType === 'revoke' ? false : document.getElementById('toggle-allow-unpreferred').checked;
+            const notes = document.getElementById('modal-notes').value;
+
+            const saveBtn = document.getElementById('btn-modal-save');
+            const revokeBtn = document.getElementById('btn-modal-revoke');
+            const alertBox = document.getElementById('modal-alert-box');
+
+            saveBtn.disabled = true;
+            revokeBtn.disabled = true;
+            saveBtn.innerHTML = `<span class="spinner-border spinner-border-sm me-1"></span>Saving...`;
+
             try {
                 const response = await fetch("{% url 'toggle_doctor_patient_allowance_api' %}", {
                     method: 'POST',
@@ -566,29 +750,37 @@
                         'X-CSRFToken': getCookie('csrftoken')
                     },
                     body: JSON.stringify({
-                        patient_reg_no: regNo,
-                        patient_name: patName,
-                        room_no: roomNo
+                        patient_reg_no: activeModalPatient.patient_reg_no,
+                        patient_name: activeModalPatient.patient_name,
+                        room_no: activeModalPatient.room_no,
+                        allow_preferred: prefChecked,
+                        allow_unpreferred: unprefChecked,
+                        action: actionType,
+                        notes: notes
                     })
                 });
 
                 const res = await response.json();
+
                 if (res.status === 'success') {
+                    if (allowanceModalInstance) allowanceModalInstance.hide();
                     showToast(res.message, res.is_allowed ? 'success' : 'warning');
                     loadPatients();
-                } else if (res.error_type === 'not_treating_doctor') {
-                    showToast(res.message, 'danger');
-                } else if (res.error_type === 'quota_exceeded') {
-                    showToast(res.message, 'danger');
-                    if (res.quota) updateQuotaUI(res.quota);
-                } else if (res.error_type === 'ineligible') {
-                    showToast(res.message, 'warning');
                 } else {
-                    showToast(res.message || 'Operation failed', 'danger');
+                    alertBox.className = 'alert alert-danger py-2 px-3 mb-3 small';
+                    alertBox.innerHTML = `<i class="fas fa-exclamation-triangle me-2"></i>${escapeHtml(res.message || 'Operation failed')}`;
+                    showToast(res.message || 'Error updating allowance', 'danger');
+                    if (res.quota) updateQuotaUI(res.quota);
                 }
             } catch (err) {
-                console.error('Toggle error:', err);
-                showToast('Failed to toggle allowance due to network error.', 'danger');
+                console.error('Submit error:', err);
+                alertBox.className = 'alert alert-danger py-2 px-3 mb-3 small';
+                alertBox.innerHTML = `<i class="fas fa-exclamation-triangle me-2"></i>Network error while saving allowance.`;
+                showToast('Network error while saving allowance.', 'danger');
+            } finally {
+                saveBtn.disabled = false;
+                revokeBtn.disabled = false;
+                saveBtn.innerHTML = `<i class="fas fa-save me-1"></i>Save Allowance`;
             }
         }
 

@@ -150,7 +150,23 @@ class DoctorQuotaAndPreferredTherapistTests(TestCase):
             self.assertEqual(res['status'], 'allowed')
             self.assertTrue(res['is_allowed'])
 
-        # Check quota showcase: 5 used, 0 remaining
+        # Doctor has allowed 5 patients, but scheduling has NOT assigned therapists yet: Quota NOT minused!
+        q_pending = DoctorPatientPreferenceAllowance.get_monthly_quota(self.doc_user, now.year, now.month)
+        self.assertEqual(q_pending['used'], 0)
+        self.assertEqual(q_pending['remaining'], 5)
+
+        # Now scheduling assigns preferred therapists to all 5 allowed patients
+        for i in range(1, 6):
+            reg = f"8800{i}"
+            save_preferred_therapist_roster(
+                patient_reg_no=reg,
+                therapist_codes=[self.therapists[0].therapist_code, self.therapists[1].therapist_code],
+                primary_bathing_code=self.therapists[0].therapist_code,
+                secondary_bathing_code=self.therapists[1].therapist_code,
+                configured_by=self.doc_user,
+            )
+
+        # NOW quota showcase: 5 used, 0 remaining (minused upon assignment!)
         quota = DoctorPatientPreferenceAllowance.get_monthly_quota(self.doc_user, now.year, now.month)
         self.assertEqual(quota['used'], 5)
         self.assertEqual(quota['remaining'], 0)
@@ -390,8 +406,21 @@ class DoctorQuotaAndPreferredTherapistTests(TestCase):
         t_data = toggle_res.json()
         self.assertEqual(t_data['status'], 'success')
         self.assertTrue(t_data['is_allowed'])
-        self.assertEqual(t_data['quota']['used'], 1)
-        self.assertEqual(t_data['quota']['remaining'], 4)
+        # Quota is not minused yet because scheduling has not assigned preferred therapists
+        self.assertEqual(t_data['quota']['used'], 0)
+        self.assertEqual(t_data['quota']['remaining'], 5)
+
+        # Once scheduling assigns preferred therapists, quota is minused!
+        save_preferred_therapist_roster(
+            patient_reg_no="90001",
+            therapist_codes=[self.therapists[0].therapist_code, self.therapists[1].therapist_code],
+            primary_bathing_code=self.therapists[0].therapist_code,
+            secondary_bathing_code=self.therapists[1].therapist_code,
+            configured_by=self.doc_user,
+        )
+        q_after = DoctorPatientPreferenceAllowance.get_monthly_quota(self.doc_user)
+        self.assertEqual(q_after['used'], 1)
+        self.assertEqual(q_after['remaining'], 4)
 
     def test_scheduling_dashboard_preferred_therapists_api_and_views(self):
         """Test Scheduling View, only allowed patients showing, and roster saving."""
@@ -444,15 +473,14 @@ class DoctorQuotaAndPreferredTherapistTests(TestCase):
 
     def test_cottage_repeated_patient_eligibility_and_filtering(self):
         """
-        Rule: Not all repeated patients have preferred therapist privileges.
-        ONLY Cottage repeated patients (staying in a Cottage room CT-*) have this!
-        Non-cottage repeated patients cannot be marked by doctor.
-        VIP patients are eligible regardless of room.
+        Rule: ALL patients (VIP, Cottage Repeated, Non-cottage Repeated, and Standard first-time patients)
+        are eligible to be allowed by their treating doctor for preferred/unpreferred therapist preferences,
+        while category flags and filter=REPEATED continue to classify Cottage Repeated vs non-cottage.
         """
         from Sheduling.preferred_therapist_service import is_cottage_room, resolve_patient_vip_and_repeated
         from django.urls import reverse
 
-        # 1. Cottage repeated patient -> Eligible!
+        # 1. Cottage repeated patient -> Eligible & Allowed!
         reg_cottage = "77001"
         Repeated_Visitors.objects.update_or_create(register_number=77001, defaults={"patient_name": "Cottage Rep P1", "total_visits": 4, "is_vip": False})
         ps_c, _ = PatientSnapshot.objects.update_or_create(pat_reg_no=reg_cottage, defaults={"pat_name": "Cottage Rep P1", "pat_room_no": "CT-1"})
@@ -468,7 +496,7 @@ class DoctorQuotaAndPreferredTherapistTests(TestCase):
         self.assertEqual(res_allow['status'], 'allowed')
         self.assertTrue(res_allow['is_allowed'])
 
-        # 2. Non-cottage repeated patient -> Ineligible!
+        # 2. Non-cottage repeated patient -> Also Eligible & Allowed!
         reg_normal = "77002"
         Repeated_Visitors.objects.update_or_create(register_number=77002, defaults={"patient_name": "Normal Rep P2", "total_visits": 3, "is_vip": False})
         ps_n, _ = PatientSnapshot.objects.update_or_create(pat_reg_no=reg_normal, defaults={"pat_name": "Normal Rep P2", "pat_room_no": "NR-10"})
@@ -478,13 +506,13 @@ class DoctorQuotaAndPreferredTherapistTests(TestCase):
         self.assertTrue(info_normal['is_repeated'])
         self.assertFalse(info_normal['is_cottage'])
         self.assertFalse(info_normal['is_cottage_repeated'])
-        self.assertFalse(info_normal['is_eligible'])
+        self.assertTrue(info_normal['is_eligible'])
 
-        res_ineligible = toggle_doctor_patient_allowance(self.doc_user, reg_normal, "Normal Rep P2")
-        self.assertEqual(res_ineligible['status'], 'ineligible')
-        self.assertIn("Only VIP patients and Cottage Repeated patients are eligible", res_ineligible['error'])
+        res_normal_allow = toggle_doctor_patient_allowance(self.doc_user, reg_normal, "Normal Rep P2")
+        self.assertEqual(res_normal_allow['status'], 'allowed')
+        self.assertTrue(res_normal_allow['is_allowed'])
 
-        # 3. First time patient (visits=1) in Cottage -> Ineligible under repeated
+        # 3. Standard first-time patient (visits=1, non-VIP) -> Also Eligible & Allowed!
         reg_first_cottage = "77003"
         Repeated_Visitors.objects.update_or_create(register_number=77003, defaults={"patient_name": "First Time Cottage P3", "total_visits": 1, "is_vip": False})
         ps_fc, _ = PatientSnapshot.objects.update_or_create(pat_reg_no=reg_first_cottage, defaults={"pat_name": "First Time Cottage P3", "pat_room_no": "CT-5"})
@@ -494,12 +522,13 @@ class DoctorQuotaAndPreferredTherapistTests(TestCase):
         self.assertFalse(info_first['is_repeated'])
         self.assertTrue(info_first['is_cottage'])
         self.assertFalse(info_first['is_cottage_repeated'])
-        self.assertFalse(info_first['is_eligible'])
+        self.assertTrue(info_first['is_eligible'])
 
         res_first = toggle_doctor_patient_allowance(self.doc_user, reg_first_cottage, "First Time Cottage P3")
-        self.assertEqual(res_first['status'], 'ineligible')
+        self.assertEqual(res_first['status'], 'allowed')
+        self.assertTrue(res_first['is_allowed'])
 
-        # 4. VIP patient in non-cottage room -> Still Eligible because VIP!
+        # 4. VIP patient in non-cottage room -> Eligible & Allowed!
         reg_vip_nc = "77004"
         Repeated_Visitors.objects.update_or_create(register_number=77004, defaults={"patient_name": "VIP Non Cottage P4", "total_visits": 1, "is_vip": True})
         ps_vnc, _ = PatientSnapshot.objects.update_or_create(pat_reg_no=reg_vip_nc, defaults={"pat_name": "VIP Non Cottage P4", "pat_room_no": "DS-1"})
@@ -510,8 +539,6 @@ class DoctorQuotaAndPreferredTherapistTests(TestCase):
         self.assertFalse(info_vip['is_cottage'])
         self.assertTrue(info_vip['is_eligible'])
 
-        # Revoke cottage patient allowance to free up quota slot before allowing VIP
-        toggle_doctor_patient_allowance(self.doc_user, reg_cottage)
         res_vip = toggle_doctor_patient_allowance(self.doc_user, reg_vip_nc, "VIP Non Cottage P4")
         self.assertEqual(res_vip['status'], 'allowed')
         self.assertTrue(res_vip['is_allowed'])
