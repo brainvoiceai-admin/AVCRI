@@ -125,17 +125,43 @@ def test_dynamic_doctor_monthly_quota_enforcement(config_setup):
             allocated_by=doc_user
         )
 
-    # Allow 1st patient
+    therapists = config_setup["therapists"]
+
+    # Allow 1st patient: doctor allows, quota not minused until scheduling assigns therapists
     r1 = toggle_doctor_patient_allowance(doc_user, "PAT_Q1", patient_name="Pat 1")
     assert r1["status"] == "allowed"
-    assert r1["quota"]["used"] == 1
-    assert r1["quota"]["remaining"] == 1
+    assert r1["quota"]["used"] == 0
+    assert r1["quota"]["remaining"] == 2
 
-    # Allow 2nd patient
+    # Scheduling assigns therapists for 1st patient -> quota is minused: used=1, remaining=1
+    save_preferred_therapist_roster(
+        patient_reg_no="PAT_Q1",
+        therapist_codes=[therapists[0].therapist_code, therapists[1].therapist_code],
+        primary_bathing_code=therapists[0].therapist_code,
+        secondary_bathing_code=therapists[1].therapist_code,
+        configured_by=doc_user,
+    )
+    q1 = DoctorPatientPreferenceAllowance.get_monthly_quota()
+    assert q1["used"] == 1
+    assert q1["remaining"] == 1
+
+    # Allow 2nd patient: doctor allows, quota remains used=1 until assigned
     r2 = toggle_doctor_patient_allowance(doc_user, "PAT_Q2", patient_name="Pat 2")
     assert r2["status"] == "allowed"
-    assert r2["quota"]["used"] == 2
-    assert r2["quota"]["remaining"] == 0
+    assert r2["quota"]["used"] == 1
+    assert r2["quota"]["remaining"] == 1
+
+    # Scheduling assigns therapists for 2nd patient -> quota is minused: used=2, remaining=0
+    save_preferred_therapist_roster(
+        patient_reg_no="PAT_Q2",
+        therapist_codes=[therapists[2].therapist_code, therapists[3].therapist_code],
+        primary_bathing_code=therapists[2].therapist_code,
+        secondary_bathing_code=therapists[3].therapist_code,
+        configured_by=doc_user,
+    )
+    q2 = DoctorPatientPreferenceAllowance.get_monthly_quota()
+    assert q2["used"] == 2
+    assert q2["remaining"] == 0
 
     # 3rd patient should be blocked by the quota of 2
     r3 = toggle_doctor_patient_allowance(doc_user, "PAT_Q3", patient_name="Pat 3")
@@ -149,8 +175,20 @@ def test_dynamic_doctor_monthly_quota_enforcement(config_setup):
     # Now 3rd patient succeeds!
     r3_retry = toggle_doctor_patient_allowance(doc_user, "PAT_Q3", patient_name="Pat 3")
     assert r3_retry["status"] == "allowed"
-    assert r3_retry["quota"]["used"] == 3
-    assert r3_retry["quota"]["remaining"] == 2
+    assert r3_retry["quota"]["used"] == 2
+    assert r3_retry["quota"]["remaining"] == 3
+
+    # When scheduling assigns therapists to 3rd patient, used becomes 3, remaining becomes 2
+    save_preferred_therapist_roster(
+        patient_reg_no="PAT_Q3",
+        therapist_codes=[therapists[4].therapist_code, therapists[5].therapist_code],
+        primary_bathing_code=therapists[4].therapist_code,
+        secondary_bathing_code=therapists[5].therapist_code,
+        configured_by=doc_user,
+    )
+    q3 = DoctorPatientPreferenceAllowance.get_monthly_quota()
+    assert q3["used"] == 3
+    assert q3["remaining"] == 2
 
 
 @pytest.mark.django_db
