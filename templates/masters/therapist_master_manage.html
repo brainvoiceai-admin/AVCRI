@@ -159,7 +159,18 @@
                                 <td>
                                     <strong>{{ therapist.therapist_code }}</strong>
                                 </td>
-                                <td>{{ therapist.therapist_name }}</td>
+                                <td>
+                                    <div class="fw-bold">{{ therapist.therapist_name }}</div>
+                                    {% if therapist.is_on_call %}
+                                        <span class="badge" style="background-color: #6f42c1; color: #fff; font-size: 0.7rem; font-weight: 600;" title="On-Call Therapist">
+                                            <i class="fas fa-phone-volume me-1"></i>On-Call
+                                        </span>
+                                    {% else %}
+                                        <span class="badge bg-light text-secondary border" style="font-size: 0.7rem;" title="Regular Staff Therapist">
+                                            <i class="fas fa-user-check me-1"></i>Regular
+                                        </span>
+                                    {% endif %}
+                                </td>
                                 <td>
                                     <span class="badge bg-info">{{ therapist.therapist_grade.name|default:"N/A" }}</span>
                                 </td>
@@ -197,7 +208,7 @@
                                         <div class="d-flex flex-column align-items-start gap-1">
                                             {% if therapist.on_call_status %}
                                             <button type="button" class="btn btn-sm btn-success py-0 px-2 on-call-btn"
-                                                    onclick="openOnCallModal('{{ therapist.pk }}', '{{ therapist.therapist_name|escapejs }}', true, '{{ therapist.on_call_start_date|date:"Y-m-d"|default:"" }}', '{{ therapist.on_call_end_date|date:"Y-m-d"|default:"" }}')"
+                                                    onclick="openOnCallModal('{{ therapist.pk }}', '{{ therapist.therapist_name|escapejs }}', true, '{{ therapist.on_call_start_date|date:"Y-m-d"|default:"" }}', '{{ therapist.on_call_end_date|date:"Y-m-d"|default:"" }}', '{% for s in therapist.on_call_slots.all %}{{ s.id }}{% if not forloop.last %},{% endif %}{% endfor %}')"
                                                     title="Currently Turned ON (Available for scheduling) - Click to turn OFF">
                                                 <i class="fas fa-toggle-on me-1"></i>ON
                                             </button>
@@ -210,9 +221,20 @@
                                                     From {{ therapist.on_call_start_date|date:"d M" }}
                                                 </span>
                                             {% endif %}
+                                            {% with therapist.on_call_slots.all as c_slots %}
+                                                {% if c_slots %}
+                                                    <span class="badge" style="background-color: #ede9fe; color: #5b21b6; border: 1px solid #c4b5fd; font-size: 0.68rem;" title="Configured Slots: {% for s in c_slots %}Slot {{ s.slot_number }}{% if not forloop.last %}, {% endif %}{% endfor %}">
+                                                        <i class="fas fa-clock me-1"></i>{% for s in c_slots %}S{{ s.slot_number }}{% if not forloop.last %}, {% endif %}{% endfor %}
+                                                    </span>
+                                                {% else %}
+                                                    <span class="badge bg-light text-muted border" style="font-size: 0.68rem;" title="Available for all slots of the day">
+                                                        All Slots
+                                                    </span>
+                                                {% endif %}
+                                            {% endwith %}
                                             {% else %}
                                             <button type="button" class="btn btn-sm btn-secondary py-0 px-2 on-call-btn"
-                                                    onclick="openOnCallModal('{{ therapist.pk }}', '{{ therapist.therapist_name|escapejs }}', false, '', '')"
+                                                    onclick="openOnCallModal('{{ therapist.pk }}', '{{ therapist.therapist_name|escapejs }}', false, '', '', '{% for s in therapist.on_call_slots.all %}{{ s.id }}{% if not forloop.last %},{% endif %}{% endfor %}')"
                                                     title="Currently Turned OFF (Standby) - Click to turn ON">
                                                 <i class="fas fa-toggle-off me-1"></i>OFF
                                             </button>
@@ -223,7 +245,7 @@
                                             </a>
                                         </div>
                                     {% else %}
-                                        <span class="text-muted small">-</span>
+                                        <span class="badge bg-light text-muted border" style="font-size: 0.7rem;">Regular Therapist</span>
                                     {% endif %}
                                 </td>
                                 <td>
@@ -553,6 +575,33 @@
                             </div>
                         </div>
 
+                        <!-- Specific Slots selection when turning ON (Slot-wise scheduling) -->
+                        <div id="oncall_slots_row" class="mb-3" style="display: none;">
+                            <div class="d-flex justify-content-between align-items-center mb-1">
+                                <label class="form-label fw-bold mb-0">
+                                    <i class="fas fa-clock text-purple me-1" style="color: #6f42c1;"></i>Allowed Time Slots <span class="text-muted fw-normal">(Optional)</span>
+                                </label>
+                                <div>
+                                    <button type="button" class="btn btn-xs btn-outline-secondary py-0 px-2 me-1" style="font-size: 0.72rem;" onclick="toggleAllModalSlots(true)">Select All</button>
+                                    <button type="button" class="btn btn-xs btn-outline-secondary py-0 px-2" style="font-size: 0.72rem;" onclick="toggleAllModalSlots(false)">Clear All</button>
+                                </div>
+                            </div>
+                            <small class="text-muted d-block mb-2">Select the specific slot(s) this on-call therapist can be scheduled for. If none are selected, therapist is available for all slots of the day.</small>
+                            <div class="row g-2 p-2 bg-light rounded border">
+                                {% for slot in available_slots %}
+                                <div class="col-6 col-md-4">
+                                    <div class="form-check">
+                                        <input class="form-check-input modal-oncall-slot" type="checkbox" name="on_call_slot_ids" value="{{ slot.id }}" id="modal_slot_{{ slot.id }}">
+                                        <label class="form-check-label small" for="modal_slot_{{ slot.id }}">
+                                            <strong>Slot {{ slot.slot_number }}</strong>
+                                            <span class="text-muted d-block" style="font-size: 0.75rem;">{{ slot.slot_time|time:"g:i A" }}</span>
+                                        </label>
+                                    </div>
+                                </div>
+                                {% endfor %}
+                            </div>
+                        </div>
+
                         <div class="mb-3">
                             <label class="form-label fw-bold">Remarks / Reason (Optional)</label>
                             <input type="text" class="form-control" name="remarks" id="oncall_remarks"
@@ -600,6 +649,10 @@
                                         <span id="oncall_status_pill" class="badge px-3 py-2" style="font-size: 0.85rem;">-</span>
                                     </div>
                                 </div>
+                                <div class="mt-2 pt-2 border-top d-flex align-items-center justify-content-between">
+                                    <small class="text-muted fw-semibold"><i class="fas fa-clock text-purple me-1" style="color: #6f42c1;"></i>Configured Time Slots:</small>
+                                    <span id="oncall_slots_display" class="badge bg-light text-dark border">All Slots (Full Day)</span>
+                                </div>
                             </div>
                         </div>
 
@@ -629,6 +682,7 @@
                                         <tr>
                                             <th>Action</th>
                                             <th>Turned ON Period (Dates)</th>
+                                            <th>Allowed Slots</th>
                                             <th>Changed By</th>
                                             <th>Date & Time</th>
                                             <th>Remarks</th>
@@ -650,7 +704,11 @@
     </div>
 
     <script>
-    function openOnCallModal(therapistId, therapistName, currentlyOn, startDate, endDate) {
+    function toggleAllModalSlots(checkAll) {
+        document.querySelectorAll('.modal-oncall-slot').forEach(cb => { cb.checked = checkAll; });
+    }
+
+    function openOnCallModal(therapistId, therapistName, currentlyOn, startDate, endDate, slotIdsStr) {
         const form = document.getElementById('onCallToggleForm');
         form.action = `/Masters/therapists/${therapistId}/toggle-on-call/`;
         
@@ -660,16 +718,28 @@
         const explanation = document.getElementById('oncall_action_explanation');
         const submitBtn = document.getElementById('oncall_submit_btn');
         const datesRow = document.getElementById('oncall_dates_row');
+        const slotsRow = document.getElementById('oncall_slots_row');
         const startDateInput = document.getElementById('oncall_modal_start_date');
         const endDateInput = document.getElementById('oncall_modal_end_date');
         document.getElementById('oncall_remarks').value = '';
 
         nameDisplay.textContent = `Therapist: ${therapistName}`;
 
+        // Reset all slot checkboxes
+        document.querySelectorAll('.modal-oncall-slot').forEach(cb => { cb.checked = false; });
+        if (slotIdsStr) {
+            const arr = String(slotIdsStr).split(',').map(s => s.trim());
+            arr.forEach(sid => {
+                const cb = document.getElementById(`modal_slot_${sid}`);
+                if (cb) cb.checked = true;
+            });
+        }
+
         if (currentlyOn) {
             // Turning OFF
             targetStatusInput.value = 'off';
-            datesRow.style.display = 'none';
+            if (datesRow) datesRow.style.display = 'none';
+            if (slotsRow) slotsRow.style.display = 'none';
             alertBox.className = 'alert alert-warning mb-3';
             explanation.innerHTML = 'You are about to <strong>Turn OFF</strong> this on-call therapist. When turned OFF, this therapist will be on standby and <strong>excluded from scheduling</strong> until turned back ON.';
             submitBtn.className = 'btn btn-warning';
@@ -677,11 +747,12 @@
         } else {
             // Turning ON
             targetStatusInput.value = 'on';
-            datesRow.style.display = 'flex';
+            if (datesRow) datesRow.style.display = 'flex';
+            if (slotsRow) slotsRow.style.display = 'block';
             if (startDate) startDateInput.value = startDate;
             if (endDate) endDateInput.value = endDate;
             alertBox.className = 'alert alert-success mb-3';
-            explanation.innerHTML = 'You are about to <strong>Turn ON</strong> this on-call therapist. Enter the active date range (e.g. October 10 to October 25). The therapist will be <strong>available for scheduling</strong> during these dates.';
+            explanation.innerHTML = 'You are about to <strong>Turn ON</strong> this on-call therapist. Enter the active date range (e.g. October 10 to October 25) and allowed time slots. The therapist will be <strong>available for scheduling</strong> during these dates and slots.';
             submitBtn.className = 'btn btn-success';
             submitBtn.innerHTML = '<i class="fas fa-toggle-on me-1"></i> Turn ON (Available)';
         }
@@ -711,6 +782,11 @@
                 }
 
                 document.getElementById('oncall_period_display').textContent = data.current_period || 'Turned OFF (Standby)';
+                const slotsDisplay = document.getElementById('oncall_slots_display');
+                if (slotsDisplay) {
+                    slotsDisplay.textContent = data.slots_summary || 'All Slots (Full Day)';
+                }
+
                 const statusPill = document.getElementById('oncall_status_pill');
                 if (data.on_call_status) {
                     statusPill.className = 'badge bg-success px-3 py-2';
@@ -752,6 +828,7 @@
                         tr.innerHTML = `
                             <td><span class="badge ${badgeClass}">${log.status_label}</span></td>
                             <td><strong>${log.date_range}</strong></td>
+                            <td><span class="badge bg-light text-dark border" style="font-size: 0.75rem;">${log.slots_summary || 'All Slots'}</span></td>
                             <td>${log.changed_by}</td>
                             <td class="text-muted">${log.created_at}</td>
                             <td>${log.remarks}</td>
@@ -759,7 +836,7 @@
                         logsTbody.appendChild(tr);
                     });
                 } else {
-                    logsTbody.innerHTML = '<tr><td colspan="5" class="text-center py-2 text-muted">No logs recorded yet.</td></tr>';
+                    logsTbody.innerHTML = '<tr><td colspan="6" class="text-center py-2 text-muted">No logs recorded yet.</td></tr>';
                 }
             })
             .catch(err => {

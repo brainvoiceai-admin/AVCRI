@@ -245,6 +245,41 @@
                                                 <small class="text-muted">e.g. October 10 to October 25. Outside these dates, the therapist is kept on standby.</small>
                                             </div>
                                         </div>
+                                        <!-- Slot-wise Availability Option -->
+                                        <div class="row mt-3 pt-2 border-top" id="onCallFormSlots">
+                                            <div class="col-12 mb-1 d-flex justify-content-between align-items-center">
+                                                <label class="form-label small fw-bold mb-0">
+                                                    <i class="fas fa-clock text-primary me-1"></i>Available Time Slots <span class="text-muted fw-normal">(Slot-wise Scheduling)</span>
+                                                </label>
+                                                <div class="btn-group btn-group-sm">
+                                                    <button type="button" class="btn btn-outline-secondary py-0 px-2" style="font-size: 0.72rem;" onclick="toggleAllOnCallSlots(true)">Select All</button>
+                                                    <button type="button" class="btn btn-outline-secondary py-0 px-2" style="font-size: 0.72rem;" onclick="toggleAllOnCallSlots(false)">Clear All</button>
+                                                </div>
+                                            </div>
+                                            <div class="col-12 mb-1">
+                                                <small class="text-muted d-block mb-2">
+                                                    Select the specific slot(s) this on-call therapist will attend. They will <strong>only</strong> be scheduled during these selected slots. Leave all unchecked for whole-day availability (all slots).
+                                                </small>
+                                                <div class="p-2 border rounded bg-white">
+                                                    <div class="row g-2">
+                                                        {% for slot in available_slots %}
+                                                        <div class="col-md-4 col-sm-6">
+                                                            <div class="form-check mb-0">
+                                                                <input class="form-check-input on-call-form-slot" type="checkbox" 
+                                                                       name="on_call_slot_ids" id="id_on_call_slot_{{ slot.id }}" value="{{ slot.id }}"
+                                                                       {% if slot.id in selected_on_call_slot_ids %}checked{% endif %}>
+                                                                <label class="form-check-label small" for="id_on_call_slot_{{ slot.id }}">
+                                                                    <strong>Slot {{ slot.slot_number }}:</strong> {{ slot.slot_time|time:"h:i A" }}
+                                                                </label>
+                                                            </div>
+                                                        </div>
+                                                        {% empty %}
+                                                        <div class="col-12 text-muted small">No slots configured in Slot Master.</div>
+                                                        {% endfor %}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
@@ -963,6 +998,12 @@
     <script src="{% static 'js/dashboards_nav.js' %}"></script>
 
     <script>
+    function toggleAllOnCallSlots(selectAll) {
+        document.querySelectorAll('.on-call-form-slot').forEach(function(cb) {
+            cb.checked = selectAll;
+        });
+    }
+
     function updateEmployeeCodeRequirement(isOnCall) {
         const empInput = document.getElementById('id_employee_code');
         const empLabel = document.getElementById('label_employee_code');

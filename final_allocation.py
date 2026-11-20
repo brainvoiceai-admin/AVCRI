@@ -941,6 +941,9 @@ def _shift_eligibility_sets_for_slot(slot_master):
             shift__shift_slots__is_active=True,
         ).values_list("therapist_id", flat=True).distinct()
     )
+    # Ensure on-call therapists are not blocked by standard shift mapping
+    from masters.models import TherapistMaster
+    eligible_ids.update(TherapistMaster.objects.filter(is_on_call=True).values_list("id", flat=True))
     return mapped_ids, eligible_ids
 
 # -----------------------
@@ -1119,9 +1122,9 @@ def allocate_therapists(
         # Treatment omission check: exclude therapists who omitted this treatment
         if (t_id and t_id in omitted_ids) or (getattr(t, 'therapist_code', None) in omitted_codes):
             return True
-        # On-call check: exclude on-call therapists who are turned OFF or outside date range
+        # On-call check: exclude on-call therapists who are turned OFF, outside date range, or outside configured slots
         from masters.models import is_therapist_on_call_active
-        if not is_therapist_on_call_active(t, date):
+        if not is_therapist_on_call_active(t, date, target_slot):
             return True
         return False
 
@@ -1892,9 +1895,9 @@ def assign_continuity_therapists_pass1(booking, allocation, target_date, locked_
             return True
         if is_therapist_omitted_for_treatment(t, current_therapy_name or therapy_code):
             return True
-        # On-call check: exclude on-call therapists who are turned OFF or outside date range
+        # On-call check: exclude on-call therapists who are turned OFF, outside date range, or outside configured slots
         from masters.models import is_therapist_on_call_active
-        if not is_therapist_on_call_active(t, target_date):
+        if not is_therapist_on_call_active(t, target_date, slot_master):
             return True
         return False
     

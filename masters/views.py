@@ -3083,6 +3083,8 @@ class TherapistMasterManagementView(ListView):
     paginate_by = 20
 
     def get_queryset(self):
+        from masters.models import sync_expired_on_call_therapists
+        sync_expired_on_call_therapists()
         # Get status filter FIRST
         status = self.request.GET.get('status', '').strip().lower()
         import datetime
@@ -3118,7 +3120,7 @@ class TherapistMasterManagementView(ListView):
             queryset = TherapistMaster.objects.all()
         
         # Apply prefetch_related after filtering
-        queryset = queryset.prefetch_related('leaves', 'therapist_grade', 'deputations', 'deputations__assigned_doctor')
+        queryset = queryset.prefetch_related('leaves', 'therapist_grade', 'deputations', 'deputations__assigned_doctor', 'on_call_slots')
         
         # Search filter
         search = self.request.GET.get('search', '').strip()
@@ -3139,7 +3141,7 @@ class TherapistMasterManagementView(ListView):
         if gender:
             queryset = queryset.filter(therapist_gender__iexact=gender)
         
-        return queryset.order_by('therapist_name')
+        return queryset.prefetch_related('on_call_slots').order_by('therapist_name')
     
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -3158,10 +3160,12 @@ class TherapistMasterManagementView(ListView):
             TherapistTreatmentOmission.objects.filter(status='pending', is_active=True)
         ))
         context['can_approve_omissions'] = can_approve_treatment_omission(self.request.user)
+        context['available_slots'] = SlotMaster.objects.filter(is_active=True).order_by('slot_number')
         context['today_date'] = datetime.date.today().strftime('%Y-%m-%d')
         context['on_call_count'] = TherapistMaster.objects.filter(is_on_call=True).count()
         context['on_call_on_count'] = TherapistMaster.objects.filter(is_on_call=True, on_call_status=True).count()
         context['on_call_off_count'] = TherapistMaster.objects.filter(is_on_call=True, on_call_status=False).count()
+        context['available_slots'] = SlotMaster.objects.filter(is_active=True).order_by('slot_number')
         # Bulk upload context
         # Note: Therapist master has complex relationships, basic bulk upload support
         context['master_type'] = 'therapist'
@@ -3276,6 +3280,8 @@ class TherapistMasterCreateView(CreateView):
         context['deputation_remarks'] = ''
         context['selected_shift_ids'] = []
         context['is_on_call_mode'] = self.request.GET.get('on_call') == '1'
+        context['available_slots'] = ShiftMaster.objects.none() if False else SlotMaster.objects.filter(is_active=True).order_by('slot_number')
+        context['selected_on_call_slot_ids'] = [int(s) for s in self.request.POST.getlist('on_call_slot_ids') if s.isdigit()] if self.request.method == 'POST' else []
         context['object'] = None
         return context
     
@@ -3377,12 +3383,22 @@ class TherapistMasterCreateView(CreateView):
         instance.save()
 
         if instance.is_on_call:
-            TherapistOnCallLog.objects.create(
+            selected_slot_ids = [int(sid) for sid in self.request.POST.getlist('on_call_slot_ids') if sid.isdigit()]
+            instance.on_call_slots.set(selected_slot_ids)
+            slot_names_log = ""
+            if selected_slot_ids:
+                sm_objs = SlotMaster.objects.filter(id__in=selected_slot_ids).order_by('slot_number')
+                slot_names_log = f" (Slots: {', '.join(f'Slot {s.slot_number}' for s in sm_objs)})"
+            c_log = TherapistOnCallLog.objects.create(
                 therapist=instance,
                 status='turned_on' if instance.on_call_status else 'turned_off',
+                start_date=instance.on_call_start_date,
+                end_date=instance.on_call_end_date,
                 changed_by=self.request.user,
-                remarks="Initial therapist profile setup as On-Call"
+                remarks=f"Initial therapist profile setup as On-Call{slot_names_log}"
             )
+            if selected_slot_ids:
+                c_log.slots.set(selected_slot_ids)
 
         # Handle therapist -> shift mapping
         selected_shift_ids = set()
@@ -3512,6 +3528,8 @@ class TherapistMasterUpdateView(UpdateView):
         context['approved_omitted_treatment_ids'] = set(self.object.treatment_omissions.filter(status='approved', is_active=True).values_list('treatment_id', flat=True))
         context['pending_omitted_treatment_ids'] = set(self.object.treatment_omissions.filter(status='pending', is_active=True).values_list('treatment_id', flat=True))
         context['can_approve_omissions'] = can_approve_treatment_omission(self.request.user)
+        context['available_slots'] = SlotMaster.objects.filter(is_active=True).order_by('slot_number')
+        context['selected_on_call_slot_ids'] = list(self.object.on_call_slots.values_list('id', flat=True)) if self.object.is_on_call else []
         
         return context
     
@@ -3530,14 +3548,28 @@ class TherapistMasterUpdateView(UpdateView):
             self.object.therapist_profile.is_bathing_therapist = self.object.is_bathing_therapist
             self.object.therapist_profile.save()
 
+        # Save on-call slots if on-call
+        if self.object.is_on_call:
+            selected_slot_ids = [int(sid) for sid in self.request.POST.getlist('on_call_slot_ids') if sid.isdigit()]
+            self.object.on_call_slots.set(selected_slot_ids)
+
         # Log on-call status change if modified
         if self.object.is_on_call and (not old_on_call or old_on_call_status != self.object.on_call_status):
-            TherapistOnCallLog.objects.create(
+            selected_slot_ids = list(self.object.on_call_slots.values_list('id', flat=True))
+            slot_names_log = ""
+            if selected_slot_ids:
+                sm_objs = SlotMaster.objects.filter(id__in=selected_slot_ids).order_by('slot_number')
+                slot_names_log = f" (Slots: {', '.join(f'Slot {s.slot_number}' for s in sm_objs)})"
+            u_log = TherapistOnCallLog.objects.create(
                 therapist=self.object,
                 status='turned_on' if self.object.on_call_status else 'turned_off',
+                start_date=self.object.on_call_start_date,
+                end_date=self.object.on_call_end_date,
                 changed_by=self.request.user,
-                remarks="Updated via therapist master edit form"
+                remarks=f"Updated via therapist master edit form{slot_names_log}"
             )
+            if selected_slot_ids:
+                u_log.slots.set(selected_slot_ids)
         _log_master_audit(self.request, 'update', 'TherapistMaster', str(self.object.pk), f'Updated TherapistMaster: {self.object.therapist_name} ({self.object.therapist_code})')
 
         # Handle therapist -> shift mapping
@@ -6088,19 +6120,41 @@ def toggle_on_call_status_view(request, pk):
         therapist.on_call_status = new_status
         therapist.save(update_fields=['is_on_call', 'on_call_status', 'on_call_start_date', 'on_call_end_date', 'updated_at'])
 
+        # Handle slot-wise configuration when turning ON / OFF
+        selected_slot_ids = []
+        if new_status:
+            raw_slots = request.POST.getlist('on_call_slot_ids') or request.GET.getlist('on_call_slot_ids')
+            if not raw_slots and (request.POST.get('slots') or request.GET.get('slots')):
+                raw_slots = str(request.POST.get('slots') or request.GET.get('slots')).split(',')
+            for sid in raw_slots:
+                try:
+                    selected_slot_ids.append(int(str(sid).strip()))
+                except (ValueError, TypeError):
+                    continue
+            therapist.on_call_slots.set(selected_slot_ids)
+        else:
+            therapist.on_call_slots.clear()
+
         remarks = (request.POST.get('remarks') or request.GET.get('remarks') or '').strip()
+        slot_summary = ""
+        if selected_slot_ids:
+            sm_objs = SlotMaster.objects.filter(id__in=selected_slot_ids).order_by('slot_number')
+            slot_summary = f" [Slots: {', '.join(f'Slot {s.slot_number}' for s in sm_objs)}]"
+
         if not remarks:
             if new_status:
                 if start_date and end_date:
-                    remarks = f"Turned ON from {start_date.strftime('%d %b %Y')} to {end_date.strftime('%d %b %Y')}"
+                    remarks = f"Turned ON from {start_date.strftime('%d %b %Y')} to {end_date.strftime('%d %b %Y')}{slot_summary}"
                 elif start_date:
-                    remarks = f"Turned ON from {start_date.strftime('%d %b %Y')}"
+                    remarks = f"Turned ON from {start_date.strftime('%d %b %Y')}{slot_summary}"
                 else:
-                    remarks = "Turned ON (Available for scheduling)"
+                    remarks = f"Turned ON (Available for scheduling){slot_summary}"
             else:
                 remarks = "Turned OFF (Standby)"
+        elif slot_summary and slot_summary not in remarks:
+            remarks += slot_summary
 
-        TherapistOnCallLog.objects.create(
+        t_log = TherapistOnCallLog.objects.create(
             therapist=therapist,
             status='turned_on' if new_status else 'turned_off',
             start_date=start_date,
@@ -6108,6 +6162,8 @@ def toggle_on_call_status_view(request, pk):
             changed_by=request.user,
             remarks=remarks
         )
+        if selected_slot_ids:
+            t_log.slots.set(selected_slot_ids)
 
         action_label = "Turned ON (Available for scheduling)" if new_status else "Turned OFF (Standby)"
         msg = f"Therapist {therapist.therapist_name} has been {action_label}."
@@ -6142,6 +6198,8 @@ def therapist_on_call_dates_api(request, pk):
     Shows the date range they were turned on (e.g. October 10 to 25)
     and the exact dates they did treatments / were in scheduling.
     """
+    from masters.models import sync_expired_on_call_therapists
+    sync_expired_on_call_therapists()
     from Patient.models import TherapistBooking
 
     therapist = get_object_or_404(TherapistMaster, pk=pk)
@@ -6175,17 +6233,20 @@ def therapist_on_call_dates_api(request, pk):
         })
 
     logs_data = []
-    for log in therapist.on_call_logs.select_related('changed_by').order_by('-created_at'):
+    for log in therapist.on_call_logs.select_related('changed_by').prefetch_related('slots').order_by('-created_at'):
         date_range_str = '-'
         if log.start_date and log.end_date:
             date_range_str = f"{log.start_date.strftime('%d %b %Y')} to {log.end_date.strftime('%d %b %Y')}"
         elif log.start_date:
             date_range_str = f"From {log.start_date.strftime('%d %b %Y')}"
 
+        log_slots_str = ', '.join(f"Slot {s.slot_number}" for s in log.slots.all().order_by('slot_number')) if log.slots.exists() else ('All Slots' if log.status == 'turned_on' else '-')
+
         logs_data.append({
             'status': log.status,
             'status_label': 'Turned ON (Available)' if log.status == 'turned_on' else 'Turned OFF (Standby)',
             'date_range': date_range_str,
+            'slots_summary': log_slots_str,
             'changed_by': log.changed_by.get_full_name() or log.changed_by.username if log.changed_by else 'System',
             'created_at': log.created_at.strftime('%d %b %Y, %I:%M %p'),
             'remarks': log.remarks or '-'
@@ -6213,6 +6274,8 @@ def therapist_on_call_dates_api(request, pk):
         'on_call_end_date': therapist.on_call_end_date.strftime('%Y-%m-%d') if therapist.on_call_end_date else '',
         'total_days_worked': len(distinct_dates),
         'total_sessions': bookings_qs.count(),
+        'configured_slots': [{'id': s.id, 'slot_number': s.slot_number, 'time': s.slot_time.strftime('%I:%M %p')} for s in therapist.on_call_slots.all().order_by('slot_number')],
+        'slots_summary': ', '.join(f"Slot {s.slot_number} ({s.slot_time.strftime('%I:%M %p')})" for s in therapist.on_call_slots.all().order_by('slot_number')) if therapist.on_call_slots.exists() else 'All Slots (Full Day)',
         'dates': dates_details,
         'logs': logs_data
     })
