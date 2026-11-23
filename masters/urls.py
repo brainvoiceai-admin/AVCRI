@@ -59,6 +59,7 @@ urlpatterns = [
     path('therapy/<int:pk>/enable/', views.therapy_master_enable, name='therapy_master_enable'),
     path('therapy/<int:pk>/disable/', views.therapy_master_disable, name='therapy_master_disable'),
     path('therapy/<int:pk>/toggle-vasthi/', views.therapy_master_toggle_vasthi, name='therapy_master_toggle_vasthi'),
+    path('therapy/<int:pk>/toggle-dhara-pizhichil/', views.therapy_master_toggle_dhara_pizhichil, name='therapy_master_toggle_dhara_pizhichil'),
     # Therapy Group Master CRUD
     path('therapy-groups/', views.TherapyGroupManagementView.as_view(), name='therapy_group_manage'),
     path('therapy-groups/add/', views.TherapyGroupCreateView.as_view(), name='therapy_group_add'),

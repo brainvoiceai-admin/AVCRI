@@ -604,6 +604,125 @@ def get_treatment_rooms_for_staying_room(patient_staying_room):
     # No match found
     return []
 
+
+def is_dhara_pizhichil_treatment(therapy_name=None, therapy_code=None):
+    """
+    Check if a therapy is marked as Dhara & Pizhichil in TherapyMaster (is_dhara_pizhichil=True).
+    This therapy strictly follows room continuity from treatment start until patient discharge.
+    """
+    try:
+        from masters.models import TherapyMaster
+        tm = None
+        if therapy_code:
+            tm = TherapyMaster.objects.filter(therapy_code=str(therapy_code).strip()).first()
+        if not tm and therapy_name:
+            tm = TherapyMaster.objects.filter(therapy_name__iexact=str(therapy_name).strip()).first()
+        if tm:
+            return getattr(tm, 'is_dhara_pizhichil', False)
+    except Exception:
+        pass
+    
+    # Fallback matching standard Dhara & Pizhichil / Pizichil names if master query fails
+    if therapy_name:
+        t_str = str(therapy_name).strip().lower()
+        return ('dhara' in t_str and ('piz' in t_str or 'pizh' in t_str))
+    return False
+
+
+def get_dhara_pizhichil_assigned_room(patient_id=None, patient=None, allocation=None):
+    """
+    Find the room originally assigned to a Dhara Pizhichil patient at the
+    beginning of treatment, ensuring strict room continuity until discharge.
+    """
+    from Patient.models import RoomBooking, TreatmentRoom
+    from Sheduling.models import TherapyAllocation, Booking
+
+    pid = patient_id or (getattr(patient, 'id', None) if patient else None)
+    pat_reg_no = getattr(patient, 'pat_reg_no', None) if patient else None
+
+    # 1. If allocation directly has an assigned active room
+    if allocation and getattr(allocation, 'room', None) and getattr(allocation.room, 'is_active', False):
+        return allocation.room
+
+    # 2. Check TherapyAllocation room for Dhara Pizhichil for this patient
+    if pid:
+        alloc_qs = TherapyAllocation.objects.filter(
+            patient_id=pid,
+            room__isnull=False,
+            room__is_active=True
+        ).order_by('from_date', 'id').select_related('room')
+        for a in alloc_qs:
+            if is_dhara_pizhichil_treatment(therapy_name=a.therapy_name, therapy_code=a.therapy_code):
+                return a.room
+
+    # 3. Check earliest RoomBooking for this patient (including CANCELED, so room is remembered across cancellations)
+    rb_qs = RoomBooking.objects.filter(room__isnull=False, room__is_active=True)
+    if pid:
+        rb_qs = rb_qs.filter(patient_id=pid)
+    elif pat_reg_no:
+        rb_qs = rb_qs.filter(patient_id=pat_reg_no)
+    else:
+        rb_qs = None
+
+    if rb_qs is not None:
+        for rb in rb_qs.order_by('date', 'id').select_related('room'):
+            if is_dhara_pizhichil_treatment(therapy_name=rb.therapy_name):
+                return rb.room
+
+    # 4. Check earliest Booking record for this patient
+    if pid:
+        bk_qs = Booking.objects.filter(
+            allocation__patient_id=pid,
+            room__isnull=False,
+            room__is_active=True
+        ).order_by('date', 'id').select_related('room', 'allocation')
+        for bk in bk_qs:
+            th_name = bk.snapshot_therapy_name or (bk.allocation.therapy_name if bk.allocation else None)
+            th_code = bk.allocation.therapy_code if bk.allocation else None
+            if is_dhara_pizhichil_treatment(therapy_name=th_name, therapy_code=th_code):
+                return bk.room
+
+    return None
+
+
+def get_patient_category_priority(patient, allocation=None, bookings=None):
+    """
+    Returns priority tier:
+      0 = Wheelchair patients (Highest - requires scarce accessible rooms)
+      1 = Dhara Pizhichil patients (Second - requires room continuity)
+      2 = Normal treatment patients (Flexible room allocation)
+    """
+    is_wc = False
+    if patient and getattr(patient, 'is_wheelchair', False):
+        is_wc = True
+    elif allocation and getattr(allocation, 'is_wheelchair', False):
+        is_wc = True
+    elif bookings:
+        is_wc = any(getattr(b, 'is_wheelchair', False) or 
+                    (b.allocation and getattr(b.allocation, 'is_wheelchair', False)) 
+                    for b in bookings)
+    if is_wc:
+        return 0
+
+    is_dp = False
+    if allocation and is_dhara_pizhichil_treatment(
+        therapy_name=getattr(allocation, 'therapy_name', None),
+        therapy_code=getattr(allocation, 'therapy_code', None)
+    ):
+        is_dp = True
+    elif bookings:
+        for b in bookings:
+            th_name = getattr(b, 'snapshot_therapy_name', None) or (b.allocation.therapy_name if b.allocation else None)
+            th_code = b.allocation.therapy_code if b.allocation else None
+            if is_dhara_pizhichil_treatment(therapy_name=th_name, therapy_code=th_code):
+                is_dp = True
+                break
+    if is_dp:
+        return 1
+
+    return 2
+
+
 def allocate_treatment_room(date, time_slot, last_room=None, therapy_name=None, patient_id=None, patient_staying_room=None, patient=None, is_wheelchair=False):
     """
     Allocate treatment room based on patient staying room rules and wheelchair accessibility.
@@ -676,6 +795,19 @@ def allocate_treatment_room(date, time_slot, last_room=None, therapy_name=None, 
             return vasthi_room
     except Exception as _vsth_err:
         print(f"[ROOM RESTRICTION] Error in Vasthi room allocation: {_vsth_err}")
+
+    # DHARA PIZHICHIL STRICT ROOM CONTINUITY:
+    # If this therapy is marked as Dhara & Pizhichil in Therapy Master:
+    # Maintain the same room until patient discharge, even across cancellations or rescheduling.
+    if is_dhara_pizhichil_treatment(therapy_name=therapy_name):
+        assigned_room = get_dhara_pizhichil_assigned_room(patient_id=patient_id, patient=patient)
+        if assigned_room:
+            room_obj = check_room_availability(assigned_room.room_no)
+            if room_obj:
+                return room_obj
+            # STRICT: If the assigned room is unavailable at this timeslot, do NOT switch rooms!
+            # Room continuity strictly requires maintaining the same room.
+            return None
 
     # NEW: Primary logic - allocate based on patient staying room
     # Special handling: If patient_staying_room starts with "OP-", treat it as if there's no staying room
@@ -783,36 +915,17 @@ def allocate_treatment_room(date, time_slot, last_room=None, therapy_name=None, 
         return None
     
     # FALLBACK: Legacy logic if patient_staying_room is not provided and not OP
-    # Check if this is a 'Dhara & Pizichil' therapy
-    is_dhara_pizichil = False
-    if therapy_name:
-        therapy_lower = str(therapy_name).lower()
-        is_dhara_pizichil = 'dhara' in therapy_lower and 'pizichil' in therapy_lower
+    # Check if this is a 'Dhara & Pizhichil' therapy
+    is_dhara_pizichil = is_dhara_pizhichil_treatment(therapy_name=therapy_name)
     
-    # For 'Dhara & Pizichil', try to find previous room assignment
+    # For Dhara & Pizhichil, try to find previous room assignment
     previous_room_no = None
     if is_dhara_pizichil and patient_id:
-        try:
-            from django.db.models import Q
-            previous_bookings = RoomBooking.objects.filter(
-                patient_id=patient_id,
-                status='BOOKED'
-            ).exclude(
-                date=date,
-                time_slot=time_slot
-            ).order_by('-date', '-time_slot').select_related('room')
-            
-            for booking in previous_bookings:
-                therapy_name_lower = str(booking.therapy_name or '').lower()
-                if 'dhara' in therapy_name_lower and 'pizichil' in therapy_name_lower:
-                    if booking.room:
-                        previous_room_no = booking.room.room_no
-                        break
-        except Exception as e:
-            print(f"[DEBUG allocate_treatment_room] Error finding previous room: {e}")
-            previous_room_no = None
+        prev_room = get_dhara_pizhichil_assigned_room(patient_id=patient_id, patient=patient)
+        if prev_room:
+            previous_room_no = prev_room.room_no
     
-    # If we have a previous room for 'Dhara & Pizichil', try to use it first
+    # If we have a previous room for Dhara & Pizhichil, try to use it first
     # BUT STRICTLY exclude TRC rooms for OP patients
     if is_dhara_pizichil and previous_room_no:
         # Don't assign TRC rooms to OP patients
@@ -3728,24 +3841,12 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                             reason = "no_room_available: No treatment room available for OP patient (TR-1 to TR-16)"
                 except Exception:
                     pass
-            elif therapy_name:
-                # Legacy: Check if this is 'Dhara & Pizichil' and we had a previous room that's unavailable
-                therapy_lower = str(therapy_name).lower()
-                if 'dhara' in therapy_lower and 'pizichil' in therapy_lower and patient_id:
-                    # Try to find previous room to show in error message
-                    try:
-                        from Patient.models import RoomBooking
-                        previous_booking = RoomBooking.objects.filter(
-                            patient_id=patient_id,
-                            status='BOOKED'
-                        ).exclude(date=target_date).order_by('-date', '-time_slot').select_related('room').first()
-                        if previous_booking:
-                            prev_therapy_lower = str(previous_booking.therapy_name or '').lower()
-                            if 'dhara' in prev_therapy_lower and 'pizichil' in prev_therapy_lower:
-                                if previous_booking.room:
-                                    reason = f"previous_room_unavailable: Previous room {previous_booking.room.room_no} for Dhara & Pizichil is unavailable"
-                    except Exception:
-                        pass
+            elif is_dhara_pizhichil_treatment(therapy_name=therapy_name):
+                prev_room = get_dhara_pizhichil_assigned_room(patient_id=patient_id, patient=getattr(allocation, 'patient', None))
+                if prev_room:
+                    reason = f"previous_room_unavailable: Original Dhara & Pizhichil room {prev_room.room_no} is unavailable at this slot"
+                else:
+                    reason = "no_room_available: No suitable room available for Dhara & Pizhichil treatment"
             # Update booking status to failed
             try:
                 try:
@@ -3901,6 +4002,9 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                     print(f"[DEBUG] Setting booking.timeslot and room BEFORE creating any related objects")
                     booking.timeslot = slot_master
                     booking.room = room_candidate or booking.room
+                    if allocation and room_candidate and not getattr(allocation, 'room', None):
+                        allocation.room = room_candidate
+                        allocation.save(update_fields=['room'])
                     # Keep status as 'draft' until all therapists are assigned and BookingAssignment records are created
                     # booking.status = 'scheduled'  # Will be set later after BookingAssignment creation
                     # Save booking COMPLETELY before creating any FK references to it
@@ -5128,6 +5232,7 @@ def bulk_allocate_for_date(target_date_str):
     allocation_priorities = []
     for allocation in draft_allocations:
         patient_obj = getattr(allocation, 'patient', None)
+        cat_rank = get_patient_category_priority(patient_obj, allocation=allocation)
         is_vip = is_patient_vip(patient_obj) or getattr(allocation, 'is_vip', False)
         vip_rank = 0 if is_vip else 1
 
@@ -5148,17 +5253,18 @@ def bulk_allocate_for_date(target_date_str):
         # We negate it so that larger dates come first in ascending sort
         date_ordinal = -most_recent_date.toordinal() if most_recent_date else 0
         op_rank = 1 if _is_patient_op(patient_obj) else 0  # 0=IP (strict priority), 1=OP
-        allocation_priorities.append((allocation, vip_rank, roster_rank, op_rank, priority_score, date_ordinal))
+        allocation_priorities.append((allocation, cat_rank, vip_rank, roster_rank, op_rank, priority_score, date_ordinal))
     
-    # Sort: VIP first (vip_rank=0), then preferred roster (roster_rank=0), then IP (op_rank=0), then priority score, then by most recent date
-    sorted_allocations = [a for a, _, _, _, _, _ in sorted(allocation_priorities, key=lambda x: (x[1], x[2], x[3], x[4], x[5]))]
+    # Sort: Wheelchair first (cat_rank=0), then Dhara Pizhichil (cat_rank=1), then Normal (cat_rank=2),
+    # sub-sorted by VIP (vip_rank=0), preferred roster (roster_rank=0), IP (op_rank=0), priority score, most recent date
+    sorted_allocations = [a for a, _, _, _, _, _, _ in sorted(allocation_priorities, key=lambda x: (x[1], x[2], x[3], x[4], x[5], x[6]))]
     
     # Count statistics
     continuity_stats = {
-        'preferred_roster': sum(1 for _, _, _, _, p, _ in allocation_priorities if p == -1),
-        'same_therapy': sum(1 for _, _, _, _, p, _ in allocation_priorities if p == 0),
-        'any_therapy': sum(1 for _, _, _, _, p, _ in allocation_priorities if p == 2),
-        'no_continuity': sum(1 for _, _, _, _, p, _ in allocation_priorities if p == 3)
+        'preferred_roster': sum(1 for entry in allocation_priorities if entry[5] == -1),
+        'same_therapy': sum(1 for entry in allocation_priorities if entry[5] == 0),
+        'any_therapy': sum(1 for entry in allocation_priorities if entry[5] == 2),
+        'no_continuity': sum(1 for entry in allocation_priorities if entry[5] == 3)
     }
     print(f"[DEBUG Continuity Priority] Processing {len(sorted_allocations)} allocations:")
     print(f"  - Active Preferred Roster: {continuity_stats['preferred_roster']}")
@@ -5194,8 +5300,8 @@ def bulk_allocate_for_date(target_date_str):
             # Bookings without patient - process separately
             patient_bookings_map[None].append(booking)
     
-    # Sort patients by priority (same as allocations: vip_rank, roster_rank, op_rank, priority, date_ordinal)
-    allocation_id_to_priority = {alloc.id: (vip_r, ros_r, op_r, p, d) for alloc, vip_r, ros_r, op_r, p, d in allocation_priorities}
+    # Sort patients by priority (same as allocations: cat_rank, vip_rank, roster_rank, op_rank, priority, date_ordinal)
+    allocation_id_to_priority = {alloc.id: (cat_r, vip_r, ros_r, op_r, p, d) for alloc, cat_r, vip_r, ros_r, op_r, p, d in allocation_priorities}
     
     # Tie-breaker: earliest "from start" date in continuity plan (priority < 0).
     # Patients whose therapy started earliest get processed first so their first-day therapists (e.g. Latha) are locked for them, not for a patient who had that therapist only on a later date.
@@ -5211,14 +5317,16 @@ def bulk_allocate_for_date(target_date_str):
         plan_earliest = {}
     
     def get_patient_priority(patient_id):
-        """Get (vip_rank, roster_rank, op_rank, priority_score, date_ordinal, earliest_from_start_ordinal) for sorting.
+        """Get (cat_rank, vip_rank, roster_rank, op_rank, priority_score, date_ordinal, earliest_from_start_ordinal) for sorting.
+        Category rank: 0=Wheelchair, 1=Dhara & Pizhichil, 2=Normal.
         VIP patients (vip_rank=0) strictly prioritized over non-VIP (vip_rank=1).
         Patients with active preferred roster (roster_rank=0) strictly prioritized.
         IP patients (op_rank=0) strictly prioritized over OP (op_rank=1).
         Patients with earlier 'from start' date get processed first so first-day therapists are assigned to them."""
         if patient_id is None:
-            return (1, 1, 1, 3, 0, 999999)
+            return (2, 1, 1, 1, 3, 0, 999999)
         first_pat = patient_bookings_map[patient_id][0].allocation.patient if patient_bookings_map[patient_id] else None
+        cat_rank = get_patient_category_priority(first_pat, bookings=patient_bookings_map[patient_id])
         
         from Sheduling.vip_service import is_patient_vip
         is_vip = is_patient_vip(first_pat)
@@ -5242,13 +5350,13 @@ def bulk_allocate_for_date(target_date_str):
         min_priority = (3, 0)
         for booking in patient_bookings_map[patient_id]:
             alloc_id = booking.allocation_id
-            p_tuple = allocation_id_to_priority.get(alloc_id, (vip_rank, roster_rank, op_rank, 3, 0))
-            priority = (p_tuple[3], p_tuple[4])
+            p_tuple = allocation_id_to_priority.get(alloc_id, (cat_rank, vip_rank, roster_rank, op_rank, 3, 0))
+            priority = (p_tuple[4], p_tuple[5])
             if priority[0] < min_priority[0] or (priority[0] == min_priority[0] and priority[1] > min_priority[1]):
                 min_priority = priority
         earliest_sd = plan_earliest.get(patient_id)
         earliest_ord = earliest_sd.toordinal() if earliest_sd else 999999
-        return (vip_rank, roster_rank, op_rank, min_priority[0], min_priority[1], earliest_ord)
+        return (cat_rank, vip_rank, roster_rank, op_rank, min_priority[0], min_priority[1], earliest_ord)
     
     # Sort patients by priority, then by earliest from-start date (therapy started first = process first)
     sorted_patient_ids = sorted(

@@ -74,14 +74,14 @@ class TherapyGroupAdmin(admin.ModelAdmin):
 
 @admin.register(TherapyMaster)
 class TherapyMasterAdmin(admin.ModelAdmin):
-    list_display = ['therapy_code', 'therapy_name', 'therapy_group', 'is_steam_therapy', 'is_vamanam', 'is_vasthi', 'total_no_of_therapist', 'is_active', 'created_at']
-    list_filter = ['is_active', 'is_steam_therapy', 'is_vamanam', 'is_vasthi', 'therapy_group', 'therapy_category', 'created_at']
+    list_display = ['therapy_code', 'therapy_name', 'therapy_group', 'is_steam_therapy', 'is_vamanam', 'is_vasthi', 'is_dhara_pizhichil', 'total_no_of_therapist', 'is_active', 'created_at']
+    list_filter = ['is_active', 'is_steam_therapy', 'is_vamanam', 'is_vasthi', 'is_dhara_pizhichil', 'therapy_group', 'therapy_category', 'created_at']
     search_fields = ['therapy_code', 'therapy_name', 'therapy_group__name']
-    list_editable = ['is_active', 'is_steam_therapy', 'is_vamanam', 'is_vasthi']
+    list_editable = ['is_active', 'is_steam_therapy', 'is_vamanam', 'is_vasthi', 'is_dhara_pizhichil']
     ordering = ['therapy_name']
     fieldsets = (
         ('Basic Information', {
-            'fields': ('therapy_code', 'therapy_name', 'therapy_group', 'therapy_category', 'is_steam_therapy', 'is_vamanam', 'is_vasthi')
+            'fields': ('therapy_code', 'therapy_name', 'therapy_group', 'therapy_category', 'is_steam_therapy', 'is_vamanam', 'is_vasthi', 'is_dhara_pizhichil')
         }),
         ('Therapy Details', {
             'fields': ('therapy_duration', 'bathing_required', 'treatment_room_required', 'cost_of_therapy')

@@ -216,6 +216,11 @@ class TherapyMaster(models.Model):
         verbose_name="Vasthi Therapy",
         help_text="If enabled, this therapy is scheduled in the 8:30 AM Vasthi slot and uses dedicated Vasthi Cottage Room allocation rules."
     )
+    is_dhara_pizhichil = models.BooleanField(
+        default=False,
+        verbose_name="Dhara & Pizhichil Therapy",
+        help_text="If enabled, this therapy strictly enforces room continuity from treatment start until patient discharge, even across temporary cancellations or rescheduling."
+    )
     is_active = models.BooleanField(default=True, verbose_name="Active")
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="Created At")
     updated_at = models.DateTimeField(auto_now=True, verbose_name="Updated At")

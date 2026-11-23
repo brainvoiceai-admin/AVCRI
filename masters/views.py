@@ -1576,7 +1576,7 @@ class TherapyMasterManagementView(ListView):
 
 class TherapyMasterCreateView(CreateView):
     model = TherapyMaster
-    fields = ['therapy_name', 'therapy_group', 'therapy_category', 'therapy_duration', 'bathing_required', 'treatment_room_required', 'cost_of_therapy', 'patient_type', 'is_steam_therapy', 'is_vamanam', 'is_vasthi', 'no_of_super_senior_therapist', 'no_of_senior_therapist', 'no_of_junior_therapist', 'no_of_trainee_therapist', 'is_active']
+    fields = ['therapy_name', 'therapy_group', 'therapy_category', 'therapy_duration', 'bathing_required', 'treatment_room_required', 'cost_of_therapy', 'patient_type', 'is_steam_therapy', 'is_vamanam', 'is_vasthi', 'is_dhara_pizhichil', 'no_of_super_senior_therapist', 'no_of_senior_therapist', 'no_of_junior_therapist', 'no_of_trainee_therapist', 'is_active']
     template_name = 'masters/therapy_master_form.html'
     success_url = reverse_lazy('therapy_master_manage')
 
@@ -1679,7 +1679,7 @@ class TherapyMasterCreateView(CreateView):
 
 class TherapyMasterUpdateView(UpdateView):
     model = TherapyMaster
-    fields = ['therapy_name', 'therapy_group', 'therapy_category', 'therapy_duration', 'bathing_required', 'treatment_room_required', 'cost_of_therapy', 'patient_type', 'is_steam_therapy', 'is_vamanam', 'is_vasthi', 'no_of_super_senior_therapist', 'no_of_senior_therapist', 'no_of_junior_therapist', 'no_of_trainee_therapist', 'is_active']
+    fields = ['therapy_name', 'therapy_group', 'therapy_category', 'therapy_duration', 'bathing_required', 'treatment_room_required', 'cost_of_therapy', 'patient_type', 'is_steam_therapy', 'is_vamanam', 'is_vasthi', 'is_dhara_pizhichil', 'no_of_super_senior_therapist', 'no_of_senior_therapist', 'no_of_junior_therapist', 'no_of_trainee_therapist', 'is_active']
     template_name = 'masters/therapy_master_form.html'
     success_url = reverse_lazy('therapy_master_manage')
     
@@ -1807,6 +1807,22 @@ def therapy_master_toggle_vasthi(request, pk):
     _log_master_audit(request, 'update', 'TherapyMaster', str(pk), f'Changed TherapyMaster {therapy.therapy_code} Vasthi status to: {status_str}')
     if request.headers.get('x-requested-with') == 'XMLHttpRequest' or request.content_type == 'application/json':
         return JsonResponse({'success': True, 'is_vasthi': therapy.is_vasthi, 'message': f'Therapy "{therapy.therapy_name}" is now designated as {status_str}.'})
+    messages.success(request, f'Therapy "{therapy.therapy_name}" is now designated as {status_str}.')
+    return redirect('therapy_master_manage')
+
+
+@login_required
+@super_admin_required
+@require_http_methods(["GET", "POST"])
+def therapy_master_toggle_dhara_pizhichil(request, pk):
+    """Toggle Dhara & Pizhichil strict room continuity status for a therapy"""
+    therapy = get_object_or_404(TherapyMaster, pk=pk)
+    therapy.is_dhara_pizhichil = not therapy.is_dhara_pizhichil
+    therapy.save(update_fields=['is_dhara_pizhichil', 'updated_at'])
+    status_str = "Dhara & Pizhichil Therapy (Strict Room Continuity)" if therapy.is_dhara_pizhichil else "Regular Therapy"
+    _log_master_audit(request, 'update', 'TherapyMaster', str(pk), f'Changed TherapyMaster {therapy.therapy_code} Dhara & Pizhichil status to: {status_str}')
+    if request.headers.get('x-requested-with') == 'XMLHttpRequest' or request.content_type == 'application/json':
+        return JsonResponse({'success': True, 'is_dhara_pizhichil': therapy.is_dhara_pizhichil, 'message': f'Therapy "{therapy.therapy_name}" is now designated as {status_str}.'})
     messages.success(request, f'Therapy "{therapy.therapy_name}" is now designated as {status_str}.')
     return redirect('therapy_master_manage')
 

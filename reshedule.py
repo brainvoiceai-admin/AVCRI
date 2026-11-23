@@ -601,6 +601,22 @@ def allocate_treatment_room(date, time_slot, last_room=None, therapy_name=None, 
     except Exception as _vsth_err:
         print(f"[ROOM RESTRICTION] Error in Vasthi room allocation: {_vsth_err}")
 
+    # DHARA PIZHICHIL STRICT ROOM CONTINUITY:
+    # If this therapy is marked as Dhara & Pizhichil in Therapy Master:
+    # Maintain the same room until patient discharge, even across cancellations or rescheduling.
+    try:
+        from final_allocation import is_dhara_pizhichil_treatment, get_dhara_pizhichil_assigned_room
+        if is_dhara_pizhichil_treatment(therapy_name=therapy_name):
+            assigned_room = get_dhara_pizhichil_assigned_room(patient_id=patient_id, patient=patient)
+            if assigned_room:
+                room_obj = check_room_availability(assigned_room.room_no)
+                if room_obj:
+                    return room_obj
+                # STRICT: If the assigned room is unavailable at this timeslot, do NOT switch rooms!
+                return None
+    except Exception as _dp_err:
+        print(f"[ROOM RESTRICTION] Error checking Dhara Pizhichil room: {_dp_err}")
+
     # NEW: Primary logic - allocate based on patient staying room
     # Special handling: If patient_staying_room starts with "OP-", treat it as if there's no staying room
     # (OP patients are handled in the OP patient fallback logic below)
@@ -3858,24 +3874,13 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
                 reason = f"no_room_available: All Vamanam treatment rooms ({', '.join(v_rooms)}) are not available"
             else:
                 reason = "no_room_available: No Vamanam treatment rooms configured in Room Master"
-        # Check if this is Dhara & Pizichil and we had a previous room that's unavailable
-        therapy_lower = str(therapy_name or '').lower()
-        is_dhara_pizichil = 'dhara' in therapy_lower and 'pizichil' in therapy_lower
-        if is_dhara_pizichil and patient_id:
-            # Try to find previous room to show in error message
-            try:
-                from Patient.models import RoomBooking
-                previous_booking = RoomBooking.objects.filter(
-                    patient_id=patient_id,
-                    status='BOOKED'
-                ).exclude(date=date).order_by('-date', '-time_slot').select_related('room').first()
-                if previous_booking:
-                    prev_therapy_lower = str(previous_booking.therapy_name or '').lower()
-                    if 'dhara' in prev_therapy_lower and 'pizichil' in prev_therapy_lower:
-                        if previous_booking.room:
-                            reason = f"previous_room_unavailable: Previous room {previous_booking.room.room_no} for Dhara & Pizichil is unavailable at this slot"
-            except Exception:
-                pass
+        # Check if this is Dhara & Pizhichil and we had an assigned room that's unavailable
+        elif is_dhara_pizhichil_treatment(therapy_name=therapy_name):
+            prev_room = get_dhara_pizhichil_assigned_room(patient_id=patient_id, patient=patient_obj)
+            if prev_room:
+                reason = f"previous_room_unavailable: Original Dhara & Pizhichil room {prev_room.room_no} is unavailable at this slot"
+            else:
+                reason = "no_room_available: No suitable room available for Dhara & Pizhichil treatment"
         if allocation and hasattr(allocation, 'patient'):
             patient_staying_room = getattr(allocation.patient, 'pat_room_no', None)
             if patient_staying_room:

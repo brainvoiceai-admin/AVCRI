@@ -131,6 +131,9 @@
                                     {% if therapy.is_vasthi %}
                                     <span class="badge bg-success text-white ms-1" title="Vasthi treatment (Slots: {% if vasthi_slots_display %}{{ vasthi_slots_display }}{% else %}Configured in Slot Master{% endif %})"><i class="fas fa-prescription-bottle-alt me-1"></i>Vasthi</span>
                                     {% endif %}
+                                    {% if therapy.is_dhara_pizhichil %}
+                                    <span class="badge bg-primary text-white ms-1" title="Dhara & Pizhichil - Strict Room Continuity until discharge"><i class="fas fa-spa me-1"></i>Dhara & Pizhichil</span>
+                                    {% endif %}
                                 </td>
                                 <td>{{ therapy.therapy_group|default:"-" }}</td>
                                 <td>{{ therapy.therapy_category|default:"-" }}</td>
@@ -198,6 +201,12 @@
                                             title="Toggle Vasthi Treatment Status"
                                             onclick="return confirm('Toggle Vasthi treatment designation for {{ therapy.therapy_name }}?');">
                                             <i class="fas fa-prescription-bottle-alt"></i>
+                                        </a>
+                                        <a href="{% url 'therapy_master_toggle_dhara_pizhichil' therapy.pk %}"
+                                            class="btn btn-sm {% if therapy.is_dhara_pizhichil %}btn-primary text-white{% else %}btn-outline-primary{% endif %}"
+                                            title="Toggle Dhara & Pizhichil (Strict Room Continuity)"
+                                            onclick="return confirm('Toggle Dhara & Pizhichil strict room continuity for {{ therapy.therapy_name }}?');">
+                                            <i class="fas fa-spa"></i>
                                         </a>
                                         {% if therapy.is_active %}
                                         <a href="{% url 'therapy_master_disable' therapy.pk %}"
