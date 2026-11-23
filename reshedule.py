@@ -1716,6 +1716,8 @@ def allocate_therapists(date, time_slot, therapy_requirements, last_therapists=N
                         shift__shift_slots__is_active=True,
                     ).values_list("therapist_id", flat=True).distinct()
                 )
+                from masters.models import TherapistMaster
+                eligible_ids.update(TherapistMaster.objects.filter(is_on_call=True).values_list("id", flat=True))
     except Exception:
         shift_filter_enabled = False
 
@@ -1799,9 +1801,9 @@ def allocate_therapists(date, time_slot, therapy_requirements, last_therapists=N
         t_code = getattr(t, 'therapist_code', None)
         if t_code and t_code in omitted_codes:
             return True
-        # On-call check: exclude on-call therapists who are turned OFF or outside date range
+        # On-call check: exclude on-call therapists who are turned OFF, outside date range, or outside configured slots
         from masters.models import is_therapist_on_call_active
-        if not is_therapist_on_call_active(t, date):
+        if not is_therapist_on_call_active(t, date, target_slot):
             return True
         return False
 
@@ -2359,6 +2361,8 @@ def allocate_therapists_with_grade_substitution(date, time_slot, therapy_require
                         shift__shift_slots__is_active=True,
                     ).values_list("therapist_id", flat=True).distinct()
                 )
+                from masters.models import TherapistMaster
+                eligible_ids.update(TherapistMaster.objects.filter(is_on_call=True).values_list("id", flat=True))
     except Exception:
         shift_filter_enabled = False
 
@@ -2423,9 +2427,9 @@ def allocate_therapists_with_grade_substitution(date, time_slot, therapy_require
         t_code = getattr(t, 'therapist_code', None)
         if t_code and t_code in omitted_codes:
             return True
-        # On-call check: exclude on-call therapists who are turned OFF or outside date range
+        # On-call check: exclude on-call therapists who are turned OFF, outside date range, or outside configured slots
         from masters.models import is_therapist_on_call_active
-        if not is_therapist_on_call_active(t, date):
+        if not is_therapist_on_call_active(t, date, target_slot):
             return True
         return False
 

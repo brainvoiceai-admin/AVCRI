@@ -487,6 +487,7 @@ class TherapistMaster(models.Model):
     on_call_status = models.BooleanField(default=True, verbose_name="On-Call Status (Active/Available)", help_text="Whether this on-call therapist is currently turned on (available for scheduling)")
     on_call_start_date = models.DateField(null=True, blank=True, verbose_name="On-Call From Date")
     on_call_end_date = models.DateField(null=True, blank=True, verbose_name="On-Call To Date")
+    on_call_slots = models.ManyToManyField('SlotMaster', blank=True, related_name='on_call_therapists', verbose_name="On-Call Available Slots", help_text="Specific slots for which this on-call therapist is available. Leave empty for all slots.")
     is_active = models.BooleanField(default=True, verbose_name="Active")
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="Created At")
     updated_at = models.DateTimeField(auto_now=True, verbose_name="Updated At")
@@ -853,6 +854,7 @@ class TherapistOnCallLog(models.Model):
     )
     start_date = models.DateField(null=True, blank=True, verbose_name="On-Call From Date")
     end_date = models.DateField(null=True, blank=True, verbose_name="On-Call To Date")
+    slots = models.ManyToManyField('SlotMaster', blank=True, related_name='on_call_logs', verbose_name="Configured Slots")
     remarks = models.TextField(blank=True, null=True, verbose_name="Remarks / Reason")
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="Timestamp")
 
@@ -1020,14 +1022,144 @@ def get_deputed_therapist_ids_for_date(target_date=None):
     ).values_list('therapist_id', flat=True))
 
 
-def is_therapist_on_call_active(therapist, target_date=None):
+def resolve_slot_master(slot):
     """
-    Checks if an on-call therapist is active on target_date.
-    If on-call therapist has start_date and end_date (e.g. Oct 10 to Oct 25),
-    they will be active only during that date window.
+    Resolves various slot representations (SlotMaster, CanonicalSlot, pk, slot_number, time, string)
+    to a SlotMaster instance.
+    """
+    if slot is None:
+        return None
+    if isinstance(slot, SlotMaster):
+        return slot
+    if hasattr(slot, 'slot_time') and slot.slot_time:
+        sm = SlotMaster.objects.filter(slot_time=slot.slot_time, is_active=True).first()
+        if sm:
+            return sm
+    if hasattr(slot, 'start_time') and slot.start_time:
+        sm = SlotMaster.objects.filter(slot_time=slot.start_time, is_active=True).first()
+        if sm:
+            return sm
+    if hasattr(slot, 'slot_number') and slot.slot_number:
+        sm = SlotMaster.objects.filter(slot_number=slot.slot_number, is_active=True).first()
+        if sm:
+            return sm
+    if isinstance(slot, int):
+        sm = SlotMaster.objects.filter(pk=slot, is_active=True).first()
+        if sm:
+            return sm
+        sm = SlotMaster.objects.filter(slot_number=slot, is_active=True).first()
+        if sm:
+            return sm
+    if isinstance(slot, str):
+        s = slot.strip()
+        import re
+        m = re.search(r"slot\s*(\d+)", s, re.IGNORECASE)
+        if m:
+            sm = SlotMaster.objects.filter(slot_number=int(m.group(1)), is_active=True).first()
+            if sm:
+                return sm
+        if s.isdigit():
+            sm = SlotMaster.objects.filter(slot_number=int(s), is_active=True).first() or SlotMaster.objects.filter(pk=int(s), is_active=True).first()
+            if sm:
+                return sm
+        import datetime
+        for fmt in ("%H:%M:%S", "%H:%M", "%I:%M %p", "%I:%M%p"):
+            try:
+                t = datetime.datetime.strptime(s, fmt).time()
+                sm = SlotMaster.objects.filter(slot_time=t, is_active=True).first()
+                if sm:
+                    return sm
+            except Exception:
+                continue
+    return None
+
+
+def sync_expired_on_call_therapists():
+    """
+    Checks all on-call therapists currently marked ON.
+    If their designated on-call period (end_date, or start_date if single day)
+    or their designated slot(s) for that day has completed:
+    - Automatically transitions on_call_status to False (Turned OFF/Standby).
+    - Logs an automatic turn-off entry into TherapistOnCallLog preserving previous dates and slots.
+    - Clears active on_call_start_date, on_call_end_date, and on_call_slots on the therapist record.
+    When the therapist comes again for duty, they can be turned ON fresh with new dates/slots,
+    while their past history remains intact in TherapistOnCallLog and dates history reports.
+    """
+    import datetime
+    now = datetime.datetime.now()
+    today = now.date()
+
+    active_on_call = TherapistMaster.objects.filter(
+        is_on_call=True,
+        on_call_status=True
+    ).prefetch_related('on_call_slots')
+
+    for therapist in active_on_call:
+        st = therapist.on_call_start_date
+        en = therapist.on_call_end_date
+        expiry_date = en or st
+
+        if not expiry_date:
+            continue
+
+        is_expired = False
+        reason = ""
+
+        # Check 1: Designated date or date range has passed
+        if expiry_date < today:
+            is_expired = True
+            if st and en:
+                reason = f"Designated on-call period ({st.strftime('%d %b %Y')} to {en.strftime('%d %b %Y')}) completed"
+            else:
+                reason = f"Designated on-call date ({expiry_date.strftime('%d %b %Y')}) completed"
+
+        # Check 2: Single-day or final day where specific slots were designated and have now concluded
+        elif expiry_date == today and therapist.on_call_slots.exists():
+            slot_times = [s.slot_time for s in therapist.on_call_slots.all() if s.slot_time]
+            if slot_times:
+                latest_time = max(slot_times)
+                # 2.5 hours (150 minutes) treatment session buffer after slot start time
+                slot_end_dt = datetime.datetime.combine(today, latest_time) + datetime.timedelta(minutes=150)
+                if now > slot_end_dt:
+                    is_expired = True
+                    slot_labels = ", ".join(f"Slot {s.slot_number}" for s in therapist.on_call_slots.all().order_by('slot_number'))
+                    reason = f"Designated on-call slot(s) completed on {today.strftime('%d %b %Y')} [{slot_labels}]"
+
+        if is_expired:
+            slots_list = list(therapist.on_call_slots.all())
+            slot_summary = f" [Slots: {', '.join(f'Slot {s.slot_number}' for s in slots_list)}]" if slots_list else ""
+            remarks = f"{reason}{slot_summary}. Automatically turned OFF."
+
+            t_log = TherapistOnCallLog.objects.create(
+                therapist=therapist,
+                status='turned_off',
+                start_date=st,
+                end_date=en,
+                changed_by=None,
+                remarks=remarks
+            )
+            if slots_list:
+                t_log.slots.set(slots_list)
+
+            therapist.on_call_status = False
+            therapist.on_call_start_date = None
+            therapist.on_call_end_date = None
+            therapist.on_call_slots.clear()
+            therapist.save(update_fields=['on_call_status', 'on_call_start_date', 'on_call_end_date', 'updated_at'])
+
+
+def is_therapist_on_call_active(therapist, target_date=None, target_slot=None):
+    """
+    Checks if an on-call therapist is active on target_date and target_slot.
+    - If regular therapist: returns True (not constrained by on-call)
+    - If turned OFF (on_call_status=False) or inactive: returns False
+    - If target_date is outside [start_date, end_date]: returns False
+    - If specific on_call_slots are configured and target_slot is provided:
+        returns True ONLY if target_slot matches one of their on_call_slots!
     """
     if not getattr(therapist, 'is_on_call', False):
         return True
+    sync_expired_on_call_therapists()
     if not getattr(therapist, 'on_call_status', True) or not getattr(therapist, 'is_active', True):
         return False
     if target_date:
@@ -1046,15 +1178,37 @@ def is_therapist_on_call_active(therapist, target_date=None):
             return False
         if en and target_date > en:
             return False
+
+    if target_slot is not None and hasattr(therapist, 'on_call_slots'):
+        configured_slots = list(therapist.on_call_slots.all())
+        if configured_slots:
+            sm = resolve_slot_master(target_slot)
+            if sm is None:
+                matched = False
+                for cs in configured_slots:
+                    if hasattr(target_slot, 'slot_time') and target_slot.slot_time == cs.slot_time:
+                        matched = True
+                        break
+                    if hasattr(target_slot, 'start_time') and target_slot.start_time == cs.slot_time:
+                        matched = True
+                        break
+                if not matched:
+                    return False
+            else:
+                if sm.id not in [s.id for s in configured_slots]:
+                    return False
+
     return True
 
 
-def get_inactive_on_call_therapist_ids(target_date=None):
+def get_inactive_on_call_therapist_ids(target_date=None, target_slot=None):
     """
-    Return set of therapist IDs that are on-call and not active for target_date.
+    Return set of therapist IDs that are on-call and not active for target_date / target_slot.
     If an on-call therapist is turned ON from start_date to end_date (e.g. Oct 10 to Oct 25),
     they are excluded outside that date window.
+    If specific on_call_slots are designated, they are also excluded for other slots.
     """
+    sync_expired_on_call_therapists()
     import datetime
     from django.db.models import Q
     if target_date is None:
@@ -1083,6 +1237,32 @@ def get_inactive_on_call_therapist_ids(target_date=None):
     ).values_list('id', flat=True))
 
     inactive_ids.update(date_inactive)
+
+    # If target_slot is provided, check therapists who have specific on_call_slots
+    if target_slot is not None:
+        sm = resolve_slot_master(target_slot)
+        therapists_with_slots = TherapistMaster.objects.filter(
+            is_on_call=True,
+            on_call_status=True
+        ).exclude(id__in=inactive_ids).prefetch_related('on_call_slots')
+
+        for t in therapists_with_slots:
+            c_slots = list(t.on_call_slots.all())
+            if c_slots:
+                if sm is None:
+                    matched = False
+                    for cs in c_slots:
+                        if hasattr(target_slot, 'slot_time') and target_slot.slot_time == cs.slot_time:
+                            matched = True
+                            break
+                        if hasattr(target_slot, 'start_time') and target_slot.start_time == cs.slot_time:
+                            matched = True
+                            break
+                    if not matched:
+                        inactive_ids.add(t.id)
+                elif sm.id not in [s.id for s in c_slots]:
+                    inactive_ids.add(t.id)
+
     return inactive_ids
 
 

@@ -312,9 +312,9 @@ def allocate_therapists(date, time_slot, therapy_requirements, last_therapists=N
         from masters.models import is_therapist_deputed
         if is_therapist_deputed(t, date):
             return True
-        # On-call check: if therapist is on-call and turned OFF or outside date range (e.g. Oct 10 to Oct 25)
+        # On-call check: if therapist is on-call and turned OFF, outside date range, or outside configured slots
         from masters.models import is_therapist_on_call_active
-        if not is_therapist_on_call_active(t, date):
+        if not is_therapist_on_call_active(t, date, target_slot):
             return True
         return False
 
@@ -346,7 +346,8 @@ def allocate_therapists(date, time_slot, therapy_requirements, last_therapists=N
                 if therapist_on_leave(t):
                     continue
                 if shift_filter_enabled and t.id in mapped_ids and t.id not in eligible_ids:
-                    continue
+                    if not (t.is_on_call and is_therapist_on_call_active(t, date, time_slot)):
+                        continue
                 if TherapistBooking.objects.filter(therapist=t, date=date, time_slot=time_slot, status='BOOKED').exists():
                     continue
 
@@ -387,7 +388,8 @@ def allocate_therapists(date, time_slot, therapy_requirements, last_therapists=N
                 if therapist_on_leave(t):
                     continue
                 if shift_filter_enabled and t.id in mapped_ids and t.id not in eligible_ids:
-                    continue
+                    if not (t.is_on_call and is_therapist_on_call_active(t, date, time_slot)):
+                        continue
                 if TherapistBooking.objects.filter(therapist=t, date=date, time_slot=time_slot, status='BOOKED').exists():
                     continue
                 allocated.append(t)
@@ -410,7 +412,8 @@ def allocate_therapists(date, time_slot, therapy_requirements, last_therapists=N
                 if t in allocated or therapist_on_leave(t):
                     continue
                 if shift_filter_enabled and t.id in mapped_ids and t.id not in eligible_ids:
-                    continue
+                    if not (t.is_on_call and is_therapist_on_call_active(t, date, time_slot)):
+                        continue
                 if TherapistBooking.objects.filter(therapist=t, date=date, time_slot=time_slot, status='BOOKED').exists():
                     continue
 

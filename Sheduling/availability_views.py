@@ -135,9 +135,9 @@ def get_available_therapists_api(request):
             if deputed_ids:
                 available_therapists = available_therapists.exclude(pk__in=deputed_ids)
 
-            # On-call check: exclude on-call therapists who are turned OFF or outside date range
+            # On-call check: exclude on-call therapists who are turned OFF, outside date range, or not available for slot
             from masters.models import get_inactive_on_call_therapist_ids
-            inactive_on_call_ids = get_inactive_on_call_therapist_ids(target_date)
+            inactive_on_call_ids = get_inactive_on_call_therapist_ids(target_date, slot_master)
             if inactive_on_call_ids:
                 available_therapists = available_therapists.exclude(pk__in=inactive_on_call_ids)
 
@@ -183,7 +183,8 @@ def get_available_therapists_api(request):
                                         shift__shift_slots__is_active=True,
                                     ).values_list("therapist_id", flat=True).distinct()
                                 )
-                                disallowed_ids = mapped_ids - eligible_ids
+                                on_call_ids = set(TherapistMaster.objects.filter(is_on_call=True).values_list("id", flat=True))
+                                disallowed_ids = (mapped_ids - eligible_ids) - on_call_ids
                                 if disallowed_ids:
                                     available_therapists = available_therapists.exclude(pk__in=disallowed_ids)
                     except Exception:
@@ -250,6 +251,7 @@ def get_available_therapists_api(request):
                 'grade': grade_name,  # Grade name from TherapistGrade model
                 'is_bathing': therapist.is_bathing_therapist,
                 'is_helping_therapist': getattr(therapist, 'is_helping_therapist', False),
+                'is_on_call': getattr(therapist, 'is_on_call', False),
                 'is_active': therapist.is_active,
                 'specialization': 'General Therapy'  # Default specialization
             }

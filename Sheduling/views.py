@@ -7954,6 +7954,7 @@ def emergency_available_therapists_api(request):
                 'grade': tm.therapist_grade.name if tm.therapist_grade else 'General',
                 'gender': tm.therapist_gender or 'Male',
                 'is_bathing_therapist': bool(tm.is_bathing_therapist),
+                'is_on_call': bool(getattr(tm, 'is_on_call', False)),
                 'session_count': session_count,
             })
 
