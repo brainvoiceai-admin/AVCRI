@@ -1,31 +1,31 @@
 Traceback (most recent call last):
-  File "D:\pre=phase-2\AVCRI\test_reshedule.py", line 11, in <module>
+  File "C:\Users\irfah\OneDrive\Desktop\AVCRI\test_reshedule.py", line 11, in <module>
     res = expand_therapies_for_visit(3068, '2026-03-11', create_bookings=True)
           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "D:\pre=phase-2\AVCRI\reshedule.py", line 3610, in expand_therapies_for_visit
+  File "C:\Users\irfah\OneDrive\Desktop\AVCRI\reshedule.py", line 4895, in expand_therapies_for_visit
     allocation = TherapyAllocation.objects.filter(pk=therapy_allocation_id).first()
                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "C:\Users\jaise\AppData\Local\Programs\Python\Python312\Lib\site-packages\django\db\models\query.py", line 1104, in first
+  File "C:\Users\irfah\OneDrive\Desktop\AVCRI\venv\Lib\site-packages\django\db\models\query.py", line 1104, in first
     for obj in queryset[:1]:
-  File "C:\Users\jaise\AppData\Local\Programs\Python\Python312\Lib\site-packages\django\db\models\query.py", line 384, in __iter__
+  File "C:\Users\irfah\OneDrive\Desktop\AVCRI\venv\Lib\site-packages\django\db\models\query.py", line 384, in __iter__
     self._fetch_all()
-  File "C:\Users\jaise\AppData\Local\Programs\Python\Python312\Lib\site-packages\django\db\models\query.py", line 1949, in _fetch_all
+  File "C:\Users\irfah\OneDrive\Desktop\AVCRI\venv\Lib\site-packages\django\db\models\query.py", line 1949, in _fetch_all
     self._result_cache = list(self._iterable_class(self))
                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "C:\Users\jaise\AppData\Local\Programs\Python\Python312\Lib\site-packages\django\db\models\query.py", line 91, in __iter__
+  File "C:\Users\irfah\OneDrive\Desktop\AVCRI\venv\Lib\site-packages\django\db\models\query.py", line 91, in __iter__
     results = compiler.execute_sql(
               ^^^^^^^^^^^^^^^^^^^^^
-  File "C:\Users\jaise\AppData\Local\Programs\Python\Python312\Lib\site-packages\django\db\models\sql\compiler.py", line 1621, in execute_sql
+  File "C:\Users\irfah\OneDrive\Desktop\AVCRI\venv\Lib\site-packages\django\db\models\sql\compiler.py", line 1621, in execute_sql
     cursor = self.connection.cursor()
              ^^^^^^^^^^^^^^^^^^^^^^^^
-  File "C:\Users\jaise\AppData\Local\Programs\Python\Python312\Lib\site-packages\django\utils\asyncio.py", line 26, in inner
+  File "C:\Users\irfah\OneDrive\Desktop\AVCRI\venv\Lib\site-packages\django\utils\asyncio.py", line 26, in inner
     return func(*args, **kwargs)
            ^^^^^^^^^^^^^^^^^^^^^
-  File "C:\Users\jaise\AppData\Local\Programs\Python\Python312\Lib\site-packages\django\db\backends\base\base.py", line 320, in cursor
+  File "C:\Users\irfah\OneDrive\Desktop\AVCRI\venv\Lib\site-packages\django\db\backends\base\base.py", line 320, in cursor
     return self._cursor()
            ^^^^^^^^^^^^^^
-  File "C:\Users\jaise\AppData\Local\Programs\Python\Python312\Lib\site-packages\django\db\backends\base\base.py", line 296, in _cursor
+  File "C:\Users\irfah\OneDrive\Desktop\AVCRI\venv\Lib\site-packages\django\db\backends\base\base.py", line 296, in _cursor
     self.ensure_connection()
-  File "C:\Users\jaise\AppData\Local\Programs\Python\Python312\Lib\site-packages\pytest_django\plugin.py", line 908, in _blocking_wrapper
+  File "C:\Users\irfah\OneDrive\Desktop\AVCRI\venv\Lib\site-packages\pytest_django\plugin.py", line 908, in _blocking_wrapper
     raise RuntimeError(
 RuntimeError: Database access not allowed, use the "django_db" mark, or the "db" or "transactional_db" fixtures to enable it.

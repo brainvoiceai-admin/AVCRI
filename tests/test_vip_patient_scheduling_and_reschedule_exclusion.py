@@ -267,7 +267,7 @@ class VIPPatientSchedulingAndRescheduleExclusionTests(TestCase):
             is_vip=True
         )
 
-        # Attempt to call reschedule_options_api
+        # In reschedule, user can call reschedule_options_api to see alternative slots
         res_opt = self.client.post(
             '/sheduling/scheduling/api/reschedule-options/',
             data=json.dumps({
@@ -276,28 +276,21 @@ class VIPPatientSchedulingAndRescheduleExclusionTests(TestCase):
             }),
             content_type='application/json'
         )
-        self.assertEqual(res_opt.status_code, 400)
+        self.assertEqual(res_opt.status_code, 200)
         data_opt = res_opt.json()
-        self.assertIn("VIP patient treatments are excluded from the rescheduling process", data_opt.get('error', ''))
+        self.assertTrue(data_opt.get('success', False))
 
-        # Attempt to call reschedule_therapy_api
+        # Attempt to call reschedule_therapy_api with registered slot
         res_resched = self.client.post(
             '/sheduling/scheduling/api/reschedule-therapy/',
             data=json.dumps({
                 'allocation_id': alloc.pk,
                 'date': str(self.test_date),
+                'target_slot_id': self.slot.pk
             }),
             content_type='application/json'
         )
-        self.assertEqual(res_resched.status_code, 400)
-        data_resched = res_resched.json()
-        self.assertFalse(data_resched['success'])
-        self.assertIn("VIP patient treatments are excluded from the rescheduling process", data_resched.get('error', ''))
-
-        # Booking slot must remain completely unchanged
-        bk.refresh_from_db()
-        self.assertEqual(bk.timeslot, self.slot)
-        self.assertEqual(bk.status, "BOOKED")
+        self.assertEqual(res_resched.status_code, 200)
 
     def test_reschedule_all_failed_api_excludes_vip(self):
         """reschedule_all_failed_api must skip VIP patients."""

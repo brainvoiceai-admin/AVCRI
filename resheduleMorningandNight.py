@@ -274,7 +274,7 @@ def get_emergency_leave_sets_for_date(target_date, slot=None):
         # Include on-call therapists who are currently turned OFF
         try:
             from masters.models import get_inactive_on_call_therapist_ids
-            em_ids.update(get_inactive_on_call_therapist_ids(target_date))
+            em_ids.update(get_inactive_on_call_therapist_ids(target_date, target_slot=slot))
         except Exception as oncall_err:
             logger.debug("Error adding inactive on-call therapists to leave sets: %s", oncall_err)
         return em_ids, em_codes
@@ -1326,16 +1326,8 @@ def process_reassignments(target_date=None, dry_run=True, max_daily_normal=5, ma
             # different slot, and mark the allocation as failed if it cannot.
             if allocation:
                 try:
-                    tasks = []
-                    if 'reshedule' in sys.modules and hasattr(sys.modules['reshedule'], 'allocate_therapy_for_visit'):
-                        tasks = sys.modules['reshedule'].allocate_therapy_for_visit(allocation.pk, target_date, create_bookings=not dry_run)
-                    elif 'reshedule' in globals():
-                        # Fallback if module is imported under name reshedule
-                        try:
-                            from reshedule import allocate_therapy_for_visit
-                            tasks = allocate_therapy_for_visit(allocation.pk, target_date, create_bookings=not dry_run)
-                        except Exception:
-                            tasks = []
+                    from reshedule import allocate_therapy_for_visit
+                    tasks = allocate_therapy_for_visit(allocation.pk, target_date, create_bookings=not dry_run)
                     # tasks can be a dict with 'error' or a list of task dicts
                     any_success = False
                     error_reason = None
@@ -1415,8 +1407,9 @@ def process_reassignments(target_date=None, dry_run=True, max_daily_normal=5, ma
         if pick and requires_senior_tag:
             try:
                 pick_grade = get_therapist_grade_name(pick)
-                if pick_grade and 'Senior' in pick_grade and 'get_senior_tag_count_for_therapist' in dir(reshedule):
-                    senior_count = reshedule.get_senior_tag_count_for_therapist(pick, target_date)
+                if pick_grade and 'Senior' in pick_grade:
+                    from reshedule import get_senior_tag_count_for_therapist
+                    senior_count = get_senior_tag_count_for_therapist(pick, target_date)
                     if senior_count >= 2:
                         logger.info(
                             "Senior tag limit reached for therapist %s on %s (count=%s). Looking for alternative.",
@@ -1440,15 +1433,8 @@ def process_reassignments(target_date=None, dry_run=True, max_daily_normal=5, ma
             print("      [WARNING] Candidate pool exists but all over daily/overtime limits – handing off to main scheduler")
             if allocation:
                 try:
-                    tasks = []
-                    if 'reshedule' in sys.modules and hasattr(sys.modules['reshedule'], 'allocate_therapy_for_visit'):
-                        tasks = sys.modules['reshedule'].allocate_therapy_for_visit(allocation.pk, target_date, create_bookings=not dry_run)
-                    elif 'reshedule' in globals():
-                        try:
-                            from reshedule import allocate_therapy_for_visit
-                            tasks = allocate_therapy_for_visit(allocation.pk, target_date, create_bookings=not dry_run)
-                        except Exception:
-                            tasks = []
+                    from reshedule import allocate_therapy_for_visit
+                    tasks = allocate_therapy_for_visit(allocation.pk, target_date, create_bookings=not dry_run)
                     any_success = False
                     error_reason = None
                     if isinstance(tasks, dict) and 'error' in tasks:

@@ -1080,6 +1080,15 @@ def allocate_therapists(
     day_of_week = date.weekday()
     allocated = []
 
+    # Check if patient is VIP
+    is_vip = False
+    if patient_id:
+        try:
+            from Sheduling.vip_service import is_patient_vip
+            is_vip = is_patient_vip(patient_id)
+        except Exception:
+            is_vip = False
+
     # If patient_age not passed directly, attempt lookup via patient_id
     if patient_age is None and patient_id:
         try:
@@ -1109,9 +1118,13 @@ def allocate_therapists(
         except Exception as e:
             print(f"[DEBUG PreferredRoster] Error checking roster for patient {patient_id}: {e}")
 
-    exclusion_set = set(avoid_therapists or [])
-    if unpreferred_codes:
-        exclusion_set.update(unpreferred_codes)
+    # For VIP patients, avoid_therapists (continuity locks of other patients) do NOT block VIP
+    if is_vip:
+        exclusion_set = set(unpreferred_codes)
+    else:
+        exclusion_set = set(avoid_therapists or [])
+        if unpreferred_codes:
+            exclusion_set.update(unpreferred_codes)
 
     # Treatment Omission Exclusions: Therapists with approved omissions for this treatment
     omitted_codes = set()
@@ -1345,6 +1358,15 @@ def allocate_therapists(
     total_required = (therapy_requirements or {}).get("total") or sum(v for v in grade_map.values() if v > 0)
     num_bathing_needed = bathing_therapists_count if bathing_therapists_count > 0 else (1 if needs_bathing else 0)
 
+    def _get_vip_displacement_exclusions(target_t=None):
+        ex = set(exclusion_set)
+        if preferred_roster_info:
+            ex.update(preferred_roster_info.get('therapist_codes', []))
+        ex.update(getattr(a, 'therapist_code', '') for a in allocated if getattr(a, 'therapist_code', None))
+        if target_t and getattr(target_t, 'therapist_code', None):
+            ex.add(getattr(target_t, 'therapist_code', ''))
+        return ex
+
     # Helper function to find and allocate candidate therapists per grade requirement
     def _find_and_allocate_candidates(target_grade, needed_original, is_helping_flag=False):
         needed = needed_original
@@ -1409,7 +1431,12 @@ def allocate_therapists(
                 if shift_filter_enabled and t.id in mapped_ids and t.id not in eligible_ids:
                     continue
                 if TherapistBooking.objects.filter(therapist=t, date=date, time_slot=time_slot, status='BOOKED').exists():
-                    continue
+                    if is_vip:
+                        from Sheduling.preferred_therapist_service import displace_non_vip_therapist_for_slot
+                        if not displace_non_vip_therapist_for_slot(t, date, time_slot, exclude_therapist_codes=_get_vip_displacement_exclusions(t)):
+                            continue
+                    else:
+                        continue
 
                 if desired_gender:
                     t_gender = get_therapist_gender(t)
@@ -1418,7 +1445,9 @@ def allocate_therapists(
 
                 session_count = get_therapist_daily_session_count(t)
                 category_session_count = get_therapist_daily_category_count(t)
-                if session_count < 5:
+                if is_vip:
+                    available_candidates.append((t, category_session_count, session_count))
+                elif session_count < 5:
                     available_candidates.append((t, category_session_count, session_count))
                 elif session_count == 5:
                     available_candidates.append((t, category_session_count, session_count))
@@ -1456,10 +1485,11 @@ def allocate_therapists(
             for t, category_session_count, session_count in ordered_candidates:
                 if needed <= 0:
                     break
-                if not allow_extra and session_count >= 5:
-                    continue
-                if allow_extra and session_count >= 6:
-                    continue
+                if not is_vip:
+                    if not allow_extra and session_count >= 5:
+                        continue
+                    if allow_extra and session_count >= 6:
+                        continue
 
                 if bathing_still_needed > 0 and (total_required - len(allocated) <= bathing_still_needed):
                     if not getattr(t, 'is_bathing_therapist', False):
@@ -1487,6 +1517,61 @@ def allocate_therapists(
                     except Exception as log_err:
                         print(f"[ERROR HelpingTherapistLog] {log_err}")
 
+            # VIP Fallback: if patient has preferred roster but this grade could not be fully satisfied from roster
+            if is_vip and needed > 0 and preferred_roster_info:
+                # If preferred therapist is assigned with another VIP patient, do NOT fall back to other therapists.
+                # Per business rules: treatment should fail so user can change the time slot in reschedule page.
+                has_other_vip_conflict = False
+                pref_codes = preferred_roster_info.get('therapist_codes', [])
+                for p_code in pref_codes:
+                    conf_tb_qs = TherapistBooking.objects.filter(
+                        date=date,
+                        time_slot=time_slot,
+                        therapist__therapist_code=p_code,
+                        status='BOOKED'
+                    )
+                    if patient_id:
+                        if str(patient_id).isdigit():
+                            conf_tb_qs = conf_tb_qs.exclude(patient_id=int(patient_id))
+                        conf_tb_qs = conf_tb_qs.exclude(visit__patient__pat_reg_no=str(patient_id))
+                    for conf_tb in conf_tb_qs:
+                        c_pat = getattr(getattr(conf_tb, 'visit', None), 'patient', None)
+                        if patient_id and (getattr(c_pat, 'pat_reg_no', None) == str(patient_id) or str(conf_tb.patient_id) == str(patient_id)):
+                            continue
+                        from Sheduling.vip_service import is_patient_vip
+                        if is_patient_vip(c_pat) or is_patient_vip(conf_tb.patient_id):
+                            has_other_vip_conflict = True
+                            break
+                    if has_other_vip_conflict:
+                        break
+
+                if not has_other_vip_conflict:
+                    fb_qs = TherapistMaster.objects.filter(
+                        therapist_grade__name__iexact=current_grade_search,
+                        is_active=True
+                    ).exclude(therapist_code__in=preferred_roster_info.get('therapist_codes_set', set()))
+                    if exclusion_set:
+                        fb_qs = fb_qs.exclude(therapist_code__in=exclusion_set)
+                    if desired_gender:
+                        fb_qs = fb_qs.filter(therapist_gender__istartswith=desired_gender[0])
+                    for fb_t in fb_qs:
+                        if needed <= 0:
+                            break
+                        if fb_t in allocated or therapist_on_leave(fb_t):
+                            continue
+                        if shift_filter_enabled and fb_t.id in mapped_ids and fb_t.id not in eligible_ids:
+                            continue
+                        if TherapistBooking.objects.filter(therapist=fb_t, date=date, time_slot=time_slot, status='BOOKED').exists():
+                            from Sheduling.preferred_therapist_service import displace_non_vip_therapist_for_slot
+                            if not displace_non_vip_therapist_for_slot(fb_t, date, time_slot, exclude_therapist_codes=_get_vip_displacement_exclusions(fb_t)):
+                                continue
+                        if bathing_still_needed > 0 and (total_required - len(allocated) <= bathing_still_needed):
+                            if not getattr(fb_t, 'is_bathing_therapist', False):
+                                continue
+                        allocated.append(fb_t)
+                        needed -= 1
+                        assigned_cnt += 1
+
         return assigned_cnt
 
     # -----------------------
@@ -1497,8 +1582,11 @@ def allocate_therapists(
         current_bath_allocated = sum(1 for a in allocated if getattr(a, 'is_bathing_therapist', False))
         if current_bath_allocated < num_bathing_needed:
             try:
-                from Sheduling.preferred_therapist_service import pick_bathing_therapist_from_roster
-                picked_bath, bath_role = pick_bathing_therapist_from_roster(preferred_roster_info, date, time_slot)
+                from Sheduling.preferred_therapist_service import pick_bathing_therapist_from_roster, displace_non_vip_therapist_for_slot
+                picked_bath, bath_role = pick_bathing_therapist_from_roster(
+                    preferred_roster_info, date, time_slot,
+                    is_vip=is_vip, exclude_therapist_codes=_get_vip_displacement_exclusions()
+                )
                 if picked_bath and picked_bath not in allocated:
                     bath_avail = True
                     if therapist_on_leave(picked_bath):
@@ -1506,12 +1594,16 @@ def allocate_therapists(
                     elif shift_filter_enabled and picked_bath.id in mapped_ids and picked_bath.id not in eligible_ids:
                         bath_avail = False
                     elif TherapistBooking.objects.filter(therapist=picked_bath, date=date, time_slot=time_slot, status='BOOKED').exists():
-                        bath_avail = False
+                        if is_vip:
+                            if not displace_non_vip_therapist_for_slot(picked_bath, date, time_slot, exclude_therapist_codes=_get_vip_displacement_exclusions(picked_bath)):
+                                bath_avail = False
+                        else:
+                            bath_avail = False
                     elif desired_gender and get_therapist_gender(picked_bath) != desired_gender:
                         bath_avail = False
                     elif exclusion_set and picked_bath.therapist_code in exclusion_set:
                         bath_avail = False
-                    elif not can_assign_therapist(picked_bath, allow_extra=False) and not can_assign_therapist(picked_bath, allow_extra=True):
+                    elif not is_vip and not can_assign_therapist(picked_bath, allow_extra=False) and not can_assign_therapist(picked_bath, allow_extra=True):
                         bath_avail = False
 
                     if bath_avail:
@@ -1599,11 +1691,17 @@ def allocate_therapists(
                 continue
 
             if TherapistBooking.objects.filter(therapist=t, date=date, time_slot=time_slot, status='BOOKED').exists():
-                continue
-
-            if not can_assign_therapist(t, allow_extra=False):
-                if not can_assign_therapist(t, allow_extra=True):
+                if is_vip:
+                    from Sheduling.preferred_therapist_service import displace_non_vip_therapist_for_slot
+                    if not displace_non_vip_therapist_for_slot(t, date, time_slot, exclude_therapist_codes=_get_vip_displacement_exclusions(t)):
+                        continue
+                else:
                     continue
+
+            if not is_vip:
+                if not can_assign_therapist(t, allow_extra=False):
+                    if not can_assign_therapist(t, allow_extra=True):
+                        continue
 
             allocated.append(t)
             if grade_to_decrement and grade_map.get(grade_to_decrement, 0) > 0:
@@ -1641,8 +1739,8 @@ def allocate_therapists(
     allocated_primary_count = len(allocated)
     shortage = total_required - allocated_primary_count
 
-    if shortage > 0 and allow_helping_fallback and not preferred_roster_info:
-        print(f"[DEBUG HelpingTherapist] Primary shortage detected ({shortage} remaining needed out of {total_required}). Triggering Helping Therapist fallback...")
+    if shortage > 0 and (allow_helping_fallback or is_vip):
+        print(f"[DEBUG HelpingTherapist] Shortage detected ({shortage} remaining needed out of {total_required}). Triggering Helping Therapist fallback...")
 
         if last_therapists:
             for code in last_therapists:
@@ -1657,12 +1755,17 @@ def allocate_therapists(
                 if shift_filter_enabled and t.id in mapped_ids and t.id not in eligible_ids:
                     continue
                 if TherapistBooking.objects.filter(therapist=t, date=date, time_slot=time_slot, status='BOOKED').exists():
-                    continue
+                    if is_vip:
+                        from Sheduling.preferred_therapist_service import displace_non_vip_therapist_for_slot
+                        if not displace_non_vip_therapist_for_slot(t, date, time_slot, exclude_therapist_codes=_get_vip_displacement_exclusions(t)):
+                            continue
+                    else:
+                        continue
                 if desired_gender and get_therapist_gender(t) != desired_gender:
                     continue
                 if needs_bathing and not t.is_bathing_therapist:
                     continue
-                if not can_assign_therapist(t, allow_extra=True):
+                if not is_vip and not can_assign_therapist(t, allow_extra=True):
                     continue
 
                 allocated.append(t)
@@ -1745,6 +1848,15 @@ def assign_continuity_therapists_pass1(booking, allocation, target_date, locked_
     therapy_name = getattr(allocation, 'therapy_name', None)
     therapy_code = getattr(allocation, 'therapy_code', None)
     current_therapy_name = therapy_name
+
+    # Check if patient is VIP
+    from Sheduling.vip_service import is_patient_vip
+    is_vip = (
+        getattr(booking, 'is_vip', False) or
+        getattr(allocation, 'is_vip', False) or
+        is_patient_vip(getattr(allocation, 'patient', None)) or
+        is_patient_vip(patient_id)
+    )
     
     # Get slot
     slot = getattr(booking, 'timeslot', None)
@@ -1933,7 +2045,7 @@ def assign_continuity_therapists_pass1(booking, allocation, target_date, locked_
         if needs_bath_flag:
             try:
                 from Sheduling.preferred_therapist_service import pick_bathing_therapist_from_roster
-                picked_bath, bath_role = pick_bathing_therapist_from_roster(preferred_roster_info, target_date, slot_master)
+                picked_bath, bath_role = pick_bathing_therapist_from_roster(preferred_roster_info, target_date, slot_master, is_vip=is_vip)
                 if picked_bath:
                     previous_bathing_therapist = picked_bath
                     if picked_bath in continuity_therapists:
@@ -2039,6 +2151,9 @@ def assign_continuity_therapists_pass1(booking, allocation, target_date, locked_
     for t in continuity_therapists:
         if len(assigned_continuity) >= req_total:
             break
+
+        if t in assigned_continuity:
+            continue
         
         # Skip inactive therapists
         if not getattr(t, 'is_active', True):
@@ -2062,8 +2177,26 @@ def assign_continuity_therapists_pass1(booking, allocation, target_date, locked_
         
         # Check if already booked at this slot
         if TherapistBooking.objects.filter(therapist=t, date=target_date, time_slot=slot_master, status='BOOKED').exists():
-            print(f"[CONTINUITY PASS1] Therapist {t.therapist_code} already booked at {target_date} {slot_master} - skipping")
-            continue
+            if is_vip:
+                from Sheduling.preferred_therapist_service import displace_non_vip_therapist_for_slot
+                cur_excl = set()
+                if preferred_roster_info:
+                    cur_excl.update(preferred_roster_info.get('therapist_codes', []))
+                cur_excl.update(getattr(a, 'therapist_code', '') for a in assigned_continuity if getattr(a, 'therapist_code', None))
+                cur_excl.add(getattr(t, 'therapist_code', ''))
+                for (tid, sid) in locked_therapist_slots:
+                    if sid == getattr(slot_master, 'id', None):
+                        t_lock = TherapistMaster.objects.filter(id=tid).first()
+                        if t_lock and t_lock.therapist_code:
+                            cur_excl.add(t_lock.therapist_code)
+                if not displace_non_vip_therapist_for_slot(t, target_date, slot_master, exclude_therapist_codes=cur_excl):
+                    print(f"[CONTINUITY PASS1] Therapist {t.therapist_code} already booked by VIP at {target_date} {slot_master} - skipping")
+                    continue
+                else:
+                    print(f"[CONTINUITY PASS1] Displaced non-VIP holding preferred therapist {t.therapist_code} for VIP patient!")
+            else:
+                print(f"[CONTINUITY PASS1] Therapist {t.therapist_code} already booked at {target_date} {slot_master} - skipping")
+                continue
         
         # Check gender match
         if desired_gender:
@@ -2138,7 +2271,7 @@ def assign_continuity_therapists_pass1(booking, allocation, target_date, locked_
         current_pass_count = sum(1 for a in assigned_continuity if a == t)
         session_count = db_count + current_pass_count
         
-        if session_count >= 6:
+        if not is_vip and session_count >= 6:
             print(f"[CONTINUITY PASS1] Therapist {t.therapist_code} at max sessions ({session_count}/6) - skipping")
             continue
         
@@ -2166,7 +2299,19 @@ def assign_continuity_therapists_pass1(booking, allocation, target_date, locked_
         if preferred_roster_info:
             try:
                 from Sheduling.preferred_therapist_service import pick_bathing_therapist_from_roster
-                picked_bath, _ = pick_bathing_therapist_from_roster(preferred_roster_info, target_date, slot_master)
+                pass1_bath_excl = set()
+                if preferred_roster_info:
+                    pass1_bath_excl.update(preferred_roster_info.get('therapist_codes', []))
+                pass1_bath_excl.update(getattr(a, 'therapist_code', '') for a in assigned_continuity if getattr(a, 'therapist_code', None))
+                for (tid, sid) in locked_therapist_slots:
+                    if sid == getattr(slot_master, 'id', None):
+                        t_lock = TherapistMaster.objects.filter(id=tid).first()
+                        if t_lock and t_lock.therapist_code:
+                            pass1_bath_excl.add(t_lock.therapist_code)
+                picked_bath, _ = pick_bathing_therapist_from_roster(
+                    preferred_roster_info, target_date, slot_master,
+                    is_vip=is_vip, exclude_therapist_codes=pass1_bath_excl
+                )
                 if picked_bath and picked_bath in assigned_continuity:
                     result['bath_assigned'] = picked_bath
                     print(f"[CONTINUITY PASS1] ✓ Using preferred roster bathing therapist: {picked_bath.therapist_code}")
@@ -3233,8 +3378,75 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                 candidate_therapists = []
 
         req_total = int(therapy_req.get("total", 1) or 1)
+        pat_reg_id = getattr(getattr(allocation, 'patient', None), 'pat_reg_no', None) or getattr(allocation, 'patient_id', None)
+        from Sheduling.vip_service import is_patient_vip
+        is_vip_booking = (
+            getattr(booking, 'is_vip', False) or
+            getattr(allocation, 'is_vip', False) or
+            is_patient_vip(pat_reg_id) or
+            is_patient_vip(getattr(allocation, 'patient', None))
+        )
+
+        if is_vip_booking and len(candidate_therapists) < req_total:
+            print(f"[VIP FAIL-SAFE] Shortage for VIP booking {booking_id} ({len(candidate_therapists)}/{req_total}). Attempting preemption...")
+            try:
+                conf_tbs = TherapistBooking.objects.filter(
+                    date=target_date,
+                    time_slot=allocate_slot,
+                    status='BOOKED'
+                ).select_related('therapist', 'visit')
+                for c_tb in conf_tbs:
+                    if len(candidate_therapists) >= req_total:
+                        break
+                    if c_tb.therapist and c_tb.therapist not in candidate_therapists:
+                        from Sheduling.preferred_therapist_service import displace_non_vip_therapist_for_slot
+                        displace_non_vip_therapist_for_slot(
+                            c_tb.therapist, target_date, allocate_slot,
+                            exclude_therapist_codes=[getattr(t, 'therapist_code', '') for t in candidate_therapists]
+                        )
+
+                candidate_therapists = allocate_therapists(
+                    target_date,
+                    allocate_slot,
+                    therapy_req,
+                    last_therapists,
+                    needs_bath_flag,
+                    patient_gender=pat_sex,
+                    avoid_therapists=None,
+                    patient_id=pat_reg_id,
+                    patient_age=pat_age,
+                    allow_helping_fallback=True
+                )
+            except Exception as e:
+                print(f"[VIP FAIL-SAFE] Error during preemption/retry: {e}")
+
         if len(candidate_therapists) < req_total:
-            reason = "insufficient_therapists_available"
+            other_vip_conflict_exists = False
+            if is_vip_booking and preferred_roster_info:
+                pref_codes = preferred_roster_info.get('therapist_codes', [])
+                conf_tbs = TherapistBooking.objects.filter(
+                    date=target_date,
+                    time_slot=allocate_slot,
+                    therapist__therapist_code__in=pref_codes,
+                    status='BOOKED'
+                ).exclude(visit=allocation)
+                if pat_reg_id:
+                    if str(pat_reg_id).isdigit():
+                        conf_tbs = conf_tbs.exclude(patient_id=int(pat_reg_id))
+                    conf_tbs = conf_tbs.exclude(visit__patient__pat_reg_no=str(pat_reg_id))
+                for c_tb in conf_tbs:
+                    c_pat = getattr(getattr(c_tb, 'visit', None), 'patient', None)
+                    if pat_reg_id and (getattr(c_pat, 'pat_reg_no', None) == str(pat_reg_id) or str(c_tb.patient_id) == str(pat_reg_id)):
+                        continue
+                    from Sheduling.vip_service import is_patient_vip
+                    if is_patient_vip(c_pat) or is_patient_vip(c_tb.patient_id):
+                        other_vip_conflict_exists = True
+                        break
+
+            if other_vip_conflict_exists:
+                reason = "Preferred therapist is assigned to another VIP patient at this slot. Change slot to reschedule."
+            else:
+                reason = "insufficient_therapists_available"
             
             # Check if all therapists have reached max sessions (6)
             try:
@@ -3367,36 +3579,60 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
         # and expose the same style of message as the earlier insufficient_therapists_available branch.
         if len(assigned_therapists) < req_total:
             unique_count = len(assigned_therapists)
-            # Try to infer patient gender for message consistency (Rule: Male children below 5 assigned to female therapist)
-            pat_sex = getattr(getattr(allocation, 'patient', None), 'pat_sex', None)
-            pat_age = getattr(getattr(allocation, 'patient', None), 'pat_age', None)
-            desired_gender = resolve_desired_gender(pat_sex, pat_age) if (pat_sex or pat_age) else 'n/a'
-            reason = f"insufficient_therapists_available (required={req_total}, found={unique_count}, gender={desired_gender})"
-            print(f"[CONTINUITY PASS2] ❌ Not enough unique therapists after de-duplication: required={req_total}, unique={unique_count}")
-            try:
-                booking.status = 'failed'
-                booking.failure_reason = (reason or '')[:512]
-                booking.save(update_fields=['status', 'failure_reason', 'updated_at'])
-                print(f"[CONTINUITY PASS2] Booking {booking_id} marked as failed (user message): {reason}")
-            except Exception as e:
-                print(f"[CONTINUITY PASS2] Could not update booking status: {e}")
-            if AllocationAttempt:
+            other_vip_conflict_exists = False
+            if is_vip_booking and preferred_roster_info:
+                pref_codes = preferred_roster_info.get('therapist_codes', [])
+                conf_tbs = TherapistBooking.objects.filter(
+                    date=target_date,
+                    time_slot=allocate_slot,
+                    therapist__therapist_code__in=pref_codes,
+                    status='BOOKED'
+                ).exclude(visit=allocation)
+                if pat_reg_id:
+                    if str(pat_reg_id).isdigit():
+                        conf_tbs = conf_tbs.exclude(patient_id=int(pat_reg_id))
+                    conf_tbs = conf_tbs.exclude(visit__patient__pat_reg_no=str(pat_reg_id))
+                for c_tb in conf_tbs:
+                    c_pat = getattr(getattr(c_tb, 'visit', None), 'patient', None)
+                    if pat_reg_id and (getattr(c_pat, 'pat_reg_no', None) == str(pat_reg_id) or str(c_tb.patient_id) == str(pat_reg_id)):
+                        continue
+                    from Sheduling.vip_service import is_patient_vip
+                    if is_patient_vip(c_pat) or is_patient_vip(c_tb.patient_id):
+                        other_vip_conflict_exists = True
+                        break
+
+            if other_vip_conflict_exists:
+                reason = "Preferred therapist is assigned to another VIP patient at this slot. Change slot to reschedule."
+            else:
+                pat_sex = getattr(getattr(allocation, 'patient', None), 'pat_sex', None)
+                pat_age = getattr(getattr(allocation, 'patient', None), 'pat_age', None)
+                desired_gender = resolve_desired_gender(pat_sex, pat_age) if (pat_sex or pat_age) else 'n/a'
+                reason = f"insufficient_therapists_available (required={req_total}, found={unique_count}, gender={desired_gender})"
+                print(f"[CONTINUITY PASS2] ❌ Not enough unique therapists after de-duplication: required={req_total}, unique={unique_count}")
                 try:
-                    AllocationAttempt.objects.create(
-                        visit=None, therapy=None, date=target_date,
-                        requested_time_slot=canonical_slot, requested_time_slot_value=requested_slot_value or '',
-                        status='FAILED', reason=reason,
-                        extra={"booking_id": booking_id, "therapists": [therapist_entry(t, False) for t in assigned_therapists]}
-                    )
-                except Exception:
-                    pass
-            tasks.append({
-                "booking_id": booking_id, "allocation_id": therapy_allocation_id, "date": target_date.isoformat(),
-                "therapy_name": therapy_name, "slot": requested_slot_value, "status": "FAILED", "reason": reason,
-                "room_no": getattr(booking.room, 'room_no', None) if getattr(booking, 'room', None) else None,
-                "therapists": [therapist_entry(t, False) for t in assigned_therapists]
-            })
-            continue
+                    booking.status = 'failed'
+                    booking.failure_reason = (reason or '')[:512]
+                    booking.save(update_fields=['status', 'failure_reason', 'updated_at'])
+                    print(f"[CONTINUITY PASS2] Booking {booking_id} marked as failed (user message): {reason}")
+                except Exception as e:
+                    print(f"[CONTINUITY PASS2] Could not update booking status: {e}")
+                if AllocationAttempt:
+                    try:
+                        AllocationAttempt.objects.create(
+                            visit=None, therapy=None, date=target_date,
+                            requested_time_slot=canonical_slot, requested_time_slot_value=requested_slot_value or '',
+                            status='FAILED', reason=reason,
+                            extra={"booking_id": booking_id, "therapists": [therapist_entry(t, False) for t in assigned_therapists]}
+                        )
+                    except Exception:
+                        pass
+                tasks.append({
+                    "booking_id": booking_id, "allocation_id": therapy_allocation_id, "date": target_date.isoformat(),
+                    "therapy_name": therapy_name, "slot": requested_slot_value, "status": "FAILED", "reason": reason,
+                    "room_no": getattr(booking.room, 'room_no', None) if getattr(booking, 'room', None) else None,
+                    "therapists": [therapist_entry(t, False) for t in assigned_therapists]
+                })
+                continue
 
         bath_assigned = None
         
@@ -3593,34 +3829,38 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                             break
                         
                         if not bath_assigned:
-                            # No alternative senior found - fail allocation
-                            reason = "bathing_therapist_unavailable: Senior therapist for Dhara & Pizichil cannot be bathing therapist, and no alternative senior available"
-                            print(f"[DEBUG] FAILING allocation: Dhara & Pizichil - Senior {senior_therapist.therapist_code} is only bathing therapist and no alternative found. Patient: {patient_id}, Date: {target_date}")
-                            
-                            try:
-                                booking.status = 'failed'
-                                booking.failure_reason = (str(reason) or '')[:512]
-                                booking.save(update_fields=['status', 'failure_reason', 'updated_at'])
-                            except Exception as e:
-                                print(f"Error updating booking {booking_id} to failed: {e}")
-                            
-                            therapists_for_audit = [therapist_entry(t, False) for t in assigned_therapists]
-                            if AllocationAttempt:
+                            if is_vip_booking and assigned_therapists:
+                                bath_assigned = assigned_therapists[0]
+                                print(f"[VIP FAIL-SAFE] Designated {bath_assigned.therapist_code} as bathing therapist for VIP {patient_id}")
+                            else:
+                                # No alternative senior found - fail allocation
+                                reason = "bathing_therapist_unavailable: Senior therapist for Dhara & Pizichil cannot be bathing therapist, and no alternative senior available"
+                                print(f"[DEBUG] FAILING allocation: Dhara & Pizichil - Senior {senior_therapist.therapist_code} is only bathing therapist and no alternative found. Patient: {patient_id}, Date: {target_date}")
+                                
                                 try:
-                                    AllocationAttempt.objects.create(
-                                        visit=None, therapy=None, date=target_date,
-                                        requested_time_slot=allocate_slot, requested_time_slot_value=requested_slot_value or '',
-                                        status='FAILED', reason=reason,
-                                        extra={"required": req_total, "found": len(candidate_therapists), "booking_id": booking_id, "therapists": therapists_for_audit, "bathing_required": True, "senior_therapist": senior_therapist.therapist_code if senior_therapist else None}
-                                    )
-                                except Exception:
-                                    pass
-                            tasks.append({
-                                "booking_id": booking_id, "allocation_id": therapy_allocation_id, "date": target_date.isoformat(),
-                                "therapy_name": therapy_name, "slot": requested_slot_value, "status": "FAILED", "reason": reason,
-                                "room_no": getattr(booking.room, 'room_no', None) if getattr(booking, 'room', None) else None, "therapists": therapists_for_audit
-                            })
-                            continue  # Skip to next booking
+                                    booking.status = 'failed'
+                                    booking.failure_reason = (str(reason) or '')[:512]
+                                    booking.save(update_fields=['status', 'failure_reason', 'updated_at'])
+                                except Exception as e:
+                                    print(f"Error updating booking {booking_id} to failed: {e}")
+                                
+                                therapists_for_audit = [therapist_entry(t, False) for t in assigned_therapists]
+                                if AllocationAttempt:
+                                    try:
+                                        AllocationAttempt.objects.create(
+                                            visit=None, therapy=None, date=target_date,
+                                            requested_time_slot=allocate_slot, requested_time_slot_value=requested_slot_value or '',
+                                            status='FAILED', reason=reason,
+                                            extra={"required": req_total, "found": len(candidate_therapists), "booking_id": booking_id, "therapists": therapists_for_audit, "bathing_required": True, "senior_therapist": senior_therapist.therapist_code if senior_therapist else None}
+                                        )
+                                    except Exception:
+                                        pass
+                                tasks.append({
+                                    "booking_id": booking_id, "allocation_id": therapy_allocation_id, "date": target_date.isoformat(),
+                                    "therapy_name": therapy_name, "slot": requested_slot_value, "status": "FAILED", "reason": reason,
+                                    "room_no": getattr(booking.room, 'room_no', None) if getattr(booking, 'room', None) else None, "therapists": therapists_for_audit
+                                })
+                                continue  # Skip to next booking
             else:
                 # Not Dhara & Pizichil or no senior therapist - use normal logic
                 # PREFERRED ROSTER: Always designate preferred roster's bathing therapist if in assigned list
@@ -3668,34 +3908,38 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                     
                     # If no bathing therapist available in assigned list, FAIL the allocation
                     if not bath_assigned:
-                        reason = "bathing_therapist_unavailable: No bathing therapist available for this therapy"
-                        print(f"[DEBUG] FAILING allocation: Therapy requires bathing but no bathing therapist available. Patient: {patient_id}, Date: {target_date}")
-                        
-                        # Update booking status to failed
-                        try:
-                            booking.status = 'failed'
-                            booking.failure_reason = (str(reason) or '')[:512]
-                            booking.save(update_fields=['status', 'failure_reason', 'updated_at'])
-                        except Exception as e:
-                            print(f"Error updating booking {booking_id} to failed: {e}")
-                        
-                        therapists_for_audit = [therapist_entry(t, False) for t in assigned_therapists]
-                        if AllocationAttempt:
+                        if is_vip_booking and assigned_therapists:
+                            bath_assigned = assigned_therapists[0]
+                            print(f"[VIP FAIL-SAFE] Designated {bath_assigned.therapist_code} as bathing therapist for VIP patient {patient_id}")
+                        else:
+                            reason = "bathing_therapist_unavailable: No bathing therapist available for this therapy"
+                            print(f"[DEBUG] FAILING allocation: Therapy requires bathing but no bathing therapist available. Patient: {patient_id}, Date: {target_date}")
+                            
+                            # Update booking status to failed
                             try:
-                                AllocationAttempt.objects.create(
-                                    visit=None, therapy=None, date=target_date,
-                                    requested_time_slot=allocate_slot, requested_time_slot_value=requested_slot_value or '',
-                                    status='FAILED', reason=reason,
-                                    extra={"required": req_total, "found": len(candidate_therapists), "booking_id": booking_id, "therapists": therapists_for_audit, "bathing_required": True}
-                                )
-                            except Exception:
-                                pass
-                        tasks.append({
-                            "booking_id": booking_id, "allocation_id": therapy_allocation_id, "date": target_date.isoformat(),
-                            "therapy_name": therapy_name, "slot": requested_slot_value, "status": "FAILED", "reason": reason,
-                            "room_no": getattr(booking.room, 'room_no', None) if getattr(booking, 'room', None) else None, "therapists": therapists_for_audit
-                        })
-                        continue  # Skip to next booking
+                                booking.status = 'failed'
+                                booking.failure_reason = (str(reason) or '')[:512]
+                                booking.save(update_fields=['status', 'failure_reason', 'updated_at'])
+                            except Exception as e:
+                                print(f"Error updating booking {booking_id} to failed: {e}")
+                            
+                            therapists_for_audit = [therapist_entry(t, False) for t in assigned_therapists]
+                            if AllocationAttempt:
+                                try:
+                                    AllocationAttempt.objects.create(
+                                        visit=None, therapy=None, date=target_date,
+                                        requested_time_slot=allocate_slot, requested_time_slot_value=requested_slot_value or '',
+                                        status='FAILED', reason=reason,
+                                        extra={"required": req_total, "found": len(candidate_therapists), "booking_id": booking_id, "therapists": therapists_for_audit, "bathing_required": True}
+                                    )
+                                except Exception:
+                                    pass
+                            tasks.append({
+                                "booking_id": booking_id, "allocation_id": therapy_allocation_id, "date": target_date.isoformat(),
+                                "therapy_name": therapy_name, "slot": requested_slot_value, "status": "FAILED", "reason": reason,
+                                "room_no": getattr(booking.room, 'room_no', None) if getattr(booking, 'room', None) else None, "therapists": therapists_for_audit
+                            })
+                            continue  # Skip to next booking
         
         # FINAL SAFETY CHECK: Ensure bath_assigned is actually in assigned_therapists.
         # Prevents the scenario where PASS 1 set bath_assigned to a therapist that
