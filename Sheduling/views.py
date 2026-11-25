@@ -4715,21 +4715,17 @@ def scheduling_dashboard(request):
             bookings__failure_reason='Patient Inactive'
         ).distinct().select_related('patient', 'room', 'timeslot').prefetch_related('bookings__assignments__therapist')
         
-        # Filter out therapies with zero therapist requirements and exclude VIP patients from rescheduling
+        # Filter out therapies with zero therapist requirements (do NOT hide VIP patients)
         from reshedule import therapist_requirements
-        from .vip_service import is_patient_vip
-        failed_allocations = [alloc for alloc in failed_allocations if therapist_requirements(alloc).get("total", 1) > 0 and not is_patient_vip(alloc)]
+        failed_allocations = [alloc for alloc in failed_allocations if therapist_requirements(alloc).get("total", 1) > 0]
         # Failed bookings for this date (one row per booking) so template can show exact failure_reason
         failed_bookings = list(
             Booking.objects.filter(date=filter_date, status='failed')
             .exclude(failure_reason='Patient Inactive')
-            .exclude(is_vip=True)
-            .exclude(allocation__is_vip=True)
-            .exclude(allocation__patient__is_vip=True)
             .select_related('allocation__patient', 'allocation', 'timeslot', 'room')
             .order_by('allocation_id', 'timeslot_id')
         )
-        failed_bookings = [b for b in failed_bookings if therapist_requirements(b.allocation).get("total", 1) > 0 and not is_patient_vip(b)]
+        failed_bookings = [b for b in failed_bookings if therapist_requirements(b.allocation).get("total", 1) > 0]
         
         # Scheduled: show allocations that have scheduled bookings for this date
         scheduled_allocations = TherapyAllocation.objects.filter(
@@ -4753,10 +4749,9 @@ def scheduling_dashboard(request):
             bookings__failure_reason='Patient Inactive'
         ).distinct().select_related('patient', 'room', 'timeslot').prefetch_related('bookings__assignments__therapist')
         
-        # Filter out therapies with zero therapist requirements and exclude VIP patients
+        # Filter out therapies with zero therapist requirements (do NOT hide VIP patients)
         from reshedule import therapist_requirements
-        from .vip_service import is_patient_vip
-        failed_allocations = [alloc for alloc in failed_allocations if therapist_requirements(alloc).get("total", 1) > 0 and not is_patient_vip(alloc)]
+        failed_allocations = [alloc for alloc in failed_allocations if therapist_requirements(alloc).get("total", 1) > 0]
         failed_bookings = []  # No date filter: show allocations only, reason column will show "—"
         scheduled_allocations = TherapyAllocation.objects.filter(
             bookings__status='scheduled'
@@ -4975,14 +4970,12 @@ def user_therapy_entry_dashboard(request):
     failed_allocations = base_failed.filter(
         bookings__status='failed'
     ).distinct().select_related('patient', 'room', 'timeslot', 'allocated_by').prefetch_related('bookings__assignments__therapist')
-    from .vip_service import is_patient_vip
-    failed_allocations = [a for a in failed_allocations if therapist_requirements(a).get("total", 1) > 0 and not is_patient_vip(a)]
+    failed_allocations = [a for a in failed_allocations if therapist_requirements(a).get("total", 1) > 0]
 
     booking_failed = Booking.objects.filter(allocation__allocated_by=current_user, date=failed_date, status='failed')
-    failed_bookings = booking_failed.select_related(
+    failed_bookings = list(booking_failed.select_related(
         'allocation__patient', 'allocation', 'timeslot', 'room', 'allocation__allocated_by'
-    ).prefetch_related('assignments__therapist').order_by('-date', '-created_at')
-    failed_bookings = [b for b in failed_bookings if not is_patient_vip(b)]
+    ).prefetch_related('assignments__therapist').order_by('-date', '-created_at'))
 
     # ---- Scheduled: filter by scheduled_date only ----
     base_scheduled = TherapyAllocation.objects.filter(allocated_by=current_user).filter(
@@ -5197,16 +5190,14 @@ def doctor_patients_therapy_dashboard(request):
     failed_allocations = base_failed.filter(bookings__status='failed').distinct().select_related(
         'patient', 'room', 'timeslot', 'allocated_by'
     ).prefetch_related('bookings__assignments__therapist')
-    from .vip_service import is_patient_vip
-    failed_allocations = [a for a in failed_allocations if therapist_requirements(a).get('total', 1) > 0 and not is_patient_vip(a)]
+    failed_allocations = [a for a in failed_allocations if therapist_requirements(a).get('total', 1) > 0]
 
     booking_failed = Booking.objects.filter(
         booking_patient_q, date=failed_date, status='failed'
     )
-    failed_bookings = booking_failed.select_related(
+    failed_bookings = list(booking_failed.select_related(
         'allocation__patient', 'allocation', 'timeslot', 'room', 'allocation__allocated_by'
-    ).prefetch_related('assignments__therapist').order_by('-date', '-created_at')
-    failed_bookings = [b for b in failed_bookings if not is_patient_vip(b)]
+    ).prefetch_related('assignments__therapist').order_by('-date', '-created_at'))
 
     base_scheduled = TherapyAllocation.objects.filter(patient_q).filter(
         Q(from_date__lte=scheduled_date) & Q(to_date__gte=scheduled_date)
@@ -5839,24 +5830,13 @@ def get_therapy_data_api(request):
                 
                 if status_filter in ('failed', 'all'):
                     base_bookings_qs = base_bookings_qs.exclude(failure_reason='Patient Inactive')
-                if status_filter == 'failed':
-                    base_bookings_qs = base_bookings_qs.exclude(is_vip=True).exclude(allocation__is_vip=True).exclude(allocation__patient__is_vip=True)
                 
                 # For 'allocated' status (used by prescription scheduling PDF), we also want to
                 # include zero‑therapist (non‑nurse) therapies. They are auto-scheduled as 'scheduled'
                 # after Final Schedule, but we need to include them in the prescription PDF.
                 # Note: base_bookings_qs already includes scheduled bookings, but we need to ensure
                 # zero-therapist therapies are NOT filtered out later in the loop.
-                if status_filter == 'allocated':
-                    # base_bookings_qs already has scheduled bookings, which includes zero-therapist therapies
-                    # We just need to make sure they're not filtered out in the conversion loop below
-                    bookings = list(base_bookings_qs)
-                else:
-                    bookings = list(base_bookings_qs)
-
-                if status_filter == 'failed':
-                    from .vip_service import is_patient_vip
-                    bookings = [b for b in bookings if not is_patient_vip(b)]
+                bookings = list(base_bookings_qs)
                 
                 # Hide inactive patient treatments in active views (draft, scheduled, allocated).
                 # Use shared logic `final_allocation.is_patient_active()` which covers both:
@@ -6396,12 +6376,6 @@ def reschedule_options_api(request):
         if not allocation:
             return JsonResponse({'error': 'Therapy allocation not found'}, status=404)
         
-        from .vip_service import is_patient_vip
-        if is_patient_vip(allocation):
-            return JsonResponse({
-                'error': 'VIP patient treatments are excluded from the rescheduling process to ensure their preferred therapist and assigned slot remain unchanged.'
-            }, status=400)
-        
         target_date = parse_date(date)
         if not target_date:
             return JsonResponse({'error': 'Invalid date format. Use YYYY-MM-DD.'}, status=400)
@@ -6416,7 +6390,7 @@ def reschedule_options_api(request):
         is_shortage_failure = False
         if failure_reason:
             fr_lower = str(failure_reason).lower()
-            if "insufficient_therapists" in fr_lower or "therapist shortage" in fr_lower or "shortage" in fr_lower:
+            if "insufficient_therapists" in fr_lower or "therapist shortage" in fr_lower or "shortage" in fr_lower or "preferred therapist" in fr_lower:
                 is_shortage_failure = True
         
         # Registered slot details
@@ -6685,13 +6659,6 @@ def reschedule_therapy_api(request):
             # Get allocation - don't require status='failed' since failed is determined by booking status
             allocation = TherapyAllocation.objects.get(id=allocation_id)
             
-            from .vip_service import is_patient_vip
-            if is_patient_vip(allocation):
-                return JsonResponse({
-                    'success': False,
-                    'error': 'VIP patient treatments are excluded from the rescheduling process to ensure their preferred therapist and assigned slot remain unchanged.'
-                }, status=400)
-            
             # Parse date
             target_date = parse_date(date)
             if not target_date:
@@ -6817,7 +6784,7 @@ def reschedule_therapy_api(request):
 
                         # Record BookingRescheduleHistory
                         try:
-                            from .models import BookingRescheduleHistory
+                            from .models import BookingRescheduleHistory, SchedulingAuditLog
                             booking.refresh_from_db()
                             after_therapists = [
                                 {
@@ -7093,7 +7060,7 @@ def reschedule_all_failed_api(request):
 
                         # Record BookingRescheduleHistory
                         try:
-                            from .models import BookingRescheduleHistory
+                            from .models import BookingRescheduleHistory, SchedulingAuditLog
                             if booking:
                                 booking.refresh_from_db()
                             else:
@@ -9157,12 +9124,12 @@ def patient_emergency_confirm_reschedule_api(request):
 
     try:
         from datetime import time
-        from django.db import transaction
+        from django.db import models, transaction
         from .models import Booking, BookingAssignment, SchedulingAuditLog
         from masters.models import SlotMaster, TherapistMaster, TherapistLeaveMaster, EmergencyLeave
         from masters.models import is_therapist_on_emergency_leave, is_therapist_deputed, is_therapist_omitted_for_treatment, TherapyMaster
-        from Patient.models import TherapistBooking, Therapist, TreatmentRoom
-        from reshedule import therapist_requirements, therapy_needs_room, therapy_needs_bath, allocate_treatment_room
+        from Patient.models import TherapistBooking, Therapist, TreatmentRoom, RoomBooking
+        from reshedule import therapist_requirements, therapy_needs_room, therapy_needs_bath, allocate_treatment_room, create_room_booking_safe
         from final_allocation import resolve_desired_gender
 
         data = json.loads(request.body)
@@ -9331,13 +9298,18 @@ def patient_emergency_confirm_reschedule_api(request):
 
         # Execute updates atomically
         with transaction.atomic():
-            # 1. Release previous assignments and TherapistBookings
+            # 1. Release previous assignments, TherapistBookings, and RoomBookings
             booking.assignments.all().delete()
             TherapistBooking.objects.filter(
                 visit=alloc,
                 date=target_date,
                 time_slot=booking.timeslot
             ).delete()
+            # Clean up old RoomBooking for this booking/allocation
+            RoomBooking.objects.filter(
+                date=target_date,
+                time_slot=booking.timeslot
+            ).filter(models.Q(visit=booking) | models.Q(therapy=alloc)).delete()
 
             # 2. Update booking slot and room
             booking.timeslot = target_slot
@@ -9347,7 +9319,21 @@ def patient_emergency_confirm_reschedule_api(request):
             booking.failure_reason = ''
             booking.save(update_fields=['timeslot', 'room', 'status', 'failure_reason', 'updated_at'])
 
-            # 3. Create new assignments & TherapistBookings
+            # 3. Create RoomBooking if treatment requires room and room is allocated
+            if booking.room:
+                try:
+                    create_room_booking_safe(
+                        room=booking.room,
+                        date=target_date,
+                        time_slot=target_slot,
+                        therapy_name=alloc.therapy_name if alloc else '',
+                        patient_id=patient_num_id,
+                        visit=booking
+                    )
+                except Exception as rb_err:
+                    print(f"[ERROR RoomBooking emergency fever resched]: {rb_err}")
+
+            # 4. Create new assignments & TherapistBookings
             # Ensure proper number of bathing therapists
             current_bathing_assigned = sum(1 for t in final_assigned if t['is_bathing'])
             if current_bathing_assigned < req_bathing_count and req_bathing_count > 0:
