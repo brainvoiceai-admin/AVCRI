@@ -529,6 +529,30 @@ def allocate_treatment_room(date, time_slot, last_room=None, therapy_name=None, 
     If no room available from the list, returns None (allocation will fail).
     """
     from Patient.models import RoomBooking, TreatmentRoom
+    from masters.models import SlotMaster
+    from django.db.models import Q
+
+    # Ensure time_slot is resolved to a SlotMaster instance if string or time object was passed
+    if time_slot is not None and not isinstance(time_slot, SlotMaster):
+        if hasattr(time_slot, 'slot_time') and time_slot.slot_time:
+            slot_candidate = SlotMaster.objects.filter(slot_time=time_slot.slot_time, is_active=True).first()
+            if slot_candidate:
+                time_slot = slot_candidate
+        elif hasattr(time_slot, 'start_time') and time_slot.start_time:
+            slot_candidate = SlotMaster.objects.filter(slot_time=time_slot.start_time, is_active=True).first()
+            if slot_candidate:
+                time_slot = slot_candidate
+        else:
+            time_str = str(time_slot).strip()
+            if ":" in time_str:
+                from datetime import datetime
+                try:
+                    p_time = datetime.strptime(time_str[:5], "%H:%M").time()
+                    slot_candidate = SlotMaster.objects.filter(slot_time=p_time, is_active=True).first()
+                    if slot_candidate:
+                        time_slot = slot_candidate
+                except Exception:
+                    pass
     
     # Auto-detect wheelchair requirement from booking or patient if not explicitly passed
     if not is_wheelchair:
@@ -561,7 +585,7 @@ def allocate_treatment_room(date, time_slot, last_room=None, therapy_name=None, 
                 date=date,
                 time_slot=time_slot,
                 status='BOOKED'
-            ).exists():
+            ).exclude(visit__status='cancelled').exists():
                 return None
             from Sheduling.models import Booking
             b_conflict = Booking.objects.filter(
@@ -569,7 +593,7 @@ def allocate_treatment_room(date, time_slot, last_room=None, therapy_name=None, 
                 date=date,
                 timeslot=time_slot,
                 status__in=['scheduled', 'BOOKED']
-            )
+            ).exclude(status='cancelled').exclude(allocation__status='cancelled')
             if booking_id:
                 b_conflict = b_conflict.exclude(pk=booking_id)
             if b_conflict.exists():
@@ -739,13 +763,10 @@ def allocate_treatment_room(date, time_slot, last_room=None, therapy_name=None, 
                 return room
         return None
     
-    # SPECIAL: Check if this is a 'Dhara & Pizichil' therapy - try to use previous room first
-    is_dhara_pizichil = False
-    if therapy_name:
-        therapy_lower = str(therapy_name).lower()
-        is_dhara_pizichil = 'dhara' in therapy_lower and 'pizichil' in therapy_lower
+    # SPECIAL: Check if this is a Dhara & Pizhichil therapy (strictly via TherapyMaster flag) - try to use previous room first
+    is_dhara_pizichil = is_dhara_pizhichil_treatment(therapy_name=therapy_name) if therapy_name else False
     
-    # For 'Dhara & Pizichil', try to find previous room assignment
+    # For Dhara & Pizhichil, try to find previous room assignment
     previous_room_no = None
     if is_dhara_pizichil and patient_id:
         try:
@@ -759,8 +780,7 @@ def allocate_treatment_room(date, time_slot, last_room=None, therapy_name=None, 
             ).order_by('-date', '-time_slot').select_related('room')
             
             for booking in previous_bookings:
-                therapy_name_lower = str(booking.therapy_name or '').lower()
-                if 'dhara' in therapy_name_lower and 'pizichil' in therapy_name_lower:
+                if is_dhara_pizhichil_treatment(therapy_name=booking.therapy_name):
                     if booking.room:
                         previous_room_no = booking.room.room_no
                         break
@@ -1541,7 +1561,7 @@ def patient_has_hard_treatment_in_session(patient_id, target_date, session, excl
     return False
 
 
-def get_allowed_slot_values(patient_type, therapy_category, used_slots=None, therapy_name=None, therapy_code=None, patient_id=None, target_date=None):
+def get_allowed_slot_values(patient_type, therapy_category, used_slots=None, therapy_name=None, therapy_code=None, patient_id=None, target_date=None, exclude_booking_id=None, exclude_allocation_id=None):
     """
     Return ordered list of allowed slot strings "HH:MM" for this patient_type and therapy_category.
     Excludes any used_slots provided (list of slot model instances).
@@ -1554,6 +1574,8 @@ def get_allowed_slot_values(patient_type, therapy_category, used_slots=None, the
         therapy_code: Therapy code (master lookup + THEB037 exemption)
         patient_id: Optional patient ID or snapshot for session hard-treatment checks
         target_date: Optional target date for session hard-treatment checks
+        exclude_booking_id: Optional booking ID to exclude from session conflict checks
+        exclude_allocation_id: Optional allocation ID to exclude from session conflict checks
     """
     # VAMANAM SPECIAL RULE: Vamanam therapies ONLY use designated Vamanam slots (e.g. 05:00, 05:30)
     if is_vamanam_treatment(therapy_name, therapy_code):
@@ -1625,8 +1647,16 @@ def get_allowed_slot_values(patient_type, therapy_category, used_slots=None, the
     # Exception: Medium and Easy treatments (e.g. Lepam) can be assigned in the same session
     if is_hard_treatment(therapy_name=therapy_name, therapy_code=therapy_code, category=therapy_category):
         if patient_id and target_date:
-            has_morning_hard = patient_has_hard_treatment_in_session(patient_id, target_date, 'morning')
-            has_evening_hard = patient_has_hard_treatment_in_session(patient_id, target_date, 'evening')
+            has_morning_hard = patient_has_hard_treatment_in_session(
+                patient_id, target_date, 'morning',
+                exclude_booking_id=exclude_booking_id,
+                exclude_allocation_id=exclude_allocation_id,
+            )
+            has_evening_hard = patient_has_hard_treatment_in_session(
+                patient_id, target_date, 'evening',
+                exclude_booking_id=exclude_booking_id,
+                exclude_allocation_id=exclude_allocation_id,
+            )
             if has_morning_hard:
                 allowed_slots = [s for s in allowed_slots if get_slot_session(s) != 'morning']
                 print(f"[SLOT RESTRICTION] Patient {patient_id} already has a hard treatment in morning session on {target_date} - excluding morning slots. Remaining: {allowed_slots}")
@@ -2854,6 +2884,7 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
     """
     from Patient.models import RoomBooking, TherapistBooking
     from masters.models import SlotMaster as SlotModel  # used when saving canonical slot objects
+    from masters.models import is_therapist_on_emergency_leave, is_therapist_deputed, is_therapist_omitted_for_treatment
     therapy_name = allocation.therapy_name
     booking_id = getattr(booking, 'pk', None)
 
@@ -2873,22 +2904,22 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
             date=date, 
             time_slot=canonical_slot, 
             status__in=['BOOKED','scheduled']
-        ).exclude(pk=getattr(booking,'pk',None))
+        ).exclude(pk=getattr(booking,'pk',None)).exclude(visit__status='cancelled')
         
+        if booking and hasattr(booking, 'pk') and booking.pk:
+            room_booking_qs = room_booking_qs.exclude(visit=booking)
         # Also exclude bookings from the same allocation (allows rescheduling to different slots)
-        # RoomBooking.therapy references TherapyAllocation
         if allocation and hasattr(allocation, 'pk'):
-            room_booking_qs = room_booking_qs.exclude(therapy=allocation)
+            room_booking_qs = room_booking_qs.exclude(therapy=allocation).exclude(visit__allocation=allocation)
         
         therapist_booking_qs = TherapistBooking.objects.filter(
             patient_id=patient_id, 
             date=date, 
             time_slot=canonical_slot, 
             status='BOOKED'
-        ).exclude(pk=getattr(booking,'pk',None))
+        ).exclude(visit__status='cancelled')
         
         # Also exclude therapist bookings from the same allocation
-        # TherapistBooking.visit references TherapyAllocation
         if allocation and hasattr(allocation, 'pk'):
             therapist_booking_qs = therapist_booking_qs.exclude(visit=allocation)
         
@@ -2903,20 +2934,21 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
                     date=date, 
                     time_slot__start_time=slot_start, 
                     status__in=['BOOKED','scheduled']
-                ).exclude(pk=getattr(booking,'pk',None))
-                
-                # RoomBooking.therapy references TherapyAllocation
+                ).exclude(
+                    Q(therapy__status='cancelled') | Q(visit__status='cancelled') | Q(visit__allocation__status='cancelled')
+                )
+                if booking and hasattr(booking, 'pk') and booking.pk:
+                    room_booking_qs = room_booking_qs.exclude(visit=booking)
                 if allocation and hasattr(allocation, 'pk'):
-                    room_booking_qs = room_booking_qs.exclude(therapy=allocation)
+                    room_booking_qs = room_booking_qs.exclude(therapy=allocation).exclude(visit__allocation=allocation)
                 
                 therapist_booking_qs = TherapistBooking.objects.filter(
                     patient_id=patient_id, 
                     date=date, 
                     time_slot__start_time=slot_start, 
                     status='BOOKED'
-                ).exclude(pk=getattr(booking,'pk',None))
+                ).exclude(visit__status='cancelled')
                 
-                # TherapistBooking.visit references TherapyAllocation
                 if allocation and hasattr(allocation, 'pk'):
                     therapist_booking_qs = therapist_booking_qs.exclude(visit=allocation)
                 
@@ -3190,6 +3222,13 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
     patient_obj = getattr(allocation, 'patient', None)
     patient_reg_no = getattr(patient_obj, 'pat_reg_no', None) if patient_obj else (str(patient_id) if patient_id else None)
     patient_name = getattr(patient_obj, 'pat_name', 'Unknown') if patient_obj else 'Unknown'
+    preferred_roster_info = None
+    if patient_reg_no or patient_id:
+        try:
+            from Sheduling.preferred_therapist_service import get_active_preferred_roster
+            preferred_roster_info = get_active_preferred_roster(patient_reg_no or patient_id)
+        except Exception:
+            preferred_roster_info = None
     try:
         # Derive patient gender and age from allocation patient snapshot (Rule: Male children below 5 assigned to female therapist)
         pat_sex = getattr(patient_obj, 'pat_sex', None)
@@ -3458,7 +3497,8 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
                 allow_helping_fallback=allow_helping_fallback,
                 patient_age=pat_age,
             )
-    except Exception:
+    except Exception as e:
+        print(f"[DEBUG] allocate_therapists exception: {e}")
         candidate_therapists = []
 
     req_total = int(therapy_req.get("total", 1) or 1)
@@ -3892,7 +3932,7 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
                     reason = "bathing_therapist_unavailable: Senior therapist for Dhara & Pizichil cannot be bathing therapist, and no alternative senior available"
                     print(f"[DEBUG] FAILING allocation: Dhara & Pizichil - Senior {senior_therapist.therapist_code} is only bathing therapist and no alternative found. Patient: {patient_id}, Date: {date}")
                     
-                    if create_bookings:
+                    if create_bookings and booking:
                         try:
                             booking.status = 'failed'
                             booking.failure_reason = (str(reason) or '')[:512]
@@ -3901,7 +3941,7 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
                             print(f"Error updating booking {booking_id} to failed: {e}")
                     
                     therapists_for_audit = [{"therapist_code": getattr(t,'therapist_code',str(t)), "is_bathing": False} for t in assigned_therapists]
-                    if AllocationAttempt:
+                    if AllocationAttempt and create_bookings:
                         try:
                             AllocationAttempt.objects.create(
                                 visit=None, therapy=None, date=date,
@@ -3964,7 +4004,7 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
                     print(f"[DEBUG] FAILING allocation: Therapy requires bathing but no bathing therapist available. Patient: {patient_id}, Date: {date}")
                     
                     # Update booking status to failed
-                    if create_bookings:
+                    if create_bookings and booking:
                         try:
                             booking.status = 'failed'
                             booking.failure_reason = (str(reason) or '')[:512]
@@ -3973,7 +4013,7 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
                             print(f"Error updating booking {booking_id} to failed: {e}")
                     
                     therapists_for_audit = [{"therapist_code": getattr(t,'therapist_code',str(t)), "is_bathing": False} for t in assigned_therapists]
-                    if AllocationAttempt:
+                    if create_bookings and AllocationAttempt:
                         try:
                             AllocationAttempt.objects.create(
                                 visit=None, therapy=None, date=date,
@@ -4024,18 +4064,18 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
                 date=date,
                 time_slot=canonical_slot,
                 status__in=['BOOKED', 'scheduled']
-            )
+            ).exclude(visit__allocation__status='cancelled').exclude(therapy__status='cancelled').exclude(visit__status='cancelled')
             if booking and hasattr(booking, 'pk') and booking.pk:
                 rb_conflict = rb_conflict.exclude(visit=booking)
             if allocation and hasattr(allocation, 'pk') and allocation.pk:
-                rb_conflict = rb_conflict.exclude(therapy=allocation)
+                rb_conflict = rb_conflict.exclude(therapy=allocation).exclude(visit__allocation=allocation)
             
             b_conflict = Booking.objects.filter(
                 room=room_candidate,
                 date=date,
                 timeslot=canonical_slot,
                 status__in=['scheduled', 'BOOKED']
-            )
+            ).exclude(status='cancelled').exclude(allocation__status='cancelled')
             if booking and hasattr(booking, 'pk') and booking.pk:
                 b_conflict = b_conflict.exclude(pk=booking.pk)
             
@@ -4265,9 +4305,8 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
                         extra_qs.delete()
                 except Exception as e:
                     print(f"[RESCHEDULE] Error cleaning up extra TherapistBooking rows: {e}")
-
             # success audit
-            if AllocationAttempt and create_bookings:
+            if create_bookings and AllocationAttempt:
                 try:
                     extra_data = {
                         "room_no": getattr(room_candidate,'room_no',None) if room_candidate else None,
@@ -4288,7 +4327,7 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
             if create_bookings:
                 used_slots.append(canonical_slot)
 
-            # update booking row
+            # update booking row (ONLY when create_bookings=True; dry-run preview must NOT schedule the booking)
             if create_bookings:
                 try:
                     booking.timeslot = canonical_slot
@@ -4408,7 +4447,7 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
 # -----------------------
 # PASS 1: Continuity Priority Pass
 # -----------------------
-def assign_continuity_therapists_pass1(booking, allocation, target_date, locked_therapist_slots):
+def assign_continuity_therapists_pass1(booking, allocation, target_date, locked_therapist_slots, create_bookings=True):
     """
     PASS 1 - Continuity Priority Pass:
     Assigns ONLY previous-day therapists for a booking and locks them.
@@ -5064,8 +5103,8 @@ def assign_continuity_therapists_pass1(booking, allocation, target_date, locked_
         else:
             print(f"[RESCHEDULE PASS1] [WARN] No senior candidates available (excluding bathing therapist)")
     
-    # Create TherapistBooking records to lock the therapists
-    if assigned_continuity:
+    # Create TherapistBooking records to lock the therapists (skip in dry-run preview mode)
+    if assigned_continuity and create_bookings:
         print(f"[RESCHEDULE PASS1] ===== LOCKING {len(assigned_continuity)} THERAPISTS FOR BOOKING {booking.pk} =====")
         try:
             for t in assigned_continuity:

@@ -32,6 +32,118 @@ from masters.models import get_staying_room_display_number
 EXTERNAL_DB_ALIAS = 'therapy_db'  # external SQL Server alias
 
 
+def _safe_cancel_patient_bookings(allocation, date_from=None, date_to=None, dates=None, booking_ids=None, timeslot=None, slot_ids=None):
+    """
+    Safely cancel Patient.TherapistBooking and Patient.RoomBooking rows associated with
+    a TherapyAllocation / set of Booking IDs without failing on UniqueConstraint
+    (unique_therapist_date_slot_status / unique_room_date_slot_status).
+    If a CANCELLED row already exists for the same (therapist/room, date, time_slot),
+    deletes the redundant BOOKED row instead of raising IntegrityError.
+    """
+    from Patient.models import TherapistBooking as TB, RoomBooking as RB
+
+    active_statuses = ['BOOKED', 'scheduled']
+
+    def _cancel_tb_qs(qs):
+        for tb in list(qs.filter(status__in=active_statuses)):
+            try:
+                dup_exists = TB.objects.filter(
+                    therapist_id=tb.therapist_id,
+                    date=tb.date,
+                    time_slot_id=tb.time_slot_id,
+                    status='CANCELLED',
+                ).exclude(pk=tb.pk).exists()
+                if dup_exists:
+                    tb.delete()
+                else:
+                    TB.objects.filter(pk=tb.pk).update(status='CANCELLED')
+            except IntegrityError:
+                try:
+                    tb.delete()
+                except Exception:
+                    pass
+            except Exception as exc:
+                print(f"[_safe_cancel_patient_bookings] Error cancelling TherapistBooking pk={tb.pk}: {exc}")
+
+    def _cancel_rb_qs(qs):
+        for rb in list(qs.filter(status__in=active_statuses)):
+            try:
+                dup_exists = RB.objects.filter(
+                    room_id=rb.room_id,
+                    date=rb.date,
+                    time_slot_id=rb.time_slot_id,
+                    status='CANCELLED',
+                ).exclude(pk=rb.pk).exists()
+                if dup_exists:
+                    rb.delete()
+                else:
+                    RB.objects.filter(pk=rb.pk).update(status='CANCELLED')
+            except IntegrityError:
+                try:
+                    rb.delete()
+                except Exception:
+                    pass
+            except Exception as exc:
+                print(f"[_safe_cancel_patient_bookings] Error cancelling RoomBooking pk={rb.pk}: {exc}")
+
+    date_filter = {}
+    if dates is not None:
+        date_filter['date__in'] = list(dates)
+    else:
+        if date_from is not None:
+            date_filter['date__gte'] = date_from
+        if date_to is not None:
+            date_filter['date__lte'] = date_to
+
+    slot_filter = {}
+    if timeslot is not None:
+        slot_filter['time_slot'] = timeslot
+    elif slot_ids:
+        slot_filter['time_slot_id__in'] = list(slot_ids)
+
+    # 1) TherapistBookings linked to this allocation
+    tb_alloc_qs = TB.objects.filter(visit=allocation, **date_filter)
+    if timeslot is not None:
+        tb_alloc_qs = tb_alloc_qs.filter(time_slot=timeslot)
+    _cancel_tb_qs(tb_alloc_qs)
+
+    # 2) Orphaned TherapistBookings for this patient (no visit FK), scoped to matching slot(s)
+    if getattr(allocation, 'patient_id', None) and slot_filter:
+        _cancel_tb_qs(
+            TB.objects.filter(
+                patient_id=allocation.patient_id,
+                visit__isnull=True,
+                **date_filter,
+                **slot_filter,
+            )
+        )
+
+    # 3) RoomBookings linked to the exact Booking rows being cancelled
+    if booking_ids:
+        rb_visit_qs = RB.objects.filter(visit_id__in=list(booking_ids))
+        if timeslot is not None:
+            rb_visit_qs = rb_visit_qs.filter(time_slot=timeslot)
+        _cancel_rb_qs(rb_visit_qs)
+
+    # 4) RoomBookings linked to this allocation via therapy FK
+    rb_alloc_qs = RB.objects.filter(therapy=allocation, **date_filter)
+    if timeslot is not None:
+        rb_alloc_qs = rb_alloc_qs.filter(time_slot=timeslot)
+    _cancel_rb_qs(rb_alloc_qs)
+
+    # 5) Orphaned RoomBookings for this patient (no therapy/visit FK), scoped to matching slot(s)
+    if getattr(allocation, 'patient_id', None) and slot_filter:
+        _cancel_rb_qs(
+            RB.objects.filter(
+                patient_id=allocation.patient_id,
+                therapy__isnull=True,
+                visit__isnull=True,
+                **date_filter,
+                **slot_filter,
+            )
+        )
+
+
 def _schedule_lock_upto_date():
     """Return (lock_upto_date, first_editable_date). After 5:30 AM (in schedule timezone), today and past are locked."""
     try:
@@ -724,58 +836,42 @@ def therapy_entry(request):
                 allocation.cancelled_at = timezone.now()
                 allocation.save()
                 
-                # Update related bookings
+                # Update related bookings (clear room so ux_booking_room_date_timeslot is freed)
+                # Update related bookings (clear room to avoid unique constraint collision on room, date, timeslot)
                 cancelled_bookings = Booking.objects.filter(
                     allocation=allocation,
-                    date__gte=parse_date(cancel_from),
-                    date__lte=parse_date(cancel_to)
+                    date__gte=cancel_from_obj,
+                    date__lte=cancel_to_obj
                 )
-                cancelled_count = cancelled_bookings.count()
-                cancelled_bookings.update(status='cancelled')
+                cancelled_booking_ids = list(cancelled_bookings.values_list('id', flat=True))
+                cancelled_slot_ids = list(
+                    cancelled_bookings.exclude(timeslot__isnull=True)
+                    .values_list('timeslot_id', flat=True)
+                    .distinct()
+                )
+                if not cancelled_slot_ids and allocation.timeslot_id:
+                    cancelled_slot_ids = [allocation.timeslot_id]
+                cancelled_count = len(cancelled_booking_ids)
+                cancelled_bookings.update(status='cancelled', room=None)
 
-                # Release therapist assignments and free Patient booking resources
+                # Delete assignments to free ux_assignment_therapist_date_timeslot constraint
                 try:
-                    # mark assignments as released
-                    BookingAssignment.objects.filter(booking__in=cancelled_bookings).update(status='released')
-                except Exception:
-                    pass
+                    if cancelled_booking_ids:
+                        BookingAssignment.objects.filter(booking_id__in=cancelled_booking_ids).update(status='released')
+                except Exception as assign_err:
+                    print(f"[cancel_therapy] Error releasing BookingAssignments: {assign_err}")
 
+                # Also free underlying Patient TherapistBooking/RoomBooking
                 try:
-                    # also free underlying Patient TherapistBooking/RoomBooking
-                    # Be explicit about links to this allocation AND fall back to patient_id
-                    from Patient.models import TherapistBooking as TB, RoomBooking as RB
-
-                    # 1) Cancel therapist bookings linked to this allocation (preferred, most accurate)
-                    TB.objects.filter(
-                        visit=allocation,
-                        date__gte=parse_date(cancel_from),
-                        date__lte=parse_date(cancel_to),
-                    ).update(status='CANCELLED')
-
-                    # 2) Also cancel therapist bookings for this patient (safety net for orphaned rows without visit FK)
-                    TB.objects.filter(
-                        patient_id=allocation.patient.id,
-                        visit__isnull=True,
-                        date__gte=parse_date(cancel_from),
-                        date__lte=parse_date(cancel_to),
-                    ).update(status='CANCELLED')
-
-                    # 3) Cancel room bookings linked to this allocation
-                    RB.objects.filter(
-                        therapy=allocation,
-                        date__gte=parse_date(cancel_from),
-                        date__lte=parse_date(cancel_to),
-                    ).update(status='CANCELLED')
-
-                    # 4) Also cancel orphaned room bookings for this patient (no explicit therapy/visit)
-                    RB.objects.filter(
-                        patient_id=allocation.patient.id,
-                        therapy__isnull=True,
-                        date__gte=parse_date(cancel_from),
-                        date__lte=parse_date(cancel_to),
-                    ).update(status='CANCELLED')
-                except Exception:
-                    pass
+                    _safe_cancel_patient_bookings(
+                        allocation,
+                        date_from=cancel_from_obj,
+                        date_to=cancel_to_obj,
+                        booking_ids=cancelled_booking_ids,
+                        slot_ids=cancelled_slot_ids,
+                    )
+                except Exception as pb_err:
+                    print(f"[cancel_therapy] Error freeing Patient bookings: {pb_err}")
                 
                 # Log audit event
                 log_therapy_audit(
@@ -1233,44 +1329,25 @@ def therapy_entry(request):
                     # Cancel associated TherapistBooking and RoomBooking before deleting
                     if bookings_to_delete.exists():
                         try:
-                            from Patient.models import TherapistBooking as TB, RoomBooking as RB
                             deleted_dates = list(bookings_to_delete.values_list('date', flat=True).distinct())
                             deleted_booking_ids = list(bookings_to_delete.values_list('id', flat=True))
-                            
-                            # Cancel TherapistBooking for deleted dates
-                            TB.objects.filter(
-                                visit=allocation,
-                                date__in=deleted_dates,
-                                status__in=['BOOKED','scheduled']
-                            ).update(status='CANCELLED')
-                            TB.objects.filter(
-                                date__in=deleted_dates,
-                                patient_id=allocation.patient.id,
-                                status__in=['BOOKED','scheduled'],
-                                visit__isnull=True
-                            ).update(status='CANCELLED')
-                            
-                            # Cancel RoomBooking for deleted dates
-                            RB.objects.filter(
-                                therapy=allocation,
-                                date__in=deleted_dates,
-                                status__in=['BOOKED','scheduled']
-                            ).update(status='CANCELLED')
-                            RB.objects.filter(
-                                visit_id__in=deleted_booking_ids,
-                                status__in=['BOOKED','scheduled']
-                            ).update(status='CANCELLED')
-                            RB.objects.filter(
-                                date__in=deleted_dates,
-                                patient_id=allocation.patient.id,
-                                status__in=['BOOKED','scheduled'],
-                                therapy__isnull=True,
-                                visit__isnull=True
-                            ).update(status='CANCELLED')
+                            pat_id = getattr(allocation.patient, 'id', None)
+                            deleted_slot_ids = list(
+                                bookings_to_delete.exclude(timeslot__isnull=True)
+                                .values_list('timeslot_id', flat=True)
+                                .distinct()
+                            )
+                            _safe_cancel_patient_bookings(
+                                allocation,
+                                dates=deleted_dates,
+                                booking_ids=deleted_booking_ids,
+                                slot_ids=deleted_slot_ids or ([allocation.timeslot_id] if allocation.timeslot_id else None),
+                            )
                         except Exception as e:
                             print(f"Error canceling bookings for deleted dates: {e}")
-                            pass
                     
+                    # Clear room on bookings_to_delete before deleting to free unique constraint
+                    bookings_to_delete.update(room=None)
                     # Now delete the bookings
                     bookings_to_delete.delete()
                     
@@ -1334,37 +1411,17 @@ def therapy_entry(request):
                         if not FinalScheduleRun.objects.filter(run_date=d).exists():
                             try:
                                 day_bookings = Booking.objects.filter(allocation=allocation, date=d)
-                                BookingAssignment.objects.filter(booking__in=day_bookings).update(status='released')
-                                from Patient.models import TherapistBooking as TB, RoomBooking as RB
+                                day_booking_ids = list(day_bookings.values_list('id', flat=True))
+                                BookingAssignment.objects.filter(booking_id__in=day_booking_ids).update(status='released')
                                 # Use the OLD timeslot when cancelling existing TherapistBooking/RoomBooking,
                                 # otherwise old-slot rows (e.g. 06:30) are left behind when the slot is changed.
                                 day_timeslot = old_slot or allocation.timeslot
-                                if day_timeslot:
-                                    TB.objects.filter(
-                                        visit=allocation, date=d, time_slot=day_timeslot,
-                                        status__in=['BOOKED','scheduled']
-                                    ).update(status='CANCELLED')
-                                    TB.objects.filter(
-                                        date=d, time_slot=day_timeslot, patient_id=allocation.patient.id,
-                                        visit__isnull=True, status__in=['BOOKED','scheduled']
-                                    ).update(status='CANCELLED')
-                                    RB.objects.filter(
-                                        therapy=allocation, date=d, time_slot=day_timeslot,
-                                        status__in=['BOOKED','scheduled']
-                                    ).update(status='CANCELLED')
-                                    for b in day_bookings:
-                                        RB.objects.filter(
-                                            visit=b, date=d, time_slot=day_timeslot,
-                                            status__in=['BOOKED','scheduled']
-                                        ).update(status='CANCELLED')
-                                    RB.objects.filter(
-                                        date=d, time_slot=day_timeslot, patient_id=allocation.patient.id,
-                                        therapy__isnull=True, visit__isnull=True,
-                                        status__in=['BOOKED','scheduled']
-                                    ).update(status='CANCELLED')
-                                else:
-                                    TB.objects.filter(visit=allocation, date=d, status__in=['BOOKED','scheduled']).update(status='CANCELLED')
-                                    RB.objects.filter(therapy=allocation, date=d, status__in=['BOOKED','scheduled']).update(status='CANCELLED')
+                                _safe_cancel_patient_bookings(
+                                    allocation,
+                                    dates=[d],
+                                    booking_ids=day_booking_ids,
+                                    timeslot=day_timeslot,
+                                )
                                 # Update to draft with new therapy name; do NOT run allocation
                                 day_bookings.update(
                                     status='draft', timeslot=allocation.timeslot, room=None,
@@ -1379,66 +1436,17 @@ def therapy_entry(request):
                         # FinalScheduleRun exists for this date: delete old bookings, create fresh, run algorithm
                         try:
                             day_bookings = Booking.objects.filter(allocation=allocation, date=d)
+                            day_booking_ids = list(day_bookings.values_list('id', flat=True))
                             # release therapist assignments for those bookings
-                            BookingAssignment.objects.filter(booking__in=day_bookings).update(status='released')
-                            # cancel external TherapistBooking/RoomBooking
-                            from Patient.models import TherapistBooking as TB, RoomBooking as RB
-                            # Get the OLD timeslot for this date to properly cancel previous external bookings
+                            BookingAssignment.objects.filter(booking_id__in=day_booking_ids).update(status='released')
+                            # cancel external TherapistBooking/RoomBooking safely
                             day_timeslot = old_slot or allocation.timeslot
-                            if day_timeslot:
-                                # Cancel TherapistBooking: filter by visit (TherapyAllocation FK) or patient_id + date + timeslot
-                                TB.objects.filter(
-                                    visit=allocation,
-                                    date=d,
-                                    time_slot=day_timeslot,
-                                    status__in=['BOOKED','scheduled']
-                                ).update(status='CANCELLED')
-                                # Also cancel by patient_id if visit FK is not set
-                                TB.objects.filter(
-                                    date=d,
-                                    time_slot=day_timeslot,
-                                    patient_id=allocation.patient.id,
-                                    status__in=['BOOKED','scheduled'],
-                                    visit__isnull=True
-                                ).update(status='CANCELLED')
-                                
-                                # Cancel RoomBooking: filter by therapy (TherapyAllocation FK) or visit (Booking FK) or patient_id
-                                # First via therapy FK
-                                RB.objects.filter(
-                                    therapy=allocation,
-                                    date=d,
-                                    time_slot=day_timeslot,
-                                    status__in=['BOOKED','scheduled']
-                                ).update(status='CANCELLED')
-                                # Then via visit FK (Booking)
-                                for booking in day_bookings:
-                                    RB.objects.filter(
-                                        visit=booking,
-                                        date=d,
-                                        time_slot=day_timeslot,
-                                        status__in=['BOOKED','scheduled']
-                                    ).update(status='CANCELLED')
-                                # Also cancel by patient_id if neither FK is set
-                                RB.objects.filter(
-                                    date=d,
-                                    time_slot=day_timeslot,
-                                    patient_id=allocation.patient.id,
-                                    status__in=['BOOKED','scheduled'],
-                                    therapy__isnull=True,
-                                    visit__isnull=True
-                                ).update(status='CANCELLED')
-                            else:
-                                # If no timeslot, cancel all for this date and allocation
-                                TB.objects.filter(
-                                    visit=allocation,
-                                    date=d,
-                                    status__in=['BOOKED','scheduled']
-                                ).update(status='CANCELLED')
-                                RB.objects.filter(
-                                    therapy=allocation,
-                                    date=d,
-                                    status__in=['BOOKED','scheduled']
-                                ).update(status='CANCELLED')
+                            _safe_cancel_patient_bookings(
+                                allocation,
+                                dates=[d],
+                                booking_ids=day_booking_ids,
+                                timeslot=day_timeslot,
+                            )
                             
                             # Delete ALL old bookings for this date (they're for the old therapy)
                             # Ensure we delete all to avoid duplicates
@@ -1590,28 +1598,14 @@ def therapy_entry(request):
                             old_booking_timeslot = booking.timeslot
                             old_booking_id = booking.id
                             
-                            # Release assignments and cancel external bookings
+                            # Release assignments and cancel external bookings safely
                             BookingAssignment.objects.filter(booking=booking).update(status='released')
-                            from Patient.models import TherapistBooking as TB, RoomBooking as RB
-                            if old_booking_timeslot:
-                                TB.objects.filter(
-                                    visit=allocation,
-                                    date=d,
-                                    time_slot=old_booking_timeslot,
-                                    status__in=['BOOKED','scheduled']
-                                ).update(status='CANCELLED')
-                                RB.objects.filter(
-                                    therapy=allocation,
-                                    date=d,
-                                    time_slot=old_booking_timeslot,
-                                    status__in=['BOOKED','scheduled']
-                                ).update(status='CANCELLED')
-                                RB.objects.filter(
-                                    visit_id=old_booking_id,
-                                    date=d,
-                                    time_slot=old_booking_timeslot,
-                                    status__in=['BOOKED','scheduled']
-                                ).update(status='CANCELLED')
+                            _safe_cancel_patient_bookings(
+                                allocation,
+                                dates=[d],
+                                booking_ids=[old_booking_id],
+                                timeslot=old_booking_timeslot,
+                            )
                             
                             # Delete ALL old bookings for this date (safety: delete all, not just one)
                             Booking.objects.filter(allocation=allocation, date=d).delete()
@@ -4631,14 +4625,14 @@ def allocate_therapy(request):
         conflict_info = {"error": "conflict", "details": str(e)}
         # try to detect room conflict: find any date where a Booking exists for same room/date/timeslot
         if room and timeslot:
-            conflicting = Booking.objects.filter(room=room, date__gte=from_date, date__lte=to_date, timeslot=timeslot).values("date","pk")
+            conflicting = Booking.objects.filter(room=room, date__gte=from_date, date__lte=to_date, timeslot=timeslot).exclude(status='cancelled').values("date","pk")
             if conflicting.exists():
                 conflict_info["room_conflicts"] = list(conflicting)
         # detect therapist conflicts
         t_conflicts = []
         for t in therapists:
             # any BookingAssignment for therapist in that date/slot
-            ass_conf = BookingAssignment.objects.filter(therapist=t, booking_date__gte=from_date, booking_date__lte=to_date, booking_timeslot=timeslot, status__in=["assigned","BOOKED"]).values("booking_date","id")
+            ass_conf = BookingAssignment.objects.filter(therapist=t, booking_date__gte=from_date, booking_date__lte=to_date, booking_timeslot=timeslot, status__in=["assigned","BOOKED"]).exclude(booking__status='cancelled').values("booking_date","id")
             if ass_conf.exists():
                 t_conflicts.append({"therapist_code": t.therapist_code, "conflicts": list(ass_conf)})
         if t_conflicts:
@@ -6387,7 +6381,7 @@ def reschedule_options_api(request):
             return JsonResponse({'error': 'Invalid date format. Use YYYY-MM-DD.'}, status=400)
             
         booking = Booking.objects.filter(allocation=allocation, date=target_date).first()
-        if booking and booking.room is not None and booking.status == 'failed':
+        if booking and booking.room is not None:
             booking.room = None
             booking.save(update_fields=['room'])
         failure_reason = (booking.failure_reason if booking else "") or (allocation.status if allocation else "")
@@ -6431,20 +6425,36 @@ def reschedule_options_api(request):
             therapy_code=getattr(allocation, "therapy_code", None),
             patient_id=patient_id,
             target_date=target_date,
+            exclude_allocation_id=allocation.id,
+            exclude_booking_id=booking.id if booking else None,
         )
         
         dummy_last_allocation = {'therapists': [], 'continuity_assigned': {}}
+        # Base continuity: therapist codes from previous allocations/history (no slot-specific pass1 locks)
+        continuity_therapist_codes = []
+        p1_res = None
         try:
             from reshedule import assign_continuity_therapists_pass1
-            p1_res = assign_continuity_therapists_pass1(booking, allocation, target_date, {})
+            p1_res = assign_continuity_therapists_pass1(
+                booking, allocation, target_date, {}, create_bookings=False
+            )
             if p1_res and p1_res.get('success'):
                 assigned_th = p1_res.get('assigned_therapists', [])
                 dummy_last_allocation = {
                     'therapists': [getattr(t, 'therapist_code', None) for t in assigned_th if getattr(t, 'therapist_code', None)],
                     'continuity_assigned': p1_res
                 }
+                continuity_therapist_codes = [getattr(t, 'therapist_code', None) for t in assigned_th if getattr(t, 'therapist_code', None)]
         except Exception:
             pass
+
+        dummy_registered_allocation = {
+            'therapists': continuity_therapist_codes,
+            'continuity_assigned': p1_res if (p1_res and p1_res.get('success')) else {}
+        }
+        dummy_general_allocation = {
+            'therapists': continuity_therapist_codes
+        }
 
         # Check helping therapist availability in registered slot
         can_use_helping_in_registered_slot = False
@@ -6499,7 +6509,7 @@ def reschedule_options_api(request):
                     used_slots=[],
                     create_bookings=False,
                     patient_id=patient_id,
-                    last_allocation=dummy_last_allocation,
+                    last_allocation=dummy_registered_allocation,
                     AllocationAttempt=None,
                     allow_helping_fallback=True
                 )
@@ -6537,9 +6547,9 @@ def reschedule_options_api(request):
             if not canonical_slot:
                 continue
 
-            if registered_slot_id and canonical_slot.id == registered_slot_id:
-                continue
-                
+            is_reg_slot = bool(registered_slot_id and canonical_slot.id == registered_slot_id)
+            slot_last_allocation = dummy_registered_allocation if is_reg_slot else dummy_general_allocation
+
             task, success, reason = attempt_allocate_slot(
                 allocation,
                 booking,
@@ -6551,10 +6561,29 @@ def reschedule_options_api(request):
                 used_slots=[],
                 create_bookings=False,
                 patient_id=patient_id,
-                last_allocation=dummy_last_allocation,
+                last_allocation=slot_last_allocation,
                 AllocationAttempt=None,
                 allow_helping_fallback=False
             )
+
+            # Tier 2 fallback: If continuity allocation failed, try without continuity constraints
+            if not success and (dummy_last_allocation.get('therapists') or dummy_last_allocation.get('continuity_assigned')):
+                empty_last_alloc = {'therapists': [], 'continuity_assigned': {}}
+                task, success, reason = attempt_allocate_slot(
+                    allocation,
+                    booking,
+                    target_date,
+                    canonical_slot,
+                    therapy_req,
+                    needs_room_flag,
+                    needs_bath_flag,
+                    used_slots=[],
+                    create_bookings=False,
+                    patient_id=patient_id,
+                    last_allocation=empty_last_alloc,
+                    AllocationAttempt=None,
+                    allow_helping_fallback=False
+                )
             
             if success:
                 room_no = task.get("room_no")
@@ -6567,13 +6596,15 @@ def reschedule_options_api(request):
 
                 st = canonical_slot.slot_time
                 st_12h = st.strftime("%I:%M %p").lstrip('0') if hasattr(st, 'strftime') else str(st)
-                display_str = f"{st_12h} (Room: {room_no})" if needs_room_flag and room_no and room_no != "—" else f"{st_12h}"
+                reg_suffix = " (Registered Slot)" if is_reg_slot else ""
+                display_str = f"{st_12h}{reg_suffix} (Room: {room_no})" if needs_room_flag and room_no and room_no != "—" else f"{st_12h}{reg_suffix}"
                 
                 available_slots.append({
                     "slot_id": canonical_slot.id,
                     "slot_time": st_12h,
                     "room_no": room_no or "—",
-                    "display": display_str
+                    "display": display_str,
+                    "is_registered_slot": is_reg_slot
                 })
                 
         return JsonResponse({
@@ -6781,6 +6812,7 @@ def reschedule_therapy_api(request):
                                 reason=resched_reason
                             )
                             try:
+                                from .models import SchedulingAuditLog
                                 pat = allocation.patient
                                 SchedulingAuditLog.objects.create(
                                     booking=booking,
@@ -6930,10 +6962,20 @@ def reschedule_all_failed_api(request):
             pid = getattr(pat, 'id', None)
             by_patient[pid].append(b)
 
+        from final_allocation import get_patient_category_priority
+        def _resched_patient_priority(item):
+            _, bks = item
+            first_pat = getattr(bks[0].allocation, 'patient', None) if bks else None
+            # 0 = Wheelchair, 1 = Dhara & Pizhichil (TherapyMaster flag), 2 = Normal
+            return get_patient_category_priority(first_pat, bookings=bks)
+
         ordered_failed_allocations = []
         seen_alloc_ids = set()
-        for pid, bookings in by_patient.items():
-            bookings.sort(key=lambda bk: getattr(bk.allocation, 'from_date', filter_date))
+        for pid, bookings in sorted(by_patient.items(), key=_resched_patient_priority):
+            bookings.sort(key=lambda bk: (
+                get_patient_category_priority(getattr(bk.allocation, 'patient', None), allocation=bk.allocation),
+                getattr(bk.allocation, 'from_date', filter_date),
+            ))
             for bk in bookings:
                 aid = getattr(bk.allocation, 'id', None)
                 if aid and aid not in seen_alloc_ids:

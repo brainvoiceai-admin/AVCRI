@@ -608,7 +608,7 @@ def get_treatment_rooms_for_staying_room(patient_staying_room):
 def is_dhara_pizhichil_treatment(therapy_name=None, therapy_code=None):
     """
     Check if a therapy is marked as Dhara & Pizhichil in TherapyMaster (is_dhara_pizhichil=True).
-    This therapy strictly follows room continuity from treatment start until patient discharge.
+    Strictly relies on the TherapyMaster flag (no hardcoded name-string fallback).
     """
     try:
         from masters.models import TherapyMaster
@@ -617,15 +617,12 @@ def is_dhara_pizhichil_treatment(therapy_name=None, therapy_code=None):
             tm = TherapyMaster.objects.filter(therapy_code=str(therapy_code).strip()).first()
         if not tm and therapy_name:
             tm = TherapyMaster.objects.filter(therapy_name__iexact=str(therapy_name).strip()).first()
+        if not tm and therapy_name:
+            tm = get_therapy_details(therapy_name)
         if tm:
-            return getattr(tm, 'is_dhara_pizhichil', False)
+            return bool(getattr(tm, 'is_dhara_pizhichil', False))
     except Exception:
         pass
-    
-    # Fallback matching standard Dhara & Pizhichil / Pizichil names if master query fails
-    if therapy_name:
-        t_str = str(therapy_name).strip().lower()
-        return ('dhara' in t_str and ('piz' in t_str or 'pizh' in t_str))
     return False
 
 
@@ -749,7 +746,9 @@ def allocate_treatment_room(date, time_slot, last_room=None, therapy_name=None, 
                 date=date,
                 time_slot=time_slot,
                 status='BOOKED'
-            ).exists():
+            ).exclude(
+                Q(therapy__status='cancelled') | Q(visit__status='cancelled') | Q(visit__allocation__status='cancelled')
+            ).exclude(visit__status='cancelled').exists():
                 return room
         except TreatmentRoom.DoesNotExist:
             pass
@@ -2769,16 +2768,30 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
         patient_already_booked = False
         try:
             patient_already_booked = (
-                RoomBooking.objects.filter(patient_id=patient_id, date=target_date, time_slot=query_slot, status__in=['BOOKED','scheduled']).exclude(visit=booking).exclude(therapy_id=allocation.id).exists()
-                or TherapistBooking.objects.filter(patient_id=patient_id, date=target_date, time_slot=query_slot, status='BOOKED').exclude(visit_id=allocation.id).exists()
+                RoomBooking.objects.filter(patient_id=patient_id, date=target_date, time_slot=query_slot, status__in=['BOOKED','scheduled'])
+                .exclude(visit=booking)
+                .exclude(therapy_id=allocation.id)
+                .exclude(Q(therapy__status='cancelled') | Q(visit__status='cancelled') | Q(visit__allocation__status='cancelled'))
+                .exists()
+                or TherapistBooking.objects.filter(patient_id=patient_id, date=target_date, time_slot=query_slot, status='BOOKED')
+                .exclude(visit_id=allocation.id)
+                .exclude(visit__status='cancelled')
+                .exists()
             )
         except Exception:
             try:
                 slot_start = getattr(pref_slot, 'start_time', None)
                 if slot_start:
                     patient_already_booked = (
-                        RoomBooking.objects.filter(patient_id=patient_id, date=target_date, time_slot__start_time=slot_start, status__in=['BOOKED','scheduled']).exclude(visit=booking).exclude(therapy_id=allocation.id).exists()
-                        or TherapistBooking.objects.filter(patient_id=patient_id, date=target_date, time_slot__start_time=slot_start, status='BOOKED').exclude(visit_id=allocation.id).exists()
+                        RoomBooking.objects.filter(patient_id=patient_id, date=target_date, time_slot__start_time=slot_start, status__in=['BOOKED','scheduled'])
+                        .exclude(visit=booking)
+                        .exclude(therapy_id=allocation.id)
+                        .exclude(Q(therapy__status='cancelled') | Q(visit__status='cancelled') | Q(visit__allocation__status='cancelled'))
+                        .exists()
+                        or TherapistBooking.objects.filter(patient_id=patient_id, date=target_date, time_slot__start_time=slot_start, status='BOOKED')
+                        .exclude(visit_id=allocation.id)
+                        .exclude(visit__status='cancelled')
+                        .exists()
                     )
             except Exception:
                 patient_already_booked = False
@@ -4195,6 +4208,17 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                                             break
                                 if not alt_found:
                                     raise RuntimeError(f"no_room_available: All Vamanam treatment rooms ({', '.join(v_rooms)}) are booked on {target_date} at {slot_master}")
+                            elif is_dhara_pizhichil_treatment(therapy_name=therapy_name, therapy_code=getattr(allocation, 'therapy_code', None)):
+                                locked_room = get_dhara_pizhichil_assigned_room(
+                                    patient_id=patient_id,
+                                    patient=allocation.patient if allocation and hasattr(allocation, 'patient') else None,
+                                    allocation=allocation,
+                                )
+                                if locked_room and room_candidate and locked_room.room_no == room_candidate.room_no:
+                                    raise RuntimeError(
+                                        f"previous_room_unavailable: Original Dhara & Pizhichil room {locked_room.room_no} is unavailable on {target_date} at {slot_master}"
+                                    )
+                                print(f"[DEBUG] Room {room_candidate.room_no} already booked for {target_date} at {slot_master}, trying alternative room...")
                             else:
                                 print(f"[DEBUG] Room {room_candidate.room_no} already booked for {target_date} at {slot_master}, trying alternative room...")
                             alternative_room = allocate_treatment_room(
@@ -4267,6 +4291,9 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                         print(f"[DEBUG] Creating RoomBooking: room={room_candidate} (pk={room_candidate.pk if room_candidate else None}), date={target_date}, slot_master={slot_master} (pk={slot_master.pk if slot_master else None}), booking={booking} (pk={booking.pk})")
                         try:
                             rb_obj, rb_created = create_room_booking_safe(room_candidate, target_date, slot_master, therapy_name, patient_id, booking)
+                            if rb_obj and allocation and rb_obj.therapy_id != allocation.id:
+                                rb_obj.therapy = allocation
+                                rb_obj.save(update_fields=['therapy'])
                             print(f"[DEBUG] RoomBooking created: {rb_obj}, created={rb_created}")
                             # Refresh RoomBooking to get actual FK IDs
                             if rb_obj:
@@ -5037,12 +5064,14 @@ def bulk_allocate_for_date(target_date_str):
         has_roster = bool(pref_roster)
 
         # Priority order:
+        # 0. Category tier: Wheelchair (0) -> Dhara & Pizhichil (1) -> Normal (2)
         # 1. VIP patients FIRST (priority 0)
         # 2. Patients with active preferred roster (priority 1)
-        # 3. Non-VIP IP patients (priority 2)
+        # 3. Non-VIP IP patients (priority 2, 0)
         # 4. Non-VIP OP patients (priority 2, 1)
+        cat_rank = get_patient_category_priority(pat, allocation=alloc, bookings=bookings)
         pat_rank = 0 if is_vip else (1 if has_roster else 2)
-        return (pat_rank, 1 if is_op else 0)
+        return (cat_rank, pat_rank, 1 if is_op else 0)
 
     ordered_bookings = []
     sorted_by_patient = sorted(
