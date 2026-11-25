@@ -749,7 +749,9 @@ def allocate_treatment_room(date, time_slot, last_room=None, therapy_name=None, 
                 date=date,
                 time_slot=time_slot,
                 status='BOOKED'
-            ).exists():
+            ).exclude(
+                Q(therapy__status='cancelled') | Q(visit__status='cancelled') | Q(visit__allocation__status='cancelled')
+            ).exclude(visit__status='cancelled').exists():
                 return room
         except TreatmentRoom.DoesNotExist:
             pass
@@ -2624,16 +2626,30 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
         patient_already_booked = False
         try:
             patient_already_booked = (
-                RoomBooking.objects.filter(patient_id=patient_id, date=target_date, time_slot=query_slot, status__in=['BOOKED','scheduled']).exclude(visit=booking).exclude(therapy_id=allocation.id).exists()
-                or TherapistBooking.objects.filter(patient_id=patient_id, date=target_date, time_slot=query_slot, status='BOOKED').exclude(visit_id=allocation.id).exists()
+                RoomBooking.objects.filter(patient_id=patient_id, date=target_date, time_slot=query_slot, status__in=['BOOKED','scheduled'])
+                .exclude(visit=booking)
+                .exclude(therapy_id=allocation.id)
+                .exclude(Q(therapy__status='cancelled') | Q(visit__status='cancelled') | Q(visit__allocation__status='cancelled'))
+                .exists()
+                or TherapistBooking.objects.filter(patient_id=patient_id, date=target_date, time_slot=query_slot, status='BOOKED')
+                .exclude(visit_id=allocation.id)
+                .exclude(visit__status='cancelled')
+                .exists()
             )
         except Exception:
             try:
                 slot_start = getattr(pref_slot, 'start_time', None)
                 if slot_start:
                     patient_already_booked = (
-                        RoomBooking.objects.filter(patient_id=patient_id, date=target_date, time_slot__start_time=slot_start, status__in=['BOOKED','scheduled']).exclude(visit=booking).exclude(therapy_id=allocation.id).exists()
-                        or TherapistBooking.objects.filter(patient_id=patient_id, date=target_date, time_slot__start_time=slot_start, status='BOOKED').exclude(visit_id=allocation.id).exists()
+                        RoomBooking.objects.filter(patient_id=patient_id, date=target_date, time_slot__start_time=slot_start, status__in=['BOOKED','scheduled'])
+                        .exclude(visit=booking)
+                        .exclude(therapy_id=allocation.id)
+                        .exclude(Q(therapy__status='cancelled') | Q(visit__status='cancelled') | Q(visit__allocation__status='cancelled'))
+                        .exists()
+                        or TherapistBooking.objects.filter(patient_id=patient_id, date=target_date, time_slot__start_time=slot_start, status='BOOKED')
+                        .exclude(visit_id=allocation.id)
+                        .exclude(visit__status='cancelled')
+                        .exists()
                     )
             except Exception:
                 patient_already_booked = False
@@ -4023,6 +4039,9 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                         print(f"[DEBUG] Creating RoomBooking: room={room_candidate} (pk={room_candidate.pk if room_candidate else None}), date={target_date}, slot_master={slot_master} (pk={slot_master.pk if slot_master else None}), booking={booking} (pk={booking.pk})")
                         try:
                             rb_obj, rb_created = create_room_booking_safe(room_candidate, target_date, slot_master, therapy_name, patient_id, booking)
+                            if rb_obj and allocation and rb_obj.therapy_id != allocation.id:
+                                rb_obj.therapy = allocation
+                                rb_obj.save(update_fields=['therapy'])
                             print(f"[DEBUG] RoomBooking created: {rb_obj}, created={rb_created}")
                             # Refresh RoomBooking to get actual FK IDs
                             if rb_obj:
