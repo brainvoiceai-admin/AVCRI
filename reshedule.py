@@ -754,13 +754,10 @@ def allocate_treatment_room(date, time_slot, last_room=None, therapy_name=None, 
                 return room
         return None
     
-    # SPECIAL: Check if this is a 'Dhara & Pizichil' therapy - try to use previous room first
-    is_dhara_pizichil = False
-    if therapy_name:
-        therapy_lower = str(therapy_name).lower()
-        is_dhara_pizichil = 'dhara' in therapy_lower and 'pizichil' in therapy_lower
+    # SPECIAL: Check if this is a Dhara & Pizhichil therapy (strictly via TherapyMaster flag) - try to use previous room first
+    is_dhara_pizichil = is_dhara_pizhichil_treatment(therapy_name=therapy_name) if therapy_name else False
     
-    # For 'Dhara & Pizichil', try to find previous room assignment
+    # For Dhara & Pizhichil, try to find previous room assignment
     previous_room_no = None
     if is_dhara_pizichil and patient_id:
         try:
@@ -774,8 +771,7 @@ def allocate_treatment_room(date, time_slot, last_room=None, therapy_name=None, 
             ).order_by('-date', '-time_slot').select_related('room')
             
             for booking in previous_bookings:
-                therapy_name_lower = str(booking.therapy_name or '').lower()
-                if 'dhara' in therapy_name_lower and 'pizichil' in therapy_name_lower:
+                if is_dhara_pizhichil_treatment(therapy_name=booking.therapy_name):
                     if booking.room:
                         previous_room_no = booking.room.room_no
                         break

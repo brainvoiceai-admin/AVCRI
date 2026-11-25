@@ -6995,10 +6995,20 @@ def reschedule_all_failed_api(request):
             pid = getattr(pat, 'id', None)
             by_patient[pid].append(b)
 
+        from final_allocation import get_patient_category_priority
+        def _resched_patient_priority(item):
+            _, bks = item
+            first_pat = getattr(bks[0].allocation, 'patient', None) if bks else None
+            # 0 = Wheelchair, 1 = Dhara & Pizhichil (TherapyMaster flag), 2 = Normal
+            return get_patient_category_priority(first_pat, bookings=bks)
+
         ordered_failed_allocations = []
         seen_alloc_ids = set()
-        for pid, bookings in by_patient.items():
-            bookings.sort(key=lambda bk: getattr(bk.allocation, 'from_date', filter_date))
+        for pid, bookings in sorted(by_patient.items(), key=_resched_patient_priority):
+            bookings.sort(key=lambda bk: (
+                get_patient_category_priority(getattr(bk.allocation, 'patient', None), allocation=bk.allocation),
+                getattr(bk.allocation, 'from_date', filter_date),
+            ))
             for bk in bookings:
                 aid = getattr(bk.allocation, 'id', None)
                 if aid and aid not in seen_alloc_ids:
