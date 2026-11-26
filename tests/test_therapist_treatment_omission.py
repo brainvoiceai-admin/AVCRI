@@ -563,3 +563,113 @@ class TestTherapistTreatmentOmission(TestCase):
         self.assertIn("Reject Request", content)
         self.assertIn(batch_id, content)
 
+    def test_is_therapist_omitted_with_patient_therapist_model(self):
+        """Passing Patient.models.Therapist (with string pk) does not crash and correctly returns True"""
+        from Patient.models import Therapist as PatientTherapist
+        TherapistTreatmentOmission.objects.create(
+            therapist=self.therapist_1,
+            treatment=self.therapy_a,
+            status='approved',
+            is_active=True
+        )
+        pt = PatientTherapist.objects.create(
+            therapist_code=self.therapist_1.therapist_code,
+            therapist_name=self.therapist_1.therapist_name,
+            therapist_grade=self.therapist_1.therapist_grade.name,
+            is_bathing_therapist=False
+        )
+        # Must not raise ValueError: Field 'id' expected a number but got 'TH_OMIT_01'
+        self.assertTrue(is_therapist_omitted_for_treatment(pt, self.therapy_a))
+        self.assertTrue(is_therapist_omitted_for_treatment(pt, self.therapy_a.therapy_code))
+        self.assertTrue(is_therapist_omitted_for_treatment(pt, self.therapy_a.therapy_name))
+        self.assertFalse(is_therapist_omitted_for_treatment(pt, self.therapy_b))
+
+    def test_omitted_helpers_with_therapy_allocation(self):
+        """Passing TherapyAllocation object to omission query helpers correctly resolves omitted IDs and codes"""
+        from Sheduling.models import TherapyAllocation, PatientSnapshot
+        TherapistTreatmentOmission.objects.create(
+            therapist=self.therapist_1,
+            treatment=self.therapy_a,
+            status='approved',
+            is_active=True
+        )
+        patient_snap = PatientSnapshot.objects.create(
+            pat_reg_no="PAT_TEST_OMIT_01",
+            pat_name="Test Omit Patient",
+            pat_sex="Male",
+            pat_age=30
+        )
+        alloc = TherapyAllocation.objects.create(
+            patient=patient_snap,
+            therapy_code=self.therapy_a.therapy_code,
+            therapy_name=self.therapy_a.therapy_name,
+            timeslot=self.slot,
+            from_date=self.target_date,
+            to_date=self.target_date,
+            days=1,
+            status="draft"
+        )
+        omitted_ids = get_omitted_therapist_ids_for_treatment(alloc)
+        omitted_codes = get_omitted_therapist_codes_for_treatment(alloc)
+        self.assertIn(self.therapist_1.id, omitted_ids)
+        self.assertIn(self.therapist_1.therapist_code, omitted_codes)
+        self.assertTrue(is_therapist_omitted_for_treatment(self.therapist_1, alloc))
+
+    def test_create_therapist_booking_safe_strictly_blocks_omitted_therapist(self):
+        """create_therapist_booking_safe strictly returns (None, False) for therapist with approved omission"""
+        from Patient.models import Therapist as PatientTherapist, TherapistBooking
+        TherapistTreatmentOmission.objects.create(
+            therapist=self.therapist_1,
+            treatment=self.therapy_a,
+            status='approved',
+            is_active=True
+        )
+        pt = PatientTherapist.objects.create(
+            therapist_code=self.therapist_1.therapist_code,
+            therapist_name=self.therapist_1.therapist_name,
+            therapist_grade=self.therapist_1.therapist_grade.name,
+            is_bathing_therapist=False
+        )
+        # Attempt to create booking for therapist_1 on omitted therapy_a
+        tb_obj, created = create_therapist_booking_safe(
+            therapist=pt,
+            date=self.target_date,
+            time_slot=self.slot,
+            therapy_name=self.therapy_a.therapy_name,
+            patient_id="PAT_TEST_01",
+            visit=None
+        )
+        self.assertIsNone(tb_obj)
+        self.assertFalse(created)
+        self.assertEqual(TherapistBooking.objects.filter(therapist__therapist_code=self.therapist_1.therapist_code).count(), 0)
+
+    def test_pick_bathing_therapist_from_roster_strictly_excludes_omitted_therapist(self):
+        """pick_bathing_therapist_from_roster rejects primary or pool bathing therapist who omitted the treatment"""
+        from Sheduling.preferred_therapist_service import pick_bathing_therapist_from_roster
+        # Set therapist_1 as bathing therapist and add approved omission for therapy_a
+        self.therapist_1.is_bathing_therapist = True
+        self.therapist_1.save()
+        self.therapist_2.is_bathing_therapist = True
+        self.therapist_2.save()
+
+        TherapistTreatmentOmission.objects.create(
+            therapist=self.therapist_1,
+            treatment=self.therapy_a,
+            status='approved',
+            is_active=True
+        )
+        roster_info = {
+            'primary_bathing_code': self.therapist_1.therapist_code,
+            'secondary_bathing_code': self.therapist_2.therapist_code,
+            'therapist_codes': [self.therapist_1.therapist_code, self.therapist_2.therapist_code]
+        }
+        picked, role = pick_bathing_therapist_from_roster(
+            roster_info,
+            target_date=self.target_date,
+            slot=self.slot,
+            therapy_name=self.therapy_a.therapy_name
+        )
+        # Primary was therapist_1, but therapist_1 omitted therapy_a, so secondary therapist_2 must be picked!
+        self.assertEqual(picked.therapist_code, self.therapist_2.therapist_code)
+        self.assertEqual(role, 'secondary')
+
