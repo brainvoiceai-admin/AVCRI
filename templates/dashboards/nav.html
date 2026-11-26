@@ -1,4 +1,10 @@
 {% load static %}
+{% if not request.user.is_authenticated %}
+<script>
+    // If navigation renders for an unauthenticated session (e.g. timeout), redirect to login
+    window.location.href = "{% url 'authentication:login' %}?next=" + encodeURIComponent(window.location.pathname + window.location.search);
+</script>
+{% endif %}
 <div class="sidebar" id="sidebar">
     <div class="sidebar-header">
         <div class="profile-section">

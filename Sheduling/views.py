@@ -4,7 +4,8 @@ import sys
 import io
 from contextlib import redirect_stdout
 from datetime import timedelta, datetime, time
-from django.shortcuts import render
+from django.shortcuts import render, redirect
+from django.urls import reverse
 from django.http import JsonResponse, HttpResponseBadRequest, HttpResponse
 from django.apps import apps
 from django.db.models import Q
@@ -2833,6 +2834,10 @@ def therapy_entry(request):
         return JsonResponse([], safe=False)
 
     # --------------- RENDER TEMPLATE WITH masters context ---------------
+    if not getattr(request, 'user', None) or not request.user.is_authenticated:
+        from django.urls import reverse
+        return redirect(f"{reverse('authentication:login')}?next={request.path}")
+
     masters_context = {}
 
     # procured list
@@ -4168,6 +4173,9 @@ def prescription_entry_page(request):
 
     
     # Default: render the template
+    if not getattr(request, 'user', None) or not request.user.is_authenticated:
+        from django.urls import reverse
+        return redirect(f"{reverse('authentication:login')}?next={request.path}")
     return render(request, 'dashboards/prescriptions/prescription_entry.html')
 
 
@@ -7417,6 +7425,9 @@ def therapy_bulk_excel(request):
         return redirect('therapy_bulk_excel')
     
     # Default: render the page
+    if not getattr(request, 'user', None) or not request.user.is_authenticated:
+        from django.urls import reverse
+        return redirect(f"{reverse('authentication:login')}?next={request.path}")
     return render(request, "dashboards/scheduling/therapy_bulk_excel.html")
 
 

@@ -735,9 +735,18 @@
             document.getElementById('modal-unpref-search').value = '';
             document.getElementById('roster-notes-input').value = '';
 
-            // Load therapists if needed
-            if (!allTherapists || allTherapists.length === 0) {
-                await preloadTherapists();
+            // Load therapists for current patient to get fresh assignment status
+            try {
+                const res = await fetch(`{% url 'get_therapists_with_leaves_api' %}?patient_reg_no=${encodeURIComponent(regNo)}`);
+                const data = await res.json();
+                if (data.status === 'success' && data.therapists) {
+                    allTherapists = data.therapists;
+                }
+            } catch (err) {
+                console.error('Error fetching therapists for patient:', err);
+                if (!allTherapists || allTherapists.length === 0) {
+                    await preloadTherapists();
+                }
             }
 
             // Fetch existing roster if any
@@ -794,8 +803,19 @@
             // Strictly filter by gender: if male patient, show ONLY male therapists
             const genderFiltered = allTherapists.filter(t => matchesGender(t.gender, currentPatientDesiredGender));
 
+            // Remove therapists who are already assigned as preferred to ANOTHER patient
+            const availableForPatient = genderFiltered.filter(t => {
+                if (t.is_assigned_to_other_patient) {
+                    return false;
+                }
+                if (t.assigned_to_patient_reg_no && String(t.assigned_to_patient_reg_no) !== String(currentPatientRegNo)) {
+                    return false;
+                }
+                return true;
+            });
+
             // Search filter
-            const displayList = genderFiltered.filter(t => {
+            const displayList = availableForPatient.filter(t => {
                 if (!searchVal) return true;
                 const matchName = (t.therapist_name || '').toLowerCase().includes(searchVal);
                 const matchCode = (t.therapist_code || '').toLowerCase().includes(searchVal);
@@ -805,7 +825,7 @@
             });
 
             if (displayList.length === 0) {
-                listEl.innerHTML = `<div class="text-center py-4 text-muted small">No therapists match "${escapeHtml(searchVal)}"</div>`;
+                listEl.innerHTML = `<div class="text-center py-4 text-muted small"><i class="fas fa-user-slash me-1 text-secondary"></i>No therapists available matching "${escapeHtml(searchVal)}"${searchVal ? '' : ' (therapists selected as preferred for other patients are excluded)'}</div>`;
                 return;
             }
 
@@ -1193,6 +1213,20 @@
                 }
             }
             if (therapistCodes.length > 0) {
+                // Client-side safety check on therapists already assigned as preferred to another patient
+                const conflictTherapists = therapistCodes.filter(c => {
+                    const t = allTherapists.find(x => x.therapist_code === c);
+                    return t && t.assigned_to_patient_reg_no && String(t.assigned_to_patient_reg_no) !== String(currentPatientRegNo);
+                });
+                if (conflictTherapists.length > 0) {
+                    const conflictNames = conflictTherapists.map(c => {
+                        const t = allTherapists.find(x => x.therapist_code === c);
+                        return t ? `${t.therapist_name} (${t.therapist_code})` : c;
+                    });
+                    showToast(`Therapist(s) ${conflictNames.join(', ')} are already assigned as preferred for another patient and cannot be selected.`, 'danger');
+                    return;
+                }
+
                 if (!pCode) {
                     showToast('Please designate a Primary Bathing Therapist.', 'warning');
                     return;
@@ -1233,6 +1267,7 @@
                     showToast(res.message, 'success');
                     if (rosterModalInstance) rosterModalInstance.hide();
                     loadAllowedPatients();
+                    preloadTherapists();
                 } else {
                     showToast(res.message || 'Failed to save preferences.', 'danger');
                 }

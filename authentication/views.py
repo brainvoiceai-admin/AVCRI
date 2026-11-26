@@ -3,6 +3,10 @@ from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.http import JsonResponse
 from django.views.decorators.http import require_http_methods
+from django.views.decorators.cache import never_cache
+from django.views.decorators.csrf import csrf_protect
+from django.views.decorators.debug import sensitive_post_parameters
+from django.utils.http import url_has_allowed_host_and_scheme
 from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.forms import AuthenticationForm
 from .models import Role, Module, NavSection, CustomUser, AuditLog, DoctorProfile
@@ -462,27 +466,43 @@ def nav_section_management(request):
 
 
 # Original authentication views that were in the system
+@sensitive_post_parameters('password')
+@csrf_protect
+@never_cache
 def login_view(request):
-    """Login view"""
+    """Login view with support for session renewal, next redirect, and safe error handling."""
+    if request.user.is_authenticated:
+        next_url = request.GET.get('next') or request.POST.get('next')
+        if next_url and url_has_allowed_host_and_scheme(next_url, allowed_hosts={request.get_host()}):
+            return redirect(next_url)
+        return redirect(get_dashboard_redirect_url(request.user))
+
+    next_param = request.GET.get('next') or request.POST.get('next') or ''
+
     if request.method == 'POST':
         form = AuthenticationForm(request, data=request.POST)
         if form.is_valid():
-            username = form.cleaned_data.get('username')
-            password = form.cleaned_data.get('password')
-            user = authenticate(username=username, password=password)
+            user = form.get_user()
             if user is not None:
                 login(request, user)
                 messages.success(request, f'Welcome back, {user.username}!')
                 
                 # Log successful login
-                log_audit_event(
-                    user=user,
-                    action='login',
-                    description=f'User {user.username} logged in successfully',
-                    status='success',
-                    request=request
-                )
+                try:
+                    log_audit_event(
+                        user=user,
+                        action='login',
+                        description=f'User {user.username} logged in successfully',
+                        status='success',
+                        request=request
+                    )
+                except Exception as audit_err:
+                    print(f"[AUTH] Login audit logging suppressed error: {audit_err}")
                 
+                next_url = request.POST.get('next') or request.GET.get('next')
+                if next_url and url_has_allowed_host_and_scheme(next_url, allowed_hosts={request.get_host()}):
+                    return redirect(next_url)
+
                 # Redirect to appropriate dashboard based on user role
                 redirect_url = get_dashboard_redirect_url(user)
                 return redirect(redirect_url)
@@ -490,9 +510,10 @@ def login_view(request):
                 messages.error(request, 'Invalid username or password.')
         else:
             messages.error(request, 'Invalid username or password.')
+    else:
+        form = AuthenticationForm(request)
     
-    form = AuthenticationForm()
-    return render(request, 'login.html', {'form': form})
+    return render(request, 'login.html', {'form': form, 'next': next_param})
 
 def get_dashboard_redirect_url(user):
     """Get the appropriate dashboard URL after login.
@@ -501,10 +522,10 @@ def get_dashboard_redirect_url(user):
     """
     return 'authentication:user_profile'
 
+@never_cache
 def logout_view(request):
     """Logout view"""
     user = request.user
-    logout(request)
     
     # Log logout (best-effort; user object is still available here)
     try:
@@ -520,9 +541,28 @@ def logout_view(request):
         # Never block logout on audit/logging issues
         pass
     
-    messages.info(request, 'You have been logged out due to inactivity or manual logout.')
+    logout(request)
+    messages.info(request, 'You have been logged out.')
     # After logout, always send the user back to the login page
     return redirect('authentication:login')
+
+@require_http_methods(["GET", "POST"])
+def session_ping(request):
+    """
+    Lightweight endpoint to verify and keep user session alive.
+    Since SESSION_SAVE_EVERY_REQUEST = True, calling this endpoint
+    refreshes the session expiry on the server.
+    """
+    if request.user.is_authenticated:
+        return JsonResponse({
+            'status': 'ok',
+            'authenticated': True,
+            'username': request.user.username,
+        })
+    return JsonResponse({
+        'status': 'unauthenticated',
+        'authenticated': False,
+    }, status=401)
 
 @login_required
 @role_required(['therapist'])

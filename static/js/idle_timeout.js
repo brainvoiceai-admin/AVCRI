@@ -1,23 +1,49 @@
 // Global idle timeout handling for authenticated dashboard pages
-// - Shows a warning popup after 28 minutes of no user activity
+// - Synchronizes user activity with Django server session (pings keep-alive every 5 mins during active use)
+// - Synchronizes activity across multiple tabs via localStorage
+// - Shows a warning popup after 28 minutes of inactivity
 // - Automatically logs the user out after 30 minutes of inactivity
-// - Any activity resets the timers and hides the warning
+// - Clicking "Stay Logged In" pings server and renews the 30-minute session
 
 (function () {
-    // TEST CONFIG: 1-minute warning, 3-minute auto logout
-    // For production, restore to 28 / 30 minutes.
-    const WARNING_MINUTES = 28; // show popup at 1 minute
-    const LOGOUT_MINUTES = 30;  // hard logout at 3 minutes
+    const WARNING_MINUTES = 28;
+    const LOGOUT_MINUTES = 30;
+    const PING_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 
     const WARNING_TIMEOUT = WARNING_MINUTES * 60 * 1000;
     const LOGOUT_TIMEOUT = LOGOUT_MINUTES * 60 * 1000;
 
-    // If you ever change the logout URL in Django, update this as well.
     const LOGOUT_URL = "/authentication/logout/";
+    const PING_URL = "/authentication/session-ping/";
+    const STORAGE_KEY = "avcri_last_active_time";
 
     let warningTimer = null;
     let logoutTimer = null;
     let warningVisible = false;
+    let lastPingTime = Date.now();
+
+    function getLastActiveTime() {
+        try {
+            const val = localStorage.getItem(STORAGE_KEY);
+            if (val) {
+                const parsed = parseInt(val, 10);
+                if (!isNaN(parsed) && parsed > 0) {
+                    return parsed;
+                }
+            }
+        } catch (e) {
+            // LocalStorage might be disabled or restricted
+        }
+        return Date.now();
+    }
+
+    function setLastActiveTime(timestamp) {
+        try {
+            localStorage.setItem(STORAGE_KEY, timestamp.toString());
+        } catch (e) {
+            // Ignore storage errors
+        }
+    }
 
     function clearTimers() {
         if (warningTimer) {
@@ -28,6 +54,31 @@
             clearTimeout(logoutTimer);
             logoutTimer = null;
         }
+    }
+
+    function pingServer(onSuccess) {
+        fetch(PING_URL, {
+            method: "GET",
+            headers: {
+                "X-Requested-With": "XMLHttpRequest"
+            },
+            credentials: "same-origin"
+        })
+        .then(function (res) {
+            if (res.ok) {
+                lastPingTime = Date.now();
+                if (typeof onSuccess === "function") {
+                    onSuccess();
+                }
+            } else if (res.status === 401) {
+                // Session expired on server; perform clean redirect
+                performLogout();
+            }
+        })
+        .catch(function (err) {
+            // Network issue, continue locally
+            console.warn("[IDLE] Session ping error:", err);
+        });
     }
 
     function createWarningModal() {
@@ -46,7 +97,7 @@
         overlay.style.display = "none";
         overlay.style.alignItems = "center";
         overlay.style.justifyContent = "center";
-        overlay.style.zIndex = "9999";
+        overlay.style.zIndex = "99999";
 
         const modal = document.createElement("div");
         modal.style.backgroundColor = "#fff";
@@ -100,7 +151,15 @@
         logoutButton.style.fontSize = "14px";
 
         stayButton.addEventListener("click", function () {
+            // Ping server to extend backend session cookie
+            pingServer(function () {
+                const now = Date.now();
+                setLastActiveTime(now);
+                hideWarning();
+                resetIdleTimers();
+            });
             hideWarning();
+            setLastActiveTime(Date.now());
             resetIdleTimers();
         });
 
@@ -135,15 +194,13 @@
     }
 
     function performLogout() {
-        // Best-effort cleanup; redirect will perform real logout on server
         clearTimers();
         hideWarning();
         window.location.href = LOGOUT_URL;
     }
 
     function resetIdleTimers() {
-        // Don’t run on the public login page, only on authenticated dashboards.
-        // We loosely detect this by checking for the sidebar element.
+        // Don’t run on the public login page, only on authenticated dashboards
         if (!document.getElementById("sidebar")) {
             clearTimers();
             hideWarning();
@@ -151,30 +208,79 @@
         }
 
         clearTimers();
+
+        const now = Date.now();
+        const lastActive = getLastActiveTime();
+        const elapsed = Math.max(0, now - lastActive);
+
+        // If inactive for 30+ minutes across tabs, log out
+        if (elapsed >= LOGOUT_TIMEOUT) {
+            performLogout();
+            return;
+        }
+
+        // If inactive for 28+ minutes, show warning and schedule remaining time until logout
+        if (elapsed >= WARNING_TIMEOUT) {
+            showWarning();
+            const remainLogout = LOGOUT_TIMEOUT - elapsed;
+            logoutTimer = setTimeout(function () {
+                const checkNow = Date.now();
+                if (checkNow - getLastActiveTime() >= LOGOUT_TIMEOUT) {
+                    performLogout();
+                } else {
+                    resetIdleTimers();
+                }
+            }, Math.max(1000, remainLogout));
+            return;
+        }
+
         hideWarning();
 
+        const remainWarning = WARNING_TIMEOUT - elapsed;
+        const remainLogout = LOGOUT_TIMEOUT - elapsed;
+
         warningTimer = setTimeout(function () {
-            showWarning();
-        }, WARNING_TIMEOUT);
+            const checkNow = Date.now();
+            if (checkNow - getLastActiveTime() >= WARNING_TIMEOUT) {
+                showWarning();
+            } else {
+                resetIdleTimers();
+            }
+        }, Math.max(1000, remainWarning));
 
         logoutTimer = setTimeout(function () {
-            performLogout();
-        }, LOGOUT_TIMEOUT);
+            const checkNow = Date.now();
+            if (checkNow - getLastActiveTime() >= LOGOUT_TIMEOUT) {
+                performLogout();
+            } else {
+                resetIdleTimers();
+            }
+        }, Math.max(2000, remainLogout));
     }
 
     function handleActivity() {
-        // Ignore activity if the document is not visible to avoid constant resets in background tabs
         if (document.hidden) {
             return;
         }
+        const now = Date.now();
+        setLastActiveTime(now);
+
+        // Throttle server session keep-alive to every 5 minutes during active user interaction
+        if (now - lastPingTime > PING_INTERVAL_MS) {
+            lastPingTime = now;
+            pingServer();
+        }
+
         resetIdleTimers();
     }
 
     function initIdleTimeout() {
-        // Guard against running before DOM is ready
         if (!document.body) {
             return;
         }
+
+        // Initialize last active time
+        setLastActiveTime(Date.now());
 
         // Attach listeners for common user interactions
         const events = ["mousemove", "mousedown", "keydown", "scroll", "touchstart"];
@@ -182,14 +288,25 @@
             window.addEventListener(evt, handleActivity, { passive: true });
         });
 
-        document.addEventListener("visibilitychange", function () {
-            // When the user returns to the tab, immediately reset timers
-            if (!document.hidden) {
-                handleActivity();
+        // Cross-tab synchronization via localStorage storage event
+        window.addEventListener("storage", function (e) {
+            if (e.key === STORAGE_KEY) {
+                resetIdleTimers();
             }
         });
 
-        // Start timers initially
+        document.addEventListener("visibilitychange", function () {
+            if (!document.hidden) {
+                const now = Date.now();
+                if (now - lastPingTime > PING_INTERVAL_MS) {
+                    lastPingTime = now;
+                    pingServer();
+                }
+                resetIdleTimers();
+            }
+        });
+
+        // Initial setup
         resetIdleTimers();
     }
 

@@ -270,6 +270,25 @@ def create_therapist_preference_api(request):
             'message': f'Therapist(s) {", ".join(overlap)} cannot be marked as both Preferred and Unpreferred.'
         }, status=400)
 
+    # Check if any preferred therapist is already assigned to another active patient's preferred roster
+    if preferred_codes:
+        from .models import PatientPreferredTherapistRoster
+        other_rosters = PatientPreferredTherapistRoster.objects.filter(is_active=True).exclude(patient_reg_no=patient_id_str)
+        conflicts = []
+        for o_r in other_rosters:
+            if not is_patient_active(o_r.patient_reg_no):
+                continue
+            o_overlap = set(preferred_codes).intersection(set(o_r.therapist_codes or []))
+            if o_overlap:
+                o_name = o_r.patient_name or f"Patient {o_r.patient_reg_no}"
+                for c in o_overlap:
+                    conflicts.append(f"{c} (already assigned to {o_name})")
+        if conflicts:
+            return JsonResponse({
+                'status': 'error',
+                'message': f"Cannot select preferred therapist: {'; '.join(conflicts)}. A therapist cannot be selected as preferred for multiple patients."
+            }, status=400)
+
     # Resolve therapist objects and names
     preferred_objs = list(TherapistMaster.objects.filter(therapist_code__in=preferred_codes, is_active=True))
     unpreferred_objs = list(TherapistMaster.objects.filter(therapist_code__in=unpreferred_codes, is_active=True))

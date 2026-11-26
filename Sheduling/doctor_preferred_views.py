@@ -787,10 +787,12 @@ def get_therapists_with_leaves_api(request):
     grade, gender, and bathing qualification for selection in scheduling modal.
     Supports filtering by gender:
       - ?gender=Female or ?gender=Male
-      - ?patient_reg_no=... (automatically resolves patient gender)
+      - ?patient_reg_no=... (automatically resolves patient gender and identifies therapists assigned to other patients)
+      - ?exclude_other_preferred=1 or ?exclude_assigned=1 (completely removes therapists assigned to other patients)
     """
     gender = request.GET.get('gender', '').strip()
     patient_reg_no = request.GET.get('patient_reg_no', '').strip()
+    exclude_assigned = request.GET.get('exclude_other_preferred', request.GET.get('exclude_assigned', '')).strip().lower() in ['1', 'true', 'yes']
 
     if not gender and patient_reg_no:
         from final_allocation import resolve_desired_gender
@@ -808,7 +810,11 @@ def get_therapists_with_leaves_api(request):
             except Exception:
                 pass
 
-    therapists = get_therapists_with_schedule_info(gender=gender)
+    therapists = get_therapists_with_schedule_info(
+        gender=gender,
+        patient_reg_no=patient_reg_no,
+        exclude_assigned_to_other=exclude_assigned
+    )
     return JsonResponse({
         'status': 'success',
         'gender_filter': gender or 'ALL',

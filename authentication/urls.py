@@ -47,4 +47,5 @@ path('nav-section-management/', views.nav_section_management, name='nav_section_
     # Role change URLs
     path('confirm-role-change/<int:user_id>/', views.confirm_role_change, name='confirm_role_change'),
     path('execute-role-change/', views.execute_role_change, name='execute_role_change'),
+    path('session-ping/', views.session_ping, name='session_ping'),
 ]

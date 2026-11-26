@@ -226,6 +226,11 @@ AUTH_USER_MODEL = "authentication.CustomUser"
 SESSION_COOKIE_AGE = 30 * 60  # 30 minutes, in seconds
 SESSION_SAVE_EVERY_REQUEST = True  # Keep active users logged in, idle users time out
 
+# Authentication redirects
+LOGIN_URL = 'authentication:login'
+LOGIN_REDIRECT_URL = 'authentication:user_profile'
+LOGOUT_REDIRECT_URL = 'authentication:login'
+
 # REST Framework Configuration
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [

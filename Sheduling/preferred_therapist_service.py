@@ -228,11 +228,13 @@ def get_active_preferred_roster(patient_identifier):
     }
 
 
-def get_therapists_with_schedule_info(gender=None):
+def get_therapists_with_schedule_info(gender=None, patient_reg_no=None, exclude_assigned_to_other=False):
     """
     Get all active therapists with their weekly off day(s), grade, gender,
     and bathing qualification.
     Optional gender parameter ('Female' or 'Male') to strictly show therapists with matching gender.
+    Optional patient_reg_no parameter: marks or excludes therapists already assigned to other patients.
+    Optional exclude_assigned_to_other: if True, completely excludes therapists assigned as preferred to another patient.
     """
     therapists = TherapistMaster.objects.filter(is_active=True).select_related('therapist_grade').prefetch_related('leaves')
     if gender:
@@ -241,8 +243,39 @@ def get_therapists_with_schedule_info(gender=None):
             therapists = therapists.filter(therapist_gender__iexact='Female')
         elif g in ['male', 'm']:
             therapists = therapists.filter(therapist_gender__iexact='Male')
+
+    # Build map of therapist_code -> other patient assignment info
+    assigned_to_other_map = {}
+    active_rosters = PatientPreferredTherapistRoster.objects.filter(is_active=True)
+    if patient_reg_no:
+        reg_str = str(patient_reg_no).strip()
+        active_rosters = active_rosters.exclude(patient_reg_no=reg_str)
+        digits = ''.join(ch for ch in reg_str if ch.isdigit())
+        if digits and digits != reg_str:
+            active_rosters = active_rosters.exclude(patient_reg_no=digits)
+
+    from final_allocation import is_patient_active
+    for r in active_rosters:
+        if not is_patient_active(r.patient_reg_no):
+            continue
+        if r.allowance and (not r.allowance.is_active or not r.allowance.allow_preferred):
+            continue
+        p_name = r.patient_name or f"Patient {r.patient_reg_no}"
+        for c in (r.therapist_codes or []):
+            if c:
+                assigned_to_other_map[c] = {
+                    'patient_reg_no': r.patient_reg_no,
+                    'patient_name': p_name
+                }
+
     result = []
     for t in therapists:
+        assigned_info = assigned_to_other_map.get(t.therapist_code)
+        is_assigned_other = bool(assigned_info)
+
+        if exclude_assigned_to_other and is_assigned_other:
+            continue
+
         leaves = list(t.leaves.filter(is_active=True))
         week_off_names = [l.leave_day_name for l in leaves if l.leave_day_name]
         week_off_ints = [l.leave_day for l in leaves]
@@ -260,6 +293,9 @@ def get_therapists_with_schedule_info(gender=None):
             'week_offs': week_off_names,
             'week_off_ints': week_off_ints,
             'week_off_display': week_off_display,
+            'is_assigned_to_other_patient': is_assigned_other,
+            'assigned_to_patient_reg_no': assigned_info['patient_reg_no'] if assigned_info else None,
+            'assigned_to_patient_name': assigned_info['patient_name'] if assigned_info else None,
         })
     result.sort(key=lambda x: (x['therapist_name'].lower(), x['therapist_code']))
     return result
@@ -930,6 +966,34 @@ def save_preferred_therapist_roster(patient_reg_no, therapist_codes=None, primar
         therapist_objs = list(TherapistMaster.objects.filter(therapist_code__in=clean_codes, is_active=True))
         p_obj = next((t for t in therapist_objs if t.therapist_code == p_code), None)
         s_obj = next((t for t in therapist_objs if t.therapist_code == s_code), None)
+
+        # Check if any selected preferred therapist is already assigned to ANOTHER active patient's preferred roster
+        other_active_rosters = PatientPreferredTherapistRoster.objects.filter(is_active=True).exclude(patient_reg_no=reg_str)
+        digits = ''.join(ch for ch in reg_str if ch.isdigit())
+        if digits and digits != reg_str:
+            other_active_rosters = other_active_rosters.exclude(patient_reg_no=digits)
+
+        from final_allocation import is_patient_active
+        conflicts = []
+        for o_roster in other_active_rosters:
+            if not is_patient_active(o_roster.patient_reg_no):
+                continue
+            if o_roster.allowance and (not o_roster.allowance.is_active or not o_roster.allowance.allow_preferred):
+                continue
+            o_codes = set(o_roster.therapist_codes or [])
+            overlap = set(clean_codes).intersection(o_codes)
+            if overlap:
+                o_name = o_roster.patient_name or f"Patient {o_roster.patient_reg_no}"
+                for c in overlap:
+                    t_master = next((t for t in therapist_objs if t.therapist_code == c), None)
+                    t_name = t_master.therapist_name if t_master else c
+                    conflicts.append(f"{t_name} ({c}) is already selected for {o_name} ({o_roster.patient_reg_no})")
+
+        if conflicts:
+            raise ValidationError(
+                f"Cannot select preferred therapist: {'; '.join(conflicts)}. "
+                f"A therapist can only be selected as preferred for one patient."
+            )
 
     # 4. Resolve unpreferred therapist objects
     unpref_objs = list(TherapistMaster.objects.filter(therapist_code__in=clean_unpref, is_active=True)) if clean_unpref else []
