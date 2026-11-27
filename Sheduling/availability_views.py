@@ -506,21 +506,26 @@ def get_time_slots_api(request):
         for slot in time_slots:
             # Format slot_time in 12-hour format for display
             time_12hr = slot.slot_time.strftime('%I:%M %p').lstrip('0')
+            slot_name = slot.slot_name or f"Slot {slot.slot_number}"
             slots_data.append({
                 'id': slot.pk,
                 'start_time': slot.slot_time.strftime('%H:%M'),
-                'slot_name': slot.slot_name or f"Slot {slot.slot_number}",
-                'display_name': time_12hr,
+                'slot_name': slot_name,
+                'display_name': f"{slot_name} ({time_12hr})",
+                'time_12hr': time_12hr,
                 'slot_number': slot.slot_number
             })
         
-        # If no time slots in database, return default ones
+        # If no time slots in database, return default hospital slots
         if not slots_data:
             default_slots = [
-                {'id': 1, 'start_time': '09:00', 'slot_name': 'Morning Slot', 'display_name': '9:00 AM', 'slot_number': 1},
-                {'id': 2, 'start_time': '10:00', 'slot_name': 'Late Morning', 'display_name': '10:00 AM', 'slot_number': 2},
-                {'id': 3, 'start_time': '14:00', 'slot_name': 'Afternoon Slot', 'display_name': '2:00 PM', 'slot_number': 3},
-                {'id': 4, 'start_time': '15:00', 'slot_name': 'Late Afternoon', 'display_name': '3:00 PM', 'slot_number': 4},
+                {'id': 1, 'start_time': '06:30', 'slot_name': 'Slot 1', 'display_name': 'Slot 1 (6:30 AM)', 'time_12hr': '6:30 AM', 'slot_number': 1},
+                {'id': 2, 'start_time': '08:30', 'slot_name': 'Slot 2', 'display_name': 'Slot 2 (8:30 AM)', 'time_12hr': '8:30 AM', 'slot_number': 2},
+                {'id': 3, 'start_time': '10:00', 'slot_name': 'Slot 3', 'display_name': 'Slot 3 (10:00 AM)', 'time_12hr': '10:00 AM', 'slot_number': 3},
+                {'id': 4, 'start_time': '11:30', 'slot_name': 'Slot 4', 'display_name': 'Slot 4 (11:30 AM)', 'time_12hr': '11:30 AM', 'slot_number': 4},
+                {'id': 5, 'start_time': '14:30', 'slot_name': 'Slot 5', 'display_name': 'Slot 5 (2:30 PM)', 'time_12hr': '2:30 PM', 'slot_number': 5},
+                {'id': 6, 'start_time': '16:00', 'slot_name': 'Slot 6', 'display_name': 'Slot 6 (4:00 PM)', 'time_12hr': '4:00 PM', 'slot_number': 6},
+                {'id': 7, 'start_time': '17:30', 'slot_name': 'Slot 7', 'display_name': 'Slot 7 (5:30 PM)', 'time_12hr': '5:30 PM', 'slot_number': 7},
             ]
             slots_data = default_slots
         
@@ -531,12 +536,233 @@ def get_time_slots_api(request):
         
     except Exception as e:
         print(f"Error in get_time_slots_api: {e}")
-        return JsonResponse({'error': str(e)}, status=500)
+        return JsonResponse({'error': str(e), 'success': False}, status=500)
 
 
 # ============================================
 # TREATMENT ROOM AVAILABILITY VIEWS
 # ============================================
+
+def _resolve_slot_master(time_slot_param):
+    """
+    Robustly resolves a SlotMaster instance from various possible representations:
+    - SlotMaster PK / ID (int or numeric string)
+    - slot_number (e.g. 1, 2, 3...)
+    - 24-hr time ('06:30', '06:30:00')
+    - 12-hr time ('6:30 AM', '06:30 PM')
+    - slot_name ('Slot 1', 'Vamanam Slot...')
+    Returns (slot_master, error_message). If time_slot_param is empty or 'all', returns (None, None).
+    """
+    if not time_slot_param or str(time_slot_param).strip().lower() in ['', 'all', 'none', 'null']:
+        return None, None
+        
+    time_str = str(time_slot_param).strip()
+    
+    # Check if numeric (PK or slot_number)
+    if time_str.isdigit():
+        val = int(time_str)
+        sm = SlotMaster.objects.filter(pk=val).first()
+        if sm:
+            return sm, None
+        sm = SlotMaster.objects.filter(slot_number=val).first()
+        if sm:
+            return sm, None
+
+    # Try parsing time formats
+    for fmt in ('%H:%M', '%H:%M:%S', '%I:%M %p', '%I:%M%p'):
+        try:
+            t = datetime.strptime(time_str, fmt).time()
+            sm = SlotMaster.objects.filter(slot_time=t).first()
+            if not sm:
+                sm = SlotMaster.objects.filter(
+                    slot_time__hour=t.hour,
+                    slot_time__minute=t.minute
+                ).first()
+            if sm:
+                return sm, None
+        except ValueError:
+            continue
+
+    # Try matching by slot name
+    sm = SlotMaster.objects.filter(slot_name__iexact=time_str).first()
+    if not sm:
+        sm = SlotMaster.objects.filter(slot_name__icontains=time_str).first()
+    if sm:
+        return sm, None
+
+    return None, f"Time slot '{time_slot_param}' not found in SlotMaster"
+
+
+def _get_unified_occupied_rooms(target_date, slot_master=None, floor=None):
+    """
+    Consolidates room occupancy from both Sheduling.Booking and Patient.RoomBooking.
+    Ensures cancelled/failed bookings and cancelled allocations are excluded.
+    Returns a unified list of occupied room dictionaries.
+    """
+    from Patient.models import RoomBooking
+    from Sheduling.models import Booking, PatientSnapshot
+    from django.db.models import Q
+
+    # 1. Query Sheduling.Booking (active, scheduled therapies)
+    b_qs = Booking.objects.filter(
+        date=target_date,
+        room__isnull=False
+    ).exclude(
+        status__in=['cancelled', 'failed', 'draft']
+    ).exclude(
+        allocation__status__in=['cancelled', 'failed']
+    ).select_related(
+        'room', 'timeslot', 'allocation', 'allocation__patient'
+    ).prefetch_related(
+        'assignments__therapist', 'nurse_assignments__nurse'
+    )
+    if slot_master:
+        b_qs = b_qs.filter(timeslot=slot_master)
+    if floor and floor != 'all':
+        b_qs = b_qs.filter(room__floor=floor)
+
+    # 2. Query Patient.RoomBooking (booked treatment room slots)
+    # Crucial: exclude rows where visit, allocation, or therapy was cancelled!
+    rb_qs = RoomBooking.objects.filter(
+        date=target_date,
+        status='BOOKED'
+    ).exclude(
+        Q(visit__status__in=['cancelled', 'failed', 'draft']) |
+        Q(visit__allocation__status__in=['cancelled', 'failed']) |
+        Q(therapy__status__in=['cancelled', 'failed'])
+    ).select_related(
+        'room', 'time_slot', 'visit', 'visit__allocation', 'visit__allocation__patient',
+        'therapy', 'therapy__patient'
+    ).prefetch_related(
+        'visit__assignments__therapist', 'visit__nurse_assignments__nurse'
+    )
+    if slot_master:
+        rb_qs = rb_qs.filter(time_slot=slot_master)
+    if floor and floor != 'all':
+        rb_qs = rb_qs.filter(room__floor=floor)
+
+    occupied_map = {}
+
+    def _format_slot(slot_obj):
+        if not slot_obj:
+            return 'N/A'
+        try:
+            t_str = slot_obj.slot_time.strftime('%I:%M %p').lstrip('0')
+            s_name = slot_obj.slot_name or f"Slot {slot_obj.slot_number}"
+            return f"{s_name} ({t_str})"
+        except Exception:
+            return str(slot_obj)
+
+    # Process RoomBookings
+    for rb in rb_qs:
+        room = rb.room
+        if not room:
+            continue
+        slot = rb.time_slot
+        slot_key = slot.id if slot else 0
+        key = (room.room_no, slot_key)
+
+        patient_name = 'N/A'
+        patient_reg_no = 'N/A'
+        patient_id = rb.patient_id
+
+        # Patient lookup
+        p = None
+        if rb.visit and rb.visit.allocation and rb.visit.allocation.patient:
+            p = rb.visit.allocation.patient
+        elif rb.therapy and rb.therapy.patient:
+            p = rb.therapy.patient
+        elif rb.patient_id:
+            p = PatientSnapshot.objects.filter(pk=rb.patient_id).first() or \
+                PatientSnapshot.objects.filter(pat_reg_no=str(rb.patient_id)).first()
+
+        if p:
+            patient_name = p.pat_name
+            patient_reg_no = p.pat_reg_no
+            patient_id = p.id
+
+        therapy_name = rb.therapy_name or (rb.therapy.therapy_name if rb.therapy else 'N/A')
+        if rb.visit and (not therapy_name or therapy_name == 'N/A'):
+            therapy_name = rb.visit.snapshot_therapy_name or (rb.visit.allocation.therapy_name if rb.visit.allocation else 'N/A')
+
+        therapists = []
+        if rb.visit:
+            for a in rb.visit.assignments.all():
+                if a.therapist:
+                    therapists.append(a.therapist.therapist_name or a.therapist.therapist_code)
+            for na in rb.visit.nurse_assignments.all():
+                if na.nurse:
+                    therapists.append(na.nurse.nurse_name or na.nurse.nurse_code)
+
+        occupied_map[key] = {
+            'room_no': room.room_no,
+            'tr_code': room.tr_code or 'N/A',
+            'floor': room.floor or 'N/A',
+            'therapy_name': therapy_name,
+            'patient_name': patient_name,
+            'patient_reg_no': patient_reg_no,
+            'patient_id': patient_id,
+            'therapists': ', '.join(therapists) if therapists else 'N/A',
+            'status': rb.status,
+            'date': rb.date.strftime('%Y-%m-%d'),
+            'time_slot': _format_slot(slot),
+            'time_slot_id': slot_key,
+            'slot_number': getattr(slot, 'slot_number', 99) if slot else 99
+        }
+
+    # Process Bookings (fills any bookings missing from RoomBooking and enriches therapist info)
+    for b in b_qs:
+        room = b.room
+        if not room:
+            continue
+        slot = b.timeslot
+        slot_key = slot.id if slot else 0
+        key = (room.room_no, slot_key)
+
+        therapists = []
+        for a in b.assignments.all():
+            if a.therapist:
+                therapists.append(a.therapist.therapist_name or a.therapist.therapist_code)
+        for na in b.nurse_assignments.all():
+            if na.nurse:
+                therapists.append(na.nurse.nurse_name or na.nurse.nurse_code)
+
+        if key in occupied_map:
+            if therapists and occupied_map[key]['therapists'] == 'N/A':
+                occupied_map[key]['therapists'] = ', '.join(therapists)
+            continue
+
+        patient_name = 'N/A'
+        patient_reg_no = 'N/A'
+        patient_id = None
+        if b.allocation and b.allocation.patient:
+            patient_name = b.allocation.patient.pat_name
+            patient_reg_no = b.allocation.patient.pat_reg_no
+            patient_id = b.allocation.patient.id
+
+        therapy_name = b.snapshot_therapy_name or (b.allocation.therapy_name if b.allocation else 'N/A')
+
+        occupied_map[key] = {
+            'room_no': room.room_no,
+            'tr_code': room.tr_code or 'N/A',
+            'floor': room.floor or 'N/A',
+            'therapy_name': therapy_name,
+            'patient_name': patient_name,
+            'patient_reg_no': patient_reg_no,
+            'patient_id': patient_id,
+            'therapists': ', '.join(therapists) if therapists else 'N/A',
+            'status': 'BOOKED',
+            'date': b.date.strftime('%Y-%m-%d'),
+            'time_slot': _format_slot(slot),
+            'time_slot_id': slot_key,
+            'slot_number': getattr(slot, 'slot_number', 99) if slot else 99
+        }
+
+    # Sort occupied rooms: floor, room_no, slot_number
+    result = list(occupied_map.values())
+    result.sort(key=lambda x: (str(x.get('floor', '')), str(x.get('room_no', '')), x.get('slot_number', 99)))
+    return result
+
 
 @login_required
 def room_availability_dashboard(request):
@@ -552,20 +778,25 @@ def room_availability_dashboard(request):
 def get_available_rooms_api(request):
     """API to get available treatment rooms based on filters"""
     try:
-        from Patient.models import TreatmentRoom, RoomBooking
+        from Patient.models import TreatmentRoom
         
         selected_date = request.GET.get('date')
         time_slot = request.GET.get('time')
         floor = request.GET.get('floor')
         
         if not selected_date:
-            return JsonResponse({'error': 'Date parameter is required'}, status=400)
+            return JsonResponse({'error': 'Date parameter is required', 'success': False}, status=400)
         
         # Parse the date
         try:
             target_date = datetime.strptime(selected_date, '%Y-%m-%d').date()
         except ValueError:
-            return JsonResponse({'error': 'Invalid date format'}, status=400)
+            return JsonResponse({'error': 'Invalid date format (expected YYYY-MM-DD)', 'success': False}, status=400)
+        
+        # Resolve time slot
+        slot_master, err = _resolve_slot_master(time_slot)
+        if err:
+            return JsonResponse({'error': err, 'success': False}, status=400)
         
         # Get all active treatment rooms
         rooms_query = TreatmentRoom.objects.filter(is_active=True)
@@ -573,66 +804,40 @@ def get_available_rooms_api(request):
         # Filter by floor if specified
         if floor and floor != 'all':
             rooms_query = rooms_query.filter(floor=floor)
+            
+        # Get occupied rooms
+        occupied_data = _get_unified_occupied_rooms(target_date, slot_master=slot_master, floor=floor)
+        occupied_room_nos = {item['room_no'] for item in occupied_data}
         
-        # If time slot is specified, check availability using RoomBooking
-        if time_slot:
-            # Parse time slot (e.g., "09:00" -> 9:00 AM)
-            try:
-                time_obj = datetime.strptime(time_slot, '%H:%M').time()
-                
-                # Find the SlotMaster record matching this time
-                slot_master = SlotMaster.objects.filter(
-                    slot_time=time_obj,
-                    is_active=True
-                ).first()
-                
-                if slot_master:
-                    # Get rooms that have bookings at this time slot
-                    booked_room_ids = RoomBooking.objects.filter(
-                        date=target_date,
-                        time_slot=slot_master,
-                        status='BOOKED'
-                    ).values_list('room_id', flat=True)
-                    
-                    # Exclude rooms that are already booked
-                    available_rooms = rooms_query.exclude(
-                        room_no__in=booked_room_ids
-                    )
-                else:
-                    # If slot master not found, return error
-                    return JsonResponse({
-                        'error': f'Time slot {time_slot} not found in SlotMaster',
-                        'success': False
-                    }, status=400)
-            except ValueError:
-                return JsonResponse({'error': 'Invalid time format'}, status=400)
-        else:
-            available_rooms = rooms_query
+        # Available rooms are active rooms excluding those occupied
+        available_rooms_qs = rooms_query.exclude(room_no__in=occupied_room_nos).order_by('floor', 'room_no')
         
-        # Prepare room data
-        rooms_list = list(available_rooms)
         rooms_data = []
-        for room in rooms_list:
-            room_data = {
+        for room in available_rooms_qs:
+            rooms_data.append({
                 'room_no': room.room_no,
                 'tr_code': room.tr_code or 'N/A',
                 'floor': room.floor or 'N/A',
                 'description': room.description or '',
+                'is_steam_room': getattr(room, 'is_steam_room', False),
+                'is_vamanam_room': getattr(room, 'is_vamanam_room', False),
+                'is_wheelchair_accessible': getattr(room, 'is_wheelchair_accessible', False),
                 'is_active': room.is_active
-            }
-            rooms_data.append(room_data)
-        
+            })
+            
         return JsonResponse({
             'success': True,
             'rooms': rooms_data,
-            'total_count': len(rooms_data)
+            'total_count': len(rooms_data),
+            'date': target_date.strftime('%Y-%m-%d'),
+            'time_slot': slot_master.slot_name if slot_master else 'All Slots'
         })
         
     except Exception as e:
         print(f"Error in get_available_rooms_api: {e}")
         import traceback
         traceback.print_exc()
-        return JsonResponse({'error': str(e)}, status=500)
+        return JsonResponse({'error': str(e), 'success': False}, status=500)
 
 
 @login_required
@@ -640,185 +845,37 @@ def get_available_rooms_api(request):
 def get_occupied_rooms_api(request):
     """API to get occupied treatment rooms for a specific date and time"""
     try:
-        from Patient.models import TreatmentRoom, RoomBooking
-        
         selected_date = request.GET.get('date')
         time_slot = request.GET.get('time')
         floor = request.GET.get('floor')
         
         if not selected_date:
-            return JsonResponse({'error': 'Date parameter is required'}, status=400)
+            return JsonResponse({'error': 'Date parameter is required', 'success': False}, status=400)
         
         # Parse the date
         try:
             target_date = datetime.strptime(selected_date, '%Y-%m-%d').date()
         except ValueError:
-            return JsonResponse({'error': 'Invalid date format'}, status=400)
+            return JsonResponse({'error': 'Invalid date format (expected YYYY-MM-DD)', 'success': False}, status=400)
         
-        occupied_data = []
-        
-        # Get occupied rooms based on time slot
-        if time_slot:
-            # Parse time slot
-            try:
-                time_obj = datetime.strptime(time_slot, '%H:%M').time()
-                
-                # Find the SlotMaster record matching this time
-                slot_master = SlotMaster.objects.filter(
-                    slot_time=time_obj,
-                    is_active=True
-                ).first()
-                
-                if slot_master:
-                    # Get room bookings for this date and time slot
-                    bookings_query = RoomBooking.objects.filter(
-                        date=target_date,
-                        time_slot=slot_master,
-                        status='BOOKED'
-                    )
-                    
-                    # Filter by floor if specified
-                    if floor and floor != 'all':
-                        bookings_query = bookings_query.filter(room__floor=floor)
-                        
-                    bookings = bookings_query.select_related('room')
-                    
-                    # Process bookings
-                    for booking in bookings:
-                        room = booking.room
-                        
-                        # Get patient name if available
-                        patient_name = 'N/A'
-                        patient_reg_no = 'N/A'
-                        if booking.patient_id:
-                            try:
-                                # Try lookup by integer ID first
-                                patient_snapshot = PatientSnapshot.objects.filter(
-                                    pat_reg_no=booking.patient_id
-                                ).first()
-                                
-                                # 1. Try Primary Key (Most likely)
-                                patient_snapshot = PatientSnapshot.objects.filter(pk=booking.patient_id).first()
-
-                                # 2. If not found, try Reg No (exact)
-                                if not patient_snapshot:
-                                    patient_snapshot = PatientSnapshot.objects.filter(
-                                        pat_reg_no=booking.patient_id
-                                    ).first()
-                                
-                                # 3. If not found, try string conversion
-                                if not patient_snapshot:
-                                    patient_snapshot = PatientSnapshot.objects.filter(
-                                        pat_reg_no=str(booking.patient_id)
-                                    ).first()
-
-                                # 4. If still not found, try partial match
-                                if not patient_snapshot:
-                                    patient_snapshot = PatientSnapshot.objects.filter(
-                                        pat_reg_no__icontains=str(booking.patient_id)
-                                    ).first()
-                                    
-                                if patient_snapshot:
-                                    patient_name = patient_snapshot.pat_name
-                                    patient_reg_no = patient_snapshot.pat_reg_no
-                            except Exception as e:
-                                print(f"Error fetching patient name for {booking.patient_id}: {e}")
-                        
-                        occupied_info = {
-                            'room_no': room.room_no,
-                            'tr_code': room.tr_code or 'N/A',
-                            'floor': room.floor or 'N/A',
-                            'therapy_name': booking.therapy_name or 'N/A',
-                            'patient_name': patient_name,
-                            'patient_reg_no': patient_reg_no,
-                            'patient_id': booking.patient_id,
-                            'status': booking.status,
-                            'date': booking.date.strftime('%Y-%m-%d'),
-                            'time_slot': slot_master.slot_name or f"Slot {slot_master.slot_number}"
-                        }
-                        occupied_data.append(occupied_info)
-                else:
-                    return JsonResponse({
-                        'error': f'Time slot {time_slot} not found in SlotMaster',
-                        'success': False
-                    }, status=400)
-            except ValueError:
-                return JsonResponse({'error': 'Invalid time format'}, status=400)
-        else:
-            # If no time slot specified, get all bookings for the date
-            bookings_query = RoomBooking.objects.filter(
-                date=target_date,
-                status='BOOKED'
-            )
+        # Resolve time slot
+        slot_master, err = _resolve_slot_master(time_slot)
+        if err:
+            return JsonResponse({'error': err, 'success': False}, status=400)
             
-            # Filter by floor if specified
-            if floor and floor != 'all':
-                bookings_query = bookings_query.filter(room__floor=floor)
-                
-            bookings = bookings_query.select_related('room', 'time_slot')
-            
-            for booking in bookings:
-                room = booking.room
-                
-                # Get patient name if available
-                patient_name = 'N/A'
-                patient_reg_no = 'N/A'
-                if booking.patient_id:
-                    try:
-                        # Try lookup by integer ID first
-                        patient_snapshot = PatientSnapshot.objects.filter(
-                            pat_reg_no=booking.patient_id
-                        ).first()
-                        
-                        # 1. Try Primary Key (Most likely)
-                        patient_snapshot = PatientSnapshot.objects.filter(pk=booking.patient_id).first()
-
-                        # 2. If not found, try Reg No (exact)
-                        if not patient_snapshot:
-                            patient_snapshot = PatientSnapshot.objects.filter(
-                                pat_reg_no=booking.patient_id
-                            ).first()
-
-                        # 3. If not found, try string conversion
-                        if not patient_snapshot:
-                            patient_snapshot = PatientSnapshot.objects.filter(
-                                pat_reg_no=str(booking.patient_id)
-                            ).first()
-
-                        # 4. If still not found, try partial match
-                        if not patient_snapshot:
-                            patient_snapshot = PatientSnapshot.objects.filter(
-                                pat_reg_no__icontains=str(booking.patient_id)
-                            ).first()
-                            
-                        if patient_snapshot:
-                            patient_name = patient_snapshot.pat_name
-                            patient_reg_no = patient_snapshot.pat_reg_no
-                    except Exception as e:
-                        print(f"Error fetching patient name for {booking.patient_id}: {e}")
-                
-                occupied_info = {
-                    'room_no': room.room_no,
-                    'tr_code': room.tr_code or 'N/A',
-                    'floor': room.floor or 'N/A',
-                    'therapy_name': booking.therapy_name or 'N/A',
-                    'patient_name': patient_name,
-                    'patient_reg_no': patient_reg_no,
-                    'patient_id': booking.patient_id,
-                    'status': booking.status,
-                    'date': booking.date.strftime('%Y-%m-%d'),
-                    'time_slot': booking.time_slot.slot_name if booking.time_slot else 'N/A'
-                }
-                occupied_data.append(occupied_info)
+        occupied_data = _get_unified_occupied_rooms(target_date, slot_master=slot_master, floor=floor)
         
         return JsonResponse({
             'success': True,
             'occupied_rooms': occupied_data,
-            'total_count': len(occupied_data)
+            'total_count': len(occupied_data),
+            'date': target_date.strftime('%Y-%m-%d'),
+            'time_slot': slot_master.slot_name if slot_master else 'All Slots'
         })
         
     except Exception as e:
         print(f"Error in get_occupied_rooms_api: {e}")
         import traceback
         traceback.print_exc()
-        return JsonResponse({'error': str(e)}, status=500)
+        return JsonResponse({'error': str(e), 'success': False}, status=500)
+

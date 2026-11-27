@@ -21,8 +21,31 @@
                     <i class="fas fa-door-open"></i>
                     <h1>Treatment Room Availability Dashboard</h1>
                 </div>
-                <p class="subtitle">Find available treatment rooms and check occupancy schedules</p>
+                <p class="subtitle">Find available treatment rooms and check occupancy schedules in real time</p>
             </header>
+
+            <!-- Summary Stats -->
+            <div class="stats-container">
+                <div class="stat-card total">
+                    <div class="stat-val" id="statTotalRooms">--</div>
+                    <div class="stat-lbl"><i class="fas fa-hospital"></i> Total Active Rooms</div>
+                </div>
+                <div class="stat-card available">
+                    <div class="stat-val" id="statAvailable">--</div>
+                    <div class="stat-lbl"><i class="fas fa-door-open"></i> Available Rooms</div>
+                </div>
+                <div class="stat-card occupied">
+                    <div class="stat-val" id="statOccupied">--</div>
+                    <div class="stat-lbl"><i class="fas fa-door-closed"></i> Occupied Rooms</div>
+                </div>
+            </div>
+
+            <!-- Quick Action Toolbar -->
+            <div class="toolbar-sync">
+                <button type="button" class="btn btn-sync-all" onclick="checkAll()" id="checkAllBtn">
+                    <i class="fas fa-sync-alt"></i> Refresh Both Available & Occupied
+                </button>
+            </div>
 
             <div class="dashboard">
                 <!-- Section 1: Room Availability -->

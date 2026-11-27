@@ -348,12 +348,123 @@ footer {
 
 /* Additional styles for occupied rooms display */
 .patient-info {
-    font-size: 0.85rem;
+    font-size: 0.88rem;
     color: var(--dark);
-    margin-top: 4px;
+    margin-top: 6px;
+    line-height: 1.5;
 }
 
 .therapy-name {
-    font-weight: 500;
+    font-weight: 600;
     color: var(--secondary);
+}
+
+.available-badge {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 12px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    margin-left: 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    background: #28a745;
+    color: white;
+}
+
+.slot-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 6px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    background: #e3f2fd;
+    color: #1565c0;
+    border: 1px solid #bbdefb;
+    margin-left: 6px;
+}
+
+.amenity-badge {
+    display: inline-block;
+    padding: 2px 7px;
+    border-radius: 4px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    margin-left: 5px;
+}
+
+.amenity-badge.steam {
+    background: #fff3e0;
+    color: #e65100;
+    border: 1px solid #ffe0b2;
+}
+
+.amenity-badge.vamanam {
+    background: #f3e5f5;
+    color: #7b1fa2;
+    border: 1px solid #e1bee7;
+}
+
+.amenity-badge.wheelchair {
+    background: #e8f5e9;
+    color: #2e7d32;
+    border: 1px solid #c8e6c9;
+}
+
+.therapist-info {
+    font-size: 0.82rem;
+    color: #374151;
+    margin-top: 4px;
+    background: #f3f4f6;
+    padding: 3px 8px;
+    border-radius: 4px;
+    display: inline-block;
+    border-left: 3px solid var(--primary);
+}
+
+.stats-container {
+    display: flex;
+    justify-content: center;
+    gap: 20px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+}
+
+.stat-card {
+    background: white;
+    padding: 14px 24px;
+    border-radius: 10px;
+    box-shadow: var(--box-shadow);
+    text-align: center;
+    min-width: 150px;
+    flex: 1;
+    max-width: 220px;
+}
+
+.stat-card.total .stat-val { color: var(--primary); }
+.stat-card.available .stat-val { color: #28a745; }
+.stat-card.occupied .stat-val { color: #e91e63; }
+.stat-val { font-size: 1.8rem; font-weight: 700; line-height: 1.2; }
+.stat-lbl { font-size: 0.8rem; color: var(--gray); text-transform: uppercase; font-weight: 600; margin-top: 4px; }
+
+.toolbar-sync {
+    text-align: center;
+    margin-bottom: 20px;
+}
+
+.btn-sync-all {
+    background: #2b3a4a;
+    color: white;
+    padding: 10px 22px;
+    border-radius: 8px;
+    font-size: 0.95rem;
+    font-weight: 600;
+}
+
+.btn-sync-all:hover {
+    background: #1f2937;
+}
+
+.room-icon.available {
+    background: #28a745;
 }
