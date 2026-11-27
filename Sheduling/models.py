@@ -964,7 +964,11 @@ class DoctorPatientPreferenceAllowance(models.Model):
         # If patient is discharged (is_patient_active == False), retain/release the quota!
         valid_used = 0
         try:
-            from final_allocation import is_patient_active
+            import sys as _sys
+            from allocation_engine.core.primitives.patient_utils import is_patient_active as _prim_is_patient_active
+            _fa_mod = _sys.modules.get('final_allocation')
+            _fa_fn = getattr(_fa_mod, 'is_patient_active', None) if _fa_mod is not None else None
+            is_patient_active = _fa_fn if (_fa_fn is not None and _fa_fn is not _prim_is_patient_active) else _prim_is_patient_active
         except Exception:
             is_patient_active = None
 

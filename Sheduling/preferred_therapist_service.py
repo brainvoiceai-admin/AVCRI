@@ -183,7 +183,7 @@ def get_active_preferred_roster(patient_identifier):
 
     # Check discharge status: if patient is discharged, deactivate roster and allowance, releasing quota
     try:
-        from final_allocation import is_patient_active
+        from allocation_engine.core.primitives.patient_utils import is_patient_active
         if not is_patient_active(roster.patient_reg_no):
             roster.is_active = False
             roster.save(update_fields=['is_active'])
@@ -254,7 +254,7 @@ def get_therapists_with_schedule_info(gender=None, patient_reg_no=None, exclude_
         if digits and digits != reg_str:
             active_rosters = active_rosters.exclude(patient_reg_no=digits)
 
-    from final_allocation import is_patient_active
+    from allocation_engine.core.primitives.patient_utils import is_patient_active
     for r in active_rosters:
         if not is_patient_active(r.patient_reg_no):
             continue
@@ -986,7 +986,7 @@ def save_preferred_therapist_roster(patient_reg_no, therapist_codes=None, primar
         if digits and digits != reg_str:
             other_active_rosters = other_active_rosters.exclude(patient_reg_no=digits)
 
-        from final_allocation import is_patient_active
+        from allocation_engine.core.primitives.patient_utils import is_patient_active
         conflicts = []
         for o_roster in other_active_rosters:
             if not is_patient_active(o_roster.patient_reg_no):
@@ -1031,7 +1031,7 @@ def save_preferred_therapist_roster(patient_reg_no, therapist_codes=None, primar
             pass
 
     if patient_sex:
-        from final_allocation import resolve_desired_gender
+        from allocation_engine.core.primitives.patient_utils import resolve_desired_gender
         desired_gender = resolve_desired_gender(patient_sex, patient_age)
         for t_obj in therapist_objs:
             t_g = str(t_obj.therapist_gender or '').strip().lower()
@@ -1248,7 +1248,7 @@ def displace_non_vip_therapist_for_slot(therapist_obj, target_date, slot_obj, ex
 
     if replacement and conf_booking:
         # Assign replacement to non-VIP booking
-        from final_allocation import create_therapist_booking_safe
+        from allocation_engine.core.primitives.booking_persistence import create_therapist_booking_safe
         new_tb, _ = create_therapist_booking_safe(
             therapist=replacement,
             date=target_date,
@@ -1356,7 +1356,7 @@ def reassign_patient_upcoming_bookings_with_roster(patient_reg_no, from_date=Non
         q |= Q(allocation__patient__id__in=patient_ids)
 
     from Sheduling.models import TherapyAllocation, FinalScheduleRun
-    from final_allocation import therapist_requirements, therapy_needs_bath
+    from allocation_engine.core.primitives.therapy_catalog import therapist_requirements, therapy_needs_bath
 
     # Clean up any stale assignments for cancelled allocations of this patient
     cancelled_allocs = TherapyAllocation.objects.filter(
@@ -1514,7 +1514,7 @@ def reassign_patient_upcoming_bookings_with_roster(patient_reg_no, from_date=Non
         # If preferred roster had fewer therapists or some were on leave,
         # VIP patients must NOT fail! Fill remaining required therapists from available therapists.
         if remaining_needed > 0 and not other_vip_conflict_exists:
-            from final_allocation import resolve_desired_gender
+            from allocation_engine.core.primitives.patient_utils import resolve_desired_gender
             from masters.models import (
                 is_therapist_on_emergency_leave,
                 is_therapist_deputed,
@@ -1589,7 +1589,7 @@ def reassign_patient_upcoming_bookings_with_roster(patient_reg_no, from_date=Non
                         remaining_needed -= 1
 
         # Step 4: Create TherapistBooking and BookingAssignment records
-        from final_allocation import create_therapist_booking_safe
+        from allocation_engine.core.primitives.booking_persistence import create_therapist_booking_safe
 
         patient_snap_id = patient_ids[0] if patient_ids else getattr(allocation.patient, 'id', None)
         therapy_name = allocation.therapy_name or ''

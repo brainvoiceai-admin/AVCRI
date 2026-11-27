@@ -4,67 +4,23 @@ from types import SimpleNamespace
 from django.db import transaction, IntegrityError
 from django.db.models import Q
 
-# -----------------------
-# Helper: date range
-# -----------------------
-def daterange(start_date, end_date):
-    d = start_date
-    while d <= end_date:
-        yield d
-        d += timedelta(days=1)
+# Layer 1A Core Primitives (re-exported for backward compatibility)
+from allocation_engine.core.primitives.date_utils import daterange
+from allocation_engine.core.primitives.patient_utils import (
+    is_patient_active,
+    parse_patient_age,
+    resolve_desired_gender,
+)
 
-# -----------------------
-# Helper: Check if patient is active (not discharged/inactive)
-# Reuse from final_allocation to avoid duplication
-# -----------------------
+# Dhara Pizhichil rules (scheduled for extraction to Layer 2 in CP-2)
 try:
     from final_allocation import (
-        is_patient_active,
-        parse_patient_age,
-        resolve_desired_gender,
         is_dhara_pizhichil_treatment,
         get_dhara_pizhichil_assigned_room,
     )
 except ImportError:
-    # Fallback: if import fails, fail-open (treat all patients as active)
-    def is_patient_active(pat_reg_no):
-        return True
-
-    def parse_patient_age(age_val):
-        if age_val is None:
-            return None
-        try:
-            if isinstance(age_val, (int, float)):
-                return float(age_val)
-            s = str(age_val).strip()
-            if not s or s.lower() in ('unknown', 'none', 'null', 'na', 'n/a', 'undefined'):
-                return None
-            import re
-            m = re.search(r'(\d+(?:\.\d+)?)', s)
-            if m:
-                return float(m.group(1))
-        except Exception:
-            pass
-        return None
-
-    def resolve_desired_gender(patient_gender=None, patient_age=None):
-        try:
-            age_num = parse_patient_age(patient_age)
-            if age_num is not None and age_num < 5.0:
-                return 'female'
-            if patient_gender:
-                g = str(patient_gender).strip().lower()
-                if g.startswith('f'):
-                    return 'female'
-                elif g.startswith('m'):
-                    return 'male'
-            return 'male'
-        except Exception:
-            return 'male'
-
     def is_dhara_pizhichil_treatment(therapy_name=None, therapy_code=None, therapy_obj=None):
-        name = str(therapy_name or '').lower()
-        return 'dhara' in name and 'piz' in name
+        return False
 
     def get_dhara_pizhichil_assigned_room(patient_id=None, patient=None, allocation=None):
         return None
@@ -144,278 +100,46 @@ def get_senior_tag_count_for_therapist(therapist, date):
     return count
 
 # -----------------------
-# Therapy master cache
+# Therapy master catalog, slot canonicalization & safe booking persistence (Layer 1A)
 # -----------------------
-therapy_cache = {}
-def get_therapy_details(therapy_name):
-    """
-    Robust therapy lookup that tolerates minor name formatting differences.
-    Tries by normalized name (lowercase, extra spaces collapsed) so that
-    variations like 'Full Body Navaradhara ( 5 T)' and 'Full Body Navaradhara (5 T)'
-    resolve to the same TherapyMaster row.
-    """
-    from masters.models import TherapyMaster
+from allocation_engine.core.primitives.therapy_catalog import (
+    therapy_cache,
+    clear_therapy_cache,
+    get_therapy_details,
+    therapy_needs_room,
+    therapy_needs_bath,
+    get_therapist_grade_name,
+    therapist_requirements as _core_therapist_requirements,
+)
+from allocation_engine.core.primitives.slot_utils import (
+    map_to_canonical_slot,
+    _slot_time_value,
+)
+from allocation_engine.core.primitives.booking_persistence import (
+    create_room_booking_safe as _core_create_room_booking_safe,
+    create_therapist_booking_safe as _core_create_therapist_booking_safe,
+)
 
-    raw = (therapy_name or "").strip()
-    if not raw:
-        return None
-
-    # Cache key based on normalized whitespace + lowercase
-    norm_key = " ".join(raw.lower().split())
-    if norm_key in therapy_cache:
-        return therapy_cache[norm_key]
-
-    details = None
-
-    # 1) Try exact iexact on original name first.
-    # Use filter().first() because the DB may contain duplicate therapy_name rows.
-    details = (
-        TherapyMaster.objects.filter(therapy_name__iexact=raw)
-        .order_by("id")
-        .first()
-    )
-
-    # 2) If not found, try normalized name match (whitespace-insensitive)
-    if details is None:
-        try:
-            candidates = TherapyMaster.objects.all()
-            best = None
-            for tm in candidates:
-                tname = getattr(tm, "therapy_name", "") or ""
-                t_norm = " ".join(tname.lower().split())
-                if t_norm == norm_key:
-                    best = tm
-                    break
-            details = best
-        except Exception:
-            details = None
-
-    therapy_cache[norm_key] = details
-    return details
-
-# -----------------------
-# Therapy attribute helpers
-# -----------------------
-def therapy_needs_room(allocation_or_booking):
-    th_name = getattr(allocation_or_booking, 'therapy_name', None) or getattr(allocation_or_booking, 'therapy', None)
-    details = get_therapy_details(th_name) if th_name else None
-    if not details:
-        return False
-    val = getattr(details, 'treatment_room_required', '')
-    return str(val).strip().lower() == 'yes'
-
-def therapy_needs_bath(allocation_or_booking):
-    if getattr(allocation_or_booking, 'bathing_therapists_count', 0) > 0:
-        return True
-    booking_alloc = getattr(allocation_or_booking, 'allocation', None)
-    if booking_alloc and getattr(booking_alloc, 'bathing_therapists_count', 0) > 0:
-        return True
-    th_name = getattr(allocation_or_booking, 'therapy_name', None) or getattr(allocation_or_booking, 'therapy', None)
-    details = get_therapy_details(th_name) if th_name else None
-    if not details:
-        return False
-    val = getattr(details, 'bathing_required', '')
-    return str(val).strip().lower() == 'yes'
-
-def get_therapist_grade_name(therapist):
-    """Helper function to get therapist grade name from TherapistGrade FK"""
-    if not therapist:
-        return ''
-    if hasattr(therapist, 'therapist_grade') and therapist.therapist_grade:
-        if hasattr(therapist.therapist_grade, 'name'):
-            return therapist.therapist_grade.name
-    return ''
 
 def therapist_requirements(allocation_or_therapy_obj):
-    name = getattr(allocation_or_therapy_obj, 'therapy_name', None)
-    details = get_therapy_details(name) if name else None
-    bathing_therapists_count = getattr(allocation_or_therapy_obj, 'bathing_therapists_count', 0) or 0
-    if not bathing_therapists_count:
-        booking_alloc = getattr(allocation_or_therapy_obj, 'allocation', None)
-        if booking_alloc:
-            bathing_therapists_count = getattr(booking_alloc, 'bathing_therapists_count', 0) or 0
-    if not details:
-        base_total = 0
-        req_total = max(base_total, bathing_therapists_count)
-        return {
-            "super_senior": 0, "senior": 0, "junior": 0, "trainee": 0, "total": req_total,
-            "normal_total": base_total,
-            "bathing_therapists_count": bathing_therapists_count,
-            "therapy_code": getattr(allocation_or_therapy_obj, 'therapy_code', None),
-            "therapy_category": None,
-            "therapy_name": name
-        }
-    base_total = int(getattr(details, 'total_no_of_therapist', 0) or 0)
-    req_total = max(base_total, bathing_therapists_count)
-    return {
-        "super_senior": int(getattr(details, 'no_of_super_senior_therapist', 0) or 0),
-        "senior": int(getattr(details, 'no_of_senior_therapist', 0) or 0),
-        "junior": int(getattr(details, 'no_of_junior_therapist', 0) or 0),
-        "trainee": int(getattr(details, 'no_of_trainee_therapist', 0) or 0),
-        "total": req_total,
-        "normal_total": base_total,
-        "bathing_therapists_count": bathing_therapists_count,
-        "therapy_code": getattr(details, 'therapy_code', getattr(allocation_or_therapy_obj, 'therapy_code', None)),
-        "therapy_category": getattr(details, 'therapy_category', None),
-        "therapy_name": getattr(details, 'therapy_name', name)
-    }
+    # Preserve reshedule.py behavior: missing TherapyMaster defaults to total=0
+    return _core_therapist_requirements(allocation_or_therapy_obj, default_total_if_missing=0)
 
-# -----------------------
-# Slot mapping helper
-# -----------------------
-def map_to_canonical_slot(slot_like):
-    if slot_like is None:
-        return None
-    try:
-        from Patient.models import TherapistBooking as TBModel
-        slot_field = TBModel._meta.get_field('time_slot')
-        canonical_model = slot_field.related_model
-        if isinstance(slot_like, canonical_model):
-            return slot_like
-        start = getattr(slot_like, 'start_time', None)
-        if start is None:
-            return None
-        return canonical_model.objects.filter(start_time=start).first()
-    except Exception:
-        return slot_like
 
-# -----------------------
-# Safe booking creation helpers (room + therapist)
-# -----------------------
 def create_room_booking_safe(room, date, time_slot, therapy_name, patient_id, visit):
-    """
-    Create RoomBooking safely.
-    visit parameter should be a Booking instance (for RoomBooking.visit FK)
-    """
-    from Patient.models import RoomBooking
-    try:
-        with transaction.atomic():
-            rb, created = RoomBooking.objects.get_or_create(
-                room=room,
-                date=date,
-                time_slot=time_slot,
-                status='BOOKED',
-                defaults={
-                    'therapy_name': therapy_name,
-                    'patient_id': patient_id,
-                    'visit': visit  # This should be a Booking instance
-                }
-            )
-            if not created and rb.visit is None and visit is not None:
-                rb.visit = visit
-                rb.save(update_fields=['visit'])
-            return rb, created
-    except IntegrityError:
-        rb = RoomBooking.objects.filter(room=room, date=date, time_slot=time_slot, status='BOOKED').first()
-        return rb, False
+    # Preserve reshedule.py behavior: atomic wrapper with update_fields
+    return _core_create_room_booking_safe(
+        room, date, time_slot, therapy_name, patient_id, visit,
+        use_atomic=True, refresh=False,
+    )
+
 
 def create_therapist_booking_safe(therapist, date, time_slot, therapy_name, patient_id, visit, is_bathing=False):
-    """
-    Create TherapistBooking safely and optionally set is_bathing if the model has that field.
-    Returns (therapist_booking_instance, created_bool)
-    """
-    from Patient.models import TherapistBooking
-    from django.db import transaction
-    
-    # CRITICAL: Final check - prevent creating booking if therapist already has 6 sessions
-    # This is an atomic database check to prevent race conditions
-    if therapist and date:
-        current_session_count = TherapistBooking.objects.filter(
-            therapist=therapist,
-            date=date,
-            status='BOOKED'
-        ).count()
-        if current_session_count >= 6:
-            print(f"[DEBUG create_therapist_booking_safe] BLOCKED: Therapist {getattr(therapist, 'therapist_code', 'UNKNOWN')} already has {current_session_count} sessions (max 6) - refusing to create booking")
-            # Return None and False to indicate booking was not created due to session limit
-            return None, False
-
-    # Treatment Omission check: strictly prevent booking if therapist has approved omission for this treatment
-    if therapist:
-        try:
-            from masters.models import is_therapist_omitted_for_treatment
-            treatment_to_check = therapy_name or getattr(visit, 'therapy_name', None) or getattr(visit, 'therapy_code', None)
-            if treatment_to_check and is_therapist_omitted_for_treatment(therapist, treatment_to_check):
-                print(f"[DEBUG create_therapist_booking_safe] BLOCKED: Therapist {getattr(therapist, 'therapist_code', 'UNKNOWN')} has approved omission for treatment '{treatment_to_check}' - refusing to create booking")
-                return None, False
-        except Exception as e:
-            print(f"[DEBUG create_therapist_booking_safe] Error in treatment omission check: {e}")
-
-    try:
-        is_ht = getattr(therapist, 'is_helping_therapist', False)
-        with transaction.atomic():
-            tb_defaults = {
-                'therapy_name': therapy_name,
-                'patient_id': patient_id,
-                'visit': visit
-            }
-            if hasattr(TherapistBooking, 'is_helping_therapist_assignment'):
-                tb_defaults['is_helping_therapist_assignment'] = is_ht
-
-            tb, created = TherapistBooking.objects.get_or_create(
-                therapist=therapist,
-                date=date,
-                time_slot=time_slot,
-                status='BOOKED',
-                defaults=tb_defaults
-            )
-            if not created:
-                updates = []
-                if tb.visit is None and visit is not None:
-                    tb.visit = visit
-                    updates.append('visit')
-                if hasattr(tb, 'is_helping_therapist_assignment') and tb.is_helping_therapist_assignment != is_ht:
-                    tb.is_helping_therapist_assignment = is_ht
-                    updates.append('is_helping_therapist_assignment')
-                if updates:
-                    tb.save(update_fields=updates)
-            # persist is_bathing if model supports it and we either created or it's not set
-            try:
-                if is_bathing and hasattr(tb, 'is_bathing'):
-                    # CRITICAL: Before setting this therapist as bathing, ensure NO OTHER therapist
-                    # for the SAME visit, SAME date and SAME time_slot is marked as bathing (unless bathing_therapists_count > 1).
-                    b_count = getattr(visit, 'bathing_therapists_count', 0) if visit else 0
-                    if b_count <= 1 and visit and time_slot:
-                        TherapistBooking.objects.filter(
-                            visit=visit,
-                            date=date,
-                            time_slot=time_slot,
-                            status='BOOKED'
-                        ).exclude(
-                            pk=tb.pk  # Exclude current record
-                        ).update(is_bathing=False)
-                        print(f"[DEBUG create_therapist_booking_safe] Cleared is_bathing for other therapists in visit {visit.pk} on {date} at {time_slot}")
-                    
-                    if getattr(tb, 'is_bathing', False) != bool(is_bathing):
-                        tb.is_bathing = bool(is_bathing)
-                        tb.save(update_fields=['is_bathing'])
-            except Exception:
-                pass
-            return tb, created
-    except IntegrityError:
-        tb = TherapistBooking.objects.filter(therapist=therapist, date=date, time_slot=time_slot, status='BOOKED').first()
-        # attempt to mark is_bathing if possible (best-effort, non-fatal)
-        try:
-            if tb and is_bathing and hasattr(tb, 'is_bathing'):
-                # CRITICAL: Before setting this therapist as bathing, ensure NO OTHER therapist
-                # for the SAME visit, SAME date and SAME time_slot is marked as bathing.
-                if tb.visit and tb.time_slot:
-                    TherapistBooking.objects.filter(
-                        visit=tb.visit,
-                        date=tb.date,
-                        time_slot=tb.time_slot,
-                        status='BOOKED'
-                    ).exclude(
-                        pk=tb.pk  # Exclude current record
-                    ).update(is_bathing=False)
-                    print(f"[DEBUG create_therapist_booking_safe] Cleared is_bathing for other therapists in visit {tb.visit.pk} on {tb.date} at {tb.time_slot}")
-                
-                if not tb.is_bathing:
-                    tb.is_bathing = True
-                    tb.save(update_fields=['is_bathing'])
-        except Exception:
-            pass
-        return tb, False
+    # Preserve reshedule.py behavior: atomic wrapper, no TherapyMaster FK lookup, update_fields
+    return _core_create_therapist_booking_safe(
+        therapist, date, time_slot, therapy_name, patient_id, visit,
+        is_bathing=is_bathing, use_atomic=True, resolve_therapy_fk=False, refresh=False,
+    )
 
 # -----------------------
 # Room allocation helper - determines treatment rooms based on patient staying room
@@ -832,10 +556,8 @@ def allocate_treatment_room(date, time_slot, last_room=None, therapy_name=None, 
 
 # -----------------------
 # Slot helpers: return allowed slots (list) for patient type
+# (_slot_time_value imported from allocation_engine.core.primitives.slot_utils)
 # -----------------------
-def _slot_time_value(slot_obj):
-    """Return time (time object) for a slot model. SlotMaster uses slot_time; legacy may use start_time."""
-    return getattr(slot_obj, 'slot_time', None) or getattr(slot_obj, 'start_time', None)
 
 
 # Mathra Vasthi (THEB037) is exempt from the Vasthi therapy-group 08:30-only rule.
