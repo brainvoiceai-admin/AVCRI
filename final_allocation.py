@@ -1893,6 +1893,32 @@ def assign_continuity_therapists_pass1(booking, allocation, target_date, locked_
     if not slot_master:
         return result
 
+    # SAME-SLOT GUARD: Do not lock continuity therapists if the patient already has a booking/lock
+    # for another allocation at this exact (date, slot) — prevents mutual deadlock where two
+    # same-slot treatments for the same patient both lock in PASS 1 and both fail in PASS 2.
+    if patient_id:
+        from Patient.models import RoomBooking
+        from django.db.models import Q
+        has_existing_slot_booking = (
+            TherapistBooking.objects.filter(
+                patient_id=patient_id,
+                date=target_date,
+                time_slot=slot_master,
+                status='BOOKED',
+            ).exclude(visit_id=allocation.id).exclude(visit__status='cancelled').exists()
+            or RoomBooking.objects.filter(
+                patient_id=patient_id,
+                date=target_date,
+                time_slot=slot_master,
+                status__in=['BOOKED', 'scheduled'],
+            ).exclude(visit=booking).exclude(therapy_id=allocation.id).exclude(
+                Q(therapy__status='cancelled') | Q(visit__status='cancelled') | Q(visit__allocation__status='cancelled')
+            ).exists()
+        )
+        if has_existing_slot_booking:
+            print(f"[CONTINUITY PASS1] Skipping booking {booking.pk} - patient {patient_id} already has a booking/lock at slot {slot_master} on {target_date}")
+            return result
+
     # HARD TREATMENT RESTRICTION: Do not lock continuity therapists if patient already has a hard treatment in this session
     from reshedule import is_hard_treatment, get_slot_session, patient_has_hard_treatment_in_session
     if is_hard_treatment(allocation, therapy_name=therapy_name, therapy_code=therapy_code):
@@ -2836,6 +2862,14 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
         if patient_already_booked:
             reason = "patient_already_has_booking"
             print(f"[CONTINUITY PASS2] Booking {booking_id}: SKIPPING due to patient_already_has_booking (continuity_assigned={continuity_assigned is not None})")
+            # Release any PASS 1 TherapistBooking locks for this failed booking so they never leak or block other bookings
+            if create_bookings:
+                try:
+                    TherapistBooking.objects.filter(
+                        visit=allocation, date=target_date, time_slot=query_slot, status='BOOKED'
+                    ).delete()
+                except Exception as _cl_e:
+                    print(f"[CONTINUITY PASS2] Error cleaning up PASS 1 locks for booking {booking_id}: {_cl_e}")
             # Update booking status to failed
             try:
                 booking.status = 'failed'
@@ -5735,6 +5769,16 @@ def bulk_allocate_for_date(target_date_str):
         
         print(f"[CONTINUITY PASS1] ===== PATIENT: {patient_name} (id={patient_id}) - Processing {len(patient_bookings)} bookings =====")
         
+        # Sort this patient's bookings to match PASS 2 allocation priority so the primary
+        # booking claims the slot in PASS 1 and any duplicate same-slot booking does not
+        # create competing PASS 1 TherapistBooking locks.
+        patient_bookings.sort(
+            key=lambda bk: allocation_id_to_priority.get(
+                bk.allocation_id, (2, 1, 1, 1, 3, 0)
+            ) + (getattr(bk.allocation, 'from_date', target_date), bk.allocation_id or 0)
+        )
+        claimed_slots_for_patient = set()
+
         # Process all bookings for this patient
         for booking in patient_bookings:
             allocation = booking.allocation
@@ -5754,6 +5798,17 @@ def bulk_allocate_for_date(target_date_str):
                 booking_continuity_map[booking.pk] = None  # Mark as no continuity needed
                 print(f"[CONTINUITY PASS1] Skipping booking {booking.pk} - zero therapists required (total=0)")
                 continue
+
+            # If another booking for the same patient already claimed this exact slot in PASS 1,
+            # skip locking continuity therapists for this duplicate same-slot booking so PASS 2
+            # allocates the first booking cleanly and fails only the duplicate with patient_already_has_booking.
+            bk_slot_id = getattr(booking, 'timeslot_id', None) or getattr(allocation, 'timeslot_id', None)
+            if bk_slot_id:
+                if bk_slot_id in claimed_slots_for_patient:
+                    booking_continuity_map[booking.pk] = None
+                    print(f"[CONTINUITY PASS1] Skipping booking {booking.pk} - patient {patient_id} already has an earlier booking at slot_id={bk_slot_id} in PASS 1")
+                    continue
+                claimed_slots_for_patient.add(bk_slot_id)
             
             # Assign continuity therapists for this booking (partial assignment is OK)
             # This will lock therapists but NOT complete the booking
