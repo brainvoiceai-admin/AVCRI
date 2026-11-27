@@ -154,6 +154,7 @@ urlpatterns = [
     path('therapists/treatment-omissions/batch/<str:batch_id>/approve/', views.approve_therapist_treatment_omission_batch_api, name='therapist_treatment_omission_batch_approve'),
     path('therapists/treatment-omissions/batch/<str:batch_id>/reject/', views.reject_therapist_treatment_omission_batch_api, name='therapist_treatment_omission_batch_reject'),
     path('therapists/treatment-omissions/batch/<str:batch_id>/delete/', views.delete_therapist_treatment_omission_batch_api, name='therapist_treatment_omission_batch_delete'),
+    path('therapists/<int:pk>/treatment-omissions/revoke-all/', views.revoke_all_therapist_treatment_omissions_api, name='therapist_treatment_omissions_revoke_all'),
     # Therapist Grade CRUD
     path('therapist-grades/', views.TherapistGradeManagementView.as_view(), name='therapistgrade_manage'),
     path('therapist-grades/add/', views.TherapistGradeCreateView.as_view(), name='therapistgrade_add'),

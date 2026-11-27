@@ -474,6 +474,11 @@
                                                             onclick="openBatchDecisionModal('{{ r.action_identifier }}', 'reject', '{{ r.therapist.therapist_name|escapejs }}', '{{ r.total_count }}')">
                                                         <i class="fas fa-times me-1"></i>Reject Request
                                                     </button>
+                                                    <button type="button" class="btn btn-sm btn-outline-danger py-1"
+                                                            onclick="openBatchDecisionModal('{{ r.action_identifier }}', 'delete', '{{ r.therapist.therapist_name|escapejs }}', '{{ r.total_count }}')"
+                                                            title="Cancel and remove this request">
+                                                        <i class="fas fa-trash-alt me-1"></i>Cancel Request
+                                                    </button>
                                                 </div>
                                             </td>
                                         </tr>
@@ -1082,6 +1087,7 @@
 
         const batchApproveTemplate = "{% url 'therapist_treatment_omission_batch_approve' 'BATCH_ID_PLACEHOLDER' %}";
         const batchRejectTemplate = "{% url 'therapist_treatment_omission_batch_reject' 'BATCH_ID_PLACEHOLDER' %}";
+        const batchDeleteTemplate = "{% url 'therapist_treatment_omission_batch_delete' 'BATCH_ID_PLACEHOLDER' %}";
 
         if (action === 'approve') {
             form.action = batchApproveTemplate.replace('BATCH_ID_PLACEHOLDER', encodeURIComponent(batchId));
@@ -1099,6 +1105,25 @@
             `;
             submitBtn.className = 'btn btn-success rounded-pill px-4 fw-semibold shadow-sm';
             submitBtn.innerHTML = `<i class="fas fa-check me-1"></i>Approve Request (${count} Treatments)`;
+        } else if (action === 'delete') {
+            let actionUrl = batchDeleteTemplate.replace('BATCH_ID_PLACEHOLDER', encodeURIComponent(batchId));
+            if (actionUrl.indexOf('?') === -1) {
+                actionUrl += '?next=' + encodeURIComponent(window.location.pathname);
+            }
+            form.action = actionUrl;
+            title.textContent = 'Cancel Treatment Omission Request';
+            title.className = 'modal-title text-danger fw-bold';
+            desc.innerHTML = `
+                <div class="alert alert-danger bg-opacity-10 border-danger mb-3 p-3 rounded-3">
+                    <div class="fw-bold fs-6 mb-1 text-danger"><i class="fas fa-trash-alt me-1"></i>Confirm Cancellation</div>
+                    Are you sure you want to <strong>CANCEL / DELETE</strong> this omission request of all <strong>${count} treatment(s)</strong> for therapist <strong>"${therapistName}"</strong>?
+                </div>
+                <div class="text-muted small">
+                    This request will be permanently removed. The therapist will remain eligible for scheduling all treatments.
+                </div>
+            `;
+            submitBtn.className = 'btn btn-danger rounded-pill px-4 fw-semibold shadow-sm';
+            submitBtn.innerHTML = `<i class="fas fa-trash-alt me-1"></i>Cancel Request (${count} Treatments)`;
         } else {
             form.action = batchRejectTemplate.replace('BATCH_ID_PLACEHOLDER', encodeURIComponent(batchId));
             title.textContent = 'Reject Treatment Omission Request';

@@ -673,3 +673,61 @@ class TestTherapistTreatmentOmission(TestCase):
         self.assertEqual(picked.therapist_code, self.therapist_2.therapist_code)
         self.assertEqual(role, 'secondary')
 
+    def test_revoke_all_therapist_treatment_omissions(self):
+        """revoke_all_therapist_treatment_omissions_api revokes all active approved omissions for a therapist"""
+        from masters.views import revoke_all_therapist_treatment_omissions_api
+        TherapistTreatmentOmission.objects.create(
+            therapist=self.therapist_1,
+            treatment=self.therapy_a,
+            status='approved',
+            is_active=True
+        )
+        TherapistTreatmentOmission.objects.create(
+            therapist=self.therapist_1,
+            treatment=self.therapy_b,
+            status='approved',
+            is_active=True
+        )
+        self.assertEqual(TherapistTreatmentOmission.objects.filter(therapist=self.therapist_1, status='approved').count(), 2)
+        self.assertTrue(is_therapist_omitted_for_treatment(self.therapist_1, self.therapy_a))
+        self.assertTrue(is_therapist_omitted_for_treatment(self.therapist_1, self.therapy_b))
+
+        req = self.factory.post(f'/masters/therapists/{self.therapist_1.pk}/treatment-omissions/revoke-all/')
+        req.user = self.admin_user
+        resp = revoke_all_therapist_treatment_omissions_api(req, self.therapist_1.pk)
+        self.assertEqual(resp.status_code, 302)
+
+        self.assertEqual(TherapistTreatmentOmission.objects.filter(therapist=self.therapist_1, status='approved').count(), 0)
+        self.assertFalse(is_therapist_omitted_for_treatment(self.therapist_1, self.therapy_a))
+        self.assertFalse(is_therapist_omitted_for_treatment(self.therapist_1, self.therapy_b))
+
+    def test_batch_delete_cancellation_with_pk_fallback(self):
+        """Cancelling using an omission pk resolves its batch and deletes all omissions in that batch"""
+        batch_id = "TOR-TEST-PK-CANCEL-001"
+        om1 = TherapistTreatmentOmission.objects.create(
+            therapist=self.therapist_1,
+            treatment=self.therapy_a,
+            status='pending',
+            batch_id=batch_id
+        )
+        om2 = TherapistTreatmentOmission.objects.create(
+            therapist=self.therapist_1,
+            treatment=self.therapy_b,
+            status='pending',
+            batch_id=batch_id
+        )
+        self.assertEqual(TherapistTreatmentOmission.objects.filter(batch_id=batch_id).count(), 2)
+
+        # Call batch delete using om1.pk string (simulating action_identifier fallback)
+        req_del = self.factory.post(
+            f'/masters/therapists/treatment-omissions/batch/{om1.pk}/delete/',
+            content_type='application/json'
+        )
+        req_del.user = self.admin_user
+        resp_del = delete_therapist_treatment_omission_batch_api(req_del, str(om1.pk))
+        self.assertEqual(resp_del.status_code, 200)
+
+        # Both omissions in the batch must be deleted
+        self.assertEqual(TherapistTreatmentOmission.objects.filter(batch_id=batch_id).count(), 0)
+
+
