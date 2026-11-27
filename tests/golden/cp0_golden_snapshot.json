@@ -1,0 +1,81 @@
+{
+  "reschedule_commit": {
+    "booking_room_assigned": true,
+    "booking_slot": "08:30",
+    "booking_status": "scheduled",
+    "task_statuses": [
+      "BOOKED"
+    ]
+  },
+  "reschedule_preview": {
+    "available_slot_times": [
+      "11:30 AM",
+      "2:30 PM",
+      "8:30 AM"
+    ],
+    "booking_status_after_preview": "failed",
+    "http_status": 200
+  },
+  "schedule_rows": [
+    {
+      "failure_reason": "",
+      "has_bathing": false,
+      "pat_reg_no": "50001",
+      "room": "TR-1",
+      "slot": "11:30",
+      "status": "scheduled",
+      "therapist_count": 1,
+      "therapy_code": "GM_EASY"
+    },
+    {
+      "failure_reason": "",
+      "has_bathing": false,
+      "pat_reg_no": "700001",
+      "room": "TR-2",
+      "slot": "08:30",
+      "status": "scheduled",
+      "therapist_count": 1,
+      "therapy_code": "GM_EASY"
+    },
+    {
+      "failure_reason": "",
+      "has_bathing": true,
+      "pat_reg_no": "700002",
+      "room": "TR-1",
+      "slot": "08:30",
+      "status": "scheduled",
+      "therapist_count": 1,
+      "therapy_code": "GM_DP"
+    },
+    {
+      "failure_reason": "",
+      "has_bathing": false,
+      "pat_reg_no": "700003",
+      "room": "TR-12",
+      "slot": "10:00",
+      "status": "scheduled",
+      "therapist_count": 1,
+      "therapy_code": "GM_STEAM"
+    },
+    {
+      "failure_reason": "",
+      "has_bathing": false,
+      "pat_reg_no": "700004",
+      "room": "TR-1",
+      "slot": "10:00",
+      "status": "scheduled",
+      "therapist_count": 1,
+      "therapy_code": "GM_EASY"
+    },
+    {
+      "failure_reason": "patient_already_has_booking",
+      "has_bathing": false,
+      "pat_reg_no": "700004",
+      "room": null,
+      "slot": "10:00",
+      "status": "failed",
+      "therapist_count": 0,
+      "therapy_code": "GM_EASY"
+    }
+  ]
+}
