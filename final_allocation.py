@@ -15,79 +15,28 @@ from allocation_engine.core.primitives.patient_utils import (
 
 
 # -----------------------
-# Helper: Check if treatment requires senior tag
+# Layer 2 Therapy-Specific Rules & Layer 1A Room Mapping (re-exported for backward compatibility)
 # -----------------------
-def is_treatment_requiring_senior_tag(therapy_name):
-    """
-    Check if a treatment requires special senior tag handling.
-    Returns True ONLY if the therapy name exactly matches one of the specified treatments.
-    """
-    if not therapy_name:
-        return False
-    
-    # List of treatments that require senior tag (only one senior, not bathing)
-    # ONLY these exact treatments should show the senior tag
-    special_treatments = [
-        'dhara & abh(3)',
-        'dhara& pizhichil (4)',
-        'dhara & pizhichil (5)',
-        'dhara & pizhichil (6)',
-        'dhara & pizhichil (7)',
-        'dhara & abyangam ( 3 t)',
-        'dhara & sudhikalpana dhara (5t)',
-        'dhara ( 2 t)',
-        'thakradhara & abhyangam (4)',
-        'thakradhara & pizichil(6)',
-        'thakradhara ( 2 t)',
-        'thakradhara&fbkadee kizhi (5 t)',
-        'thakradhara& thakrapizhichil(7)',
-    ]
-    
-    # Normalize therapy name: lowercase, remove extra spaces, keep structure
-    therapy_normalized = ' '.join(str(therapy_name).lower().strip().split())
-    
-    # Check for exact match (case-insensitive, ignoring extra spaces)
-    for special_treatment in special_treatments:
-        special_normalized = ' '.join(special_treatment.lower().strip().split())
-        if therapy_normalized == special_normalized:
-            return True
-    
-    return False
-
-# -----------------------
-# Senior tag usage helper (max N per therapist per day)
-# -----------------------
-def get_senior_tag_count_for_therapist(therapist, date):
-    """
-    Count how many special senior-tag treatments a therapist is already assigned to
-    on a given date (based on TherapistBooking records).
-    A \"senior-tag\" assignment is defined as:
-      - TherapistBooking.therapist == therapist
-      - same date
-      - status == 'BOOKED'
-      - is_bathing == False (only non-bathing senior gets the tag)
-      - treatment name is in the special senior list (via is_treatment_requiring_senior_tag)
-    """
-    from Patient.models import TherapistBooking
-
-    try:
-        qs = (TherapistBooking.objects
-              .filter(therapist=therapist, date=date, status='BOOKED')
-              .select_related('therapy', 'visit'))
-    except Exception:
-        return 0
-
-    count = 0
-    for tb in qs:
-        # Only non-bathing sessions can have the senior tag
-        if getattr(tb, 'is_bathing', False):
-            continue
-        name = getattr(tb.therapy, 'therapy_name', None) or getattr(tb, 'therapy_name', None)
-        if not name and getattr(tb, 'visit', None) is not None:
-            name = getattr(tb.visit, 'therapy_name', None)
-        if is_treatment_requiring_senior_tag(name):
-            count += 1
-    return count
+from allocation_engine.core.primitives.room_utils import get_treatment_rooms_for_staying_room
+from allocation_engine.rules import (
+    is_treatment_requiring_senior_tag,
+    get_senior_tag_count_for_therapist,
+    is_dhara_pizhichil_treatment,
+    get_dhara_pizhichil_assigned_room,
+    is_steam_therapy_treatment,
+    get_steam_therapy_rooms,
+    is_vamanam_treatment,
+    get_vamanam_slots,
+    get_vamanam_treatment_rooms,
+    allocate_vamanam_treatment_room,
+    is_vasthi_treatment,
+    get_vasthi_slots,
+    allocate_vasthi_treatment_room,
+    get_wheelchair_accessible_rooms,
+    is_hard_treatment,
+    get_slot_session,
+    patient_has_hard_treatment_in_session,
+)
 
 # -----------------------
 # Therapy master catalog, slot canonicalization & safe booking persistence (Layer 1A)
@@ -128,155 +77,8 @@ def create_therapist_booking_safe(therapist, date, time_slot, therapy_name, pati
         is_bathing=is_bathing, use_atomic=False, resolve_therapy_fk=True, refresh=True,
     )
 
-# -----------------------
-# Room allocation helper - determines treatment rooms based on patient staying room
-# -----------------------
-def get_treatment_rooms_for_staying_room(patient_staying_room):
-    """
-    Returns list of treatment room numbers to check based on patient staying room.
-    Returns empty list if no match found.
-    
-    Updated Rules:
-    - DS-1 to DS-6: TR-1/TR-2 → TR-3/TR-4 → TR-7/TR-8
-    - NR-7 to NR-14: TR-3/TR-4 → TR-7/TR-8 → TR-11/TR-12
-    - NR-15 to NR-21: TR-5/TR-6 → TR-7/TR-8 → TR-11/TR-12 → TR-9/TR-14
-    - NR-22 to NR-27: TR-7/TR-8 → TR-5/TR-6 → TR-11/TR-12 → TR-9/TR-14
-    - NR-28 to NR-33: TR-15/TR-16
-    - MG-1 to MG-10, CB-1/CB-2, FG-1 to FG-12: TR-9 to TR-14 → TR-7/TR-8
-    - CT-1, CT-2, etc.: TRC-1, TRC-2, etc. (same number)
-    """
-    if not patient_staying_room:
-        return []
-    
-    staying_room = str(patient_staying_room).strip().upper()
-    
-    # Extract prefix and number
-    import re
-    match = re.match(r'([A-Z]+)-?(\d+)', staying_room)
-    if not match:
-        return []
-    
-    prefix = match.group(1)
-    try:
-        room_num = int(match.group(2))
-    except ValueError:
-        return []
-    
-    # DS-1 to DS-6: TR-1/TR-2 → TR-3/TR-4 → TR-7/TR-8
-    if prefix == 'DS' and 1 <= room_num <= 6:
-        return ['TR-1', 'TR-2', 'TR-3', 'TR-4', 'TR-7', 'TR-8']
-    
-    # NR-7 to NR-14: TR-3/TR-4 → TR-7/TR-8 → TR-11/TR-12
-    if prefix == 'NR' and 7 <= room_num <= 14:
-        return ['TR-3', 'TR-4', 'TR-7', 'TR-8', 'TR-11', 'TR-12']
-    
-    # NR-15 to NR-21: TR-5/TR-6 → TR-7/TR-8 → TR-11/TR-12 → TR-9/TR-14
-    if prefix == 'NR' and 15 <= room_num <= 21:
-        return ['TR-5', 'TR-6', 'TR-7', 'TR-8', 'TR-11', 'TR-12', 'TR-9', 'TR-10', 'TR-13', 'TR-14']
-    
-    # NR-22 to NR-27: TR-7/TR-8 → TR-5/TR-6 → TR-11/TR-12 → TR-9/TR-14
-    if prefix == 'NR' and 22 <= room_num <= 27:
-        return ['TR-7', 'TR-8', 'TR-5', 'TR-6', 'TR-11', 'TR-12', 'TR-9', 'TR-10', 'TR-13', 'TR-14']
-    
-    # NR-28 to NR-33: TR-15/TR-16
-    if prefix == 'NR' and 28 <= room_num <= 33:
-        return ['TR-15', 'TR-16']
-    
-    # MG-1 to MG-10, CB-1/CB-2, FG-1 to FG-12: TR-9 to TR-14 → TR-7/TR-8
-    if prefix == 'MG' and 1 <= room_num <= 10:
-        return ['TR-9', 'TR-10', 'TR-11', 'TR-12', 'TR-13', 'TR-14', 'TR-7', 'TR-8']
-    if prefix == 'CB' and room_num in [1, 2]:
-        return ['TR-9', 'TR-10', 'TR-11', 'TR-12', 'TR-13', 'TR-14', 'TR-7', 'TR-8']
-    if prefix == 'FG' and 1 <= room_num <= 12:
-        return ['TR-9', 'TR-10', 'TR-11', 'TR-12', 'TR-13', 'TR-14', 'TR-7', 'TR-8']
-    
-    # CT-1, CT-2, etc.: TRC-1, TRC-2, etc. (same number)
-    if prefix == 'CT':
-        return [f'TRC-{room_num}']
-    
-    # OP-* prefix: Return empty list (OP patients are handled separately in allocate_treatment_room)
-    if prefix == 'OP':
-        return []
-    
-    # No match found
-    return []
-
-
-def is_dhara_pizhichil_treatment(therapy_name=None, therapy_code=None):
-    """
-    Check if a therapy is marked as Dhara & Pizhichil in TherapyMaster (is_dhara_pizhichil=True).
-    Strictly relies on the TherapyMaster flag (no hardcoded name-string fallback).
-    """
-    try:
-        from masters.models import TherapyMaster
-        tm = None
-        if therapy_code:
-            tm = TherapyMaster.objects.filter(therapy_code=str(therapy_code).strip()).first()
-        if not tm and therapy_name:
-            tm = TherapyMaster.objects.filter(therapy_name__iexact=str(therapy_name).strip()).first()
-        if not tm and therapy_name:
-            tm = get_therapy_details(therapy_name)
-        if tm:
-            return bool(getattr(tm, 'is_dhara_pizhichil', False))
-    except Exception:
-        pass
-    return False
-
-
-def get_dhara_pizhichil_assigned_room(patient_id=None, patient=None, allocation=None):
-    """
-    Find the room originally assigned to a Dhara Pizhichil patient at the
-    beginning of treatment, ensuring strict room continuity until discharge.
-    """
-    from Patient.models import RoomBooking, TreatmentRoom
-    from Sheduling.models import TherapyAllocation, Booking
-
-    pid = patient_id or (getattr(patient, 'id', None) if patient else None)
-    pat_reg_no = getattr(patient, 'pat_reg_no', None) if patient else None
-
-    # 1. If allocation directly has an assigned active room
-    if allocation and getattr(allocation, 'room', None) and getattr(allocation.room, 'is_active', False):
-        return allocation.room
-
-    # 2. Check TherapyAllocation room for Dhara Pizhichil for this patient
-    if pid:
-        alloc_qs = TherapyAllocation.objects.filter(
-            patient_id=pid,
-            room__isnull=False,
-            room__is_active=True
-        ).order_by('from_date', 'id').select_related('room')
-        for a in alloc_qs:
-            if is_dhara_pizhichil_treatment(therapy_name=a.therapy_name, therapy_code=a.therapy_code):
-                return a.room
-
-    # 3. Check earliest RoomBooking for this patient (including CANCELED, so room is remembered across cancellations)
-    rb_qs = RoomBooking.objects.filter(room__isnull=False, room__is_active=True)
-    if pid:
-        rb_qs = rb_qs.filter(patient_id=pid)
-    elif pat_reg_no:
-        rb_qs = rb_qs.filter(patient_id=pat_reg_no)
-    else:
-        rb_qs = None
-
-    if rb_qs is not None:
-        for rb in rb_qs.order_by('date', 'id').select_related('room'):
-            if is_dhara_pizhichil_treatment(therapy_name=rb.therapy_name):
-                return rb.room
-
-    # 4. Check earliest Booking record for this patient
-    if pid:
-        bk_qs = Booking.objects.filter(
-            allocation__patient_id=pid,
-            room__isnull=False,
-            room__is_active=True
-        ).order_by('date', 'id').select_related('room', 'allocation')
-        for bk in bk_qs:
-            th_name = bk.snapshot_therapy_name or (bk.allocation.therapy_name if bk.allocation else None)
-            th_code = bk.allocation.therapy_code if bk.allocation else None
-            if is_dhara_pizhichil_treatment(therapy_name=th_name, therapy_code=th_code):
-                return bk.room
-
-    return None
+# (get_treatment_rooms_for_staying_room, is_dhara_pizhichil_treatment,
+#  get_dhara_pizhichil_assigned_room imported from allocation_engine above)
 
 
 def get_patient_category_priority(patient, allocation=None, bookings=None):
@@ -353,7 +155,7 @@ def allocate_treatment_room(date, time_slot, last_room=None, therapy_name=None, 
     
     # STEAM THERAPY RESTRICTION: Always allocate strictly to designated steam therapy rooms (dynamic from Room Master)
     try:
-        from reshedule import is_steam_therapy_treatment, get_steam_therapy_rooms
+        from allocation_engine.rules.steam import is_steam_therapy_treatment, get_steam_therapy_rooms
         if is_steam_therapy_treatment(therapy_name):
             steam_rooms = get_steam_therapy_rooms()
             for candidate_room_no in steam_rooms:
@@ -368,7 +170,7 @@ def allocate_treatment_room(date, time_slot, last_room=None, therapy_name=None, 
 
     # VAMANAM THERAPY RESTRICTION: Dedicated Vamanam room allocation (Primary first: TR-11/TR-12, then Secondary: TR-9)
     try:
-        from reshedule import is_vamanam_treatment, allocate_vamanam_treatment_room
+        from allocation_engine.rules.vamanam import is_vamanam_treatment, allocate_vamanam_treatment_room
         if is_vamanam_treatment(therapy_name):
             v_room = allocate_vamanam_treatment_room(date, time_slot, check_room_availability)
             if v_room:
@@ -381,7 +183,7 @@ def allocate_treatment_room(date, time_slot, last_room=None, therapy_name=None, 
     # - Cottage patients preferably assigned matching TRC room
     # - If multiple patients in same cottage room, only one gets TRC room, others get other suitable treatment rooms
     try:
-        from reshedule import is_vasthi_treatment, allocate_vasthi_treatment_room
+        from allocation_engine.rules.vasthi import is_vasthi_treatment, allocate_vasthi_treatment_room
         if is_vasthi_treatment(therapy_name, getattr(patient, 'therapy_code', None) if patient else None):
             vasthi_room = allocate_vasthi_treatment_room(
                 date, time_slot, last_room=last_room, therapy_name=therapy_name,
@@ -427,7 +229,7 @@ def allocate_treatment_room(date, time_slot, last_room=None, therapy_name=None, 
             # If wheelchair patient and staying room rooms didn't yield an accessible room,
             # fallback to any available wheelchair accessible rooms in facility
             if is_wheelchair:
-                from reshedule import get_wheelchair_accessible_rooms
+                from allocation_engine.rules.wheelchair import get_wheelchair_accessible_rooms
                 for wc_room_no in get_wheelchair_accessible_rooms():
                     room = check_room_availability(wc_room_no)
                     if room:
@@ -499,7 +301,7 @@ def allocate_treatment_room(date, time_slot, last_room=None, therapy_name=None, 
         
         # If wheelchair patient, try all wheelchair accessible rooms (excluding TRC)
         if is_wheelchair:
-            from reshedule import get_wheelchair_accessible_rooms
+            from allocation_engine.rules.wheelchair import get_wheelchair_accessible_rooms
             for wc_room_no in get_wheelchair_accessible_rooms():
                 if wc_room_no.upper().startswith('TRC'):
                     continue
@@ -1471,7 +1273,7 @@ def assign_continuity_therapists_pass1(booking, allocation, target_date, locked_
             return result
 
     # HARD TREATMENT RESTRICTION: Do not lock continuity therapists if patient already has a hard treatment in this session
-    from reshedule import is_hard_treatment, get_slot_session, patient_has_hard_treatment_in_session
+    from allocation_engine.rules.hard_treatment import is_hard_treatment, get_slot_session, patient_has_hard_treatment_in_session
     if is_hard_treatment(allocation, therapy_name=therapy_name, therapy_code=therapy_code):
         slot_session = get_slot_session(slot_master)
         if slot_session and patient_id and patient_has_hard_treatment_in_session(
@@ -2277,7 +2079,7 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
         pref_slot = getattr(booking, 'timeslot', None) or getattr(allocation, 'timeslot', None)
         # Vasthi therapy (marked via TherapyMaster.is_vasthi or Vasthi group, except Mathra THEB037): schedule in dynamic Vasthi slot (defaults to 08:30)
         try:
-            from reshedule import is_vasthi_treatment, get_vasthi_slots
+            from allocation_engine.rules.vasthi import is_vasthi_treatment, get_vasthi_slots
             if is_vasthi_treatment(therapy_name, getattr(allocation, 'therapy_code', None)):
                 # If pref_slot is already designated as an active Vasthi slot, keep it
                 is_current_slot_vasthi = bool(pref_slot and getattr(pref_slot, 'is_vasthi_slot', False) and getattr(pref_slot, 'is_active', True))
@@ -2300,7 +2102,7 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
 
         # Vamanam therapy: schedule in dynamic Vamanam slot (defaults to 06:30)
         try:
-            from reshedule import is_vamanam_treatment, get_vamanam_slots
+            from allocation_engine.rules.vamanam import is_vamanam_treatment, get_vamanam_slots
             if is_vamanam_treatment(therapy_name, getattr(allocation, 'therapy_code', None)):
                 is_current_slot_vamanam = bool(pref_slot and getattr(pref_slot, 'is_vamanam_slot', False) and getattr(pref_slot, 'is_active', True))
                 if not is_current_slot_vamanam:
@@ -2447,7 +2249,7 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
 
         # HARD TREATMENT RESTRICTION: Two hard treatments should not be scheduled in the same session
         # Exception: Medium and Easy treatments (e.g. Lepam) can be assigned in the same session
-        from reshedule import is_hard_treatment, get_slot_session, patient_has_hard_treatment_in_session
+        from allocation_engine.rules.hard_treatment import is_hard_treatment, get_slot_session, patient_has_hard_treatment_in_session
         is_hard = is_hard_treatment(allocation, therapy_name=therapy_name, therapy_code=getattr(allocation, 'therapy_code', None))
         if is_hard:
             slot_session = get_slot_session(query_slot or canonical_slot)
@@ -3672,7 +3474,7 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
         if needs_room_flag and not room_candidate:
             # Build detailed error message based on patient staying room or OP status
             reason = "no_room_available"
-            from reshedule import is_steam_therapy_treatment, get_steam_therapy_rooms, is_vamanam_treatment, get_vamanam_treatment_rooms
+            from allocation_engine.rules import is_steam_therapy_treatment, get_steam_therapy_rooms, is_vamanam_treatment, get_vamanam_treatment_rooms
             if is_wc:
                 reason = "no_room_available: No wheelchair accessible treatment room available"
             elif is_steam_therapy_treatment(therapy_name):
@@ -3811,7 +3613,7 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                         ).exclude(pk=booking.pk).first()
                         
                         if existing_booking:
-                            from reshedule import is_steam_therapy_treatment, get_steam_therapy_rooms, is_vamanam_treatment, get_vamanam_treatment_rooms
+                            from allocation_engine.rules import is_steam_therapy_treatment, get_steam_therapy_rooms, is_vamanam_treatment, get_vamanam_treatment_rooms
                             if is_steam_therapy_treatment(therapy_name):
                                 current_room_no = getattr(room_candidate, 'room_no', None)
                                 steam_rooms = get_steam_therapy_rooms()

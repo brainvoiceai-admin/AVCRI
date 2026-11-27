@@ -30,6 +30,7 @@ from .slot_utils import (
     map_to_canonical_slot,
     _slot_time_value,
 )
+from .room_utils import get_treatment_rooms_for_staying_room
 from .booking_persistence import (
     create_room_booking_safe,
     create_therapist_booking_safe,
