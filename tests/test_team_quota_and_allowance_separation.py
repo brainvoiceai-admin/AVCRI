@@ -44,7 +44,7 @@ def team_setup(db):
     grade, _ = TherapistGrade.objects.get_or_create(name="Senior Therapist")
 
     therapists = []
-    for i in range(1, 8):
+    for i in range(1, 15):
         t, _ = TherapistMaster.objects.get_or_create(
             therapist_code=f"TH_TEAM_{i}",
             defaults={
@@ -180,9 +180,9 @@ def test_unpreferred_allowance_is_unlimited_and_does_not_consume_quota(team_setu
         assert r["status"] == "allowed"
         save_preferred_therapist_roster(
             patient_reg_no=reg,
-            therapist_codes=[team_setup["therapists"][0].therapist_code, team_setup["therapists"][1].therapist_code],
-            primary_bathing_code=team_setup["therapists"][0].therapist_code,
-            secondary_bathing_code=team_setup["therapists"][1].therapist_code,
+            therapist_codes=[team_setup["therapists"][(i-1)*2].therapist_code, team_setup["therapists"][(i-1)*2 + 1].therapist_code],
+            primary_bathing_code=team_setup["therapists"][(i-1)*2].therapist_code,
+            secondary_bathing_code=team_setup["therapists"][(i-1)*2 + 1].therapist_code,
             configured_by=doc_a,
         )
 

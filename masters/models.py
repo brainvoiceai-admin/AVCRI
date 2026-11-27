@@ -1410,6 +1410,177 @@ class TherapistTreatmentOmission(models.Model):
         return f"{self.therapist.therapist_name} - Omit {self.treatment.therapy_name} [{self.status}]"
 
 
+def _resolve_therapist_keys(therapist):
+    """
+    Given a therapist object, id, or code, returns (th_id, th_code).
+    th_id is integer ID for TherapistMaster (or None).
+    th_code is therapist_code string (or None).
+    Handles TherapistMaster, Patient.models.Therapist, int ID, or string code/ID.
+    """
+    if not therapist:
+        return None, None
+
+    th_id = None
+    th_code = None
+
+    if isinstance(therapist, TherapistMaster):
+        th_id = therapist.pk
+        th_code = therapist.therapist_code
+    elif hasattr(therapist, 'therapist_code'):
+        # Could be Patient.models.Therapist, TherapistMaster, or duck-typed object
+        code_val = getattr(therapist, 'therapist_code', None)
+        if code_val:
+            th_code = str(code_val).strip()
+        pk_val = getattr(therapist, 'pk', None)
+        if isinstance(pk_val, int):
+            th_id = pk_val
+    elif isinstance(therapist, int):
+        th_id = therapist
+    elif isinstance(therapist, str):
+        s = therapist.strip()
+        if s.isdigit():
+            th_id = int(s)
+        else:
+            th_code = s
+    elif hasattr(therapist, 'pk'):
+        pk_val = getattr(therapist, 'pk', None)
+        if isinstance(pk_val, int):
+            th_id = pk_val
+        elif isinstance(pk_val, str) and pk_val.strip().isdigit():
+            th_id = int(pk_val.strip())
+        elif isinstance(pk_val, str):
+            th_code = pk_val.strip()
+
+    # If code is known but id is not (or vice-versa), resolve from TherapistMaster
+    if th_code and not th_id:
+        try:
+            tm_obj = TherapistMaster.objects.filter(therapist_code__iexact=th_code).first()
+            if tm_obj:
+                th_id = tm_obj.pk
+        except Exception:
+            pass
+    elif th_id and not th_code:
+        try:
+            tm_obj = TherapistMaster.objects.filter(pk=th_id).first()
+            if tm_obj:
+                th_code = tm_obj.therapist_code
+        except Exception:
+            pass
+
+    return th_id, th_code
+
+
+def _resolve_treatment_keys(treatment):
+    """
+    Given a treatment (TherapyMaster, TherapyAllocation, Booking, TherapistBooking, dict, str, or int),
+    returns a tuple of:
+      - tr_ids: set of integer TherapyMaster PKs
+      - tr_codes: set of therapy_code strings
+      - tr_names: set of therapy_name strings
+    """
+    import re
+    tr_ids = set()
+    tr_codes = set()
+    tr_names = set()
+
+    if not treatment:
+        return tr_ids, tr_codes, tr_names
+
+    if isinstance(treatment, TherapyMaster):
+        if treatment.pk:
+            tr_ids.add(treatment.pk)
+        if treatment.therapy_code:
+            tr_codes.add(treatment.therapy_code.strip())
+        if treatment.therapy_name:
+            tr_names.add(treatment.therapy_name.strip())
+        return tr_ids, tr_codes, tr_names
+
+    # Check dict (e.g. therapy_requirements dict)
+    if isinstance(treatment, dict):
+        c = treatment.get('therapy_code')
+        if c and isinstance(c, str):
+            tr_codes.add(c.strip())
+        n = treatment.get('therapy_name')
+        if n and isinstance(n, str):
+            tr_names.add(n.strip())
+        tid = treatment.get('therapy_id') or treatment.get('treatment_id')
+        if tid and isinstance(tid, int):
+            tr_ids.add(tid)
+
+    # Check if object has therapy FK (e.g. TherapistBooking, Booking)
+    th_fk = getattr(treatment, 'therapy', None)
+    if isinstance(th_fk, TherapyMaster):
+        if th_fk.pk:
+            tr_ids.add(th_fk.pk)
+        if th_fk.therapy_code:
+            tr_codes.add(th_fk.therapy_code.strip())
+        if th_fk.therapy_name:
+            tr_names.add(th_fk.therapy_name.strip())
+
+    # Check if object is allocation/booking-like (has therapy_code, therapy_name)
+    code_attr = getattr(treatment, 'therapy_code', None)
+    if code_attr and isinstance(code_attr, str):
+        tr_codes.add(code_attr.strip())
+    name_attr = getattr(treatment, 'therapy_name', None)
+    if name_attr and isinstance(name_attr, str):
+        tr_names.add(name_attr.strip())
+
+    # If it's an int, it could be TherapyMaster.id
+    if isinstance(treatment, int):
+        tr_ids.add(treatment)
+        try:
+            tm = TherapyMaster.objects.filter(pk=treatment).first()
+            if tm:
+                if tm.therapy_code:
+                    tr_codes.add(tm.therapy_code.strip())
+                if tm.therapy_name:
+                    tr_names.add(tm.therapy_name.strip())
+        except Exception:
+            pass
+
+    # If it's a string
+    if isinstance(treatment, str):
+        s = treatment.strip()
+        if s.isdigit():
+            tr_ids.add(int(s))
+        else:
+            tr_codes.add(s)
+            tr_names.add(s)
+
+    # Resolve from TherapyMaster if we have codes or names to get complete IDs and canonical names
+    from django.db.models import Q
+    lookup_q = Q()
+    if tr_ids:
+        lookup_q |= Q(id__in=tr_ids)
+    for c in list(tr_codes):
+        lookup_q |= Q(therapy_code__iexact=c)
+    for n in list(tr_names):
+        lookup_q |= Q(therapy_name__iexact=n)
+        cleaned_star = n.lstrip('*').strip()
+        if cleaned_star != n:
+            lookup_q |= Q(therapy_name__iexact=cleaned_star)
+        # Also try adding leading '*' if database has '*<name>'
+        lookup_q |= Q(therapy_name__iexact='*' + cleaned_star)
+        # Normalize whitespace
+        norm_space = ' '.join(n.split())
+        if norm_space != n:
+            lookup_q |= Q(therapy_name__iexact=norm_space)
+            lookup_q |= Q(therapy_name__iexact='*' + norm_space)
+
+    if lookup_q:
+        try:
+            for tm in TherapyMaster.objects.filter(lookup_q):
+                tr_ids.add(tm.id)
+                if tm.therapy_code:
+                    tr_codes.add(tm.therapy_code.strip())
+                if tm.therapy_name:
+                    tr_names.add(tm.therapy_name.strip())
+        except Exception:
+            pass
+
+    return tr_ids, tr_codes, tr_names
+
+
 def is_therapist_omitted_for_treatment(therapist, treatment) -> bool:
     """
     Check if a therapist has an approved omission for a specific treatment.
@@ -1419,60 +1590,29 @@ def is_therapist_omitted_for_treatment(therapist, treatment) -> bool:
     if not therapist or not treatment:
         return False
 
-    th_id = None
-    th_code = None
-    if isinstance(therapist, TherapistMaster):
-        th_id = therapist.pk
-        th_code = therapist.therapist_code
-    elif hasattr(therapist, 'pk') and getattr(therapist, 'pk', None):
-        th_id = therapist.pk
-        th_code = getattr(therapist, 'therapist_code', None)
-    elif isinstance(therapist, int):
-        th_id = therapist
-    elif isinstance(therapist, str):
-        th_str = therapist.strip()
-        if th_str.isdigit():
-            th_id = int(th_str)
-        else:
-            th_code = th_str
-
-    tr_id = None
-    tr_code = None
-    tr_name = None
-    if isinstance(treatment, TherapyMaster):
-        tr_id = treatment.pk
-        tr_code = treatment.therapy_code
-        tr_name = treatment.therapy_name
-    elif hasattr(treatment, 'pk') and getattr(treatment, 'pk', None) and hasattr(treatment, 'therapy_name'):
-        tr_id = treatment.pk
-        tr_code = getattr(treatment, 'therapy_code', None)
-        tr_name = getattr(treatment, 'therapy_name', None)
-    elif isinstance(treatment, int):
-        tr_id = treatment
-    elif isinstance(treatment, str):
-        tr_str = treatment.strip()
-        if tr_str.isdigit():
-            tr_id = int(tr_str)
-        else:
-            tr_code = tr_str
-            tr_name = tr_str
+    th_id, th_code = _resolve_therapist_keys(therapist)
+    if not th_id and not th_code:
+        return False
 
     from django.db.models import Q
     th_q = Q()
-    if th_id:
+    if th_id and isinstance(th_id, int):
         th_q |= Q(therapist_id=th_id)
     if th_code:
-        th_q |= Q(therapist__therapist_code__iexact=th_code)
+        th_q |= Q(therapist__therapist_code__iexact=str(th_code).strip())
     if not th_q:
         return False
 
+    tr_ids, tr_codes, tr_names = _resolve_treatment_keys(treatment)
     tr_q = Q()
-    if tr_id:
-        tr_q |= Q(treatment_id=tr_id)
-    if tr_code:
-        tr_q |= Q(treatment__therapy_code__iexact=tr_code)
-    if tr_name:
-        tr_q |= Q(treatment__therapy_name__iexact=tr_name)
+    if tr_ids:
+        tr_q |= Q(treatment_id__in=tr_ids)
+    if tr_codes:
+        for c in tr_codes:
+            tr_q |= Q(treatment__therapy_code__iexact=c)
+    if tr_names:
+        for n in tr_names:
+            tr_q |= Q(treatment__therapy_name__iexact=n)
     if not tr_q:
         return False
 
@@ -1491,19 +1631,16 @@ def get_omitted_therapist_ids_for_treatment(treatment) -> set:
     if not treatment:
         return set()
     from django.db.models import Q
+    tr_ids, tr_codes, tr_names = _resolve_treatment_keys(treatment)
     tr_q = Q()
-    if isinstance(treatment, TherapyMaster):
-        tr_q = Q(treatment_id=treatment.pk)
-    elif hasattr(treatment, 'pk') and getattr(treatment, 'pk', None) and hasattr(treatment, 'therapy_name'):
-        tr_q = Q(treatment_id=treatment.pk)
-    elif isinstance(treatment, int):
-        tr_q = Q(treatment_id=treatment)
-    elif isinstance(treatment, str):
-        treatment_clean = treatment.strip()
-        if treatment_clean.isdigit():
-            tr_q = Q(treatment_id=int(treatment_clean))
-        else:
-            tr_q = Q(treatment__therapy_code__iexact=treatment_clean) | Q(treatment__therapy_name__iexact=treatment_clean)
+    if tr_ids:
+        tr_q |= Q(treatment_id__in=tr_ids)
+    if tr_codes:
+        for c in tr_codes:
+            tr_q |= Q(treatment__therapy_code__iexact=c)
+    if tr_names:
+        for n in tr_names:
+            tr_q |= Q(treatment__therapy_name__iexact=n)
     if not tr_q:
         return set()
 
@@ -1521,19 +1658,16 @@ def get_omitted_therapist_codes_for_treatment(treatment) -> set:
     if not treatment:
         return set()
     from django.db.models import Q
+    tr_ids, tr_codes, tr_names = _resolve_treatment_keys(treatment)
     tr_q = Q()
-    if isinstance(treatment, TherapyMaster):
-        tr_q = Q(treatment_id=treatment.pk)
-    elif hasattr(treatment, 'pk') and getattr(treatment, 'pk', None) and hasattr(treatment, 'therapy_name'):
-        tr_q = Q(treatment_id=treatment.pk)
-    elif isinstance(treatment, int):
-        tr_q = Q(treatment_id=treatment)
-    elif isinstance(treatment, str):
-        treatment_clean = treatment.strip()
-        if treatment_clean.isdigit():
-            tr_q = Q(treatment_id=int(treatment_clean))
-        else:
-            tr_q = Q(treatment__therapy_code__iexact=treatment_clean) | Q(treatment__therapy_name__iexact=treatment_clean)
+    if tr_ids:
+        tr_q |= Q(treatment_id__in=tr_ids)
+    if tr_codes:
+        for c in tr_codes:
+            tr_q |= Q(treatment__therapy_code__iexact=c)
+    if tr_names:
+        for n in tr_names:
+            tr_q |= Q(treatment__therapy_name__iexact=n)
     if not tr_q:
         return set()
 

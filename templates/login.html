@@ -39,8 +39,11 @@
                 <p>Login to continue</p>
             </div>
 
-            <form id="loginForm" method="POST" action="{% url 'authentication:login' %}">
+            <form id="loginForm" method="POST" action="{% url 'authentication:login' %}{% if next %}?next={{ next|urlencode }}{% endif %}">
                 {% csrf_token %}
+                {% if next %}
+                <input type="hidden" name="next" value="{{ next }}">
+                {% endif %}
                 <div id="messageContainer">
                     {% if messages %}
                         {% for message in messages %}

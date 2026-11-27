@@ -7,11 +7,13 @@ Comprehensive test suite for:
 5. Bathing Therapist Primary -> Secondary substitution when Primary is off.
 6. Continuity and Replacement within the 7-therapist pool (4 available kept, 1 off replaced from remaining 2).
 """
+import json
 import pytest
 from datetime import date, time
 from django.test import TestCase, Client
 from django.utils import timezone
 from django.core.exceptions import ValidationError
+from django.urls import reverse
 
 from authentication.models import CustomUser, DoctorProfile
 from masters.models import SlotMaster, TherapistGrade, TherapistMaster, TherapistLeaveMaster, TherapyMaster
@@ -155,14 +157,22 @@ class DoctorQuotaAndPreferredTherapistTests(TestCase):
         self.assertEqual(q_pending['used'], 0)
         self.assertEqual(q_pending['remaining'], 5)
 
-        # Now scheduling assigns preferred therapists to all 5 allowed patients
+        # Now scheduling assigns preferred therapists to all 5 allowed patients (each patient has distinct therapists)
         for i in range(1, 6):
             reg = f"8800{i}"
+            t_a, _ = TherapistMaster.objects.get_or_create(
+                therapist_code=f"Q_T{i}_A",
+                defaults={"therapist_name": f"Quota Therapist {i}A", "therapist_gender": "Male", "employee_code": f"EMP_Q_{i}A", "is_bathing_therapist": True, "is_active": True}
+            )
+            t_b, _ = TherapistMaster.objects.get_or_create(
+                therapist_code=f"Q_T{i}_B",
+                defaults={"therapist_name": f"Quota Therapist {i}B", "therapist_gender": "Male", "employee_code": f"EMP_Q_{i}B", "is_bathing_therapist": True, "is_active": True}
+            )
             save_preferred_therapist_roster(
                 patient_reg_no=reg,
-                therapist_codes=[self.therapists[0].therapist_code, self.therapists[1].therapist_code],
-                primary_bathing_code=self.therapists[0].therapist_code,
-                secondary_bathing_code=self.therapists[1].therapist_code,
+                therapist_codes=[t_a.therapist_code, t_b.therapist_code],
+                primary_bathing_code=t_a.therapist_code,
+                secondary_bathing_code=t_b.therapist_code,
                 configured_by=self.doc_user,
             )
 
@@ -714,5 +724,109 @@ class DoctorQuotaAndPreferredTherapistTests(TestCase):
             secondary_bathing_code="FEM_T2"
         )
         self.assertEqual(roster.patient_reg_no, fem_reg)
+
+    def test_cannot_select_same_preferred_therapist_for_another_patient(self):
+        """
+        When therapist T is selected as preferred for Patient 1:
+        1. In get_therapists_with_schedule_info / API for Patient 2:
+           - T is flagged as is_assigned_to_other_patient=True
+           - If exclude_assigned_to_other=True, T is excluded from the list.
+        2. In get_therapists_with_schedule_info for Patient 1:
+           - T is NOT flagged as assigned to other (is_assigned_to_other_patient=False).
+        3. Attempting to save Patient 2's roster with T raises ValidationError.
+        4. Attempting to save via HTTP API for Patient 2 with T returns 400 with clear error message.
+        """
+        # Allow Patient 1 (self.vip_reg)
+        toggle_doctor_patient_allowance(
+            doctor_user=self.doc_user,
+            patient_reg_no=self.vip_reg,
+            allow_preferred=True
+        )
+        # Assign PREF_T1, PREF_T2, PREF_T3 to Patient 1
+        save_preferred_therapist_roster(
+            patient_reg_no=self.vip_reg,
+            therapist_codes=["PREF_T1", "PREF_T2", "PREF_T3"],
+            primary_bathing_code="PREF_T1",
+            secondary_bathing_code="PREF_T2"
+        )
+
+        # Create and allow Patient 2
+        pat2_reg = "90002"
+        Repeated_Visitors.objects.update_or_create(
+            register_number=90002,
+            defaults={"patient_name": "Patient 2 Anoop", "total_visits": 3, "is_vip": False}
+        )
+        pat2_snap, _ = PatientSnapshot.objects.update_or_create(
+            pat_reg_no=pat2_reg,
+            defaults={"pat_name": "Patient 2 Anoop", "pat_sex": "Male", "pat_age": "45"}
+        )
+        TherapyAllocation.objects.get_or_create(
+            patient=pat2_snap,
+            therapy_code="TH_PAT2",
+            defaults={"allocated_by": self.doc_user, "from_date": timezone.now().date(), "to_date": timezone.now().date(), "days": 1}
+        )
+        toggle_doctor_patient_allowance(
+            doctor_user=self.doc_user,
+            patient_reg_no=pat2_reg,
+            allow_preferred=True
+        )
+
+        # 1. Check get_therapists_with_schedule_info for Patient 2:
+        t_list_pat2 = get_therapists_with_schedule_info(patient_reg_no=pat2_reg)
+        t1_for_pat2 = next(t for t in t_list_pat2 if t['therapist_code'] == "PREF_T1")
+        self.assertTrue(t1_for_pat2['is_assigned_to_other_patient'])
+        self.assertEqual(t1_for_pat2['assigned_to_patient_reg_no'], self.vip_reg)
+
+        # Exclude assigned to other
+        t_list_pat2_excluded = get_therapists_with_schedule_info(patient_reg_no=pat2_reg, exclude_assigned_to_other=True)
+        self.assertFalse(any(t['therapist_code'] == "PREF_T1" for t in t_list_pat2_excluded))
+        self.assertFalse(any(t['therapist_code'] == "PREF_T2" for t in t_list_pat2_excluded))
+        self.assertFalse(any(t['therapist_code'] == "PREF_T3" for t in t_list_pat2_excluded))
+
+        # 2. Check get_therapists_with_schedule_info for Patient 1 (own patient):
+        t_list_pat1 = get_therapists_with_schedule_info(patient_reg_no=self.vip_reg)
+        t1_for_pat1 = next(t for t in t_list_pat1 if t['therapist_code'] == "PREF_T1")
+        self.assertFalse(t1_for_pat1['is_assigned_to_other_patient'])
+
+        # 3. Attempting to save Patient 2 with PREF_T1 raises ValidationError
+        # Create outside bathing therapist for secondary
+        TherapistMaster.objects.get_or_create(
+            therapist_code="PREF_T4",
+            defaults={
+                "therapist_name": "Preferred Therapist 4",
+                "therapist_gender": "Male",
+                "employee_code": "EMP_PREF_4",
+                "is_bathing_therapist": True,
+                "is_active": True,
+            }
+        )
+        with self.assertRaises(ValidationError) as ctx:
+            save_preferred_therapist_roster(
+                patient_reg_no=pat2_reg,
+                therapist_codes=["PREF_T1", "PREF_T4"],  # PREF_T1 is already with Patient 1
+                primary_bathing_code="PREF_T1",
+                secondary_bathing_code="PREF_T4"
+            )
+        self.assertIn("already selected", str(ctx.exception))
+        self.assertIn("PREF_T1", str(ctx.exception))
+
+        # 4. API check: POST /scheduling/api/save-preferred-therapist-roster/
+        client = Client()
+        client.force_login(self.staff_user)
+        resp = client.post(
+            reverse('save_patient_preferred_roster_api'),
+            data=json.dumps({
+                'patient_reg_no': pat2_reg,
+                'therapist_codes': ["PREF_T1", "PREF_T4"],
+                'primary_bathing_code': "PREF_T1",
+                'secondary_bathing_code': "PREF_T4"
+            }),
+            content_type='application/json'
+        )
+        self.assertEqual(resp.status_code, 400)
+        data = resp.json()
+        self.assertEqual(data['status'], 'error')
+        self.assertIn("already selected", data['message'])
+
 
 

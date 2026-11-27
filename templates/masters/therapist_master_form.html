@@ -527,7 +527,16 @@
                         <span class="fw-bold text-danger">
                             <i class="fas fa-check-circle me-1"></i>Approved Omitted Treatments (Excluded from Scheduling)
                         </span>
-                        <span class="badge bg-danger">{{ approved_omissions|length }} Active</span>
+                        <div class="d-flex align-items-center gap-2">
+                            <span class="badge bg-danger">{{ approved_omissions|length }} Active</span>
+                            {% if approved_omissions %}
+                            <button type="button" class="btn btn-danger btn-sm py-0 px-2 fw-semibold"
+                                    onclick="submitOmissionAction('{% url 'therapist_treatment_omissions_revoke_all' object.pk %}', 'Revoke ALL {{ approved_omissions|length }} approved treatment omissions for {{ object.therapist_name }}? The therapist will once again be eligible for scheduling these treatments.');"
+                                    title="Revoke all approved omissions for this therapist">
+                                <i class="fas fa-undo-alt me-1"></i>Revoke All
+                            </button>
+                            {% endif %}
+                        </div>
                     </div>
                     <div class="card-body p-0">
                         {% if approved_omissions %}
@@ -554,12 +563,12 @@
                                         <td class="small">{{ o.approved_by.get_full_name|default:o.approved_by.username|default:"Admin/HR" }}</td>
                                         <td class="small">{{ o.approved_at|date:"d/m/Y" }}</td>
                                         <td class="text-end">
-                                            <a href="{% url 'therapist_treatment_omission_delete' o.pk %}" 
-                                               class="btn btn-outline-danger btn-sm py-0 px-2"
-                                               onclick="return confirm('Revoke omission for {{ o.treatment.therapy_name }}? The therapist will once again be eligible for scheduling.');"
-                                               title="Revoke Omission">
+                                            <button type="button" 
+                                                    class="btn btn-outline-danger btn-sm py-0 px-2"
+                                                    onclick="submitOmissionAction('{% url 'therapist_treatment_omission_delete' o.pk %}', 'Revoke omission for {{ o.treatment.therapy_name }}? The therapist will once again be eligible for scheduling.');"
+                                                    title="Revoke Omission">
                                                 <i class="fas fa-trash-alt me-1"></i>Revoke
-                                            </a>
+                                            </button>
                                         </td>
                                     </tr>
                                     {% endfor %}
@@ -597,7 +606,7 @@
                                 <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-2">
                                     <div>
                                         <h6 class="mb-1 fw-bold text-dark">
-                                            <i class="fas fa-file-alt text-warning me-1"></i>
+                                             <i class="fas fa-file-alt text-warning me-1"></i>
                                             Omission Request: {{ req.total_count }} Treatment{{ req.total_count|pluralize }}
                                             <span class="badge bg-warning text-dark ms-2">Pending HR/Admin</span>
                                         </h6>
@@ -607,32 +616,20 @@
                                     </div>
                                     <div class="d-flex align-items-center gap-1">
                                         {% if can_approve_omissions %}
-                                        <form method="post" action="{% url 'therapist_treatment_omission_batch_approve' req.action_identifier %}" class="d-inline">
-                                            {% csrf_token %}
-                                            <input type="hidden" name="next" value="{% url 'therapist_master_update' object.pk %}">
-                                            <button type="submit" class="btn btn-success btn-sm py-1 px-3"
-                                                    onclick="return confirm('Approve omission of all {{ req.total_count }} treatments for {{ object.therapist_name }}?');">
-                                                <i class="fas fa-check me-1"></i>Approve All ({{ req.total_count }})
-                                            </button>
-                                        </form>
-                                        <form method="post" action="{% url 'therapist_treatment_omission_batch_reject' req.action_identifier %}" class="d-inline">
-                                            {% csrf_token %}
-                                            <input type="hidden" name="next" value="{% url 'therapist_master_update' object.pk %}">
-                                            <button type="submit" class="btn btn-danger btn-sm py-1 px-3"
-                                                    onclick="return confirm('Reject this omission request for all {{ req.total_count }} treatments?');">
-                                                <i class="fas fa-times me-1"></i>Reject Request
-                                            </button>
-                                        </form>
+                                        <button type="button" class="btn btn-success btn-sm py-1 px-3"
+                                                onclick="submitOmissionAction('{% url 'therapist_treatment_omission_batch_approve' req.action_identifier %}', 'Approve omission of all {{ req.total_count }} treatments for {{ object.therapist_name }}?');">
+                                            <i class="fas fa-check me-1"></i>Approve All ({{ req.total_count }})
+                                        </button>
+                                        <button type="button" class="btn btn-danger btn-sm py-1 px-3"
+                                                onclick="submitOmissionAction('{% url 'therapist_treatment_omission_batch_reject' req.action_identifier %}', 'Reject this omission request for all {{ req.total_count }} treatments?');">
+                                            <i class="fas fa-times me-1"></i>Reject Request
+                                        </button>
                                         {% endif %}
-                                        <form method="post" action="{% url 'therapist_treatment_omission_batch_delete' req.action_identifier %}" class="d-inline">
-                                            {% csrf_token %}
-                                            <input type="hidden" name="next" value="{% url 'therapist_master_update' object.pk %}">
-                                            <button type="submit" class="btn btn-outline-danger btn-sm py-1 px-2"
-                                                    onclick="return confirm('Cancel this entire request of {{ req.total_count }} treatments?');"
-                                                    title="Cancel Request">
-                                                <i class="fas fa-trash-alt me-1"></i>Cancel Request
-                                            </button>
-                                        </form>
+                                        <button type="button" class="btn btn-outline-danger btn-sm py-1 px-2"
+                                                onclick="submitOmissionAction('{% url 'therapist_treatment_omission_batch_delete' req.action_identifier %}', 'Cancel this entire request of {{ req.total_count }} treatments?');"
+                                                title="Cancel Request">
+                                            <i class="fas fa-trash-alt me-1"></i>Cancel Request
+                                        </button>
                                     </div>
                                 </div>
 
@@ -707,23 +704,20 @@
                                             </td>
                                             <td class="text-end">
                                                 {% if can_approve_omissions %}
-                                                <a href="{% url 'therapist_treatment_omission_approve' o.pk %}?next={% url 'therapist_master_update' object.pk %}" 
-                                                   class="btn btn-success btn-sm py-0 px-2 me-1"
-                                                   onclick="return confirm('Approve omission of {{ o.treatment.therapy_name }}?');">
+                                                <button type="button" class="btn btn-success btn-sm py-0 px-2 me-1"
+                                                        onclick="submitOmissionAction('{% url 'therapist_treatment_omission_approve' o.pk %}', 'Approve omission of {{ o.treatment.therapy_name }}?');">
                                                     <i class="fas fa-check me-1"></i>Approve
-                                                </a>
-                                                <a href="{% url 'therapist_treatment_omission_reject' o.pk %}?next={% url 'therapist_master_update' object.pk %}" 
-                                                   class="btn btn-danger btn-sm py-0 px-2 me-1"
-                                                   onclick="return confirm('Reject omission request?');">
+                                                </button>
+                                                <button type="button" class="btn btn-danger btn-sm py-0 px-2 me-1"
+                                                        onclick="submitOmissionAction('{% url 'therapist_treatment_omission_reject' o.pk %}', 'Reject omission request?');">
                                                     <i class="fas fa-times me-1"></i>Reject
-                                                </a>
+                                                </button>
                                                 {% endif %}
-                                                <a href="{% url 'therapist_treatment_omission_delete' o.pk %}?next={% url 'therapist_master_update' object.pk %}" 
-                                                   class="btn btn-outline-secondary btn-sm py-0 px-2"
-                                                   onclick="return confirm('Cancel this omission request?');"
-                                                   title="Cancel Request">
+                                                <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-2"
+                                                        onclick="submitOmissionAction('{% url 'therapist_treatment_omission_delete' o.pk %}', 'Cancel this omission request?');"
+                                                        title="Cancel Request">
                                                     <i class="fas fa-times"></i>
-                                                </a>
+                                                </button>
                                             </td>
                                         </tr>
                                         {% endfor %}
@@ -751,22 +745,22 @@
                             <div class="d-flex flex-wrap align-items-center justify-content-between gap-2">
                                 <div class="d-flex flex-wrap align-items-center gap-1">
                                     <span class="small fw-bold text-muted text-uppercase me-1"><i class="fas fa-bolt text-warning me-1"></i>Quick Select:</span>
-                                    <button type="button" class="btn btn-sm btn-outline-danger" onclick="selectByCategory('hard')" title="Select all Hard difficulty treatments">
+                                    <button type="button" class="btn btn-sm btn-outline-danger" onclick="selectByCategory('hard')" title="Toggle select all Hard difficulty treatments">
                                         <i class="fas fa-fire me-1"></i>Select All Hard ({{ hard_treatments_count|default:"0" }})
                                     </button>
-                                    <button type="button" class="btn btn-sm btn-outline-warning text-dark" onclick="selectByCategory('medium')" title="Select all Medium difficulty treatments">
+                                    <button type="button" class="btn btn-sm btn-outline-warning text-dark" onclick="selectByCategory('medium')" title="Toggle select all Medium difficulty treatments">
                                         <i class="fas fa-layer-group me-1"></i>Select All Medium ({{ medium_treatments_count|default:"0" }})
                                     </button>
-                                    <button type="button" class="btn btn-sm btn-outline-success" onclick="selectByCategory('easy')" title="Select all Easy difficulty treatments">
+                                    <button type="button" class="btn btn-sm btn-outline-success" onclick="selectByCategory('easy')" title="Toggle select all Easy difficulty treatments">
                                         <i class="fas fa-feather-alt me-1"></i>Select All Easy ({{ easy_treatments_count|default:"0" }})
                                     </button>
                                     <button type="button" class="btn btn-sm btn-outline-primary" onclick="selectAllVisible()" title="Select all currently visible treatments">
                                         <i class="fas fa-check-double me-1"></i>Select All
                                     </button>
                                 </div>
-                                <div>
-                                    <button type="button" class="btn btn-sm btn-outline-secondary" onclick="deselectAll()" title="Clear all selected treatments">
-                                        <i class="fas fa-undo me-1"></i>Clear All
+                                <div class="d-flex gap-1">
+                                    <button type="button" class="btn btn-sm btn-outline-danger" onclick="cancelTreatmentSelection()" title="Cancel and clear all selected treatments">
+                                        <i class="fas fa-times-circle me-1"></i>Cancel / Clear Selection
                                     </button>
                                 </div>
                             </div>
@@ -861,9 +855,9 @@
                                                onchange="handleCheckboxToggle(this, event)">
                                     </div>
                                     <div>
-                                        <label class="form-check-label fw-bold text-dark mb-0" for="omit_check_{{ t.id }}" style="cursor: pointer;">
+                                        <span class="form-check-label fw-bold text-dark mb-0" style="cursor: pointer;">
                                             {{ t.therapy_name }}
-                                        </label>
+                                        </span>
                                         <span class="badge bg-light text-secondary border ms-1">{{ t.therapy_code }}</span>
                                     </div>
                                 </div>
@@ -990,6 +984,14 @@
                 </div>
             </div>
         </form>
+
+        {% if object %}
+        <!-- Standalone form for omission actions (Approve, Reject, Cancel, Revoke) to avoid HTML form nesting -->
+        <form id="omissionActionForm" method="post" action="" style="display: none;">
+            {% csrf_token %}
+            <input type="hidden" name="next" value="{% url 'therapist_master_update' object.pk %}">
+        </form>
+        {% endif %}
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
@@ -1140,8 +1142,11 @@
 
     function toggleTreatmentRow(id, event) {
         // If click originated from the checkbox itself, let handleCheckboxToggle handle it
-        if (event && event.target && event.target.classList && event.target.classList.contains('form-check-input')) {
-            return;
+        if (event && event.target) {
+            const tag = (event.target.tagName || '').toUpperCase();
+            if (tag === 'INPUT' || (event.target.classList && event.target.classList.contains('form-check-input'))) {
+                return;
+            }
         }
         
         const checkbox = document.getElementById('omit_check_' + id);
@@ -1171,16 +1176,24 @@
 
     function selectByCategory(category) {
         const catLower = (category || '').toLowerCase();
-        const checkboxes = document.querySelectorAll('.treatment-checkbox:not(:disabled)');
-        let selectedAny = false;
+        const matchingCheckboxes = [];
         
-        checkboxes.forEach(cb => {
+        document.querySelectorAll('.treatment-checkbox:not(:disabled)').forEach(cb => {
             const itemCat = (cb.getAttribute('data-category') || '').toLowerCase();
             if (itemCat === catLower) {
-                cb.checked = true;
-                updateSingleRowStyle(cb);
-                selectedAny = true;
+                matchingCheckboxes.push(cb);
             }
+        });
+        
+        if (matchingCheckboxes.length === 0) return;
+
+        // If all matching are already checked, toggle them OFF (cancel/clear this category)
+        const allChecked = matchingCheckboxes.every(cb => cb.checked);
+        const targetState = !allChecked;
+
+        matchingCheckboxes.forEach(cb => {
+            cb.checked = targetState;
+            updateSingleRowStyle(cb);
         });
         
         updateSelectedChipsAndCount();
@@ -1207,6 +1220,27 @@
             updateSingleRowStyle(cb);
         });
         updateSelectedChipsAndCount();
+    }
+
+    function cancelTreatmentSelection() {
+        deselectAll();
+        const reasonInput = document.getElementById('omit_reason');
+        if (reasonInput) reasonInput.value = '';
+    }
+
+    function submitOmissionAction(actionUrl, confirmMsg) {
+        if (confirmMsg && !confirm(confirmMsg)) {
+            return false;
+        }
+        const form = document.getElementById('omissionActionForm');
+        if (form) {
+            form.action = actionUrl;
+            form.submit();
+        } else {
+            // Fallback navigation
+            window.location.href = actionUrl;
+        }
+        return false;
     }
 
     function removeTreatmentChip(id) {

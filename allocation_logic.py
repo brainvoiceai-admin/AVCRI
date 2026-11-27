@@ -312,6 +312,13 @@ def allocate_therapists(date, time_slot, therapy_requirements, last_therapists=N
         from masters.models import is_therapist_deputed
         if is_therapist_deputed(t, date):
             return True
+        # 3) treatment omission check
+        th_code_req = (therapy_requirements or {}).get("therapy_code")
+        th_name_req = (therapy_requirements or {}).get("therapy_name")
+        if th_code_req or th_name_req:
+            from masters.models import is_therapist_omitted_for_treatment
+            if is_therapist_omitted_for_treatment(t, th_code_req or th_name_req):
+                return True
         # On-call check: if therapist is on-call and turned OFF, outside date range, or outside configured slots
         from masters.models import is_therapist_on_call_active
         if not is_therapist_on_call_active(t, date, target_slot):

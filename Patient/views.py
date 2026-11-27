@@ -407,6 +407,10 @@ def therapy_entry_view(request):
         return JsonResponse(response, status=200)
 
     # GET - render page
+    if not getattr(request, 'user', None) or not request.user.is_authenticated:
+        from django.urls import reverse
+        return redirect(f"{reverse('authentication:login')}?next={request.path}")
+
     context = {
         'patient': patient,
         'all_therapy_items': all_therapy_items,
@@ -762,6 +766,10 @@ def allocation_result_view(request):
     # summary counts
     success_count = sum(1 for t in tasks if (t.get('status') or '').upper() in ('BOOKED','SUCCESS'))
     failed_count  = sum(1 for t in tasks if (t.get('status') or '').upper() in ('FAILED','PARTIAL'))
+
+    if not getattr(request, 'user', None) or not request.user.is_authenticated:
+        from django.urls import reverse
+        return redirect(f"{reverse('authentication:login')}?next={request.path}")
 
     context = {
         'tasks': tasks,

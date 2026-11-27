@@ -1853,6 +1853,10 @@ def allocate_therapists(date, time_slot, therapy_requirements, last_therapists=N
         t_code = getattr(t, 'therapist_code', None)
         if t_code and t_code in omitted_codes:
             return True
+        if th_code_req or th_name_req:
+            from masters.models import is_therapist_omitted_for_treatment
+            if is_therapist_omitted_for_treatment(t, th_code_req or th_name_req):
+                return True
         # On-call check: exclude on-call therapists who are turned OFF, outside date range, or outside configured slots
         from masters.models import is_therapist_on_call_active
         if not is_therapist_on_call_active(t, date, target_slot):
@@ -2586,6 +2590,10 @@ def allocate_therapists_with_grade_substitution(date, time_slot, therapy_require
         t_code = getattr(t, 'therapist_code', None)
         if t_code and t_code in omitted_codes:
             return True
+        if th_code_req or th_name_req:
+            from masters.models import is_therapist_omitted_for_treatment
+            if is_therapist_omitted_for_treatment(t, th_code_req or th_name_req):
+                return True
         # On-call check: exclude on-call therapists who are turned OFF, outside date range, or outside configured slots
         from masters.models import is_therapist_on_call_active
         if not is_therapist_on_call_active(t, date, target_slot):
@@ -3462,7 +3470,11 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
         # the remaining slots.
         if pass1_continuity_objects and pass1_continuity_assigned:
             candidate_therapists = list(pass1_continuity_objects)
-            remaining_req = pass1_continuity_assigned.get('remaining_requirements', {})
+            remaining_req = dict(pass1_continuity_assigned.get('remaining_requirements', {}))
+            if 'therapy_code' not in remaining_req or not remaining_req['therapy_code']:
+                remaining_req['therapy_code'] = therapy_req.get('therapy_code') or getattr(allocation, 'therapy_code', None)
+            if 'therapy_name' not in remaining_req or not remaining_req['therapy_name']:
+                remaining_req['therapy_name'] = therapy_req.get('therapy_name') or getattr(allocation, 'therapy_name', None) or therapy_name
             remaining_total = remaining_req.get('total', 0)
             print(f"[RESCHEDULE PASS2] Prepended {len(pass1_continuity_objects)} PASS 1 continuity therapists to candidate_therapists")
             if remaining_total > 0:
@@ -3472,6 +3484,11 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
                     if getattr(t, 'therapist_code', None)
                 }
                 remaining_last_therapists = [c for c in last_therapists if c not in continuity_codes_to_avoid] if last_therapists else None
+                if remaining_last_therapists:
+                    treatment_to_check = remaining_req.get('therapy_code') or remaining_req.get('therapy_name') or therapy_name
+                    if treatment_to_check:
+                        from masters.models import is_therapist_omitted_for_treatment
+                        remaining_last_therapists = [c for c in remaining_last_therapists if not is_therapist_omitted_for_treatment(c, treatment_to_check)]
                 additional = allocate_therapists(
                     date,
                     canonical_slot,
@@ -4817,9 +4834,23 @@ def assign_continuity_therapists_pass1(booking, allocation, target_date, locked_
             print(f"[RESCHEDULE PASS1] Error finding previous day therapists: {e}")
             continuity_therapists = []
     
+    # Exclude therapists who have approved omissions for this treatment
+    treatment_for_omission = getattr(allocation, 'therapy_name', None) or getattr(allocation, 'therapy_code', None) or therapy_name
+    if treatment_for_omission and continuity_therapists:
+        from masters.models import is_therapist_omitted_for_treatment
+        continuity_therapists = [t for t in continuity_therapists if not is_therapist_omitted_for_treatment(t, treatment_for_omission)]
+    if previous_bathing_therapist and treatment_for_omission:
+        from masters.models import is_therapist_omitted_for_treatment
+        if is_therapist_omitted_for_treatment(previous_bathing_therapist, treatment_for_omission):
+            previous_bathing_therapist = None
+
     if not continuity_therapists:
         # No continuity therapists - skip this booking in PASS 1
         result['remaining_requirements'] = therapy_req.copy()
+        if 'therapy_code' not in result['remaining_requirements'] or not result['remaining_requirements']['therapy_code']:
+            result['remaining_requirements']['therapy_code'] = getattr(allocation, 'therapy_code', None) or therapy_code
+        if 'therapy_name' not in result['remaining_requirements'] or not result['remaining_requirements']['therapy_name']:
+            result['remaining_requirements']['therapy_name'] = getattr(allocation, 'therapy_name', None) or therapy_name
         return result
     
     # Check which continuity therapists are available and can be assigned
@@ -5143,7 +5174,10 @@ def assign_continuity_therapists_pass1(booking, allocation, target_date, locked_
         "junior": grade_map.get("Junior Therapist", 0),
         "trainee": grade_map.get("Trainee Therapist", 0),
         "total": req_total - len(assigned_continuity),
-        "therapy_category": therapy_req.get("therapy_category", None)
+        "therapy_category": therapy_req.get("therapy_category", None),
+        "therapy_code": therapy_req.get("therapy_code") or getattr(allocation, 'therapy_code', None),
+        "therapy_name": therapy_req.get("therapy_name") or getattr(allocation, 'therapy_name', None) or therapy_name,
+        "bathing_therapists_count": therapy_req.get("bathing_therapists_count", 0),
     }
     result['success'] = len(assigned_continuity) > 0
     

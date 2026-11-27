@@ -4431,12 +4431,45 @@ def delete_therapist_treatment_omission_batch_api(request, batch_id):
     """
     Cancel or revoke all omissions in a single request batch.
     """
-    omissions = TherapistTreatmentOmission.objects.filter(batch_id=batch_id)
-    if not omissions.exists() and batch_id.isdigit():
-        omissions = TherapistTreatmentOmission.objects.filter(pk=int(batch_id))
+    import urllib.parse
+    clean_batch_id = urllib.parse.unquote(str(batch_id).strip())
+
+    omissions = TherapistTreatmentOmission.objects.filter(batch_id=clean_batch_id)
+    if not omissions.exists() and clean_batch_id.isdigit():
+        single_om = TherapistTreatmentOmission.objects.filter(pk=int(clean_batch_id)).first()
+        if single_om:
+            if single_om.batch_id:
+                omissions = TherapistTreatmentOmission.objects.filter(batch_id=single_om.batch_id)
+            else:
+                from datetime import timedelta
+                time_window = timedelta(minutes=2)
+                omissions = TherapistTreatmentOmission.objects.filter(
+                    therapist=single_om.therapist,
+                    reason=single_om.reason,
+                    created_at__gte=single_om.created_at - time_window,
+                    created_at__lte=single_om.created_at + time_window,
+                    batch_id__isnull=True
+                )
+    elif not omissions.exists() and clean_batch_id.startswith('LEGACY_'):
+        parts = clean_batch_id.split('_')
+        if len(parts) >= 3 and parts[1].isdigit():
+            th_id = int(parts[1])
+            time_str = parts[2]
+            omissions = TherapistTreatmentOmission.objects.filter(therapist_id=th_id, batch_id__isnull=True)
+            if time_str and len(time_str) >= 12:
+                import datetime
+                try:
+                    target_time = datetime.datetime.strptime(time_str[:12], '%Y%m%d%H%M')
+                    from datetime import timedelta
+                    omissions = omissions.filter(
+                        created_at__gte=target_time - timedelta(minutes=2),
+                        created_at__lte=target_time + timedelta(minutes=2)
+                    )
+                except Exception:
+                    pass
 
     if not omissions.exists():
-        msg = "No omission records found for this request."
+        msg = "No omission records found for this request (it may have already been cancelled or removed)."
         if request.headers.get('x-requested-with') == 'XMLHttpRequest' or request.content_type == 'application/json':
             return JsonResponse({'success': False, 'message': msg}, status=404)
         try:
@@ -4455,7 +4488,7 @@ def delete_therapist_treatment_omission_batch_api(request, batch_id):
             'delete',
             'TherapistTreatmentOmission',
             str(om.pk),
-            f'Deleted/cancelled treatment omission in batch {batch_id}: {therapist.therapist_name} - {om.treatment.therapy_name}'
+            f'Deleted/cancelled treatment omission in batch {clean_batch_id}: {therapist.therapist_name} - {om.treatment.therapy_name}'
         )
     omissions.delete()
 
@@ -4475,6 +4508,44 @@ def delete_therapist_treatment_omission_batch_api(request, batch_id):
     if 'treatment-omission' in referer:
         return redirect('therapist_treatment_omission_approvals')
     return redirect('therapist_master_update', pk=therapist_pk)
+
+
+@login_required
+def revoke_all_therapist_treatment_omissions_api(request, pk):
+    """
+    Cancel or revoke all approved treatment omissions for a therapist.
+    """
+    therapist = get_object_or_404(TherapistMaster, pk=pk)
+    omissions = TherapistTreatmentOmission.objects.filter(
+        therapist=therapist,
+        status='approved',
+        is_active=True
+    )
+    count = omissions.count()
+    if count == 0:
+        try:
+            messages.info(request, f'No active approved treatment omissions found for therapist "{therapist.therapist_name}".')
+        except Exception:
+            pass
+    else:
+        for om in omissions:
+            _log_master_audit(
+                request,
+                'delete',
+                'TherapistTreatmentOmission',
+                str(om.pk),
+                f'Revoked omission: {therapist.therapist_name} - {om.treatment.therapy_name}'
+            )
+        omissions.delete()
+        try:
+            messages.success(request, f'All {count} approved treatment omission(s) revoked for therapist "{therapist.therapist_name}". The therapist is now eligible for scheduling all treatments.')
+        except Exception:
+            pass
+
+    next_url = request.POST.get('next') or request.GET.get('next')
+    if next_url:
+        return redirect(next_url)
+    return redirect('therapist_master_update', pk=therapist.pk)
 
 
 @login_required

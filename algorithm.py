@@ -208,6 +208,14 @@ def allocate_therapists(date, time_slot, therapy_requirements, last_therapists=N
             candidates = candidates.filter(is_bathing_therapist=True)
         # filter out already allocated and those on leave
         candidates = [t for t in candidates if t not in allocated and not TherapistLeave.objects.filter(therapist=t, leave_day=day_of_week).exists()]
+        th_code_req = (therapy_requirements or {}).get("therapy_code")
+        th_name_req = (therapy_requirements or {}).get("therapy_name")
+        if th_code_req or th_name_req:
+            try:
+                from masters.models import is_therapist_omitted_for_treatment
+                candidates = [t for t in candidates if not is_therapist_omitted_for_treatment(t, th_code_req or th_name_req)]
+            except Exception:
+                pass
         for t in candidates:
             # only treat booked rows as blocking
             if not TherapistBooking.objects.filter(therapist=t, date=date, time_slot=time_slot, status='BOOKED').exists():

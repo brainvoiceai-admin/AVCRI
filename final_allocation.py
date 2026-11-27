@@ -385,32 +385,33 @@ def create_therapist_booking_safe(therapist, date, time_slot, therapy_name, pati
     Note: Don't use nested transaction.atomic() - we're already in a transaction
     """
     from Patient.models import TherapistBooking
-    from masters.models import TherapyMaster
+    from masters.models import TherapyMaster, TherapistMaster
     print(f"[DEBUG create_therapist_booking_safe] Called with: therapist={therapist} (pk={therapist.pk if therapist else None}), date={date}, time_slot={time_slot} (type={type(time_slot)}, pk={time_slot.pk if time_slot else None}), visit={visit} (type={type(visit)}, pk={visit.pk if visit else None})")
 
-    # CRITICAL: Final check - prevent creating booking if therapist already has 6 sessions
-    # This is an atomic database check to prevent race conditions
-    if therapist and date:
-        current_session_count = TherapistBooking.objects.filter(
-            therapist=therapist,
-            date=date,
-            status='BOOKED'
-        ).count()
-        if current_session_count >= 6:
-            print(f"[DEBUG create_therapist_booking_safe] BLOCKED: Therapist {getattr(therapist, 'therapist_code', 'UNKNOWN')} already has {current_session_count} sessions (max 6) - refusing to create booking")
-            # Return None and False to indicate booking was not created due to session limit
-            return None, False
+    # Resolve therapist to TherapistMaster instance if needed (TherapistBooking.therapist FK points to TherapistMaster)
+    therapist_master = None
+    if isinstance(therapist, TherapistMaster):
+        therapist_master = therapist
+    elif hasattr(therapist, 'therapist_code'):
+        therapist_master = TherapistMaster.objects.filter(therapist_code=therapist.therapist_code, is_active=True).first()
+    elif isinstance(therapist, int):
+        therapist_master = TherapistMaster.objects.filter(pk=therapist).first()
+    elif isinstance(therapist, str):
+        if therapist.strip().isdigit():
+            therapist_master = TherapistMaster.objects.filter(pk=int(therapist.strip())).first()
+        else:
+            therapist_master = TherapistMaster.objects.filter(therapist_code=therapist.strip()).first()
+    
+    booking_therapist = therapist_master or therapist
 
     # Resolve TherapyMaster FK so TherapistBooking.therapy is never left null when possible
     therapy_obj = None
     try:
-        # Prefer therapy_code from the allocation/visit if present
         therapy_code = getattr(visit, "therapy_code", None) if visit is not None else None
         visit_therapy_name = getattr(visit, "therapy_name", None) if visit is not None else None
         if therapy_code:
             therapy_obj = TherapyMaster.objects.filter(therapy_code=therapy_code).first()
         if not therapy_obj and (therapy_name or visit_therapy_name):
-            # Fallback: match by case-insensitive therapy_name
             name_for_lookup = therapy_name or visit_therapy_name
             therapy_obj = TherapyMaster.objects.filter(therapy_name__iexact=name_for_lookup).first()
     except Exception as e:
@@ -420,12 +421,23 @@ def create_therapist_booking_safe(therapist, date, time_slot, therapy_name, pati
     if therapist:
         try:
             from masters.models import is_therapist_omitted_for_treatment
-            treatment_to_check = therapy_obj or therapy_name or getattr(visit, 'therapy_name', None) or getattr(visit, 'therapy_code', None)
+            treatment_to_check = therapy_obj or therapy_name or (getattr(visit, 'therapy_name', None) if visit is not None else None) or (getattr(visit, 'therapy_code', None) if visit is not None else None)
             if treatment_to_check and is_therapist_omitted_for_treatment(therapist, treatment_to_check):
                 print(f"[DEBUG create_therapist_booking_safe] BLOCKED: Therapist {getattr(therapist, 'therapist_code', 'UNKNOWN')} has approved omission for treatment '{treatment_to_check}' - refusing to create booking")
                 return None, False
         except Exception as e:
             print(f"[DEBUG create_therapist_booking_safe] Error in treatment omission check: {e}")
+
+    # Session limit check
+    if booking_therapist and date:
+        current_session_count = TherapistBooking.objects.filter(
+            therapist=booking_therapist,
+            date=date,
+            status='BOOKED'
+        ).count()
+        if current_session_count >= 6:
+            print(f"[DEBUG create_therapist_booking_safe] BLOCKED: Therapist {getattr(booking_therapist, 'therapist_code', 'UNKNOWN')} already has {current_session_count} sessions (max 6) - refusing to create booking")
+            return None, False
 
     try:
         # Don't use nested transaction.atomic() - we're already in a transaction
@@ -1247,6 +1259,10 @@ def allocate_therapists(
         # Treatment omission check: exclude therapists who omitted this treatment
         if (t_id and t_id in omitted_ids) or (getattr(t, 'therapist_code', None) in omitted_codes):
             return True
+        if th_code_req or th_name_req:
+            from masters.models import is_therapist_omitted_for_treatment
+            if is_therapist_omitted_for_treatment(t, th_code_req or th_name_req):
+                return True
         # On-call check: exclude on-call therapists who are turned OFF, outside date range, or outside configured slots
         from masters.models import is_therapist_on_call_active
         if not is_therapist_on_call_active(t, date, target_slot):
@@ -1584,11 +1600,14 @@ def allocate_therapists(
                 from Sheduling.preferred_therapist_service import pick_bathing_therapist_from_roster, displace_non_vip_therapist_for_slot
                 picked_bath, bath_role = pick_bathing_therapist_from_roster(
                     preferred_roster_info, date, time_slot,
-                    is_vip=is_vip, exclude_therapist_codes=_get_vip_displacement_exclusions()
+                    is_vip=is_vip, exclude_therapist_codes=_get_vip_displacement_exclusions(),
+                    therapy_name=th_code_req or th_name_req
                 )
                 if picked_bath and picked_bath not in allocated:
                     bath_avail = True
                     if therapist_on_leave(picked_bath):
+                        bath_avail = False
+                    elif (th_code_req or th_name_req) and is_therapist_omitted_for_treatment(picked_bath, th_code_req or th_name_req):
                         bath_avail = False
                     elif shift_filter_enabled and picked_bath.id in mapped_ids and picked_bath.id not in eligible_ids:
                         bath_avail = False
@@ -2044,7 +2063,10 @@ def assign_continuity_therapists_pass1(booking, allocation, target_date, locked_
         if needs_bath_flag:
             try:
                 from Sheduling.preferred_therapist_service import pick_bathing_therapist_from_roster
-                picked_bath, bath_role = pick_bathing_therapist_from_roster(preferred_roster_info, target_date, slot_master, is_vip=is_vip)
+                picked_bath, bath_role = pick_bathing_therapist_from_roster(
+                    preferred_roster_info, target_date, slot_master, is_vip=is_vip,
+                    therapy_name=current_therapy_name or therapy_code
+                )
                 if picked_bath:
                     previous_bathing_therapist = picked_bath
                     if picked_bath in continuity_therapists:
@@ -2055,6 +2077,14 @@ def assign_continuity_therapists_pass1(booking, allocation, target_date, locked_
 
     if unpreferred_codes:
         continuity_therapists = [t for t in continuity_therapists if getattr(t, 'therapist_code', None) not in unpreferred_codes]
+
+    # Exclude therapists who have approved omissions for this treatment
+    from masters.models import is_therapist_omitted_for_treatment
+    treatment_for_omission = current_therapy_name or therapy_code or getattr(allocation, 'therapy_name', None) or getattr(allocation, 'therapy_code', None)
+    if treatment_for_omission and continuity_therapists:
+        continuity_therapists = [t for t in continuity_therapists if not is_therapist_omitted_for_treatment(t, treatment_for_omission)]
+    if previous_bathing_therapist and treatment_for_omission and is_therapist_omitted_for_treatment(previous_bathing_therapist, treatment_for_omission):
+        previous_bathing_therapist = None
 
     # Exclude Helping Therapists from Pass 1 (Primary Continuity Pass)
     if continuity_therapists:
@@ -2070,6 +2100,10 @@ def assign_continuity_therapists_pass1(booking, allocation, target_date, locked_
     if not continuity_therapists:
         # No continuity therapists - skip this booking in PASS 1
         result['remaining_requirements'] = therapy_req.copy()
+        if 'therapy_code' not in result['remaining_requirements'] or not result['remaining_requirements']['therapy_code']:
+            result['remaining_requirements']['therapy_code'] = therapy_code or getattr(allocation, 'therapy_code', None)
+        if 'therapy_name' not in result['remaining_requirements'] or not result['remaining_requirements']['therapy_name']:
+            result['remaining_requirements']['therapy_name'] = current_therapy_name or getattr(allocation, 'therapy_name', None)
         return result
     
     # Check which continuity therapists are available and can be assigned
@@ -2418,7 +2452,10 @@ def assign_continuity_therapists_pass1(booking, allocation, target_date, locked_
         "junior": grade_map.get("Junior Therapist", 0),
         "trainee": grade_map.get("Trainee Therapist", 0),
         "total": req_total - len(assigned_continuity),
-        "therapy_category": therapy_req.get("therapy_category", None)
+        "therapy_category": therapy_req.get("therapy_category", None),
+        "therapy_code": therapy_req.get("therapy_code") or therapy_code or getattr(allocation, 'therapy_code', None),
+        "therapy_name": therapy_req.get("therapy_name") or therapy_name or getattr(allocation, 'therapy_name', None),
+        "bathing_therapists_count": therapy_req.get("bathing_therapists_count", 0),
     }
     result['success'] = len(assigned_continuity) > 0
     
@@ -3026,7 +3063,11 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
             print(f"[CONTINUITY PASS2] Booking {booking_id}: ENTERING continuity_assigned block!")
             # PASS 2: Use continuity therapists from PASS 1 and fill remaining slots
             assigned_continuity = continuity_assigned.get('assigned_therapists', [])
-            remaining_req = continuity_assigned.get('remaining_requirements', therapy_req)
+            remaining_req = dict(continuity_assigned.get('remaining_requirements', therapy_req))
+            if 'therapy_code' not in remaining_req or not remaining_req['therapy_code']:
+                remaining_req['therapy_code'] = therapy_req.get('therapy_code') or getattr(allocation, 'therapy_code', None)
+            if 'therapy_name' not in remaining_req or not remaining_req['therapy_name']:
+                remaining_req['therapy_name'] = therapy_req.get('therapy_name') or getattr(allocation, 'therapy_name', None) or therapy_name
             result_bath_assigned = continuity_assigned.get('bath_assigned', None)
             result_senior_therapist = continuity_assigned.get('senior_therapist', None)
             
@@ -3082,6 +3123,16 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                             if c not in assigned_codes
                         ]
                         print(f"[PREFERRED ROSTER] Preferring {len(last_therapists_for_remaining)} preferred roster therapist(s) when filling remaining: {last_therapists_for_remaining}")
+
+                    # Treatment omission exclusion: do not prefer any therapist who omitted this treatment
+                    if last_therapists_for_remaining:
+                        treatment_to_check = remaining_req.get('therapy_code') or remaining_req.get('therapy_name') or therapy_name or getattr(allocation, 'therapy_name', None)
+                        if treatment_to_check:
+                            from masters.models import is_therapist_omitted_for_treatment
+                            last_therapists_for_remaining = [
+                                c for c in last_therapists_for_remaining
+                                if not is_therapist_omitted_for_treatment(c, treatment_to_check)
+                            ]
                     
                     # Build avoid set from continuity therapists so allocate_therapists
                     # does not return them again (their PASS 1 bookings were cancelled by
@@ -3566,6 +3617,16 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                 "room_no": getattr(booking.room, 'room_no', None) if getattr(booking, 'room', None) else None, "therapists": therapists_for_audit
             })
             continue
+
+        # STRICT TREATMENT OMISSION FILTER:
+        # Exclude any therapist who has an approved omission for this treatment under any circumstances.
+        from masters.models import is_therapist_omitted_for_treatment
+        treatment_check = therapy_name or getattr(allocation, 'therapy_name', None) or getattr(allocation, 'therapy_code', None)
+        if treatment_check:
+            candidate_therapists = [
+                t for t in candidate_therapists
+                if not is_therapist_omitted_for_treatment(t, treatment_check)
+            ]
 
         # choose single bathing-assigned therapist if bathing required
         assigned_therapists = candidate_therapists[:req_total]
@@ -4339,12 +4400,22 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                         continuity_therapists = continuity_assigned.get('assigned_therapists', [])
                         continuity_therapist_ids = {getattr(t, 'id', None) for t in continuity_therapists if hasattr(t, 'id')}
                     
-                    for t in assigned_therapists:
+                    from masters.models import is_therapist_omitted_for_treatment
+                    treatment_check = therapy_name or getattr(allocation, 'therapy_name', None) or getattr(allocation, 'therapy_code', None)
+                    if treatment_check:
+                        assigned_therapists = [t for t in assigned_therapists if not is_therapist_omitted_for_treatment(t, treatment_check)]
+
+                    for t in list(assigned_therapists):
                         is_bath_for_t = (t in bath_assigned_set)
                         therapist_id = getattr(t, 'id', None)
                         is_continuity_therapist = therapist_id in continuity_therapist_ids
                         
                         if create_bookings:
+                            if treatment_check and is_therapist_omitted_for_treatment(t, treatment_check):
+                                print(f"[CONTINUITY PASS2] BLOCKED: Therapist {t.therapist_code} has approved omission for {treatment_check} - removing")
+                                assigned_therapists = [at for at in assigned_therapists if at != t]
+                                continue
+
                             if is_continuity_therapist:
                                 # This therapist was locked in PASS 1 - use existing TherapistBooking
                                 print(f"[CONTINUITY PASS2] Using existing TherapistBooking for continuity therapist {t.therapist_code} (locked in PASS 1)")
@@ -4372,8 +4443,9 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                                     print(f"[CONTINUITY PASS2] ⚠ WARNING: Continuity therapist {t.therapist_code} has no TherapistBooking - creating one")
                                     tb_obj, tb_created = create_therapist_booking_safe(t, target_date, slot_master, therapy_name, patient_id, allocation, is_bathing=is_bath_for_t)
                                     if tb_obj is None:
-                                        print(f"[CONTINUITY PASS2] ✗ ERROR: Cannot create TherapistBooking for {t.therapist_code} - session limit exceeded (>= 6 sessions)")
+                                        print(f"[CONTINUITY PASS2] ✗ ERROR: Cannot create TherapistBooking for {t.therapist_code} - session limit exceeded or treatment omitted")
                                         # This should not happen if checks were done correctly, but handle gracefully
+                                        assigned_therapists = [at for at in assigned_therapists if at != t]
                                         continue
                                     tb_objs.append(tb_obj)
                             else:
@@ -4383,8 +4455,9 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                                 # Use slot_master (resolved SlotMaster) instead of canonical_slot to ensure FK is valid
                                 tb_obj, tb_created = create_therapist_booking_safe(t, target_date, slot_master, therapy_name, patient_id, allocation, is_bathing=is_bath_for_t)
                                 if tb_obj is None:
-                                    print(f"[CONTINUITY PASS2] ✗ ERROR: Cannot create TherapistBooking for {t.therapist_code} - session limit exceeded (>= 6 sessions)")
+                                    print(f"[CONTINUITY PASS2] ✗ ERROR: Cannot create TherapistBooking for {t.therapist_code} - session limit exceeded or treatment omitted")
                                     # This should not happen if checks were done correctly, but handle gracefully
+                                    assigned_therapists = [at for at in assigned_therapists if at != t]
                                     continue
                                 print(f"[CONTINUITY PASS2] TherapistBooking created: {tb_obj}, created={tb_created}")
                                 if not tb_created:
@@ -5369,6 +5442,15 @@ def bulk_allocate_for_date(target_date_str):
             if pref_roster and pref_roster.get('unpreferred_codes_set'):
                 unpref_pool = pref_roster['unpreferred_codes_set']
                 continuity_rows = [r for r in continuity_rows if getattr(r['therapist'], 'therapist_code', None) not in unpref_pool]
+
+            # Enforce treatment omissions: Never include therapists who omitted this treatment in continuity plan
+            from masters.models import is_therapist_omitted_for_treatment
+            treatment_to_check = therapy_obj or current_therapy_name or getattr(allocation, 'therapy_code', None)
+            if treatment_to_check:
+                continuity_rows = [
+                    r for r in continuity_rows
+                    if not is_therapist_omitted_for_treatment(r['therapist'], treatment_to_check)
+                ]
 
             if continuity_rows:
                 print(f"[CONTINUITY PLAN]   Raw continuity candidates:")
