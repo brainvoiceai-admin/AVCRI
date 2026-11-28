@@ -62,15 +62,15 @@ SCHEDULING_PASS1_CONFIG = Pass1Config(
 
 RESCHEDULING_PASS1_CONFIG = Pass1Config(
     mode="rescheduling",
-    check_same_slot_conflict=False,
-    enforce_shift_and_oncall=False,
-    exclude_helping_from_continuity=False,
+    check_same_slot_conflict=True,
+    enforce_shift_and_oncall=True,
+    exclude_helping_from_continuity=True,
     expand_preferred_roster_therapists=False,
-    exclude_unpreferred_therapists=False,
+    exclude_unpreferred_therapists=True,
     fallback_bathing_from_history=True,
     fallback_to_previous_day_bookings=True,
-    set_bath_assigned_in_loop=False,
-    validate_senior_not_bathing=False,
+    set_bath_assigned_in_loop=True,
+    validate_senior_not_bathing=True,
 )
 
 
