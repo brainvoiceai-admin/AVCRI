@@ -93,7 +93,7 @@ def create_room_booking_safe(room, date, time_slot, therapy_name, patient_id, vi
 def create_therapist_booking_safe(therapist, date, time_slot, therapy_name, patient_id, visit, is_bathing=False):
     return _core_create_therapist_booking_safe(
         therapist, date, time_slot, therapy_name, patient_id, visit,
-        is_bathing=is_bathing, use_atomic=True, resolve_therapy_fk=False, refresh=False,
+        is_bathing=is_bathing, use_atomic=True, resolve_therapy_fk=True, refresh=False,
     )
 
 

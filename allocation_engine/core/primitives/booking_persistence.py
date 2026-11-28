@@ -26,6 +26,15 @@ def create_room_booking_safe(
         refresh: If True, calls full save() + refresh_from_db() when updating FKs (SQLite FK safety).
     """
     from Patient.models import RoomBooking
+    from Sheduling.models import TherapyAllocation
+
+    resolved_allocation = None
+    if isinstance(therapy_allocation, TherapyAllocation):
+        resolved_allocation = therapy_allocation
+    elif therapy_allocation is None and visit is not None:
+        candidate_alloc = getattr(visit, 'allocation', None)
+        if isinstance(candidate_alloc, TherapyAllocation):
+            resolved_allocation = candidate_alloc
 
     ctx = transaction.atomic() if use_atomic else nullcontext()
     try:
@@ -35,8 +44,8 @@ def create_room_booking_safe(
                 'patient_id': patient_id,
                 'visit': visit,
             }
-            if therapy_allocation is not None:
-                defaults['therapy'] = therapy_allocation
+            if resolved_allocation is not None:
+                defaults['therapy'] = resolved_allocation
 
             rb, created = RoomBooking.objects.get_or_create(
                 room=room,
@@ -57,10 +66,19 @@ def create_room_booking_safe(
                 needs_save = True
                 update_fields.append('visit')
 
-            if therapy_allocation is not None and rb.therapy_id != getattr(therapy_allocation, 'id', None):
-                rb.therapy = therapy_allocation
-                needs_save = True
-                update_fields.append('therapy')
+            if resolved_allocation is not None:
+                explicit_alloc_override = (
+                    isinstance(therapy_allocation, TherapyAllocation)
+                    and (rb.visit_id is None or rb.visit_id == getattr(visit, 'pk', None))
+                )
+                if (
+                    rb.therapy_id is None
+                    or (created and rb.therapy_id != resolved_allocation.id)
+                    or (explicit_alloc_override and rb.therapy_id != resolved_allocation.id)
+                ):
+                    rb.therapy = resolved_allocation
+                    needs_save = True
+                    update_fields.append('therapy')
 
             if needs_save:
                 if refresh:
@@ -73,16 +91,23 @@ def create_room_booking_safe(
         rb = RoomBooking.objects.filter(
             room=room, date=date, time_slot=time_slot, status='BOOKED'
         ).first()
-        if rb and rb.visit is None and visit is not None:
-            try:
+        if rb:
+            recovery_fields = []
+            if rb.visit is None and visit is not None:
                 rb.visit = visit
-                if refresh:
-                    rb.save()
-                    rb.refresh_from_db()
-                else:
-                    rb.save(update_fields=['visit'])
-            except Exception as e:
-                print(f"[DEBUG create_room_booking_safe] Error updating visit: {e}")
+                recovery_fields.append('visit')
+            if resolved_allocation is not None and rb.therapy_id is None:
+                rb.therapy = resolved_allocation
+                recovery_fields.append('therapy')
+            if recovery_fields:
+                try:
+                    if refresh:
+                        rb.save()
+                        rb.refresh_from_db()
+                    else:
+                        rb.save(update_fields=recovery_fields)
+                except Exception as e:
+                    print(f"[DEBUG create_room_booking_safe] Error updating recovery fields: {e}")
         return rb, False
 
 
@@ -275,12 +300,19 @@ def create_therapist_booking_safe(
         except Exception as e:
             print(f"[DEBUG create_therapist_booking_safe] Error updating is_bathing on existing: {e}")
 
-        if tb and tb.visit is None and visit is not None:
-            try:
+        if tb:
+            tb_recovery_fields = []
+            if tb.visit is None and visit is not None:
                 tb.visit = visit
-                tb.save(update_fields=['visit'])
-            except Exception as e:
-                print(f"[DEBUG create_therapist_booking_safe] Error updating visit: {e}")
+                tb_recovery_fields.append('visit')
+            if resolve_therapy_fk and therapy_obj is not None and getattr(tb, 'therapy_id', None) is None:
+                tb.therapy = therapy_obj
+                tb_recovery_fields.append('therapy')
+            if tb_recovery_fields:
+                try:
+                    tb.save(update_fields=tb_recovery_fields)
+                except Exception as e:
+                    print(f"[DEBUG create_therapist_booking_safe] Error updating recovery fields: {e}")
         return tb, False
 
 

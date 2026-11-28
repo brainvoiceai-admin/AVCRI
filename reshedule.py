@@ -82,10 +82,10 @@ def create_room_booking_safe(room, date, time_slot, therapy_name, patient_id, vi
 
 
 def create_therapist_booking_safe(therapist, date, time_slot, therapy_name, patient_id, visit, is_bathing=False):
-    # Preserve reshedule.py behavior: atomic wrapper, no TherapyMaster FK lookup, update_fields
+    # Rescheduling wrapper: atomic with TherapyMaster FK resolution and update_fields
     return _core_create_therapist_booking_safe(
         therapist, date, time_slot, therapy_name, patient_id, visit,
-        is_bathing=is_bathing, use_atomic=True, resolve_therapy_fk=False, refresh=False,
+        is_bathing=is_bathing, use_atomic=True, resolve_therapy_fk=True, refresh=False,
     )
 
 # (get_treatment_rooms_for_staying_room & get_wheelchair_accessible_rooms imported from allocation_engine above)
