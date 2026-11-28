@@ -571,6 +571,7 @@ def assign_continuity_therapists_pass1(
 
     day_of_week = target_date.weekday()
     assigned_continuity = []
+    decremented_grade_by_therapist = {}
     grade_map = {
         "Super Senior Therapist": therapy_req.get("super_senior", 0),
         "Senior Therapist": therapy_req.get("senior", 0),
@@ -720,6 +721,7 @@ def assign_continuity_therapists_pass1(
 
         if grade_to_decrement and grade_map.get(grade_to_decrement, 0) > 0:
             grade_map[grade_to_decrement] -= 1
+            decremented_grade_by_therapist[getattr(t, 'id', id(t))] = grade_to_decrement
 
         locked_therapist_slots.add(lock_key)
 
@@ -788,30 +790,46 @@ def assign_continuity_therapists_pass1(
                 result['senior_therapist'] = None
 
     # Create TherapistBooking records to lock the therapists (skip in dry-run preview mode)
+    final_assigned = assigned_continuity
     if assigned_continuity and create_bookings:
-        try:
-            for t in assigned_continuity:
-                is_bath = t == result['bath_assigned']
+        locked_assigned = []
+        for t in assigned_continuity:
+            is_bath = t == result['bath_assigned']
+            try:
                 tb_obj, _tb_created = create_therapist_booking_safe(
                     t, target_date, slot_master, therapy_name, patient_id, allocation, is_bathing=is_bath
                 )
-                if tb_obj is None:
-                    result['assigned_therapists'] = [at for at in result['assigned_therapists'] if at != t]
-                    continue
-        except Exception as e:
-            print(f"[CONTINUITY PASS1] ERROR creating TherapistBooking locks for booking {booking.pk}: {e}")
+            except Exception as e:
+                print(f"[CONTINUITY PASS1] ERROR creating TherapistBooking locks for booking {booking.pk}: {e}")
+                tb_obj = None
 
-    result['assigned_therapists'] = assigned_continuity
+            if tb_obj is None:
+                if hasattr(locked_therapist_slots, 'discard'):
+                    locked_therapist_slots.discard((t.id, slot_master.id))
+                dec_grade = decremented_grade_by_therapist.get(getattr(t, 'id', id(t)))
+                if dec_grade and dec_grade in grade_map:
+                    grade_map[dec_grade] += 1
+                if result.get('bath_assigned') == t:
+                    result['bath_assigned'] = None
+                if result.get('senior_therapist') == t:
+                    result['senior_therapist'] = None
+                continue
+
+            locked_assigned.append(t)
+
+        final_assigned = locked_assigned
+
+    result['assigned_therapists'] = final_assigned
     result['remaining_requirements'] = {
         "super_senior": grade_map.get("Super Senior Therapist", 0),
         "senior": grade_map.get("Senior Therapist", 0),
         "junior": grade_map.get("Junior Therapist", 0),
         "trainee": grade_map.get("Trainee Therapist", 0),
-        "total": req_total - len(assigned_continuity),
+        "total": req_total - len(final_assigned),
         "therapy_category": therapy_req.get("therapy_category", None),
         "therapy_code": therapy_req.get("therapy_code") or therapy_code or getattr(allocation, 'therapy_code', None),
         "therapy_name": therapy_req.get("therapy_name") or therapy_name or getattr(allocation, 'therapy_name', None),
         "bathing_therapists_count": therapy_req.get("bathing_therapists_count", 0),
     }
-    result['success'] = len(assigned_continuity) > 0
+    result['success'] = len(final_assigned) > 0
     return result
