@@ -6282,9 +6282,6 @@ def reschedule_options_api(request):
             return JsonResponse({'error': 'Invalid date format. Use YYYY-MM-DD.'}, status=400)
             
         booking = Booking.objects.filter(allocation=allocation, date=target_date).first()
-        if booking and booking.room is not None:
-            booking.room = None
-            booking.save(update_fields=['room'])
         failure_reason = (booking.failure_reason if booking else "") or (allocation.status if allocation else "")
         
         # Determine if failure is due to therapist shortage

@@ -131,6 +131,9 @@ def allocate_treatment_room(
             else:
                 rb_qs = rb_qs.exclude(visit__status='cancelled')
 
+            if booking_id:
+                rb_qs = rb_qs.exclude(visit_id=booking_id)
+
             if rb_qs.exists():
                 return None
 

@@ -1329,8 +1329,8 @@ def attempt_allocate_slot(allocation, booking, date, canonical_slot, therapy_req
             therapist_dict["is_senior"] = True  # Mark senior therapist for UI highlighting
         therapists_for_audit.append(therapist_dict)
 
-    # room allocation if needed
-    room_candidate = getattr(booking, 'room', None)
+    # room allocation if needed (never blindly reuse a stale room from a failed booking)
+    room_candidate = None if getattr(booking, 'status', None) == 'failed' else getattr(booking, 'room', None)
     if room_candidate:
         if getattr(booking, 'timeslot', None) != canonical_slot:
             room_candidate = None
