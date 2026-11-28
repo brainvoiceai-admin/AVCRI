@@ -20,8 +20,6 @@ def get_therapy_details(therapy_name):
         return None
 
     norm_key = " ".join(raw.lower().split())
-    if norm_key in therapy_cache:
-        return therapy_cache[norm_key]
 
     details = (
         TherapyMaster.objects.filter(therapy_name__iexact=raw)
@@ -43,7 +41,6 @@ def get_therapy_details(therapy_name):
         except Exception:
             details = None
 
-    therapy_cache[norm_key] = details
     return details
 
 
