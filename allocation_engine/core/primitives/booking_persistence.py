@@ -120,15 +120,21 @@ def create_therapist_booking_safe(
         therapist_master = TherapistMaster.objects.filter(
             therapist_code=therapist.therapist_code, is_active=True
         ).first()
-    elif isinstance(therapist, int):
+    elif isinstance(therapist, int) and not isinstance(therapist, bool):
         therapist_master = TherapistMaster.objects.filter(pk=therapist).first()
     elif isinstance(therapist, str):
-        if therapist.strip().isdigit():
-            therapist_master = TherapistMaster.objects.filter(pk=int(therapist.strip())).first()
-        else:
-            therapist_master = TherapistMaster.objects.filter(therapist_code=therapist.strip()).first()
+        code_or_pk = therapist.strip()
+        if code_or_pk.isdigit():
+            therapist_master = TherapistMaster.objects.filter(pk=int(code_or_pk)).first()
+            if therapist_master is None:
+                therapist_master = TherapistMaster.objects.filter(therapist_code=code_or_pk).first()
+        elif code_or_pk:
+            therapist_master = TherapistMaster.objects.filter(therapist_code=code_or_pk).first()
 
-    booking_therapist = therapist_master or therapist
+    if therapist_master is None:
+        return None, False
+
+    booking_therapist = therapist_master
 
     # CRITICAL: Final atomic DB check - prevent creating booking if therapist already has 6 sessions
     if booking_therapist and date:
@@ -159,7 +165,7 @@ def create_therapist_booking_safe(
             print(f"[DEBUG create_therapist_booking_safe] Error resolving TherapyMaster for '{therapy_name}': {e}")
 
     # Treatment Omission check: strictly prevent booking if therapist has approved omission
-    if therapist:
+    if booking_therapist:
         try:
             from masters.models import is_therapist_omitted_for_treatment
             treatment_to_check = (
@@ -168,17 +174,17 @@ def create_therapist_booking_safe(
                 or getattr(visit, 'therapy_name', None)
                 or getattr(visit, 'therapy_code', None)
             )
-            if treatment_to_check and is_therapist_omitted_for_treatment(therapist, treatment_to_check):
+            if treatment_to_check and is_therapist_omitted_for_treatment(booking_therapist, treatment_to_check):
                 print(
                     f"[DEBUG create_therapist_booking_safe] BLOCKED: Therapist "
-                    f"{getattr(therapist, 'therapist_code', 'UNKNOWN')} has approved omission "
+                    f"{getattr(booking_therapist, 'therapist_code', 'UNKNOWN')} has approved omission "
                     f"for treatment '{treatment_to_check}' - refusing to create booking"
                 )
                 return None, False
         except Exception as e:
             print(f"[DEBUG create_therapist_booking_safe] Error in treatment omission check: {e}")
 
-    is_ht = getattr(therapist, 'is_helping_therapist', False)
+    is_ht = getattr(booking_therapist, 'is_helping_therapist', False)
     ctx = transaction.atomic() if use_atomic else nullcontext()
 
     try:
@@ -194,7 +200,7 @@ def create_therapist_booking_safe(
                 tb_defaults['is_helping_therapist_assignment'] = is_ht
 
             tb, created = TherapistBooking.objects.get_or_create(
-                therapist=therapist,
+                therapist=booking_therapist,
                 date=date,
                 time_slot=time_slot,
                 status='BOOKED',
@@ -252,7 +258,7 @@ def create_therapist_booking_safe(
             return tb, created
     except IntegrityError:
         tb = TherapistBooking.objects.filter(
-            therapist=therapist, date=date, time_slot=time_slot, status='BOOKED'
+            therapist=booking_therapist, date=date, time_slot=time_slot, status='BOOKED'
         ).first()
         try:
             if tb and is_bathing and hasattr(tb, 'is_bathing'):
