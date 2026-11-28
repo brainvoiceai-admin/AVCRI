@@ -69,8 +69,8 @@ from allocation_engine.core.primitives.booking_persistence import (
 
 
 def therapist_requirements(allocation_or_therapy_obj):
-    # Preserve reshedule.py behavior: missing TherapyMaster defaults to total=0
-    return _core_therapist_requirements(allocation_or_therapy_obj, default_total_if_missing=0)
+    # Missing TherapyMaster defaults to total=1 (consistent with scheduling)
+    return _core_therapist_requirements(allocation_or_therapy_obj, default_total_if_missing=1)
 
 
 def create_room_booking_safe(room, date, time_slot, therapy_name, patient_id, visit):

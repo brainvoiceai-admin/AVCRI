@@ -56,7 +56,7 @@ def is_patient_active(patient):
 
 
 def therapist_requirements(allocation_or_therapy_obj):
-    return _core_therapist_requirements(allocation_or_therapy_obj, default_total_if_missing=0)
+    return _core_therapist_requirements(allocation_or_therapy_obj, default_total_if_missing=1)
 
 
 def assign_continuity_therapists_pass1(booking, allocation, target_date, locked_therapist_slots, create_bookings=True):

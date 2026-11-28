@@ -80,7 +80,7 @@ from allocation_engine.core.allocators.therapist_allocator import (
 
 
 def therapist_requirements(allocation_or_therapy_obj):
-    return _core_therapist_requirements(allocation_or_therapy_obj, default_total_if_missing=0)
+    return _core_therapist_requirements(allocation_or_therapy_obj, default_total_if_missing=1)
 
 
 def create_room_booking_safe(room, date, time_slot, therapy_name, patient_id, visit):

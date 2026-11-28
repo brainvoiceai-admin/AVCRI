@@ -60,7 +60,7 @@ def preview_slot_reschedule(
     Returns `(task_dict, success_bool, reason_if_failed)`.
     """
     if therapy_req is None:
-        therapy_req = _core_therapist_requirements(allocation, default_total_if_missing=0)
+        therapy_req = _core_therapist_requirements(allocation, default_total_if_missing=1)
     if needs_room_flag is None:
         needs_room_flag = therapy_needs_room(allocation)
     if needs_bath_flag is None:
@@ -96,7 +96,7 @@ def compute_reschedule_options_preview(allocation, booking, target_date):
     patient = getattr(allocation, 'patient', None)
     patient_id = getattr(patient, 'id', None)
     patient_type = "OP" if (patient and hasattr(patient, 'is_op') and patient.is_op()) else "IP"
-    therapy_req = _core_therapist_requirements(allocation, default_total_if_missing=0)
+    therapy_req = _core_therapist_requirements(allocation, default_total_if_missing=1)
     needs_room_flag = therapy_needs_room(allocation)
     needs_bath_flag = therapy_needs_bath(allocation)
 

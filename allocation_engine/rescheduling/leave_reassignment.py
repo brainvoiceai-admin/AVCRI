@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 
 
 def therapist_requirements(allocation_or_therapy_obj):
-    return _core_therapist_requirements(allocation_or_therapy_obj, default_total_if_missing=0)
+    return _core_therapist_requirements(allocation_or_therapy_obj, default_total_if_missing=1)
 
 
 def parse_target_date(date_str=None):
