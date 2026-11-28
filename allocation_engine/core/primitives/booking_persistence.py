@@ -3,6 +3,13 @@ from contextlib import nullcontext
 from django.db import IntegrityError, transaction
 
 
+def _savepoint_if_atomic(use_atomic=False):
+    """Return a transaction/savepoint context when requested or already inside an outer atomic block."""
+    if use_atomic or transaction.get_connection().in_atomic_block:
+        return transaction.atomic()
+    return nullcontext()
+
+
 def create_room_booking_safe(
     room,
     date,
@@ -36,7 +43,7 @@ def create_room_booking_safe(
         if isinstance(candidate_alloc, TherapyAllocation):
             resolved_allocation = candidate_alloc
 
-    ctx = transaction.atomic() if use_atomic else nullcontext()
+    ctx = _savepoint_if_atomic(use_atomic=use_atomic)
     try:
         with ctx:
             defaults = {
@@ -210,7 +217,7 @@ def create_therapist_booking_safe(
             print(f"[DEBUG create_therapist_booking_safe] Error in treatment omission check: {e}")
 
     is_ht = getattr(booking_therapist, 'is_helping_therapist', False)
-    ctx = transaction.atomic() if use_atomic else nullcontext()
+    ctx = _savepoint_if_atomic(use_atomic=use_atomic)
 
     try:
         with ctx:
@@ -348,7 +355,8 @@ def safe_cancel_patient_bookings(
                 if dup_exists:
                     tb.delete()
                 else:
-                    TB.objects.filter(pk=tb.pk).update(status='CANCELLED')
+                    with _savepoint_if_atomic():
+                        TB.objects.filter(pk=tb.pk).update(status='CANCELLED')
             except IntegrityError:
                 try:
                     tb.delete()
@@ -369,7 +377,8 @@ def safe_cancel_patient_bookings(
                 if dup_exists:
                     rb.delete()
                 else:
-                    RB.objects.filter(pk=rb.pk).update(status='CANCELLED')
+                    with _savepoint_if_atomic():
+                        RB.objects.filter(pk=rb.pk).update(status='CANCELLED')
             except IntegrityError:
                 try:
                     rb.delete()
