@@ -100,7 +100,7 @@ def create_therapist_booking_safe(therapist, date, time_slot, therapy_name, pati
     )
 
 
-def allocate_treatment_room(date, time_slot, last_room=None, therapy_name=None, patient_id=None, patient_staying_room=None, patient=None, is_wheelchair=False):
+def allocate_treatment_room(date, time_slot, last_room=None, therapy_name=None, patient_id=None, patient_staying_room=None, patient=None, is_wheelchair=False, booking_id=None):
     return _allocate_treatment_room_core(
         date=date,
         time_slot=time_slot,
@@ -109,6 +109,7 @@ def allocate_treatment_room(date, time_slot, last_room=None, therapy_name=None, 
         patient_id=patient_id,
         patient_staying_room=patient_staying_room,
         patient=patient,
+        booking_id=booking_id,
         is_wheelchair=is_wheelchair,
         config=SCHEDULING_ROOM_CONFIG,
     )
@@ -1763,7 +1764,8 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                     patient_id=patient_id,
                     patient_staying_room=patient_staying_room,
                     patient=allocation.patient if allocation and hasattr(allocation, 'patient') else None,
-                    is_wheelchair=is_wc
+                    is_wheelchair=is_wc,
+                    booking_id=booking_id,
                 )
             except Exception:
                 room_candidate = None
@@ -1973,7 +1975,8 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                                 patient_id=patient_id,
                                 patient_staying_room=patient_staying_room,
                                 patient=allocation.patient if allocation and hasattr(allocation, 'patient') else None,
-                                is_wheelchair=is_wc
+                                is_wheelchair=is_wc,
+                                booking_id=booking_id,
                             )
                             if alternative_room and alternative_room != room_candidate:
                                 # Check if alternative room is also booked
@@ -2049,7 +2052,11 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                             traceback.print_exc()
                             raise
                         if not rb_created:
-                            # RoomBooking already exists, try alternative room
+                            # RoomBooking already exists, try alternative room.
+                            # Do not pass booking_id here: create_room_booking_safe may have
+                            # attached visit=booking to a preexisting visit=None RoomBooking
+                            # before returning rb_created=False, and excluding booking_id
+                            # would mask that conflict and return room_candidate again.
                             alternative_room = allocate_treatment_room(
                                 target_date, 
                                 slot_master, 
@@ -2058,7 +2065,8 @@ def expand_therapies_for_visit(therapy_allocation_id, target_date, create_bookin
                                 patient_id=patient_id,
                                 patient_staying_room=patient_staying_room,
                                 patient=allocation.patient if allocation and hasattr(allocation, 'patient') else None,
-                                is_wheelchair=is_wc
+                                is_wheelchair=is_wc,
+                                booking_id=None,
                             )
                             if alternative_room and alternative_room != room_candidate:
                                 # Update booking room first

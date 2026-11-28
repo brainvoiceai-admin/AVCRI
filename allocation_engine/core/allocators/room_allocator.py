@@ -31,7 +31,7 @@ class RoomAllocationConfig:
 
 
 SCHEDULING_ROOM_CONFIG = RoomAllocationConfig(
-    check_booking_table=False,
+    check_booking_table=True,
     exclude_cancelled_therapy_and_alloc=True,
     wheelchair_no_staying_room_fallback=False,
     use_reschedule_legacy_fallback=False,
@@ -103,6 +103,43 @@ def allocate_treatment_room(
             if getattr(patient, 'is_wheelchair', False):
                 is_wheelchair = True
 
+    def _is_room_occupied(room):
+        rb_qs = RoomBooking.objects.filter(
+            room=room,
+            date=date,
+            time_slot=time_slot,
+            status='BOOKED',
+        )
+        if config.exclude_cancelled_therapy_and_alloc:
+            rb_qs = rb_qs.exclude(
+                Q(therapy__status='cancelled')
+                | Q(visit__status='cancelled')
+                | Q(visit__allocation__status='cancelled')
+            ).exclude(visit__status='cancelled')
+        else:
+            rb_qs = rb_qs.exclude(visit__status='cancelled')
+
+        if booking_id:
+            rb_qs = rb_qs.exclude(visit_id=booking_id)
+
+        if rb_qs.exists():
+            return True
+
+        if config.check_booking_table:
+            from Sheduling.models import Booking
+            b_conflict = Booking.objects.filter(
+                room=room,
+                date=date,
+                timeslot=time_slot,
+                status__in=['scheduled', 'BOOKED'],
+            ).exclude(status='cancelled').exclude(allocation__status='cancelled')
+            if booking_id:
+                b_conflict = b_conflict.exclude(pk=booking_id)
+            if b_conflict.exists():
+                return True
+
+        return False
+
     # Helper function to check room availability
     def check_room_availability(room_no, exclude_trc=False):
         try:
@@ -116,39 +153,8 @@ def allocate_treatment_room(
             if exclude_trc and room_no.upper().startswith('TRC'):
                 return None
 
-            rb_qs = RoomBooking.objects.filter(
-                room=room,
-                date=date,
-                time_slot=time_slot,
-                status='BOOKED',
-            )
-            if config.exclude_cancelled_therapy_and_alloc:
-                rb_qs = rb_qs.exclude(
-                    Q(therapy__status='cancelled')
-                    | Q(visit__status='cancelled')
-                    | Q(visit__allocation__status='cancelled')
-                ).exclude(visit__status='cancelled')
-            else:
-                rb_qs = rb_qs.exclude(visit__status='cancelled')
-
-            if booking_id:
-                rb_qs = rb_qs.exclude(visit_id=booking_id)
-
-            if rb_qs.exists():
+            if _is_room_occupied(room):
                 return None
-
-            if config.check_booking_table:
-                from Sheduling.models import Booking
-                b_conflict = Booking.objects.filter(
-                    room=room,
-                    date=date,
-                    timeslot=time_slot,
-                    status__in=['scheduled', 'BOOKED'],
-                ).exclude(status='cancelled').exclude(allocation__status='cancelled')
-                if booking_id:
-                    b_conflict = b_conflict.exclude(pk=booking_id)
-                if b_conflict.exists():
-                    return None
 
             return room
         except TreatmentRoom.DoesNotExist:
@@ -391,12 +397,7 @@ def allocate_treatment_room(
                 previous_room = TreatmentRoom.objects.get(room_no=previous_room_no)
                 if is_wheelchair and not getattr(previous_room, 'is_wheelchair_accessible', False):
                     pass
-                elif not RoomBooking.objects.filter(
-                    room=previous_room,
-                    date=date,
-                    time_slot=time_slot,
-                    status='BOOKED',
-                ).exists():
+                elif not _is_room_occupied(previous_room):
                     return previous_room
             except TreatmentRoom.DoesNotExist:
                 pass
@@ -408,9 +409,7 @@ def allocate_treatment_room(
                 room = TreatmentRoom.objects.get(room_no=room_no)
                 if is_wheelchair and not getattr(room, 'is_wheelchair_accessible', False):
                     pass
-                elif not RoomBooking.objects.filter(
-                    room=room, date=date, time_slot=time_slot, status='BOOKED'
-                ).exists():
+                elif not _is_room_occupied(room):
                     return room
         except TreatmentRoom.DoesNotExist:
             pass
@@ -427,9 +426,7 @@ def allocate_treatment_room(
                     continue
                 if is_wheelchair and not getattr(r, 'is_wheelchair_accessible', False):
                     continue
-                if not RoomBooking.objects.filter(
-                    room=r, date=date, time_slot=time_slot, status='BOOKED'
-                ).exists():
+                if not _is_room_occupied(r):
                     return r
         except TreatmentRoom.DoesNotExist:
             pass
@@ -440,9 +437,7 @@ def allocate_treatment_room(
                 continue
             if is_wheelchair and not getattr(r, 'is_wheelchair_accessible', False):
                 continue
-            if not RoomBooking.objects.filter(
-                room=r, date=date, time_slot=time_slot, status='BOOKED'
-            ).exists():
+            if not _is_room_occupied(r):
                 return r
 
     return None

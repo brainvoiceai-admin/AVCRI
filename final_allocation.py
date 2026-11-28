@@ -92,7 +92,7 @@ from allocation_engine.core.allocators.slot_policy import (
 )
 
 
-def allocate_treatment_room(date, time_slot, last_room=None, therapy_name=None, patient_id=None, patient_staying_room=None, patient=None, is_wheelchair=False):
+def allocate_treatment_room(date, time_slot, last_room=None, therapy_name=None, patient_id=None, patient_staying_room=None, patient=None, is_wheelchair=False, booking_id=None):
     """Backward-compatible scheduling shim delegating to allocation_engine.core.allocators.room_allocator."""
     return _allocate_treatment_room_core(
         date=date,
@@ -102,6 +102,7 @@ def allocate_treatment_room(date, time_slot, last_room=None, therapy_name=None, 
         patient_id=patient_id,
         patient_staying_room=patient_staying_room,
         patient=patient,
+        booking_id=booking_id,
         is_wheelchair=is_wheelchair,
         config=SCHEDULING_ROOM_CONFIG,
     )
